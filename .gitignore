@@ -1,0 +1,19 @@
+# Local agent credentials / settings (per spec-kit security note)
+.claude/settings.local.json
+.claude/**/*.local.json
+
+# Go build artifacts
+/bin/
+*.test
+*.out
+coverage.*
+
+# SQLite stores / local data
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# OS / editor
+.DS_Store
+*.swp
