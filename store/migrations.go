@@ -24,6 +24,9 @@ type Migration struct {
 // triggers index them directly. All timestamps are INTEGER unix microseconds,
 // consistent with the rest of the schema.
 var v1Memory = []string{
+	`CREATE TABLE IF NOT EXISTS schema_version (
+		version INTEGER PRIMARY KEY
+	)`,
 	`CREATE TABLE IF NOT EXISTS memory_entries (
 		id                TEXT    PRIMARY KEY,
 		name              TEXT    NOT NULL UNIQUE,

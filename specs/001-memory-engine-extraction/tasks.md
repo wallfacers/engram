@@ -65,14 +65,14 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] 搬 `SRC/internal/memory/*.go`(非测试:entrystore/retriever/embedder/vectorstore/entities/block/budgets/writer/usagelog/migrate/snapshot/export)→ `./memory/`,批量改 import:`internal/memory`→`engram/memory`、`internal/store`→`engram/store`、`store/sqlite`→`engram/store`、`prompt`→`engram/memory/prompt`、`embedding`→`engram/embedding`、`idgen`→`engram/internal/idgen`、`provider`→`engram/provider`
-- [ ] T012 [US1] 内化 sessionsearch:新建 `./memory/queryplan.go`,把 `SRC/internal/tools/sessionsearch/` 的 `buildPlan`/`likeFragments` 及其 CJK 分词器(`cjk.go`/`tokenizer.go`,仅依赖 `strings`/`unicode`)落入本包;将 `retriever.go` 两处 `sessionsearch.BuildPlan`/`LikeFragments` 调用改为本包函数;删除对 `internal/tools` 的 import。依据 research.md R5
-- [ ] T013 [P] [US1] 搬 `SRC/internal/memory/curation/` → `./memory/curation/`(整子包,含测试),改 import 路径
-- [ ] T014 [P] [US1] 搬 `SRC/internal/memory/pipeline/` → `./memory/pipeline/`(整子包,含测试),改 import 路径
-- [ ] T015 [US1] 搬 memory 既有测试 → `./memory/`:`entrystore_test.go`、`retriever_test.go`、`embedder_test.go`、`memory_test.go`、`migrate_test.go`、`snapshot_test.go`、`export_test.go`、`usagelog_test.go`,改 import 路径;从 sessionsearch 相关测试提取 `queryplan_test.go` 锚定分词/查询解析行为
-- [ ] T016 [US1] `go build ./...` 转绿:解决残留宿主引用、`extract_text` 边界(research.md R3)、prompt template 闭包(R4)等编译暴露的缺口,按需最小补齐
-- [ ] T017 [US1] `go test ./...` 转绿:所有平移单测通过(SC-002),定位并修复任何因路径/初始化差异导致的失败(不改变行为语义)
-- [ ] T018 [US1] 零宿主引用核验:`grep -rn "workhorse-agent/internal" ./ --include=*.go` 应零命中(SC-004);记录核验结果
+- [X] T011 [US1] 搬 `SRC/internal/memory/*.go`(非测试:entrystore/retriever/embedder/vectorstore/entities/block/budgets/writer/usagelog/migrate/snapshot/export)→ `./memory/`,批量改 import:`internal/memory`→`engram/memory`、`internal/store`→`engram/store`、`store/sqlite`→`engram/store`、`prompt`→`engram/memory/prompt`、`embedding`→`engram/embedding`、`idgen`→`engram/internal/idgen`、`provider`→`engram/provider`
+- [X] T012 [US1] 内化 sessionsearch:新建 `./memory/queryplan.go`,把 `SRC/internal/tools/sessionsearch/` 的 `buildPlan`/`likeFragments` 及其 CJK 分词器(`cjk.go`/`tokenizer.go`,仅依赖 `strings`/`unicode`)落入本包;将 `retriever.go` 两处 `sessionsearch.BuildPlan`/`LikeFragments` 调用改为本包函数;删除对 `internal/tools` 的 import。依据 research.md R5
+- [X] T013 [P] [US1] 搬 `SRC/internal/memory/curation/` → `./memory/curation/`(整子包,含测试),改 import 路径
+- [X] T014 [P] [US1] 搬 `SRC/internal/memory/pipeline/` → `./memory/pipeline/`(整子包,含测试),改 import 路径
+- [X] T015 [US1] 搬 memory 既有测试 → `./memory/`:`entrystore_test.go`、`retriever_test.go`、`embedder_test.go`、`memory_test.go`、`migrate_test.go`、`snapshot_test.go`、`export_test.go`、`usagelog_test.go`,改 import 路径;从 sessionsearch 相关测试提取 `queryplan_test.go` 锚定分词/查询解析行为
+- [X] T016 [US1] `go build ./...` 转绿:解决残留宿主引用、`extract_text` 边界(research.md R3)、prompt template 闭包(R4)等编译暴露的缺口,按需最小补齐
+- [X] T017 [US1] `go test ./...` 转绿:所有平移单测通过(SC-002),定位并修复任何因路径/初始化差异导致的失败(不改变行为语义)
+- [X] T018 [US1] 零宿主引用核验:`grep -rn "workhorse-agent/internal" ./ --include=*.go` 应零命中(SC-004);记录核验结果
 
 **Checkpoint**: US1 完成 —— engram 作为独立库编译通过、既有单测全绿、无任何宿主代码引用。**MVP 达成**
 
