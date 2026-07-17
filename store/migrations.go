@@ -167,7 +167,7 @@ func (s *Store) applyMigration(ctx context.Context, m Migration) error {
 	}
 
 	if m.Version == 2 {
-		slog.Info("sqlite: migration v2 memory hybrid complete")
+		slog.Info("sqlite: migration v2 backfill complete")
 	}
 
 	if _, err := tx.ExecContext(ctx,
