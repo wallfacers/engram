@@ -19,6 +19,7 @@
 | `…/internal/store`(记忆接口/类型切片:Store/ErrNotFound/Upsert/BumpUsage) | `github.com/wallfacers/engram/store` |
 | `…/internal/store/sqlite`(记忆切片) | `github.com/wallfacers/engram/store` |
 | `…/internal/idgen` | `github.com/wallfacers/engram/internal/idgen`(不对外) |
+| `…/internal/version` | `github.com/wallfacers/engram/internal/version`(不对外;`UserAgent()` 去品牌化 `"workhorse-agent/"`→`"engram/"`,见 research R1b) |
 | `…/internal/tools/sessionsearch` 的 `BuildPlan`/`LikeFragments` | 内化为 `memory` 包内未导出的 `buildPlan`/`likeFragments`(`queryplan.go`) |
 
 ## 公开入口(`memory` 包,签名不变)
