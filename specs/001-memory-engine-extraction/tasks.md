@@ -45,7 +45,9 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 - [ ] T004 [P] 搬 `SRC/internal/idgen/` → `./internal/idgen/`(整包,含测试),改 import 路径为 `github.com/wallfacers/engram/internal/idgen`
 - [ ] T005 [P] 搬 `SRC/internal/embedding/` → `./embedding/`(整包,含 `embedder_test.go` 等),改 import 路径
 - [ ] T006 [P] 搬 `SRC/internal/provider/`(含 `anthropic/`、`openai/`、`policy.go`/`retry.go`/`sseparse.go` 及测试)→ `./provider/`,改 import 路径
-- [ ] T007 切片搬 store → `./store/`:从 `SRC/internal/store/sqlite/` 取 `sqlite.go`(`Open`/`Options`/`Store`)、`migrations.go`(**仅记忆迁移**:memory_entries/fts+3触发器/curation_lease/embeddings/entities + event_date/fact_source 列,renumber 为 engram 独立链,保留 up/down)、`funcs.go`(**仅 `ProbeFTS5`,去 `extract_text`**);去除会话/权限表与 `internal/store` 接口耦合(按需内联)。依据 research.md R2/R3、data-model.md
+- [ ] T007 切片搬 store 实现 → `./store/`:从 `SRC/internal/store/sqlite/` 取 `sqlite.go`(`Open`/`Options`/`Store`)、`migrations.go`(**仅记忆迁移**:memory_entries/fts+3触发器/curation_lease/embeddings/entities + event_date/fact_source 列,renumber 为 engram 独立链,保留 up/down)、`funcs.go`(**仅 `ProbeFTS5`,去 `extract_text`**);**不纳入**会话/权限表。依据 research.md R2/R3、data-model.md
+- [ ] T007a 切片搬 store 接口/类型 → `./store/store.go`:从 `SRC/internal/store/`(接口包,非 sqlite)取 **记忆相关符号** `Store` / `ErrNotFound` / `Upsert` / `BumpUsage`(`entrystore.go` 依赖,**必须纳入**);会话类型 `Session` / `SessionState` / `SessionSummary` **留宿主不搬**;共用类型按最小闭包纳入并在提交信息记录归属。依据 research.md R2a、contracts 路径映射
+- [ ] T007b 负向核验(SC-005):确认 `./store/` 迁移链与类型中**无任何非记忆结构**(无 sessions/messages/events/tool_calls/permissions 表,无 Session* 类型);`grep -rniE "session|permission|message|tool_call" ./store/ --include=*.go` 结果仅限记忆语义命中,否则回退清理
 - [ ] T008 切片搬 prompt → `./memory/prompt/`:从 `SRC/internal/prompt/` 取 `memory_extraction.go` + `curation_judge.go` + 二者 import 闭包内的模板基建(`template.go`/`builtins.go` 按需),平移相关 `template_test.go` 用例。依据 research.md R4
 - [ ] T009 搬记忆相关的 store 测试 → `./store/`:`fts5_test.go`、`migrations_test.go`(仅记忆用例)、`probe_test.go`,改 import 路径
 - [ ] T010 在 `./` 运行 `go mod tidy` 解析外部依赖(`modernc.org/sqlite` 等),生成 `./go.sum`;确认无 CGO 依赖进入核心路径
@@ -62,7 +64,7 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] 搬 `SRC/internal/memory/*.go`(非测试:entrystore/retriever/embedder/vectorstore/entities/block/budgets/writer/usagelog/migrate/snapshot/export)→ `./memory/`,批量改 import:`internal/memory`→`engram/memory`、`store/sqlite`→`engram/store`、`prompt`→`engram/memory/prompt`、`embedding`→`engram/embedding`、`idgen`→`engram/internal/idgen`、`provider`→`engram/provider`
+- [ ] T011 [US1] 搬 `SRC/internal/memory/*.go`(非测试:entrystore/retriever/embedder/vectorstore/entities/block/budgets/writer/usagelog/migrate/snapshot/export)→ `./memory/`,批量改 import:`internal/memory`→`engram/memory`、`internal/store`→`engram/store`、`store/sqlite`→`engram/store`、`prompt`→`engram/memory/prompt`、`embedding`→`engram/embedding`、`idgen`→`engram/internal/idgen`、`provider`→`engram/provider`
 - [ ] T012 [US1] 内化 sessionsearch:新建 `./memory/queryplan.go`,把 `SRC/internal/tools/sessionsearch/` 的 `buildPlan`/`likeFragments` 及其 CJK 分词器(`cjk.go`/`tokenizer.go`,仅依赖 `strings`/`unicode`)落入本包;将 `retriever.go` 两处 `sessionsearch.BuildPlan`/`LikeFragments` 调用改为本包函数;删除对 `internal/tools` 的 import。依据 research.md R5
 - [ ] T013 [P] [US1] 搬 `SRC/internal/memory/curation/` → `./memory/curation/`(整子包,含测试),改 import 路径
 - [ ] T014 [P] [US1] 搬 `SRC/internal/memory/pipeline/` → `./memory/pipeline/`(整子包,含测试),改 import 路径
@@ -83,7 +85,7 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] 在 workhorse 侧冻存基线:用固定语料 + 固定 query 集 + 固定/打桩向量跑抽离前 `Retriever`,导出每 query 的排序 entry ID 序列为 golden,写入 `./testdata/parity/`(含 fixtures + 期望序列)。依据 research.md R6
+- [ ] T019 [US2] 冻存基线:用固定语料 + 固定 query 集 + 固定/打桩向量跑抽离前 `Retriever`,导出每 query 的排序 entry ID 序列为 golden,写入 engram `./testdata/parity/`(含 fixtures + 期望序列)。**采集用一次性、不提交的临时 harness**(scratch 目录或临时 `_test.go`),**宿主 workhorse 工作树须保持干净、零提交**(FR-012);产物只落 engram。依据 research.md R6
 - [ ] T020 [US2] 实现 `./memory/parity_test.go` 的 `TestRetrievalParity`:加载 `testdata/parity/` fixtures + golden,以打桩向量运行 engram `Retriever`,逐 query 断言排序 entry ID 序列与 golden 逐条相等(SC-003),无需外部端点
 - [ ] T021 [US2] 实现 `./memory/parity_test.go` 的 `TestSignalDegradation`:分别令语义/关键词/实体三路信号缺失或失败,断言其余独立降级仍返回结果且与基线一致、不整体报错(FR-009)
 - [ ] T022 [US2] 建 CI 工作流 `./.github/workflows/ci.yml`:每次 push/PR 跑 `go build ./...` + `go test ./...`(含对拍与降级),作为合并门禁(FR-008)
@@ -140,7 +142,7 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 ### Within Foundational / US1
 
 - T004/T005/T006 [P] 三个独立基础设施包并行
-- T007/T008 切片(store/prompt)可与 T004-T006 并行,但 T010 tidy 依赖全部到位
+- T007/T007a/T007b(store 实现 + 接口切片 + 负向核验)、T008(prompt 切片)可与 T004-T006 并行,但 T007b 依赖 T007/T007a,T010 tidy 依赖全部到位
 - T011(搬 memory 主体)依赖 Foundational 完成;T013/T014 [P] 子包并行;T012 内化耦合与 T011 同区需顺序;T016→T017→T018 顺序收敛
 
 ### Parallel Opportunities

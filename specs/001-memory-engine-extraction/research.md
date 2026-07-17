@@ -17,6 +17,13 @@
 **Alternatives considered**: 用接口把 store/provider/embedder 抽象、实现留宿主——被 Q1
 否决(那是"重设计契约",破坏纯搬运的可归因性)。
 
+**补充勘察(第三个混杂包)**:除 `store/sqlite` 外,memory 还直接 import **`internal/store`**
+(接口/类型包,221 行)。该包同样**混杂**:含记忆符号 `store.Store` / `store.ErrNotFound` /
+`store.Upsert` / `store.BumpUsage`(被 `entrystore.go` 依赖),也含会话类型 `Session` /
+`SessionState` / `SessionSummary`。因此它与 `store/sqlite`、`prompt` 并列,是**第三个需要
+按记忆相关性切片**的对象:记忆符号切入 engram 的 `store/` 包,会话类型留宿主。注意这些符号
+是记忆**必需**的,必须**纳入**而非去除。见 R2a。
+
 ## R2. store/sqlite 切片:记忆迁移可独立成链吗
 
 **Decision**: 可以。engram 的 `store/` 重建一条**只含记忆迁移**的链,renumber 为 v1..vN。
@@ -31,6 +38,19 @@ schema 与会话 schema 完全解耦,可独立建链。engram 从空库直接建
 
 **Alternatives considered**: 整包搬 migrations 再运行时忽略会话迁移——被 Q2 否决(engram
 会携带宿主 schema,违背原则 II)。
+
+## R2a. internal/store 接口包切片
+
+**Decision**: engram 的 `store/` 除承载 SQLite 实现外,一并纳入 `internal/store` 里**记忆相关
+的接口/类型/函数**(`Store`、`ErrNotFound`、`Upsert`、`BumpUsage` 等 entrystore 依赖的符号);
+会话类型(`Session`/`SessionState`/`SessionSummary` 等)留宿主、不搬。
+
+**Rationale**: `entrystore.go` 直接依赖这些符号,是记忆 CRUD/使用记账的接口契约,必须随迁,
+否则 engram 无法编译。它与 `store/sqlite`、`prompt` 同为混杂共享包,切法一致:只取记忆闭包。
+归属存疑者(如某类型被记忆与会话共用)从宽纳入记忆所需部分,实现时以编译暴露最小闭包。
+
+**Follow-up**: 实现时核查 `store.go`/`types.go` 中记忆符号是否引用了会话类型;若有共用类型,
+连带其最小定义纳入 engram/store,并在提交信息记录归属判断。
 
 ## R3. 自定义 SQLite 函数:engram 需要哪些
 

@@ -81,3 +81,8 @@ engram store 从空库直接建到记忆终态。保留 up/down 对(源 v7/v7Dow
 `VectorStore`、`Embedder`、`Retriever`、`Budgets`、`UsageLogger`、`Snapshot`/`Loader`,
 以及错误类型 `ErrMemoryTooLarge`/`ErrTriggerInvalid`/`ErrPinnedBudgetExceeded`。
 字段与方法签名不变,仅包路径由 `internal/memory` 变为 `github.com/wallfacers/engram/memory`。
+
+`store` 包(engram)还纳入宿主 `internal/store` 的**记忆接口/类型闭包**——`Store`、
+`ErrNotFound`、`Upsert`、`BumpUsage` 等 `entrystore.go` 依赖的符号;会话类型
+(`Session`/`SessionState`/`SessionSummary`)留宿主、不搬。这是与 `store/sqlite`、`prompt`
+并列的第三个混杂包切片(见 research.md R2a)。

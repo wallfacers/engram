@@ -75,8 +75,9 @@ engram/
 │   └── prompt/                 # 切片:memory_extraction.go + curation_judge.go + template 依赖闭包
 ├── embedding/                  # 原 internal/embedding,整包搬
 ├── provider/                   # 原 internal/provider(含 anthropic/ openai/),整包搬
-├── store/                      # 切片:仅记忆 schema 的独立 store
-│   ├── sqlite.go               # Open/Options/Store(去会话/权限)
+├── store/                      # 切片:仅记忆 schema 的独立 store(合并两个宿主 store 包的记忆闭包)
+│   ├── store.go                # 切自 internal/store:记忆接口/类型(Store/ErrNotFound/Upsert/BumpUsage),去会话类型
+│   ├── sqlite.go               # 切自 internal/store/sqlite:Open/Options/Store(去会话/权限)
 │   ├── migrations.go           # 仅记忆迁移链(renumber v1..vN)
 │   ├── funcs.go                # 仅 ProbeFTS5(去 extract_text)
 │   └── *_test.go               # fts5/migrations/probe 相关记忆测试

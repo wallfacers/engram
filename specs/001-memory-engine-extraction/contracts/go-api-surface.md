@@ -16,6 +16,7 @@
 | `…/internal/memory/pipeline` | `github.com/wallfacers/engram/memory/pipeline` |
 | `…/internal/embedding` | `github.com/wallfacers/engram/embedding` |
 | `…/internal/provider`(+anthropic/openai) | `github.com/wallfacers/engram/provider` |
+| `…/internal/store`(记忆接口/类型切片:Store/ErrNotFound/Upsert/BumpUsage) | `github.com/wallfacers/engram/store` |
 | `…/internal/store/sqlite`(记忆切片) | `github.com/wallfacers/engram/store` |
 | `…/internal/idgen` | `github.com/wallfacers/engram/internal/idgen`(不对外) |
 | `…/internal/tools/sessionsearch` 的 `BuildPlan`/`LikeFragments` | 内化为 `memory` 包内未导出的 `buildPlan`/`likeFragments`(`queryplan.go`) |
@@ -39,10 +40,17 @@
 
 ## store 包契约(记忆切片)
 
+`store` 包合并宿主两个 store 包的**记忆闭包**:`internal/store`(接口/类型)+
+`internal/store/sqlite`(SQLite 实现)。
+
 - `store.Open(opts store.Options) (*store.Store, error)` — 打开只含记忆 schema 的 SQLite
 - `store.Options` — 打开选项(路径等,字段同源)
 - `store.Store` — 持有 `*sql.DB`;建链只跑记忆迁移
+- `store.ErrNotFound` — 记忆条目未找到错误(切自 internal/store)
+- `store.Upsert(...)` / `store.BumpUsage(...)` — entrystore 依赖的记忆存取契约(切自 internal/store)
 - `ProbeFTS5(db *sql.DB) error` — FTS5 可用性探测
+
+**不纳入**:`Session` / `SessionState` / `SessionSummary` 等会话类型留宿主。
 
 ## 契约级验收
 
