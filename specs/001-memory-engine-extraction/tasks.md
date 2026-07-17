@@ -42,16 +42,16 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 **⚠️ CRITICAL**: 本阶段是 US1/US2/US3 的共同地基
 
-- [ ] T004 [P] 搬 `SRC/internal/idgen/` → `./internal/idgen/`(整包,含测试),改 import 路径为 `github.com/wallfacers/engram/internal/idgen`
-- [ ] T005 [P] 搬 `SRC/internal/embedding/` → `./embedding/`(整包,含 `embedder_test.go` 等),改 import 路径
-- [ ] T006 [P] 搬 `SRC/internal/provider/`(含 `anthropic/`、`openai/`、`policy.go`/`retry.go`/`sseparse.go` 及测试)→ `./provider/`,改 import 路径。**注意**:`anthropic/openai` 依赖 `internal/version`(设 User-Agent 头),需 T006a 先/同步到位
-- [ ] T006a [P] 搬 `SRC/internal/version/`(18 行,自洽)→ `./internal/version/`,改 import 路径;**去品牌化**:`UserAgent()` 返回值由 `"workhorse-agent/"` 改为 `"engram/"`(唯一允许的行为例外,依据 research.md R1b;不改变任何 MVP 门禁,无测试断言该串)。provider 两处调用点(`anthropic.go`/`openai.go`)相应指向 `engram/internal/version`
-- [ ] T007 切片搬 store 实现 → `./store/`:从 `SRC/internal/store/sqlite/` 取 `sqlite.go`(`Open`/`Options`/`Store`)、`migrations.go`(**仅记忆迁移**:memory_entries/fts+3触发器/curation_lease/embeddings/entities + event_date/fact_source 列,renumber 为 engram 独立链,保留 up/down)、`funcs.go`(**仅 `ProbeFTS5`,去 `extract_text`**);**不纳入**会话/权限表。依据 research.md R2/R3、data-model.md
-- [ ] T007a 切片搬 store 接口/类型 → `./store/store.go`:从 `SRC/internal/store/`(接口包,非 sqlite)取 **记忆相关符号** `Store` / `ErrNotFound` / `Upsert` / `BumpUsage`(`entrystore.go` 依赖,**必须纳入**);会话类型 `Session` / `SessionState` / `SessionSummary` **留宿主不搬**;共用类型按最小闭包纳入并在提交信息记录归属。依据 research.md R2a、contracts 路径映射
-- [ ] T007b 负向核验(SC-005):确认 `./store/` 迁移链与类型中**无任何非记忆结构**(无 sessions/messages/events/tool_calls/permissions 表,无 Session* 类型);`grep -rniE "session|permission|message|tool_call" ./store/ --include=*.go` 结果仅限记忆语义命中,否则回退清理
-- [ ] T008 切片搬 prompt → `./memory/prompt/`:从 `SRC/internal/prompt/` 取 `memory_extraction.go` + `curation_judge.go` + 二者 import 闭包内的模板基建(`template.go`/`builtins.go` 按需)。**陷阱规避**:**不搬 `doc.go`**、且**不整搬 `template_test.go`**——它们依赖 `internal/skills`(不在搬运范围);只平移不触碰 skills 的相关测试用例(二目标文件仅 import `fmt`/`strings`,切片子集本身干净)。依据 research.md R1a/R4
-- [ ] T009 搬记忆相关的 store 测试 → `./store/`:`fts5_test.go`、`migrations_test.go`(仅记忆用例)、`probe_test.go`,改 import 路径
-- [ ] T010 在 `./` 运行 `go mod tidy` 解析外部依赖(`modernc.org/sqlite` 等),生成 `./go.sum`;确认无 CGO 依赖进入核心路径
+- [X] T004 [P] 搬 `SRC/internal/idgen/` → `./internal/idgen/`(整包,含测试),改 import 路径为 `github.com/wallfacers/engram/internal/idgen`
+- [X] T005 [P] 搬 `SRC/internal/embedding/` → `./embedding/`(整包,含 `embedder_test.go` 等),改 import 路径
+- [X] T006 [P] 搬 `SRC/internal/provider/`(含 `anthropic/`、`openai/`、`policy.go`/`retry.go`/`sseparse.go` 及测试)→ `./provider/`,改 import 路径。**注意**:`anthropic/openai` 依赖 `internal/version`(设 User-Agent 头),需 T006a 先/同步到位
+- [X] T006a [P] 搬 `SRC/internal/version/`(18 行,自洽)→ `./internal/version/`,改 import 路径;**去品牌化**:`UserAgent()` 返回值由 `"workhorse-agent/"` 改为 `"engram/"`(唯一允许的行为例外,依据 research.md R1b;不改变任何 MVP 门禁,无测试断言该串)。provider 两处调用点(`anthropic.go`/`openai.go`)相应指向 `engram/internal/version`
+- [X] T007 切片搬 store 实现 → `./store/`:从 `SRC/internal/store/sqlite/` 取 `sqlite.go`(`Open`/`Options`/`Store`)、`migrations.go`(**仅记忆迁移**:memory_entries/fts+3触发器/curation_lease/embeddings/entities + event_date/fact_source 列,renumber 为 engram 独立链,保留 up/down)、`funcs.go`(**仅 `ProbeFTS5`,去 `extract_text`**);**不纳入**会话/权限表。依据 research.md R2/R3、data-model.md
+- [X] T007a 切片搬 store 接口/类型 → `./store/store.go`:从 `SRC/internal/store/`(接口包,非 sqlite)取 **记忆相关符号** `Store` / `ErrNotFound` / `Upsert` / `BumpUsage`(`entrystore.go` 依赖,**必须纳入**);会话类型 `Session` / `SessionState` / `SessionSummary` **留宿主不搬**;共用类型按最小闭包纳入并在提交信息记录归属。依据 research.md R2a、contracts 路径映射
+- [X] T007b 负向核验(SC-005):确认 `./store/` 迁移链与类型中**无任何非记忆结构**(无 sessions/messages/events/tool_calls/permissions 表,无 Session* 类型);`grep -rniE "session|permission|message|tool_call" ./store/ --include=*.go` 结果仅限记忆语义命中,否则回退清理
+- [X] T008 切片搬 prompt → `./memory/prompt/`:从 `SRC/internal/prompt/` 取 `memory_extraction.go` + `curation_judge.go` + 二者 import 闭包内的模板基建(`template.go`/`builtins.go` 按需)。**陷阱规避**:**不搬 `doc.go`**、且**不整搬 `template_test.go`**——它们依赖 `internal/skills`(不在搬运范围);只平移不触碰 skills 的相关测试用例(二目标文件仅 import `fmt`/`strings`,切片子集本身干净)。依据 research.md R1a/R4
+- [X] T009 搬记忆相关的 store 测试 → `./store/`:`fts5_test.go`、`migrations_test.go`(仅记忆用例)、`probe_test.go`,改 import 路径
+- [X] T010 在 `./` 运行 `go mod tidy` 解析外部依赖(`modernc.org/sqlite` 等),生成 `./go.sum`;确认无 CGO 依赖进入核心路径
 
 **Checkpoint**: `go build ./embedding/... ./provider/... ./store/... ./internal/... ./memory/prompt/...` 全绿;基础设施独立可编译
 
