@@ -28,9 +28,9 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 **Purpose**: 立起 Go module 与目录骨架
 
-- [ ] T001 在 `./` 执行 `go mod init github.com/wallfacers/engram` 并设 `go 1.22`,生成 `./go.mod`
-- [ ] T002 [P] 扩展 `./.gitignore`:忽略 Go 构建产物、`*.db`/`*.sqlite`、`cmd/locomo-bench` 二进制、本地 `testdata` 大文件缓存
-- [ ] T003 [P] 创建顶层目录骨架:`./memory/`、`./store/`、`./embedding/`、`./provider/`、`./internal/idgen/`、`./cmd/locomo-bench/`、`./testdata/parity/`
+- [X] T001 在 `./` 执行 `go mod init github.com/wallfacers/engram` 并设 `go 1.22`,生成 `./go.mod`
+- [X] T002 [P] 扩展 `./.gitignore`:忽略 Go 构建产物、`*.db`/`*.sqlite`、`cmd/locomo-bench` 二进制、本地 `testdata` 大文件缓存
+- [X] T003 [P] 创建顶层目录骨架:`./memory/`、`./store/`、`./embedding/`、`./provider/`、`./internal/idgen/`、`./cmd/locomo-bench/`、`./testdata/parity/`
 
 **Checkpoint**: 空 module 可 `go build ./...`(无包时应无错)
 
