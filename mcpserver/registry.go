@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -51,10 +52,11 @@ type Registry struct {
 	dataDir           string
 	embClient         embedding.Client
 	llmCaller         pipeline.ModelCaller
-	maxOpenNamespaces int // reserved for the post-MVP bounded-cache policy
+	maxOpenNamespaces int
 
 	mu      sync.Mutex
 	handles map[string]*NamespaceHandle
+	lru     *list.List // front is most recently used; values are namespace strings
 	closed  bool
 }
 
@@ -96,6 +98,7 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 		llmCaller:         config.LLMCaller,
 		maxOpenNamespaces: config.MaxOpenNamespaces,
 		handles:           make(map[string]*NamespaceHandle),
+		lru:               list.New(),
 	}, nil
 }
 
@@ -123,6 +126,7 @@ func (r *Registry) Get(ctx context.Context, namespace string) (*NamespaceHandle,
 		return nil, errors.New("registry is closed")
 	}
 	if handle := r.handles[ns]; handle != nil {
+		r.touchLocked(ns)
 		return handle, nil
 	}
 
@@ -149,7 +153,36 @@ func (r *Registry) Get(ctx context.Context, namespace string) (*NamespaceHandle,
 		pipe:      pipe,
 	}
 	r.handles[ns] = handle
+	r.lru.PushFront(ns)
+	r.evictLocked()
 	return handle, nil
+}
+
+func (r *Registry) touchLocked(namespace string) {
+	for element := r.lru.Front(); element != nil; element = element.Next() {
+		if element.Value == namespace {
+			r.lru.MoveToFront(element)
+			return
+		}
+	}
+}
+
+// evictLocked keeps the number of opened namespace stores within the configured
+// bound. It runs while mu is held, so a namespace cannot be evicted twice or
+// replaced concurrently. Store.Close is intentionally performed before the
+// next Get can observe the new cache state.
+func (r *Registry) evictLocked() {
+	for len(r.handles) > r.maxOpenNamespaces {
+		element := r.lru.Back()
+		if element == nil {
+			return
+		}
+		namespace := element.Value.(string)
+		handle := r.handles[namespace]
+		delete(r.handles, namespace)
+		r.lru.Remove(element)
+		_ = handle.close()
+	}
 }
 
 // Close closes every opened namespace and prevents future Get calls.
@@ -170,6 +203,7 @@ func (r *Registry) Close() error {
 		}
 		delete(r.handles, namespace)
 	}
+	r.lru.Init()
 	return closeErr
 }
 
@@ -177,4 +211,8 @@ func (r *Registry) handleCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.handles)
+}
+
+func (r *Registry) hasLLMCaller() bool {
+	return r != nil && r.llmCaller != nil
 }

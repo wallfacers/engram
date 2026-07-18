@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/store"
 )
 
@@ -81,6 +82,26 @@ type memoryDeleteInput struct {
 
 type memoryDeleteOutput struct {
 	Deleted bool `json:"deleted"`
+}
+
+type memoryIngestInput struct {
+	Namespace string                `json:"namespace,omitempty" jsonschema:"target namespace; empty uses default"`
+	Messages  []memoryIngestMessage `json:"messages" jsonschema:"conversation turns to extract facts from"`
+}
+
+type memoryIngestMessage struct {
+	Role string `json:"role" jsonschema:"message author: user or assistant"`
+	Text string `json:"text" jsonschema:"message text"`
+}
+
+type memoryIngestOutput struct {
+	ExtractedCount int                 `json:"extracted_count"`
+	Entries        []ingestEntryOutput `json:"entries"`
+}
+
+type ingestEntryOutput struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
 }
 
 type entryOutput struct {
@@ -222,6 +243,48 @@ func (a *toolAdapter) memoryDelete(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, memoryDeleteOutput{}, err
 	}
 	return nil, memoryDeleteOutput{Deleted: true}, nil
+}
+
+func (a *toolAdapter) memoryIngest(ctx context.Context, _ *mcp.CallToolRequest, input memoryIngestInput) (*mcp.CallToolResult, memoryIngestOutput, error) {
+	handle, err := a.registry.Get(ctx, input.Namespace)
+	if err != nil {
+		return nil, memoryIngestOutput{}, err
+	}
+	if handle.pipe == nil {
+		return nil, memoryIngestOutput{}, errors.New("memory_ingest requires an LLM provider")
+	}
+	messages := make([]pipeline.Message, 0, len(input.Messages))
+	for i, message := range input.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role != "user" && role != "assistant" {
+			return nil, memoryIngestOutput{}, fmt.Errorf("messages[%d].role must be user or assistant", i)
+		}
+		messages = append(messages, pipeline.Message{Role: role, Text: message.Text})
+	}
+	before, err := handle.entries.List(ctx)
+	if err != nil {
+		return nil, memoryIngestOutput{}, err
+	}
+	count, err := handle.pipe.Ingest(ctx, time.Time{}, "", messages)
+	if err != nil {
+		return nil, memoryIngestOutput{}, err
+	}
+	after, err := handle.entries.List(ctx)
+	if err != nil {
+		return nil, memoryIngestOutput{}, err
+	}
+	known := make(map[string]struct{}, len(before))
+	for _, entry := range before {
+		known[entry.Name] = struct{}{}
+	}
+	entries := make([]ingestEntryOutput, 0, count)
+	for _, entry := range after {
+		if _, existed := known[entry.Name]; existed {
+			continue
+		}
+		entries = append(entries, ingestEntryOutput{Name: entry.Name, Content: entry.Content})
+	}
+	return nil, memoryIngestOutput{ExtractedCount: count, Entries: entries}, nil
 }
 
 func toEntryOutput(entry *memory.Entry) entryOutput {

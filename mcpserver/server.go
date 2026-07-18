@@ -13,11 +13,17 @@ const (
 	offlineDegradedReason = "no embedding endpoint configured (offline mode)"
 )
 
-// NewServer builds the MCP server and registers the MVP memory tools.
+// NewServer builds the MCP server and registers the configured memory tools.
 func NewServer(registry *Registry) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: serverVersion}, nil)
 	adapter := &toolAdapter{registry: registry}
 	registerTools(server, adapter)
+	if registry != nil && registry.hasLLMCaller() {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "memory_ingest",
+			Description: "Extract durable facts from conversation messages into a namespace.",
+		}, adapter.memoryIngest)
+	}
 	return server
 }
 

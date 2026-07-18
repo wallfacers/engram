@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -140,4 +142,39 @@ func structuredMap(t *testing.T, result *mcp.CallToolResult) map[string]any {
 		t.Fatalf("decode structured content %s: %v", data, err)
 	}
 	return output
+}
+
+func TestToolsRejectPathLikeNamespacesWithoutCreatingOutsideFiles(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	registry, err := NewRegistry(ctx, RegistryConfig{DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	clientSession, _ := connectInMemory(t, ctx, NewServer(registry))
+
+	invalid := []string{"../outside", "a/b", `a\b`, filepath.Join(root, "absolute")}
+	for _, namespace := range invalid {
+		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "memory_write",
+			Arguments: map[string]any{"namespace": namespace, "name": "blocked", "content": "must not be stored"},
+		})
+		if err != nil {
+			t.Fatalf("namespace %q CallTool: %v", namespace, err)
+		}
+		if !result.IsError {
+			t.Fatalf("namespace %q was accepted", namespace)
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "data" {
+			t.Fatalf("invalid namespace created outside data directory: %s", entry.Name())
+		}
+	}
 }
