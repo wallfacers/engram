@@ -38,7 +38,7 @@
       两索引、`memory_event_aliases` 表 + FTS5 镜像 + 同步 trigger 三件套、
       `memory_entries` 加 `event_start/event_end/superseded_by` 三列（Down 对称回滚），
       并先在 `store/migrations_test.go` 写 v2→v3→v2 迁移往返可失败测试
-- [ ] T003 同步 Go 侧 Entry：`memory/entrystore.go` 的 `Entry` 结构体、
+- [x] T003 同步 Go 侧 Entry：`memory/entrystore.go` 的 `Entry` 结构体、
       `entrySelectCols`、`upsert`、`scanEntry` 增加 EventStart/EventEnd/SupersededBy；
       `TestRetrievalParity` 与既有单测保持全绿（零值语义=现状）
 

@@ -296,6 +296,36 @@ func TestEventDateAndFactSourceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEventTimeRangeAndSupersededRoundTrip(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+	start := time.Date(2023, time.May, 7, 0, 0, 0, 0, time.UTC)
+	end := start.Add(48 * time.Hour)
+	e := &memory.Entry{
+		Name:         "trip",
+		Content:      "visited the coast",
+		EventStart:   &start,
+		EventEnd:     &end,
+		SupersededBy: "trip-updated",
+	}
+	if err := es.Upsert(ctx, e); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := es.GetByName(ctx, "trip")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.EventStart == nil || !got.EventStart.Equal(start) {
+		t.Fatalf("event_start: got %v want %v", got.EventStart, start)
+	}
+	if got.EventEnd == nil || !got.EventEnd.Equal(end) {
+		t.Fatalf("event_end: got %v want %v", got.EventEnd, end)
+	}
+	if got.SupersededBy != "trip-updated" {
+		t.Fatalf("superseded_by: got %q", got.SupersededBy)
+	}
+}
+
 func TestDeleteCascadesDerived(t *testing.T) {
 	es, db := newEntryStore(t)
 	ctx := context.Background()

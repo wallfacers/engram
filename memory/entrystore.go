@@ -36,6 +36,13 @@ type Entry struct {
 	// FactSource records provenance: "" (legacy/manual write), "user", "agent",
 	// or "extraction" (the ADD-only pipeline).
 	FactSource string
+	// EventStart and EventEnd bound when the remembered event occurred. They are
+	// stored as nullable unix seconds; nil means the event time is unknown.
+	EventStart *time.Time
+	EventEnd   *time.Time
+	// SupersededBy names the newer entry that replaces this entry. Empty means
+	// the entry has not been superseded.
+	SupersededBy string
 }
 
 // EntryStore is a thin SQLite-backed accessor for memory_entries. It takes the
@@ -82,6 +89,21 @@ func entryFromNullableMicros(n sql.NullInt64) *time.Time {
 	return &t
 }
 
+func entryNullableSeconds(t *time.Time) sql.NullInt64 {
+	if t == nil || t.IsZero() {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: t.Unix(), Valid: true}
+}
+
+func entryFromNullableSeconds(n sql.NullInt64) *time.Time {
+	if !n.Valid {
+		return nil
+	}
+	t := time.Unix(n.Int64, 0).UTC()
+	return &t
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -114,9 +136,9 @@ func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error 
 	_, err := q.ExecContext(ctx,
 		`INSERT INTO memory_entries(
 			id, name, trigger, content, pinned, durability, category,
-			hit_count, last_used_at, created_at, updated_at, char_count, source_session_id,
-			event_date, fact_source)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			 hit_count, last_used_at, created_at, updated_at, char_count, source_session_id,
+			event_date, fact_source, event_start, event_end, superseded_by)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(name) DO UPDATE SET
 			trigger           = excluded.trigger,
 			content           = excluded.content,
@@ -127,11 +149,16 @@ func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error 
 			source_session_id = excluded.source_session_id,
 			event_date        = excluded.event_date,
 			fact_source       = excluded.fact_source,
+			event_start       = excluded.event_start,
+			event_end         = excluded.event_end,
+			superseded_by     = excluded.superseded_by,
 			updated_at        = excluded.updated_at`,
 		e.ID, e.Name, e.Trigger, e.Content, boolToInt(e.Pinned), e.Durability, e.Category,
 		e.HitCount, entryNullableMicros(e.LastUsedAt),
 		entryToMicros(e.CreatedAt), entryToMicros(e.UpdatedAt), e.CharCount, e.SourceSessionID,
-		entryNullableMicros(e.EventDate), e.FactSource)
+		entryNullableMicros(e.EventDate), e.FactSource,
+		entryNullableSeconds(e.EventStart), entryNullableSeconds(e.EventEnd),
+		sql.NullString{String: e.SupersededBy, Valid: e.SupersededBy != ""})
 	if err != nil {
 		return fmt.Errorf("memory: upsert entry %q: %w", e.Name, err)
 	}
@@ -146,17 +173,18 @@ func (s *EntryStore) Upsert(ctx context.Context, e *Entry) error {
 
 const entrySelectCols = `id, name, trigger, content, pinned, durability, category,
 	hit_count, last_used_at, created_at, updated_at, char_count, source_session_id,
-	event_date, fact_source`
+	event_date, fact_source, event_start, event_end, superseded_by`
 
 func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 	var e Entry
 	var pinned int
-	var lastUsedAt, eventDate sql.NullInt64
+	var lastUsedAt, eventDate, eventStart, eventEnd sql.NullInt64
+	var supersededBy sql.NullString
 	var createdAt, updatedAt int64
 	if err := sc.Scan(&e.ID, &e.Name, &e.Trigger, &e.Content, &pinned,
 		&e.Durability, &e.Category, &e.HitCount, &lastUsedAt,
 		&createdAt, &updatedAt, &e.CharCount, &e.SourceSessionID,
-		&eventDate, &e.FactSource); err != nil {
+		&eventDate, &e.FactSource, &eventStart, &eventEnd, &supersededBy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -167,6 +195,11 @@ func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 	e.CreatedAt = entryFromMicros(createdAt)
 	e.UpdatedAt = entryFromMicros(updatedAt)
 	e.EventDate = entryFromNullableMicros(eventDate)
+	e.EventStart = entryFromNullableSeconds(eventStart)
+	e.EventEnd = entryFromNullableSeconds(eventEnd)
+	if supersededBy.Valid {
+		e.SupersededBy = supersededBy.String
+	}
 	return &e, nil
 }
 
