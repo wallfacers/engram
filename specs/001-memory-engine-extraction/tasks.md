@@ -105,8 +105,8 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 - [X] T023 [US3] 搬 `SRC/cmd/locomo-bench/`(main/runner/dataset/chunks/filter/journal 及测试)→ `./cmd/locomo-bench/`,改 import 路径为 engram 各包
 - [X] T024 [US3] `go build ./cmd/locomo-bench` 转绿 + 平移 bench 自带测试(`bench_test.go`/`chunks_test.go`/`filter_test.go` 等)通过
-- [ ] T025 [US3] 小子集端到端跑通:配本地 embedding/LLM 端点(`EMBED_BASE_URL`/`BASE_URL` 等),`--limit` 小子集运行并产出可比口径结果(SC-006);把所需环境变量补进 `quickstart.md`
-- [ ] T026 [US3] 全量数据集一次性 sanity check:跑一次完整 LoCoMo,记录结果范围与抽离前对照(SC-007);**非逐分门禁**,仅记录(FR-010)
+- [X] T025 [US3] 小子集端到端跑通:2 段 ×10 题 `--retrieval both`,中转站 gpt-5.6-luna(答题/判分)+ gpt-5.4-mini(抽取)+ 本地 Ollama qwen3-embedding:0.6b。结果:hybrid 80% vs fts 45%(+35pp,涨点集中 multi-hop/temporal),量级对齐 SRC ~74.7% 基线(SC-006 ✓)。详见 `eval-results.md`
+- [~] T026 [US3] 全量数据集一次性 sanity check:**以 2 段子集完成方向性抽查**(保真信号充分,见 eval-results.md);全量 10 段一次性运行**按需保留**(gpt-5.6-luna 抽取 ~9.5min/段,全量数小时级 + API 花费,主要服务发布/论文口径),**非逐分门禁**(FR-010、SC-007)
 
 **Checkpoint**: US3 完成 —— 评测设施随迁可用,回归 + 论文两用
 
