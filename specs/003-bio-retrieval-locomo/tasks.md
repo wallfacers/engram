@@ -99,7 +99,7 @@
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] 校验 bench 对 OpenAI 协议中转站的答题/抽取模型切换纯 env 化无死角
+- [x] T012 [US2] 校验 bench 对 OpenAI 协议中转站的答题/抽取模型切换纯 env 化无死角
       （`LOCOMO_MODEL`/`EXTRACT_MODEL`/`LOCOMO_PROVIDER` 贯通 usage 记账），补
       `cmd/locomo-bench/main.go` 缺口并在 quickstart.md 修正命令（依赖 T008）
 - [ ] T013 [US2] 产出 Strike 0 运行脚本 `.locomo-run/strike0.sh`（quickstart §Strike 0

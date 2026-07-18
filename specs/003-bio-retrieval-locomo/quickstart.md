@@ -21,7 +21,8 @@ go build ./cmd/locomo-bench
 
 ```bash
 # 1) 算账（不花钱）
-./locomo-bench --data testdata/locomo/locomo10.json --repeats 5 --estimate
+./locomo-bench --data testdata/locomo/locomo10.json --repeats 5 --estimate --no-idk-retry
+# --estimate is offline and does not require --run-dir or LOCOMO_API_KEY.
 
 # 2) 抽取 A/B（两库各建一次，维护者确认预估后执行）
 EXTRACT_MODEL=gpt-5.4-mini ./locomo-bench --data ... --run-dir .locomo-run/s0-extract-mini --repeats 5 --no-idk-retry
@@ -29,6 +30,9 @@ EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-ex
 
 # 3) 配对判定 → 选定抽取模型并全程冻结；产出即校准基线
 ./locomo-bench --compare .locomo-run/s0-extract-mini .locomo-run/s0-extract-sol
+
+模型 regime 只通过环境变量切换：`LOCOMO_PROVIDER` 选择协议，`LOCOMO_MODEL` 控制答题/判分，
+`EXTRACT_MODEL` 控制抽取；三者会进入费用账的对应角色，命令行不接受模型或密钥参数。
 ```
 
 记录：`stats.json` 均值±CI 即**校准基线**；与旧基线（74.7@luna，带 IDK 重试）的差 =
