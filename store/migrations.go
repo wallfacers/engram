@@ -125,11 +125,68 @@ var v2MemoryHybridDown = []string{
 	`ALTER TABLE memory_entries DROP COLUMN event_date`,
 }
 
+// v3BioRetrieval adds the local-only indexes used by the optional associative,
+// temporal, and conflict-resolution retrieval signals.
+var v3BioRetrieval = []string{
+	`CREATE TABLE IF NOT EXISTS memory_entity_edges (
+		entity_a   TEXT NOT NULL,
+		entity_b   TEXT NOT NULL,
+		kind       TEXT NOT NULL DEFAULT 'co',
+		weight     REAL NOT NULL DEFAULT 1.0,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (entity_a, entity_b, kind)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_entity_edges_a ON memory_entity_edges(entity_a)`,
+	`CREATE INDEX IF NOT EXISTS idx_entity_edges_b ON memory_entity_edges(entity_b)`,
+
+	`CREATE TABLE IF NOT EXISTS memory_event_aliases (
+		entry_name TEXT NOT NULL,
+		alias      TEXT NOT NULL,
+		PRIMARY KEY (entry_name, alias)
+	)`,
+	`CREATE VIRTUAL TABLE IF NOT EXISTS memory_event_aliases_fts USING fts5(
+		alias,
+		entry_name UNINDEXED,
+		tokenize='trigram'
+	)`,
+	`CREATE TRIGGER IF NOT EXISTS memory_event_aliases_fts_ai AFTER INSERT ON memory_event_aliases BEGIN
+		INSERT INTO memory_event_aliases_fts(rowid, alias, entry_name)
+		VALUES (new.rowid, new.alias, new.entry_name);
+	END`,
+	`CREATE TRIGGER IF NOT EXISTS memory_event_aliases_fts_ad AFTER DELETE ON memory_event_aliases BEGIN
+		DELETE FROM memory_event_aliases_fts WHERE rowid = old.rowid;
+	END`,
+	`CREATE TRIGGER IF NOT EXISTS memory_event_aliases_fts_au AFTER UPDATE ON memory_event_aliases BEGIN
+		DELETE FROM memory_event_aliases_fts WHERE rowid = old.rowid;
+		INSERT INTO memory_event_aliases_fts(rowid, alias, entry_name)
+		VALUES (new.rowid, new.alias, new.entry_name);
+	END`,
+
+	`ALTER TABLE memory_entries ADD COLUMN event_start INTEGER`,
+	`ALTER TABLE memory_entries ADD COLUMN event_end INTEGER`,
+	`ALTER TABLE memory_entries ADD COLUMN superseded_by TEXT`,
+}
+
+var v3BioRetrievalDown = []string{
+	`DROP TRIGGER IF EXISTS memory_event_aliases_fts_au`,
+	`DROP TRIGGER IF EXISTS memory_event_aliases_fts_ad`,
+	`DROP TRIGGER IF EXISTS memory_event_aliases_fts_ai`,
+	`DROP TABLE IF EXISTS memory_event_aliases_fts`,
+	`DROP TABLE IF EXISTS memory_event_aliases`,
+	`DROP INDEX IF EXISTS idx_entity_edges_b`,
+	`DROP INDEX IF EXISTS idx_entity_edges_a`,
+	`DROP TABLE IF EXISTS memory_entity_edges`,
+	`ALTER TABLE memory_entries DROP COLUMN superseded_by`,
+	`ALTER TABLE memory_entries DROP COLUMN event_end`,
+	`ALTER TABLE memory_entries DROP COLUMN event_start`,
+}
+
 // migrationsByVersion is the ordered list of all migrations. Each entry is
 // applied inside its own transaction; schema_version is bumped per step.
 var migrationsByVersion = []Migration{
 	{Version: 1, Up: v1Memory, Down: v1MemoryDown},
 	{Version: 2, Up: v2MemoryHybrid, Down: v2MemoryHybridDown},
+	{Version: 3, Up: v3BioRetrieval, Down: v3BioRetrievalDown},
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -168,6 +225,9 @@ func (s *Store) applyMigration(ctx context.Context, m Migration) error {
 
 	if m.Version == 2 {
 		slog.Info("sqlite: migration v2 memory hybrid complete")
+	}
+	if m.Version == 3 {
+		slog.Info("sqlite: migration v3 bio retrieval complete")
 	}
 
 	if _, err := tx.ExecContext(ctx,

@@ -34,7 +34,7 @@
 **Purpose**: migration v3 与 Entry 结构扩展——US3/US4/US5 的共享 schema 地基
 （单一 Migration 单元，一次交付；US1/US2 不依赖，可与本阶段并行）
 
-- [ ] T002 在 `store/migrations.go` 追加 Migration v3：`memory_entity_edges` 表 +
+- [x] T002 在 `store/migrations.go` 追加 Migration v3：`memory_entity_edges` 表 +
       两索引、`memory_event_aliases` 表 + FTS5 镜像 + 同步 trigger 三件套、
       `memory_entries` 加 `event_start/event_end/superseded_by` 三列（Down 对称回滚），
       并先在 `store/migrations_test.go` 写 v2→v3→v2 迁移往返可失败测试
