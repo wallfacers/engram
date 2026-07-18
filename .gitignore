@@ -9,6 +9,7 @@
 *.out
 coverage.*
 cmd/locomo-bench/locomo-bench
+/locomo-bench
 
 # SQLite stores / local data
 *.db
