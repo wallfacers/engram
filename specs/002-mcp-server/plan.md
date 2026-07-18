@@ -1,113 +1,85 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: MCP Server 适配层
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Branch**: `002-mcp-server` | **Date**: 2026-07-18 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+**Input**: Feature specification from `/specs/002-mcp-server/spec.md`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+在 engram 引擎之上新增一个**独立、薄适配层的 MCP server**(stdio 传输),把引擎的记忆读写能力经 Model Context Protocol 暴露给任意 MCP 客户端。采用官方 Go SDK `modelcontextprotocol/go-sdk` v1.5.0(纯 Go、仅 stdio)。多 namespace 隔离**在适配层实现**——每 namespace 一份独立引擎 store(`dataDir/<ns>.db`),由 Registry 惰性打开、LRU 有界缓存;引擎公开面与 store schema 逐字节不动(守住 001 已对拍行为)。可选 LLM 抽取工具按 provider 配置显隐,保 P1/P2 纯离线。
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
+**Language/Version**: Go 1.22(与引擎同)
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**Primary Dependencies**: `github.com/modelcontextprotocol/go-sdk` v1.5.0(仅 stdio);复用引擎 `github.com/wallfacers/engram/{memory,memory/pipeline,embedding,provider,store}`。无新增需 C 工具链的依赖。
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**Storage**: 每 namespace 一份本地 SQLite 文件(`modernc.org/sqlite`,纯 Go,经引擎 `store.Open`);适配层不引入平行存储。
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**Testing**: `go test`;契约测用 SDK 进程内(in-memory)client↔server 传输;`CGO_ENABLED=0 go build ./...` 门禁。
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Target Platform**: 本地可执行程序(Linux/macOS/Windows,交叉编译无 CGO),被 MCP 客户端以子进程 + stdio 拉起。
 
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: 单仓库内的 CLI/adapter(引擎库 + 新增 `cmd/engram-mcp` 二进制 + `mcpserver` 适配包)。
 
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+**Performance Goals**: 无强吞吐目标(本地单用户,交互式)。约束是不因 namespace 增多而无界耗资源(FR-013:LRU 有界句柄)。
 
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**Constraints**: 默认离线可运行(无外网/无端点即可启动并提供写/列/查/删/降级检索);无 CGO;不改引擎公开 API 与 store schema;密钥零泄漏。
 
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
-
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Scale/Scope**: 单用户;单进程多 namespace(默认 LRU 上限 64 个同时打开);每 namespace ~10 万条级(承 001 规模声明,不超边界)。
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*GATE: 已在设计前后各核对一次,五项原则全部满足或以更简方案规避,无需 Complexity Tracking。*
 
-[Gates determined based on constitution file]
+- **I. 本地优先/默认离线** ✅:MVP 仅 stdio;embedding/LLM 均为可选,`embClient==nil` 即纯离线 FTS+实体检索,server 无端点也能启动(US2/FR-014)。无托管服务被设为必需。
+- **II. 引擎/适配分离** ✅:新增独立 `cmd/engram-mcp` + `mcpserver` 包,只通过引擎公开 API 交互;引擎不感知 MCP/namespace。新增集成面**不改引擎内部契约**(FR-021/SC-005)。
+- **III. 契约优先 & namespace 隔离** ✅:先出 `contracts/mcp-tools.md` 冻结工具契约再实现;namespace 隔离是本特性一等目标(US3/FR-009~013),物理独立库,默认不可跨越(FR-022 明确不做跨 namespace 访问)。
+- **IV. 评测回归门禁** ✅(按构造):适配层不改引擎算法,LoCoMo 指标不变;以 SC-003 parity(MCP 检索==直接检索)+ SC-005(引擎单测全绿、公开面/schema 不变)作机器证明,替代全量 bench 重跑(见 research R6)。
+- **V. 优雅降级 & 规模诚实** ✅:检索沿用引擎三路独立降级;降级标注取**结构化诚实口径**(是否配 embedding,不谎称,见 research R3);LRU 上限与 ~10 万条规模如实写入文档,不夸大。
+
+**技术约束核对**:无 CGO(SDK 纯 Go,CGO=0 构建门禁)✅;依赖最小化(仅加一个官方可审计依赖)✅;模型侧可替换(复用引擎 embedding/provider 接口)✅;单一存储真相(直接用引擎 store,无副本)✅。
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+specs/002-mcp-server/
+├── plan.md              # 本文件
+├── research.md          # Phase 0:R1 SDK选型 / R2 namespace注册表 / R3 降级口径 / R4 抽取显隐 / R5 布局 / R6 测试
+├── data-model.md        # Phase 1:namespace/Registry/工具I-O/配置 实体与不变量
+├── quickstart.md        # Phase 1:构建、配置、接客户端、跑测、离线验证
+├── contracts/
+│   └── mcp-tools.md     # Phase 1:6 个 MCP 工具的名称/输入schema/输出形状/错误映射(冻结契约)
+└── tasks.md             # Phase 2(/speckit-tasks 生成,非本命令)
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
+cmd/
+├── locomo-bench/            # 既有,不动
+└── engram-mcp/
+    └── main.go              # 新增:薄入口——解析配置、构建 Registry+SDK server、Run stdio
 
-tests/
-├── contract/
-├── integration/
-└── unit/
+mcpserver/                   # 新增:可测适配包(引擎无耦合)
+├── config.go               # Config:数据目录、可选 embedding/LLM 端点·模型·密钥、LRU 上限
+├── config_test.go
+├── namespace.go            # namespace 校验(路径逃逸白名单)+ 默认 namespace
+├── namespace_test.go       # SC-009 逃逸拒绝表
+├── registry.go             # namespace→引擎单元 惰性开库 + LRU 有界缓存 + Close
+├── registry_test.go        # 惰性/隔离/淘汰
+├── server.go               # 构建 mcp.Server,按 provider 显隐注册工具,降级标注
+├── tools.go                # 6 个工具 handler(write/search/list/get/delete/ingest)
+├── tools_test.go           # 契约/集成:in-memory client 驱动 US1/US2/US3/US4
+└── parity_test.go          # SC-003:memory_search == 直接 Retriever.Search
 
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+# 引擎包(memory/ embedding/ provider/ store/ internal/):本特性不改(除非记录为 001 契约增量)
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**:遵循既有布局——新增二进制入 `cmd/engram-mcp/`(对齐 `cmd/locomo-bench/`),适配逻辑入顶层可测包 `mcpserver/`(对齐顶层 `memory/`)。薄 main + 厚可测包,满足宪法「测试先行/契约测试」。命名 `mcpserver` 规避与 SDK `mcp` import 标识冲突。
 
 ## Complexity Tracking
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
-
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+> 无宪法违背需要证成——本节留空。namespace 纳入虽扩大范围,但以"适配层每 namespace 独立库"的更简方案实现,未触碰引擎、未加引擎迁移,不构成复杂度违规。
