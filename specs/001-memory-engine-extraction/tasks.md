@@ -89,7 +89,7 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 - [X] T019 [US2] 冻存基线:用固定语料 + 固定 query 集 + 固定/打桩向量跑抽离前 `Retriever`,导出每 query 的排序 entry ID 序列为 golden,写入 engram `./testdata/parity/`(含 fixtures + 期望序列)。**采集用一次性、不提交的临时 harness**(scratch 目录或临时 `_test.go`),**宿主 workhorse 工作树须保持干净、零提交**(FR-012);产物只落 engram。依据 research.md R6
 - [X] T020 [US2] 实现 `./memory/parity_test.go` 的 `TestRetrievalParity`:加载 `testdata/parity/` fixtures + golden,以打桩向量运行 engram `Retriever`,逐 query 断言排序 entry ID 序列与 golden 逐条相等(SC-003),无需外部端点
 - [X] T021 [US2] 实现 `./memory/parity_test.go` 的 `TestSignalDegradation`:分别令语义/关键词/实体三路信号缺失或失败,断言其余独立降级仍返回结果且与基线一致、不整体报错(FR-009)
-- [ ] T022 [US2] 建 CI 工作流 `./.github/workflows/ci.yml`:每次 push/PR 跑 `go build ./...` + `go test ./...`(含对拍与降级),作为合并门禁(FR-008)
+- [X] T022 [US2] 建 CI 工作流 `./.github/workflows/ci.yml`:每次 push/PR 跑 `go build ./...` + `go test ./...`(含对拍与降级),作为合并门禁(FR-008)
 
 **Checkpoint**: US2 完成 —— 保真对拍 100%、降级验证通过、CI 守门
 
@@ -117,8 +117,8 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 **Purpose**: 跨故事的收尾与门禁固化
 
 - [ ] T027 [P] 更新 `./README.md`:标注 engram 已是可构建 module,给出构建/测试/对拍/bench 入口,链接 `specs/001-memory-engine-extraction/`
-- [ ] T028 [P] 无 CGO 验证:`CGO_ENABLED=0 go build ./...` 通过并写入 CI(宪法原则 I)
-- [ ] T029 [P] 静态检查:CI 增 `go vet ./...`(可选 staticcheck)
+- [X] T028 [P] 无 CGO 验证:`CGO_ENABLED=0 go build ./...` 通过并写入 CI(宪法原则 I)
+- [X] T029 [P] 静态检查:CI 增 `go vet ./...`(可选 staticcheck)
 - [ ] T030 端到端走查 `quickstart.md` 五步,确认与实际一致;修订偏差
 
 ---
