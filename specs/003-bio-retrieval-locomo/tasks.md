@@ -23,7 +23,7 @@
 
 **Purpose**: 记录基础设施就位（代码骨架已存在，无脚手架需求）
 
-- [ ] T001 创建 `specs/003-bio-retrieval-locomo/eval-log.md` 记录模板（每枪：预估费用/
+- [x] T001 创建 `specs/003-bio-retrieval-locomo/eval-log.md` 记录模板（每枪：预估费用/
       实际费用/stats/compare verdict/保留-回退结论），并在 `.locomo-run/env.sh` 注释里
       补 `LOCOMO_PRICE_TABLE` 示例
 
