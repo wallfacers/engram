@@ -1,0 +1,51 @@
+[
+  {
+    "question_id": "q-user",
+    "question_type": "single-session-user",
+    "question": "What did the user mention?",
+    "answer": "tea",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-02T00:00:00Z", "messages": [{"role": "user", "content": "I like tea."}]}]
+  },
+  {
+    "question_id": "q-assistant",
+    "question_type": "single-session-assistant",
+    "question": "What did the assistant recommend?",
+    "answer": "a book",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-03T00:00:00Z", "messages": [{"role": "assistant", "content": "Try this book."}]}]
+  },
+  {
+    "question_id": "q-multi",
+    "question_type": "multi-session",
+    "question": "What changed?",
+    "answer": "the plan",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-04T00:00:00Z", "messages": [{"role": "user", "content": "The plan changed."}]}]
+  },
+  {
+    "question_id": "q-temporal",
+    "question_type": "temporal-reasoning",
+    "question": "When was it?",
+    "answer": "January",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-05T00:00:00Z", "messages": [{"role": "user", "content": "It happened in January."}]}]
+  },
+  {
+    "question_id": "q-update",
+    "question_type": "knowledge-update",
+    "question": "What is current?",
+    "answer": "the new value",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-06T00:00:00Z", "messages": [{"role": "user", "content": "The new value is current."}]}]
+  },
+  {
+    "question_id": "q-abstain",
+    "question_type": "abstention",
+    "question": "What is unknown?",
+    "answer": "",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-07T00:00:00Z", "messages": [{"role": "user", "content": "Nothing about that."}]}]
+  },
+  {
+    "question_id": "q-preference",
+    "question_type": "preference",
+    "question": "What does the user prefer?",
+    "answer": "tea",
+    "haystack_sessions": [{"session_id": "s1", "date": "2024-01-08T00:00:00Z", "messages": [{"role": "user", "content": "I prefer tea."}]}]
+  }
+]

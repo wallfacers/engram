@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/wallfacers/engram/provider"
 )
 
 func TestParseLoCoMoDate(t *testing.T) {
@@ -220,5 +222,33 @@ func TestIsIDK(t *testing.T) {
 		if got := isIDK(in); got != want {
 			t.Fatalf("isIDK(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+type usageTestProvider struct{}
+
+func (usageTestProvider) Name() string { return "usage-test" }
+
+func (usageTestProvider) Stream(context.Context, provider.Request) (<-chan provider.ProviderEvent, error) {
+	ch := make(chan provider.ProviderEvent, 3)
+	ch <- provider.ProviderEvent{Type: provider.EventTextDelta, TextDelta: "answer"}
+	ch <- provider.ProviderEvent{Type: provider.EventUsage, Usage: &provider.Usage{InputTokens: 12, OutputTokens: 5}}
+	ch <- provider.ProviderEvent{Type: provider.EventStop, StopReason: "end_turn"}
+	close(ch)
+	return ch, nil
+}
+
+func TestModelCallerForwardsProviderUsage(t *testing.T) {
+	var gotRole, gotModel string
+	var gotUsage provider.Usage
+	call := newModelCallerWithUsage(usageTestProvider{}, "test-model", 100, "answer", func(role, model string, usage provider.Usage) {
+		gotRole, gotModel, gotUsage = role, model, usage
+	})
+	text, err := call(context.Background(), "system", "question")
+	if err != nil || text != "answer" {
+		t.Fatalf("call = %q, err=%v", text, err)
+	}
+	if gotRole != "answer" || gotModel != "test-model" || gotUsage.InputTokens != 12 || gotUsage.OutputTokens != 5 {
+		t.Fatalf("usage hook = role=%q model=%q usage=%+v", gotRole, gotModel, gotUsage)
 	}
 }

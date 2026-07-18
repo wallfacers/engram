@@ -13,6 +13,14 @@ type modelCaller func(ctx context.Context, system, user string) (string, error)
 
 // newModelCaller wraps a provider.Provider into a modelCaller.
 func newModelCaller(p provider.Provider, model string, maxTokens int) modelCaller {
+	return newModelCallerWithUsage(p, model, maxTokens, "", nil)
+}
+
+// newModelCallerWithUsage is the accounting-aware provider adapter. Provider
+// adapters already normalize vendor usage responses into EventUsage; this
+// wrapper preserves the text-only modelCaller contract while forwarding totals
+// to the benchmark cost ledger.
+func newModelCallerWithUsage(p provider.Provider, model string, maxTokens int, role string, record func(role, model string, usage provider.Usage)) modelCaller {
 	return func(ctx context.Context, system, user string) (string, error) {
 		req := provider.Request{
 			Model:     model,
@@ -25,18 +33,33 @@ func newModelCaller(p provider.Provider, model string, maxTokens int) modelCalle
 		}
 		ch, err := p.Stream(ctx, req)
 		if err != nil {
+			if record != nil {
+				record(role, model, provider.Usage{})
+			}
 			return "", err
 		}
 		var sb strings.Builder
+		usage := provider.Usage{}
 		for ev := range ch {
 			switch ev.Type {
 			case provider.EventTextDelta:
 				sb.WriteString(ev.TextDelta)
+			case provider.EventUsage:
+				if ev.Usage != nil {
+					usage.InputTokens += ev.Usage.InputTokens
+					usage.OutputTokens += ev.Usage.OutputTokens
+				}
 			case provider.EventError:
 				if ev.Error != nil {
+					if record != nil {
+						record(role, model, usage)
+					}
 					return "", ev.Error
 				}
 			}
+		}
+		if record != nil {
+			record(role, model, usage)
 		}
 		return sb.String(), nil
 	}

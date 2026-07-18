@@ -52,24 +52,29 @@ import (
 )
 
 type options struct {
-	dataPath     string
-	runDir       string
-	storeDir     string
-	retrieval    string
-	maxConvs     int
-	maxQuestions int
-	topK         int
-	maxTokens    int
-	concurrency  int
-	chunks       bool
-	chunkQuota   int
-	filterPool   int
-	opinionPass  bool
-	adversarial  int
-	catTopKSpec  string
-	catQuotaSpec string
-	catTopK      map[int]int
-	catQuota     map[int]int
+	dataPath      string
+	runDir        string
+	storeDir      string
+	datasetFormat string
+	compareSpec   string
+	repeats       int
+	estimate      bool
+	noIDKRetry    bool
+	retrieval     string
+	maxConvs      int
+	maxQuestions  int
+	topK          int
+	maxTokens     int
+	concurrency   int
+	chunks        bool
+	chunkQuota    int
+	filterPool    int
+	opinionPass   bool
+	adversarial   int
+	catTopKSpec   string
+	catQuotaSpec  string
+	catTopK       map[int]int
+	catQuota      map[int]int
 }
 
 func main() {
@@ -83,6 +88,11 @@ func run() error {
 	var opt options
 	flag.StringVar(&opt.dataPath, "data", "", "path to LoCoMo JSON dataset (required)")
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
+	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
+	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
+	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
+	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
+	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
@@ -97,11 +107,35 @@ func run() error {
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
-	flag.Parse()
+	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
+		return err
+	}
 
-	if opt.dataPath == "" || opt.runDir == "" {
+	if opt.compareSpec != "" {
+		dirs, err := parseCompareSpec(opt.compareSpec)
+		if err != nil {
+			return err
+		}
+		report, err := compareRunDirs(dirs[0], dirs[1])
+		if err != nil {
+			return err
+		}
+		if err := writeCompare("compare.json", report); err != nil {
+			return fmt.Errorf("write compare.json: %w", err)
+		}
+		fmt.Printf("compare: flips A→B=%d B→A=%d McNemar p=%.6f CI overlap=%t verdict=%s\n",
+			report.FlipsAToB, report.FlipsBToA, report.McNemarP, report.CIOverlap, report.Verdict)
+		return nil
+	}
+	if opt.dataPath == "" {
 		flag.Usage()
-		return fmt.Errorf("--data and --run-dir are required")
+		return fmt.Errorf("--data is required")
+	}
+	if opt.repeats < 1 {
+		return fmt.Errorf("--repeats must be at least 1")
+	}
+	if opt.datasetFormat != "locomo" && opt.datasetFormat != "longmemeval" {
+		return fmt.Errorf("--dataset-format must be locomo or longmemeval, got %q", opt.datasetFormat)
 	}
 	arms, err := armsFor(opt.retrieval)
 	if err != nil {
@@ -117,26 +151,36 @@ func run() error {
 		opt.concurrency = 1
 	}
 
-	apiKey := os.Getenv("LOCOMO_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
-	}
-	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
-	model := envOr("LOCOMO_MODEL", "deepseek-v4-pro")
-	extractModel := envOr("EXTRACT_MODEL", model)
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-
-	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
-		return fmt.Errorf("create run dir: %w", err)
-	}
-
-	convs, err := loadDataset(opt.dataPath)
+	convs, err := loadBenchmarkDataset(opt.dataPath, opt.datasetFormat)
 	if err != nil {
 		return err
 	}
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		convs = convs[:opt.maxConvs]
+	}
+	prices, err := parsePriceTable(os.Getenv("LOCOMO_PRICE_TABLE"))
+	if err != nil {
+		return err
+	}
+	model := envOr("LOCOMO_MODEL", "deepseek-v4-pro")
+	extractModel := envOr("EXTRACT_MODEL", model)
+	if opt.estimate {
+		return printEstimate(convs, opt, prices, model, extractModel)
+	}
+	if opt.runDir == "" {
+		return fmt.Errorf("--run-dir is required unless --estimate or --compare is used")
+	}
+	apiKey := os.Getenv("LOCOMO_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
+	}
+	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
+		return fmt.Errorf("create run dir: %w", err)
+	}
+	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		logger.Info("sampling conversations", "limit", opt.maxConvs)
 	}
 
@@ -156,48 +200,101 @@ func run() error {
 		return fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
 	}
 	sem := make(chan struct{}, opt.concurrency)
-	call := gate(sem, newModelCaller(prov, model, opt.maxTokens))
-	extractCall := pipeline.ModelCaller(gate(sem, newModelCaller(prov, extractModel, opt.maxTokens)))
-
-	// Per-arm aggregator + resumable journal.
-	states := make([]*armState, 0, len(arms))
-	for _, name := range arms {
-		j, err := openJournal(opt.runDir, name)
-		if err != nil {
-			return err
+	ledger := newCostLedger(prices)
+	recordUsage := func(role, model string, usage provider.Usage) {
+		ledger.Add(role, model, usage.InputTokens, usage.OutputTokens)
+		if role == "answer" {
+			ledger.AddContextTokens(usage.InputTokens)
 		}
-		defer j.Close()
-		states = append(states, &armState{name: name, agg: newAggregator(), journal: j})
 	}
+	answerCall := gate(sem, newModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
+	judgeCall := gate(sem, newModelCallerWithUsage(prov, model, opt.maxTokens, "judge", recordUsage))
+	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
 
 	// The embedding client is shared across conversations (safe for concurrent
 	// use) and only built when a hybrid arm is present.
 	var embClient embedding.Client
 	if hasArm(arms, "hybrid") {
-		embClient = buildBenchEmbeddingClient(logger)
+		embClient = buildBenchEmbeddingClient(logger, func(inputTokens, outputTokens int) {
+			ledger.Add("embed", envOr("EMBED_MODEL", "qwen3-embedding:0.6b"), inputTokens, outputTokens)
+		})
 	}
 
 	logger.Info("starting", "conversations", len(convs), "arms", arms, "concurrency", opt.concurrency,
 		"model", model, "extract_model", extractModel, "top_k", opt.topK)
 
 	ctx := context.Background()
-	var wg sync.WaitGroup
-	for ci := range convs {
-		wg.Add(1)
-		go func(conv conversation) {
-			defer wg.Done()
-			if err := processConversation(ctx, opt, conv, extractCall, call, embClient, states, logger); err != nil {
-				logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
+	for repeat := 1; repeat <= opt.repeats; repeat++ {
+		repeatOpt := opt
+		if opt.repeats > 1 {
+			repeatOpt.runDir = filepath.Join(opt.runDir, fmt.Sprintf("run-%d", repeat))
+		}
+		if err := os.MkdirAll(repeatOpt.runDir, 0o755); err != nil {
+			return fmt.Errorf("create repeat run dir: %w", err)
+		}
+		states := make([]*armState, 0, len(arms))
+		for _, name := range arms {
+			j, err := openJournal(repeatOpt.runDir, name)
+			if err != nil {
+				return err
 			}
-		}(convs[ci])
+			states = append(states, &armState{name: name, agg: newAggregator(), journal: j})
+		}
+		var wg sync.WaitGroup
+		for ci := range convs {
+			wg.Add(1)
+			go func(conv conversation, current []*armState) {
+				defer wg.Done()
+				if err := processConversation(ctx, repeatOpt, conv, extractCall, answerCall, judgeCall, embClient, current, logger); err != nil {
+					logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
+				}
+			}(convs[ci], states)
+		}
+		wg.Wait()
+		for _, state := range states {
+			state.journal.Close()
+			report(state, repeatOpt)
+		}
+		if len(states) == 1 {
+			if err := mirrorResultsFile(repeatOpt.runDir, states[0].name); err != nil {
+				return err
+			}
+		}
+		if len(states) == 2 {
+			reportDelta(states[0], states[1])
+		}
 	}
-	wg.Wait()
+	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel)
+	if err := writeCost(filepath.Join(opt.runDir, "cost.json"), ledger.Report()); err != nil {
+		return fmt.Errorf("write cost.json: %w", err)
+	}
+	for _, arm := range arms {
+		runs, err := loadArmRuns(opt.runDir, arm, opt.repeats)
+		if err != nil {
+			return err
+		}
+		stats := statsFromRuns(runs)
+		path := filepath.Join(opt.runDir, "stats.json")
+		if len(arms) > 1 {
+			path = filepath.Join(opt.runDir, "stats-"+arm+".json")
+		}
+		if err := writeStats(path, stats); err != nil {
+			return fmt.Errorf("write stats: %w", err)
+		}
+		printStatsSummary(arm, stats)
+	}
+	fmt.Printf("cost: actual_usd=%.6f answer_context_tokens_mean=%.0f\n", ledger.ActualUSD(), ledger.AnswerContextTokensMean())
+	return nil
+}
 
-	for _, s := range states {
-		report(s, opt)
+func mirrorResultsFile(dir, arm string) error {
+	source := filepath.Join(dir, fmt.Sprintf("results-%s.jsonl", arm))
+	contents, err := os.ReadFile(source) //nolint:gosec // operator-selected run artifact
+	if err != nil {
+		return fmt.Errorf("read results for mirror: %w", err)
 	}
-	if len(states) == 2 {
-		reportDelta(states[0], states[1])
+	if err := os.WriteFile(filepath.Join(dir, "results.jsonl"), contents, 0o644); err != nil { //nolint:gosec // operator-selected run directory
+		return fmt.Errorf("write results.jsonl: %w", err)
 	}
 	return nil
 }
@@ -247,7 +344,7 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 // questions under every retrieval arm from that shared store. Extraction is
 // sequential (the store is single-connection); questions run concurrently and
 // are bounded by the global LLM-call semaphore.
-func processConversation(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, call modelCaller, embClient embedding.Client, states []*armState, logger *slog.Logger) error {
+func processConversation(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, answerCall, judgeCall modelCaller, embClient embedding.Client, states []*armState, logger *slog.Logger) error {
 	dsn := ":memory:"
 	if opt.storeDir != "" {
 		if err := os.MkdirAll(opt.storeDir, 0o755); err != nil {
@@ -348,8 +445,11 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 	var qwg sync.WaitGroup
 	answered, advAnswered := 0, 0
 	for qi, qa := range conv.QA {
-		if qa.Category == adversarialCategory {
-			if opt.adversarial == 0 || (opt.adversarial > 0 && advAnswered >= opt.adversarial) {
+		if qa.Adversarial || qa.Category == adversarialCategory {
+			if opt.datasetFormat == "longmemeval" {
+				// LongMemEval_S abstention questions are part of the full
+				// target set and are always included.
+			} else if opt.adversarial == 0 || (opt.adversarial > 0 && advAnswered >= opt.adversarial) {
 				continue
 			}
 			advAnswered++
@@ -368,16 +468,20 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey) {
 				defer qwg.Done()
-				correct, predicted := answerAndJudge(ctx, retrievers[s.name], call, opt, qa, logger)
+				correct, predicted := answerAndJudge(ctx, retrievers[s.name], answerCall, judgeCall, opt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
-					Conv:      key.Conv,
-					Q:         key.Q,
-					Category:  qa.Category,
-					Correct:   correct,
-					Question:  qa.Question,
-					Gold:      goldFor(qa),
-					Predicted: predicted,
+					Conv:         key.Conv,
+					Q:            key.Q,
+					QuestionID:   qa.QuestionID,
+					Category:     qa.Category,
+					CategoryName: qa.CategoryName,
+					QuestionType: qa.QuestionType,
+					Adversarial:  qa.Adversarial || qa.Category == adversarialCategory,
+					Correct:      correct,
+					Question:     qa.Question,
+					Gold:         goldFor(qa),
+					Predicted:    predicted,
 				})
 			}(s, qa, key)
 		}
@@ -414,29 +518,29 @@ func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
 // produces an alternative search query, its hits are unioned with the first
 // round's, and the question is answered again (EverMemOS-style second round,
 // paid only for the IDK tail). Returns (correct, predicted answer).
-func answerAndJudge(ctx context.Context, retriever *memory.Retriever, call modelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string) {
+func answerAndJudge(ctx context.Context, retriever *memory.Retriever, answerCall, judgeCall modelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, err := retrieve(ctx, retriever, call, qa.Question, topK, quota, opt)
+	hits, err := retrieve(ctx, retriever, answerCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
 		return false, ""
 	}
 	prompt := answerPromptFor(qa.Category)
-	predicted, err := call(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
+	predicted, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
 		return false, ""
 	}
 
-	if isIDK(predicted) {
-		if retry, ok := retryWithRewrite(ctx, retriever, call, opt, qa, prompt, hits); ok {
+	if isIDK(predicted) && !opt.noIDKRetry {
+		if retry, ok := retryWithRewrite(ctx, retriever, answerCall, opt, qa, prompt, hits); ok {
 			predicted = retry
-		} else if retry, ok := retryWithWiderNet(ctx, retriever, call, opt, qa, prompt); ok {
+		} else if retry, ok := retryWithWiderNet(ctx, retriever, answerCall, opt, qa, prompt); ok {
 			predicted = retry
 		}
 	}
 
-	verdict, err := call(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
+	verdict, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
 		return false, predicted
@@ -451,7 +555,7 @@ func answerAndJudge(ctx context.Context, retriever *memory.Retriever, call model
 const adversarialGold = `This question cannot be answered from the conversation — it contains no such information. The correct response DECLINES: it says the information is not mentioned, not available, or "I don't know". Any confident substantive answer is wrong.`
 
 func goldFor(qa locomoQA) string {
-	if qa.Category == adversarialCategory {
+	if qa.Adversarial || qa.Category == adversarialCategory {
 		return adversarialGold
 	}
 	return qa.AnswerText()
@@ -577,12 +681,13 @@ func toMemories(hits []memory.Result) []retrievedMemory {
 
 // buildBenchEmbeddingClient builds the embedding client from EMBED_* env, with
 // local defaults. Returns nil (semantic disabled) on failure.
-func buildBenchEmbeddingClient(logger *slog.Logger) embedding.Client {
+func buildBenchEmbeddingClient(logger *slog.Logger, usage func(inputTokens, outputTokens int)) embedding.Client {
 	c, err := embedding.New(embedding.Config{
 		BaseURL: envOr("EMBED_BASE_URL", "http://127.0.0.1:11434/v1"),
 		Model:   envOr("EMBED_MODEL", "qwen3-embedding:0.6b"),
 		APIKey:  os.Getenv("EMBED_API_KEY"),
 		Timeout: 30 * time.Second,
+		Usage:   usage,
 	})
 	if err != nil || c == nil {
 		logger.Warn("hybrid arm: embedding client unavailable; semantic signal disabled (degrades to BM25+entity)")
@@ -688,4 +793,107 @@ func pct(n, d int) float64 {
 		return 0
 	}
 	return 100 * float64(n) / float64(d)
+}
+
+func loadArmRuns(baseDir, arm string, repeats int) ([][]result, error) {
+	runs := make([][]result, 0, repeats)
+	for repeat := 1; repeat <= repeats; repeat++ {
+		dir := baseDir
+		if repeats > 1 {
+			dir = filepath.Join(baseDir, fmt.Sprintf("run-%d", repeat))
+		}
+		path := filepath.Join(dir, fmt.Sprintf("results-%s.jsonl", arm))
+		items, err := readResultsJSONL(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		runs = append(runs, items)
+	}
+	return runs, nil
+}
+
+func countSelectedQuestions(convs []conversation, opt options) int {
+	total := 0
+	for _, conv := range convs {
+		answered, adversarial := 0, 0
+		for _, qa := range conv.QA {
+			if qa.Adversarial || qa.Category == adversarialCategory {
+				if opt.datasetFormat == "longmemeval" || opt.adversarial < 0 || (opt.adversarial > 0 && adversarial < opt.adversarial) {
+					total++
+					adversarial++
+				}
+				continue
+			}
+			if opt.maxQuestions > 0 && answered >= opt.maxQuestions {
+				break
+			}
+			answered++
+			total++
+		}
+	}
+	return total
+}
+
+func estimateDatasetCost(convs []conversation, opt options, prices priceTable, model, extractModel string) float64 {
+	repeats := opt.repeats
+	questions := countSelectedQuestions(convs, opt)
+	extractionCalls := 0
+	for _, conv := range convs {
+		extractionCalls += len(conv.Sessions)
+	}
+	answerCalls := questions
+	judgeCalls := questions
+	if opt.filterPool > opt.topK {
+		answerCalls += questions
+	}
+	extract, _ := estimateCost(prices, extractModel, extractionCalls*repeats, 4_000, 500)
+	answer, _ := estimateCost(prices, model, answerCalls*repeats, 7_000, 300)
+	judge, _ := estimateCost(prices, model, judgeCalls*repeats, 1_000, 100)
+	return extract + answer + judge
+}
+
+func printEstimate(convs []conversation, opt options, prices priceTable, model, extractModel string) error {
+	questions := countSelectedQuestions(convs, opt)
+	extractionCalls := 0
+	for _, conv := range convs {
+		extractionCalls += len(conv.Sessions)
+	}
+	report := costReport{
+		EstimatedUSD: estimateDatasetCost(convs, opt, prices, model, extractModel),
+		ByRole: map[string]*roleCost{
+			"extract": {Calls: extractionCalls * opt.repeats, InTokens: extractionCalls * opt.repeats * 4_000, OutTokens: extractionCalls * opt.repeats * 500},
+			"answer":  {Calls: questions * opt.repeats, InTokens: questions * opt.repeats * 7_000, OutTokens: questions * opt.repeats * 300},
+			"judge":   {Calls: questions * opt.repeats, InTokens: questions * opt.repeats * 1_000, OutTokens: questions * opt.repeats * 100},
+			"embed":   {},
+		},
+	}
+	if opt.filterPool > opt.topK {
+		report.ByRole["answer"].Calls += questions * opt.repeats
+		report.ByRole["answer"].InTokens += questions * opt.repeats * 1_000
+	}
+	fmt.Printf("estimate: dataset=%s repeats=%d questions=%d extract_calls=%d estimated_usd=%.6f\n",
+		opt.datasetFormat, opt.repeats, questions, extractionCalls*opt.repeats, report.EstimatedUSD)
+	if _, ok := prices.Lookup(model); !ok {
+		fmt.Printf("estimate: unpriced model=%s\n", model)
+	}
+	if _, ok := prices.Lookup(extractModel); !ok {
+		fmt.Printf("estimate: unpriced model=%s\n", extractModel)
+	}
+	return nil
+}
+
+func printStatsSummary(arm string, stats statsReport) {
+	keys := make([]string, 0, len(stats.Categories))
+	for category := range stats.Categories {
+		keys = append(keys, category)
+	}
+	sort.Strings(keys)
+	fmt.Printf("\n=== repeated stats (retrieval=%s, repeats=%d) ===\n", arm, stats.Repeats)
+	for _, category := range keys {
+		summary := stats.Categories[category]
+		fmt.Printf("  %-24s mean=%5.1f%% ci95=[%5.1f%%,%5.1f%%]\n", category,
+			summary.Mean*100, summary.CI95[0]*100, summary.CI95[1]*100)
+	}
+	fmt.Printf("  %-24s mean=%5.1f%% ci95=[%5.1f%%,%5.1f%%]\n", "OVERALL", stats.Overall.Mean*100, stats.Overall.CI95[0]*100, stats.Overall.CI95[1]*100)
+	fmt.Printf("  %-24s mean=%5.1f%% ci95=[%5.1f%%,%5.1f%%]\n", "OVERALL_COMPARABLE", stats.OverallComparable.Mean*100, stats.OverallComparable.CI95[0]*100, stats.OverallComparable.CI95[1]*100)
 }

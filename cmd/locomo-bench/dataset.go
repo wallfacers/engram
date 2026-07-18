@@ -20,9 +20,13 @@ type locomoItem struct {
 }
 
 type locomoQA struct {
-	Question string          `json:"question"`
-	Answer   json.RawMessage `json:"answer"` // may be string or number
-	Category int             `json:"category"`
+	Question     string          `json:"question"`
+	Answer       json.RawMessage `json:"answer"` // may be string or number
+	Category     int             `json:"category"`
+	QuestionID   string          `json:"question_id,omitempty"`
+	QuestionType string          `json:"question_type,omitempty"`
+	CategoryName string          `json:"category_name,omitempty"`
+	Adversarial  bool            `json:"adversarial,omitempty"`
 }
 
 // AnswerText renders the gold answer as a string regardless of JSON type.
@@ -71,6 +75,11 @@ func loadDataset(path string) ([]conversation, error) {
 		sessions, err := parseConversation(it.Conversation)
 		if err != nil {
 			return nil, fmt.Errorf("conversation %d: %w", i, err)
+		}
+		for qi := range it.QA {
+			it.QA[qi].QuestionID = fmt.Sprintf("conv-%d-q-%d", i, qi)
+			it.QA[qi].CategoryName = categoryLabel(it.QA[qi].Category)
+			it.QA[qi].Adversarial = it.QA[qi].Category == adversarialCategory
 		}
 		convs = append(convs, conversation{ID: i, Sessions: sessions, QA: it.QA})
 	}
@@ -176,6 +185,20 @@ func categoryLabel(c int) string {
 		return "single-hop"
 	case 5:
 		return "adversarial"
+	case 6:
+		return "single-session-user"
+	case 7:
+		return "single-session-assistant"
+	case 8:
+		return "multi-session"
+	case 9:
+		return "temporal-reasoning"
+	case 10:
+		return "knowledge-update"
+	case 11:
+		return "abstention"
+	case 12:
+		return "preference"
 	default:
 		return "category-" + strconv.Itoa(c)
 	}

@@ -225,6 +225,7 @@ func encodeRequest(r provider.Request) ([]byte, error) {
 	out := openaiReq{
 		Model:       r.Model,
 		Stream:      true,
+		StreamOpts:  &streamOpts{IncludeUsage: true},
 		MaxTokens:   r.MaxTokens,
 		Temperature: r.Temperature,
 	}

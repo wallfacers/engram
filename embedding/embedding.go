@@ -38,6 +38,10 @@ type Config struct {
 	APIKey     string
 	Dimensions int
 	Timeout    time.Duration
+	// Usage, when supplied, receives token usage for each embedding request.
+	// Local endpoints may omit usage, in which case the callback still records
+	// the call with zero token counts.
+	Usage func(inputTokens, outputTokens int)
 }
 
 // HTTPClient is the concrete OpenAI-compatible implementation.
@@ -74,6 +78,10 @@ type embedResponse struct {
 		Embedding []float32 `json:"embedding"`
 		Index     int       `json:"index"`
 	} `json:"data"`
+	Usage *struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -122,6 +130,13 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float32, er
 	}
 	if len(out.Data) != len(texts) {
 		return nil, fmt.Errorf("embedding: expected %d vectors, got %d", len(texts), len(out.Data))
+	}
+	if c.cfg.Usage != nil {
+		inputTokens := 0
+		if out.Usage != nil {
+			inputTokens = out.Usage.PromptTokens
+		}
+		c.cfg.Usage(inputTokens, 0)
 	}
 	vectors := make([][]float32, len(texts))
 	for _, d := range out.Data {

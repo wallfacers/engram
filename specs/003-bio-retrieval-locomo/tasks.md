@@ -55,35 +55,35 @@
 
 ### Tests for User Story 1
 
-- [ ] T004 [P] [US1] 在 `cmd/locomo-bench/stats_test.go` 写可失败测试：已知样本的
+- [x] T004 [P] [US1] 在 `cmd/locomo-bench/stats_test.go` 写可失败测试：已知样本的
       均值±95%CI（t 分布）、McNemar 已知列联表 p 值（含小样本二项精确路径）、
       CI 重叠判定、`verdict` 规则（above-noise 二判据其一）
-- [ ] T005 [P] [US1] 在 `cmd/locomo-bench/cost_test.go` 写可失败测试：价目表解析
+- [x] T005 [P] [US1] 在 `cmd/locomo-bench/cost_test.go` 写可失败测试：价目表解析
       （含 unpriced 模型标注）、分桶累计、estimate 计算、`answer_context_tokens_mean`
       与 1.5× WARNING 阈值
-- [ ] T006 [P] [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 写可失败测试：用
+- [x] T006 [P] [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 写可失败测试：用
       `testdata/longmemeval/sample.json` 小 fixture 验证 LME_S 解析、7 题型→桶映射、
       abstention→对抗口径标记
 
 ### Implementation for User Story 1
 
-- [ ] T007 [P] [US1] 实现 `cmd/locomo-bench/stats.go`：run 层均值±95%CI（标准库
+- [x] T007 [P] [US1] 实现 `cmd/locomo-bench/stats.go`：run 层均值±95%CI（标准库
       math，t 临界值表内置）、题层 McNemar（卡方近似+小样本精确）、compare.json/
       stats.json 序列化（契约 bench-cli.md §1）
-- [ ] T008 [P] [US1] 实现 `cmd/locomo-bench/cost.go`：从 provider 响应捕获 usage
+- [x] T008 [P] [US1] 实现 `cmd/locomo-bench/cost.go`：从 provider 响应捕获 usage
       （`provider/openai`、`provider/anthropic` 回传 token 数透传到 bench 记账钩子；
       embedding 客户端 `embedding/embedding.go` 同样接钩子，本地端点单价 0 仍记
       calls/tokens）、`LOCOMO_PRICE_TABLE` 解析、`--estimate` 模式、cost.json 落盘
       与报告尾打印（契约 bench-cli.md §4/§5）
-- [ ] T009 [US1] 在 `cmd/locomo-bench/main.go` 接线 `--repeats N`：逐 run 落
+- [x] T009 [US1] 在 `cmd/locomo-bench/main.go` 接线 `--repeats N`：逐 run 落
       `run-<i>/results.jsonl`（question_id/category/correct/answer/token 用量），
       跑完聚合写 stats.json；`--compare A B` 子模式读双 run-dir 对齐 question_id
       输出配对报告；同步接线 `--no-idk-retry`（禁用两级重试，判定口径必开，
       默认关=现行为）（依赖 T007）
-- [ ] T010 [US1] 实现 `cmd/locomo-bench/longmemeval.go`：`--dataset-format
+- [x] T010 [US1] 实现 `cmd/locomo-bench/longmemeval.go`：`--dataset-format
       longmemeval` 加载 LME_S haystack（带时间戳会话）走既有抽取/建库/答题/判分链，
       题型映射与 per-桶报告（依赖 T006 fixture；契约 bench-cli.md §3）
-- [ ] T011 [US1] 报告层打通：`aggregator` 扩展 per-桶 CI 输出、`reportDelta` 兼容
+- [x] T011 [US1] 报告层打通：`aggregator` 扩展 per-桶 CI 输出、`reportDelta` 兼容
       compare 模式、`results.jsonl` 记录 LME 原始题型（`cmd/locomo-bench/main.go`）
 
 **Checkpoint**: 全部离线单测绿；`--estimate` 对 locomo10 输出费用预估；
