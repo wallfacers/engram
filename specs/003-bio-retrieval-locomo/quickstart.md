@@ -24,19 +24,20 @@ go build ./cmd/locomo-bench
 ./locomo-bench --data testdata/locomo/locomo10.json --repeats 5 --estimate
 
 # 2) 抽取 A/B（两库各建一次，维护者确认预估后执行）
-EXTRACT_MODEL=gpt-5.4-mini ./locomo-bench --data ... --run-dir .locomo-run/s0-extract-mini --repeats 5
-EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-extract-sol  --repeats 5
+EXTRACT_MODEL=gpt-5.4-mini ./locomo-bench --data ... --run-dir .locomo-run/s0-extract-mini --repeats 5 --no-idk-retry
+EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-extract-sol  --repeats 5 --no-idk-retry
 
 # 3) 配对判定 → 选定抽取模型并全程冻结；产出即校准基线
 ./locomo-bench --compare .locomo-run/s0-extract-mini .locomo-run/s0-extract-sol
 ```
 
-记录：`stats.json` 均值±CI 即**校准基线**；与旧基线（74.7@luna）的差 = 模型贡献。
+记录：`stats.json` 均值±CI 即**校准基线**；与旧基线（74.7@luna，带 IDK 重试）的差 =
+模型贡献 + single-pass 口径差（二者混合，如实标注，不拆分——后续判定只参照新基线）。
 
 ## Strike 1 — 联想检索
 
 ```bash
-./locomo-bench --data ... --run-dir .locomo-run/s1-assoc --repeats 5 --assoc
+./locomo-bench --data ... --run-dir .locomo-run/s1-assoc --repeats 5 --no-idk-retry --assoc
 ./locomo-bench --compare .locomo-run/s0-<frozen> .locomo-run/s1-assoc
 ```
 
@@ -47,7 +48,7 @@ EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-ex
 ## Strike 2 — 时间结构化
 
 ```bash
-./locomo-bench --data ... --run-dir .locomo-run/s2-temporal --repeats 5 --assoc --temporal-score
+./locomo-bench --data ... --run-dir .locomo-run/s2-temporal --repeats 5 --no-idk-retry --assoc --temporal-score
 ./locomo-bench --compare .locomo-run/s1-assoc .locomo-run/s2-temporal
 ```
 
@@ -58,7 +59,7 @@ EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-ex
 
 ```bash
 # 建库阶段带冲突消解重建一次库；答题换 abstain prompt（口径改动，独立提交）
-./locomo-bench --data ... --run-dir .locomo-run/s3-full --repeats 5 \
+./locomo-bench --data ... --run-dir .locomo-run/s3-full --repeats 5 --no-idk-retry \
   --assoc --temporal-score --conflict-resolution --abstain-prompt --adversarial
 ./locomo-bench --compare .locomo-run/s2-<best> .locomo-run/s3-full
 ```
@@ -71,7 +72,7 @@ EXTRACT_MODEL=gpt-5.6-sol  ./locomo-bench --data ... --run-dir .locomo-run/s0-ex
 ./locomo-bench --dataset-format longmemeval --data testdata/longmemeval/longmemeval_s.json \
   --estimate --repeats 3          # 先算账！~500 题建库开销显著，维护者分批
 ./locomo-bench --dataset-format longmemeval --data ... --run-dir .locomo-run/lme-final \
-  --repeats 3 <获胜 flag 组合>
+  --repeats 3 --no-idk-retry <获胜 flag 组合>
 ```
 
 ## 记录纪律（每枪必做）

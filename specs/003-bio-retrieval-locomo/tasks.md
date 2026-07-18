@@ -71,13 +71,15 @@
       math，t 临界值表内置）、题层 McNemar（卡方近似+小样本精确）、compare.json/
       stats.json 序列化（契约 bench-cli.md §1）
 - [ ] T008 [P] [US1] 实现 `cmd/locomo-bench/cost.go`：从 provider 响应捕获 usage
-      （`provider/openai`、`provider/anthropic` 回传 token 数透传到 bench 记账钩子）、
-      `LOCOMO_PRICE_TABLE` 解析、`--estimate` 模式、cost.json 落盘与报告尾打印
-      （契约 bench-cli.md §4/§5）
+      （`provider/openai`、`provider/anthropic` 回传 token 数透传到 bench 记账钩子；
+      embedding 客户端 `embedding/embedding.go` 同样接钩子，本地端点单价 0 仍记
+      calls/tokens）、`LOCOMO_PRICE_TABLE` 解析、`--estimate` 模式、cost.json 落盘
+      与报告尾打印（契约 bench-cli.md §4/§5）
 - [ ] T009 [US1] 在 `cmd/locomo-bench/main.go` 接线 `--repeats N`：逐 run 落
       `run-<i>/results.jsonl`（question_id/category/correct/answer/token 用量），
       跑完聚合写 stats.json；`--compare A B` 子模式读双 run-dir 对齐 question_id
-      输出配对报告（依赖 T007）
+      输出配对报告；同步接线 `--no-idk-retry`（禁用两级重试，判定口径必开，
+      默认关=现行为）（依赖 T007）
 - [ ] T010 [US1] 实现 `cmd/locomo-bench/longmemeval.go`：`--dataset-format
       longmemeval` 加载 LME_S haystack（带时间戳会话）走既有抽取/建库/答题/判分链，
       题型映射与 per-桶报告（依赖 T006 fixture；契约 bench-cli.md §3）
@@ -101,7 +103,8 @@
       （`LOCOMO_MODEL`/`EXTRACT_MODEL`/`LOCOMO_PROVIDER` 贯通 usage 记账），补
       `cmd/locomo-bench/main.go` 缺口并在 quickstart.md 修正命令（依赖 T008）
 - [ ] T013 [US2] 产出 Strike 0 运行脚本 `.locomo-run/strike0.sh`（quickstart §Strike 0
-      的三步：estimate → A/B 两库多跑 → compare），内置价目表与 run-dir 约定
+      的三步：estimate → A/B 两库多跑 → compare），内置价目表与 run-dir 约定；
+      所有运行命令带 `--no-idk-retry`（判定口径）
 - [ ] T014 [US2] ⏸️ **维护者执行**：跑 strike0.sh（先 estimate 确认花费）；本方把
       两库 stats/compare、冻结抽取模型决定、校准基线、模型贡献差值与实际费用记入
       `specs/003-bio-retrieval-locomo/eval-log.md`
@@ -211,8 +214,8 @@
       （`cmd/locomo-bench/main.go`，作用于建库/curation 阶段）
 - [ ] T035 [US5] **独立提交（口径改动）**：`cmd/locomo-bench/runner.go` 增
       Abstain-R1 1:4 ICL 答题 prompt（拒答须指出缺失信息）；`--abstain-prompt` flag
-      门控并与两级 IDK 重试互斥（`main.go:431-437` 路径旁路）；编造率/误拒率
-      进 per-桶报告
+      门控，仅替换答题 prompt——重试禁用由既有 `--no-idk-retry` 承担（T009），
+      二者独立组合；编造率/误拒率进 per-桶报告
 - [ ] T036 [US5] ⏸️ **维护者执行**：Strike 3 多跑（`--adversarial`，compare vs
       Strike 2 获胜配置）；判定编造率显著降且误拒 within-noise→保留；记 eval-log.md
 

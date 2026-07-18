@@ -34,11 +34,13 @@ ci_overlap, verdict: "above-noise" | "within-noise"}`。
 ## 2. 机制开关（FR-011，默认全关）
 
 ```
+--no-idk-retry         # 禁用两级 IDK 重试；判定口径必开（自校准基线起全程 single-pass）
 --assoc                # Strike 1 联想信号
 --assoc-depth 2
 --temporal-score       # Strike 2 时间信号
 --temporal-hard-filter
---abstain-prompt       # Strike 3 拒答 prompt 契约（替换两级 IDK 重试；互斥于重试）
+--abstain-prompt       # Strike 3 拒答 prompt 契约（仅替换答题 prompt；与 --no-idk-retry
+                       #  独立，判定运行中二者组合使用）
 --conflict-resolution  # Strike 3 冲突四分类（作用于建库/curation 阶段）
 --superseded-penalty 0.3
 ```
@@ -84,6 +86,6 @@ LOCOMO_PRICE_TABLE     # env，JSON：{"gpt-5.6-sol": {"in": 1.25, "out": 10.0},
 
 ## 6. 兼容性
 
-- 不带任何新 flag 时，行为与当前 HEAD 完全一致（含两级 IDK 重试仍在——移除它属
-  `--abstain-prompt` 路径的口径改动，独立提交、flag 门控）。
+- 不带任何新 flag 时，行为与当前 HEAD 完全一致（含两级 IDK 重试仍在）；
+  `--no-idk-retry` 与 `--abstain-prompt` 均为独立口径开关、独立提交、flag 门控。
 - `run-N/results.jsonl` 逐题记录 schema 见 data-model §6；question_id 稳定可配对。
