@@ -25,6 +25,8 @@ server.Run(context.Background(), &mcp.StdioTransport{}) // 跑到客户端断开
 
 **待验证(plan→impl 门禁)**:加入 SDK 后 `CGO_ENABLED=0 go build ./...` 必须仍通过(宪法「无 CGO」)。官方 SDK 基于 `encoding/json`/`jsonschema`,预期纯 Go;在 T-setup 任务里以 `go mod graph` + CGO=0 构建实测确认,若引入 CGO 依赖则回退 mark3labs 或手写。
 
+**实施勘误(2026-07-19,本节初稿疏漏)**:本 R1 只核了 CGO,**漏核 SDK 的 Go 版本要求**。实测 v1.5.0 **强制 Go ≥ 1.25.0**,故 module 基线从 001 的 `go 1.22` 抬到 `go 1.25.0`(用户已裁定接受:Go 1.25 稳定、向后兼容,引擎行为不变、既有测试全绿)。CGO=0 构建通过、SDK 未替换。附带引入 7 个纯 Go 间接依赖(jsonschema-go、segmentio/asm+encoding、uritemplate、x/mod、x/oauth2、x/sync)——可审计、无 C 依赖,「依赖最小化」轻微让步但在可接受范围。
+
 ## R2. namespace 隔离落地 —— 决定:适配层维护 `namespace → 独立引擎 store` 注册表
 
 **Decision**:namespace 隔离**完全在适配层实现**。一个 namespace 映射到 `dataDir/<ns>.db` 一份独立 SQLite 文件,由适配层的 **Registry** 惰性 `store.Open` 并装配该 namespace 的引擎单元(EntryStore/VectorStore/Embedder/Retriever/Pipeline)。引擎**不感知 namespace,store schema 一行不改**。

@@ -4,7 +4,7 @@
 
 ## 前提
 
-- Go 1.22+,无需 C 工具链(纯 Go,`modernc.org/sqlite` + 纯 Go MCP SDK)
+- Go 1.25+(MCP SDK v1.5.0 要求),无需 C 工具链(纯 Go,`modernc.org/sqlite` + 纯 Go MCP SDK)
 - P1/P2 路径(写/检索/列/查/删 + 降级检索)**无需外网、无需任何端点**
 - 语义检索(增强项)需一个 embedding 端点(如本地 Ollama);抽取工具(`memory_ingest`)需一个 LLM provider——二者均可选
 
