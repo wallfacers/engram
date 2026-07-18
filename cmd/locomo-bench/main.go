@@ -19,6 +19,7 @@
 // run artifacts:
 //
 //	LOCOMO_API_KEY   (required) answer + judge model key
+//	LOCOMO_PROVIDER  (default anthropic; set "openai" for OpenAI-chat endpoints)
 //	LOCOMO_BASE_URL  (default https://api.deepseek.com/anthropic)
 //	LOCOMO_MODEL     (default deepseek-v4-pro)     answer + judge model
 //	EXTRACT_MODEL    (default = LOCOMO_MODEL)      extraction model (a fast,
@@ -44,7 +45,9 @@ import (
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/pipeline"
+	"github.com/wallfacers/engram/provider"
 	"github.com/wallfacers/engram/provider/anthropic"
+	"github.com/wallfacers/engram/provider/openai"
 	"github.com/wallfacers/engram/store"
 )
 
@@ -140,7 +143,18 @@ func run() error {
 	// One provider; a global semaphore caps concurrent in-flight LLM calls so
 	// many conversations/questions run in parallel without exceeding the rate
 	// limit. Every LLM call (extraction, answer, judge) passes through it.
-	prov := anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
+	// Provider protocol is selectable so the harness can target either an
+	// Anthropic-messages endpoint (default) or an OpenAI-chat-completions one
+	// (LOCOMO_PROVIDER=openai). Both satisfy provider.Provider identically.
+	var prov provider.Provider
+	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
+	case "openai":
+		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL})
+	case "anthropic", "":
+		prov = anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
+	default:
+		return fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	}
 	sem := make(chan struct{}, opt.concurrency)
 	call := gate(sem, newModelCaller(prov, model, opt.maxTokens))
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCaller(prov, extractModel, opt.maxTokens)))
