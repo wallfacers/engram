@@ -1,0 +1,58 @@
+[
+  {
+    "id": "q-ascii-python",
+    "query": "Python scripting",
+    "k": 5,
+    "vector": [1, 0, 0, 0, 0, 0],
+    "degradation": true
+  },
+  {
+    "id": "q-cjk-trigram",
+    "query": "杭州龙井茶",
+    "k": 5,
+    "vector": [0, 0, 0, 1, 0, 0],
+    "degradation": false
+  },
+  {
+    "id": "q-entity-sweden",
+    "query": "Sweden",
+    "k": 5,
+    "vector": [0, 1, 0, 0, 0, 0],
+    "degradation": true
+  },
+  {
+    "id": "q-mixed-python-berlin",
+    "query": "Python Berlin",
+    "k": 5,
+    "vector": [0.7, 0, 0.7, 0, 0, 0],
+    "degradation": true
+  },
+  {
+    "id": "q-semantic-coffee",
+    "query": "caffeine intake",
+    "k": 5,
+    "vector": [0, 0, 0, 0, 1, 0],
+    "degradation": false
+  },
+  {
+    "id": "q-keyword-trail",
+    "query": "Inca Trail",
+    "k": 5,
+    "vector": [0, 0, 0, 0, 0, 0],
+    "degradation": false
+  },
+  {
+    "id": "q-cjk-like-fallback",
+    "query": "杭州",
+    "k": 5,
+    "vector": [0, 0, 0, 1, 0, 0],
+    "degradation": false
+  },
+  {
+    "id": "q-mixed-travel",
+    "query": "Lisbon coast",
+    "k": 5,
+    "vector": [0, 0, 0, 0, 0, 1],
+    "degradation": false
+  }
+]

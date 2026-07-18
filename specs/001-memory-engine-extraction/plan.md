@@ -82,6 +82,7 @@ engram/
 │   ├── funcs.go                # 仅 ProbeFTS5(去 extract_text)
 │   └── *_test.go               # fts5/migrations/probe 相关记忆测试
 ├── internal/idgen/             # 原 internal/idgen,整包搬(engram 内部)
+├── internal/version/           # 原 internal/version,搬入;UserAgent 去品牌化为 "engram/"(provider 依赖,见 research R1b)
 ├── cmd/locomo-bench/           # 原样搬:回归 + 论文设施
 └── testdata/parity/            # 新增:确定性对拍的固定语料/query/向量与基线快照
 ```

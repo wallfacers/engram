@@ -8,6 +8,52 @@
 engram 的核心引擎抽离自 [workhorse-agent](https://github.com/wallfacers/workhorse-agent)
 的记忆子系统(已经 LoCoMo 五轮消融调优)。
 
+## 当前状态
+
+engram 已是可独立构建的 Go module，核心路径使用纯 Go SQLite（`modernc.org/sqlite`），不需要 CGO。
+记忆引擎、确定性检索对拍和 `locomo-bench` 已在本仓库内；LoCoMo 端到端评测需要运行者提供数据集和本地或私有模型端点。
+
+## 使用
+
+```bash
+go build ./...
+go test ./...
+CGO_ENABLED=0 go build ./...
+go vet ./...
+```
+
+检索保真门禁和三路信号降级测试无需外网：
+
+```bash
+go test ./memory -run TestRetrievalParity
+go test ./memory -run TestSignalDegradation
+```
+
+评测工具可先独立构建：
+
+```bash
+go build ./cmd/locomo-bench
+```
+
+有 LoCoMo 数据集和端点后，用 `--conversations`、`--questions` 做小子集运行：
+
+```bash
+export LOCOMO_API_KEY=...
+export LOCOMO_BASE_URL=http://127.0.0.1:4000/anthropic
+export LOCOMO_MODEL=...
+export EXTRACT_MODEL=...
+export EMBED_BASE_URL=http://127.0.0.1:11434/v1
+export EMBED_MODEL=...
+export EMBED_API_KEY=...
+go run ./cmd/locomo-bench \
+  --data /path/to/locomo.json \
+  --run-dir ./testdata/locomo-run \
+  --conversations 1 \
+  --questions 2
+```
+
+完整命令、对拍 fixture 和评测资源要求见 [`quickstart.md`](specs/001-memory-engine-extraction/quickstart.md)。
+
 ## 文档
 
 - [`docs/background-extraction-from-workhorse-agent.md`](docs/background-extraction-from-workhorse-agent.md)
@@ -23,7 +69,7 @@ engram 的核心引擎抽离自 [workhorse-agent](https://github.com/wallfacers/
 `constitution → specify → plan → tasks → implement`。脚手架已初始化于 `.specify/`,
 Claude 集成 skills 在 `.claude/skills/`。
 
-## 状态
+## 规格与实现记录
 
-立项中(2026-07-18)。脚手架 + 战略文档已就位;下一步走
-`/speckit-constitution` 与第一个能力规格「记忆引擎抽离」。
+- [`specs/001-memory-engine-extraction/`](specs/001-memory-engine-extraction/)
+  —— 记忆引擎抽离的 constitution、spec、plan、tasks、research、契约和验证入口。

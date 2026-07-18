@@ -4,15 +4,20 @@
 
 # Go build artifacts
 /bin/
+*.exe
 *.test
 *.out
 coverage.*
+cmd/locomo-bench/locomo-bench
+/locomo-bench
 
 # SQLite stores / local data
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
 /data/
+testdata/parity/cache/
 
 # OS / editor
 .DS_Store

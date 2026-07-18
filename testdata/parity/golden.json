@@ -1,0 +1,222 @@
+{
+  "model": "fixture-v1",
+  "source": "workhorse-agent Retriever baseline",
+  "results": [
+    {
+      "query_id": "q-ascii-python",
+      "entry_ids": [
+        "entry-001",
+        "entry-007",
+        "entry-009",
+        "entry-003",
+        "entry-005"
+      ],
+      "no_semantic": [
+        "entry-001",
+        "entry-007"
+      ],
+      "no_keyword": [
+        "entry-007",
+        "entry-001",
+        "entry-009",
+        "entry-003",
+        "entry-005"
+      ],
+      "no_entity": [
+        "entry-001",
+        "entry-007",
+        "entry-009",
+        "entry-003",
+        "entry-005"
+      ]
+    },
+    {
+      "query_id": "q-cjk-trigram",
+      "entry_ids": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ],
+      "no_semantic": [],
+      "no_keyword": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ],
+      "no_entity": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ]
+    },
+    {
+      "query_id": "q-entity-sweden",
+      "entry_ids": [
+        "entry-002",
+        "entry-008",
+        "entry-003",
+        "entry-005",
+        "entry-006"
+      ],
+      "no_semantic": [
+        "entry-008",
+        "entry-002"
+      ],
+      "no_keyword": [
+        "entry-008",
+        "entry-002",
+        "entry-003",
+        "entry-005",
+        "entry-006"
+      ],
+      "no_entity": [
+        "entry-002",
+        "entry-008",
+        "entry-003",
+        "entry-005",
+        "entry-006"
+      ]
+    },
+    {
+      "query_id": "q-mixed-python-berlin",
+      "entry_ids": [
+        "entry-007",
+        "entry-003",
+        "entry-001",
+        "entry-009",
+        "entry-005"
+      ],
+      "no_semantic": [
+        "entry-007",
+        "entry-003",
+        "entry-001"
+      ],
+      "no_keyword": [
+        "entry-007",
+        "entry-003",
+        "entry-001",
+        "entry-009",
+        "entry-005"
+      ],
+      "no_entity": [
+        "entry-007",
+        "entry-003",
+        "entry-001",
+        "entry-009",
+        "entry-005"
+      ]
+    },
+    {
+      "query_id": "q-semantic-coffee",
+      "entry_ids": [
+        "entry-005",
+        "entry-008",
+        "entry-003",
+        "entry-006",
+        "entry-004"
+      ],
+      "no_semantic": [],
+      "no_keyword": [
+        "entry-005",
+        "entry-008",
+        "entry-003",
+        "entry-006",
+        "entry-004"
+      ],
+      "no_entity": [
+        "entry-005",
+        "entry-008",
+        "entry-003",
+        "entry-006",
+        "entry-004"
+      ]
+    },
+    {
+      "query_id": "q-keyword-trail",
+      "entry_ids": [
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-004"
+      ],
+      "no_semantic": [
+        "entry-009"
+      ],
+      "no_keyword": [
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-004"
+      ],
+      "no_entity": [
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-004"
+      ]
+    },
+    {
+      "query_id": "q-cjk-like-fallback",
+      "entry_ids": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ],
+      "no_semantic": [
+        "entry-004"
+      ],
+      "no_keyword": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ],
+      "no_entity": [
+        "entry-004",
+        "entry-003",
+        "entry-005",
+        "entry-006",
+        "entry-009"
+      ]
+    },
+    {
+      "query_id": "q-mixed-travel",
+      "entry_ids": [
+        "entry-006",
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-004"
+      ],
+      "no_semantic": [
+        "entry-006"
+      ],
+      "no_keyword": [
+        "entry-006",
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-004"
+      ],
+      "no_entity": [
+        "entry-006",
+        "entry-009",
+        "entry-003",
+        "entry-005",
+        "entry-004"
+      ]
+    }
+  ]
+}

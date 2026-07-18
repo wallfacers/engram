@@ -19,6 +19,7 @@
 | `…/internal/store`(记忆接口/类型切片:Store/ErrNotFound/Upsert/BumpUsage) | `github.com/wallfacers/engram/store` |
 | `…/internal/store/sqlite`(记忆切片) | `github.com/wallfacers/engram/store` |
 | `…/internal/idgen` | `github.com/wallfacers/engram/internal/idgen`(不对外) |
+| `…/internal/version` | `github.com/wallfacers/engram/internal/version`(不对外;`UserAgent()` 去品牌化 `"workhorse-agent/"`→`"engram/"`,见 research R1b) |
 | `…/internal/tools/sessionsearch` 的 `BuildPlan`/`LikeFragments` | 内化为 `memory` 包内未导出的 `buildPlan`/`likeFragments`(`queryplan.go`) |
 
 ## 公开入口(`memory` 包,签名不变)
@@ -47,8 +48,12 @@
 - `store.Options` — 打开选项(路径等,字段同源)
 - `store.Store` — 持有 `*sql.DB`;建链只跑记忆迁移
 - `store.ErrNotFound` — 记忆条目未找到错误(切自 internal/store)
-- `store.Upsert(...)` / `store.BumpUsage(...)` — entrystore 依赖的记忆存取契约(切自 internal/store)
 - `ProbeFTS5(db *sql.DB) error` — FTS5 可用性探测
+- `store.Migration` — 迁移条目类型(记忆链)
+
+**实现期归属勘误**:原列的 `Upsert`/`BumpUsage` 经核实**并非** `internal/store` 的独立符号,
+而是 `memory.EntryStore` 的方法(此前 `store.X` grep 未能区分包引用与名为 `store` 的变量方法
+调用)。故它们**留在 `memory` 包**,engram `store` 包只切入 `ErrNotFound` + 具体 `Store`。
 
 **不纳入**:`Session` / `SessionState` / `SessionSummary` 等会话类型留宿主。
 

@@ -17,6 +17,30 @@
 **Alternatives considered**: 用接口把 store/provider/embedder 抽象、实现留宿主——被 Q1
 否决(那是"重设计契约",破坏纯搬运的可归因性)。
 
+**⚠️ 勘误(实现期发现)**:R1 初版用 `grep $p/*.go` 逐包扫描,**漏扫了子目录**,导致
+"provider 零宿主依赖"结论错误。用 `grep -r` 全树复扫,搬运闭包对宿主 internal 的依赖里,
+除已知的 `store`/`store/sqlite`/`prompt`/`sessionsearch` 外,还有**三个闭包外宿主包**:
+
+| 宿主包 | 谁依赖 | 处置 |
+|--------|--------|------|
+| `internal/version`(18 行,自洽,零反向依赖) | `provider/anthropic`、`provider/openai`(各 1 处,设 User-Agent 头) | **搬入** `engram/internal/version`,并**去品牌化** `UserAgent()`:`"workhorse-agent/"` → `"engram/"`。见 R1b |
+| `internal/tools/sessionsearch` | `memory/retriever.go` | 已规划内化(R5、T012) |
+| `internal/skills` | `internal/prompt` 的 **`doc.go`/`template_test.go`**(**非**切片子集) | **虚惊**:不在 prompt 切片范围;切 `memory_extraction.go`/`curation_judge.go`/`template.go` 时**不搬 `doc.go`**、且排除触碰 skills 的测试用例即可,二目标文件只 import `fmt`/`strings` |
+
+**教训**:依赖闭包必须 `grep -r` 全树扫,含所有子目录与测试文件。
+
+### R1b. version 去品牌化裁决
+
+**Decision**: 搬 `internal/version` → `engram/internal/version`;`UserAgent()` 返回
+`"engram/" + Version`(Version 仍取 `runtime/debug.BuildInfo`,缺省 "dev")。
+
+**Rationale**: ① 该串本无法逐字节保真——`debug.ReadBuildInfo().Main.Version` 在 engram
+下读的是 engram 的 module 版本,版本段必变;② 它是**出站 LLM 请求的 User-Agent 客户端身份**,
+非调优的引擎行为,**不进任何 MVP 验收门禁**(对拍用打桩向量、不打活端点;既有单测不断言
+该串——全仓库无 User-Agent 断言,仅 provider 两处生产调用);③ 在 engram 出站头里保留
+"workhorse-agent" 是产品性错误、必然回改。故此为对"逐字节保真"铁律的**一处限定例外**,
+与已接受的 module/import 改名同类(去品牌化,非行为漂移)。评审者据此放行。
+
 **补充勘察(第三个混杂包)**:除 `store/sqlite` 外,memory 还直接 import **`internal/store`**
 (接口/类型包,221 行)。该包同样**混杂**:含记忆符号 `store.Store` / `store.ErrNotFound` /
 `store.Upsert` / `store.BumpUsage`(被 `entrystore.go` 依赖),也含会话类型 `Session` /

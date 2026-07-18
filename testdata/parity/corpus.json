@@ -1,0 +1,101 @@
+[
+  {
+    "id": "entry-001",
+    "name": "python-preference",
+    "trigger": "favorite language",
+    "content": "The user prefers Python for scripting tasks.",
+    "category": "fact",
+    "entities": ["Python"],
+    "event_date": "2024-01-03T00:00:00Z",
+    "vector": [1, 0, 0, 0, 0, 0],
+    "updated_at": "2024-02-01T00:00:01Z"
+  },
+  {
+    "id": "entry-002",
+    "name": "sweden-midsummer",
+    "trigger": "summer celebration",
+    "content": "The user celebrates Midsummer in Sweden with friends.",
+    "category": "fact",
+    "entities": ["Sweden"],
+    "event_date": "2024-06-21T00:00:00Z",
+    "vector": [0, 1, 0, 0, 0, 0],
+    "updated_at": "2024-02-01T00:00:02Z"
+  },
+  {
+    "id": "entry-003",
+    "name": "berlin-home",
+    "trigger": "university city",
+    "content": "The user lived in Berlin during university.",
+    "category": "fact",
+    "entities": ["Berlin"],
+    "event_date": "2019-09-01T00:00:00Z",
+    "vector": [0, 0, 1, 0, 0, 0],
+    "updated_at": "2024-02-01T00:00:03Z"
+  },
+  {
+    "id": "entry-004",
+    "name": "longjing-tea",
+    "trigger": "favorite drink",
+    "content": "用户喜欢在杭州喝龙井茶。",
+    "category": "fact",
+    "entities": ["杭州", "龙井茶"],
+    "event_date": "2023-05-14T00:00:00Z",
+    "vector": [0, 0, 0, 1, 0, 0],
+    "updated_at": "2024-02-01T00:00:04Z"
+  },
+  {
+    "id": "entry-005",
+    "name": "coffee-habit",
+    "trigger": "morning routine",
+    "content": "The user drinks black coffee every morning.",
+    "category": "habit",
+    "entities": ["coffee"],
+    "event_date": "2024-01-10T00:00:00Z",
+    "vector": [0, 0, 0, 0, 1, 0],
+    "updated_at": "2024-02-01T00:00:05Z"
+  },
+  {
+    "id": "entry-006",
+    "name": "lisbon-travel",
+    "trigger": "coastal holiday",
+    "content": "The user visited Lisbon for a coastal holiday.",
+    "category": "event",
+    "entities": ["Lisbon"],
+    "event_date": "2022-08-18T00:00:00Z",
+    "vector": [0, 0, 0, 0, 0, 1],
+    "updated_at": "2024-02-01T00:00:06Z"
+  },
+  {
+    "id": "entry-007",
+    "name": "python-berlin",
+    "trigger": "work and home",
+    "content": "The user used Python while living in Berlin.",
+    "category": "fact",
+    "entities": ["Python", "Berlin"],
+    "event_date": "2020-04-12T00:00:00Z",
+    "vector": [0.7, 0, 0.7, 0, 0, 0],
+    "updated_at": "2024-02-01T00:00:07Z"
+  },
+  {
+    "id": "entry-008",
+    "name": "sweden-coffee",
+    "trigger": "summer coffee",
+    "content": "The user drinks coffee during Swedish summer celebrations.",
+    "category": "habit",
+    "entities": ["Sweden", "coffee"],
+    "event_date": "2021-06-21T00:00:00Z",
+    "vector": [0, 0.7, 0, 0, 0.7, 0],
+    "updated_at": "2024-02-01T00:00:08Z"
+  },
+  {
+    "id": "entry-009",
+    "name": "peru-trail",
+    "trigger": "ancient trail",
+    "content": "The user hiked the Inca Trail in Peru.",
+    "category": "event",
+    "entities": ["Inca Trail", "Peru"],
+    "event_date": "2021-09-05T00:00:00Z",
+    "vector": [0.1, 0, 0, 0, 0, 0.99],
+    "updated_at": "2024-02-01T00:00:09Z"
+  }
+]

@@ -7,7 +7,8 @@
 - Go 1.22+
 - 无需 C 工具链(纯 Go,`modernc.org/sqlite`)
 - 保真对拍与单测**无需外网、无需活端点**(向量打桩)
-- 评测(可选)需:LoCoMo 数据集 + 本地 embedding/LLM 端点(经环境变量)
+- 评测(可选)需:LoCoMo 数据集 + 本地或私有 embedding/LLM 端点(经环境变量)
+- 评测答案、判分和抽取使用 `LOCOMO_API_KEY`；embedding 使用 `EMBED_API_KEY`（可为空）
 
 ## 1. 构建(离线、纯净环境)
 
@@ -53,17 +54,38 @@ go test ./memory -run TestSignalDegradation
 
 ## 5. 评测工具(可选:回归 + 论文设施)
 
-小子集端到端跑通(需本地端点):
+先构建工具并查看参数:
 
 ```bash
-export EMBED_BASE_URL=http://localhost:11434   # 本地 embedding sidecar
-export EMBED_MODEL=...                          # 见 cmd/locomo-bench 说明
-export BASE_URL=... ; export _API_KEY=...       # 本地/私有 LLM 端点
-go run ./cmd/locomo-bench --dataset <locomo.json> --limit <小子集> ...
+go build ./cmd/locomo-bench
+go run ./cmd/locomo-bench -h
+```
+
+小子集端到端跑通需要 LoCoMo 数据集和本地或私有端点。当前工具使用
+`--conversations` 与 `--questions` 控制小子集，不提供 `--limit` 参数:
+
+```bash
+export LOCOMO_API_KEY=...                       # 必填:答案、判分、抽取
+export LOCOMO_BASE_URL=http://127.0.0.1:4000/anthropic
+export LOCOMO_MODEL=...
+export EXTRACT_MODEL=...                        # 可选，默认 LOCOMO_MODEL
+export EMBED_BASE_URL=http://127.0.0.1:11434/v1
+export EMBED_MODEL=...
+export EMBED_API_KEY=...                        # 可选
+export EMBED_RERANK_MODEL=...                   # 可选
+go run ./cmd/locomo-bench \
+  --data <locomo.json> \
+  --run-dir ./testdata/locomo-run \
+  --conversations 1 \
+  --questions 2 \
+  --retrieval both
 ```
 
 **期望**:端到端完成并产出可比口径结果(SC-006)。全量数据集运行作**一次性 sanity check**
 (SC-007),不作逐分合并门禁(FR-010)。
+
+本轮执行环境没有 LoCoMo 数据集，也没有配置上述 API key/端点，因此 T025/T026 仅完成入口和资源说明，
+未运行端到端或全量评测；不得将构建/对拍结果当作 LoCoMo 指标。
 
 ## 验收对照
 
