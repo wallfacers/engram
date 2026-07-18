@@ -102,7 +102,7 @@
 - [x] T012 [US2] 校验 bench 对 OpenAI 协议中转站的答题/抽取模型切换纯 env 化无死角
       （`LOCOMO_MODEL`/`EXTRACT_MODEL`/`LOCOMO_PROVIDER` 贯通 usage 记账），补
       `cmd/locomo-bench/main.go` 缺口并在 quickstart.md 修正命令（依赖 T008）
-- [ ] T013 [US2] 产出 Strike 0 运行脚本 `.locomo-run/strike0.sh`（quickstart §Strike 0
+- [x] T013 [US2] 产出 Strike 0 运行脚本 `.locomo-run/strike0.sh`（quickstart §Strike 0
       的三步：estimate → A/B 两库多跑 → compare），内置价目表与 run-dir 约定；
       所有运行命令带 `--no-idk-retry`（判定口径）
 - [ ] T014 [US2] ⏸️ **维护者执行**：跑 strike0.sh（先 estimate 确认花费）；本方把
