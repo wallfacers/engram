@@ -116,10 +116,10 @@ description: "Task list for 记忆引擎抽离(Memory Engine Extraction)"
 
 **Purpose**: 跨故事的收尾与门禁固化
 
-- [ ] T027 [P] 更新 `./README.md`:标注 engram 已是可构建 module,给出构建/测试/对拍/bench 入口,链接 `specs/001-memory-engine-extraction/`
+- [X] T027 [P] 更新 `./README.md`:标注 engram 已是可构建 module,给出构建/测试/对拍/bench 入口,链接 `specs/001-memory-engine-extraction/`
 - [X] T028 [P] 无 CGO 验证:`CGO_ENABLED=0 go build ./...` 通过并写入 CI(宪法原则 I)
 - [X] T029 [P] 静态检查:CI 增 `go vet ./...`(可选 staticcheck)
-- [ ] T030 端到端走查 `quickstart.md` 五步,确认与实际一致;修订偏差
+- [X] T030 端到端走查 `quickstart.md` 五步,确认与实际一致;修订偏差
 
 ---
 
