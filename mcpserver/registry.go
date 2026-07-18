@@ -32,6 +32,11 @@ type NamespaceHandle struct {
 	embedder  *memory.Embedder
 	retriever *memory.Retriever
 	pipe      *pipeline.Pipeline
+
+	// refs counts in-flight Acquire holders. Guarded by Registry.mu. A handle
+	// with refs > 0 is in use and MUST NOT be evicted/closed underneath its
+	// callers; eviction skips it and tolerates a transient over-budget state.
+	refs int
 }
 
 func (h *NamespaceHandle) close() error {
@@ -102,37 +107,42 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 	}, nil
 }
 
-// Get returns the cached handle for namespace, opening and assembling it on
-// first access.
-func (r *Registry) Get(ctx context.Context, namespace string) (*NamespaceHandle, error) {
+// Acquire returns the cached handle for namespace, opening and assembling it on
+// first access, and pins it for the duration of the caller's use. The returned
+// release function MUST be called (typically via defer) exactly when the caller
+// is done touching the handle; it drops the pin so the handle may later be
+// evicted. While pinned, the handle's store is never closed underneath the
+// caller, which is what makes concurrent tool calls safe against LRU eviction.
+func (r *Registry) Acquire(ctx context.Context, namespace string) (*NamespaceHandle, func(), error) {
 	if r == nil {
-		return nil, errors.New("nil registry")
+		return nil, nil, errors.New("nil registry")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ns, err := normalizeNamespace(namespace)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	path, err := namespaceDatabasePath(r.dataDir, ns)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return nil, errors.New("registry is closed")
+		return nil, nil, errors.New("registry is closed")
 	}
 	if handle := r.handles[ns]; handle != nil {
 		r.touchLocked(ns)
-		return handle, nil
+		handle.refs++
+		return handle, r.releaseFunc(handle), nil
 	}
 
 	st, err := store.Open(ctx, store.Options{DSN: path})
 	if err != nil {
-		return nil, fmt.Errorf("open namespace %q: %w", ns, err)
+		return nil, nil, fmt.Errorf("open namespace %q: %w", ns, err)
 	}
 	entries := memory.NewEntryStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
@@ -151,11 +161,30 @@ func (r *Registry) Get(ctx context.Context, namespace string) (*NamespaceHandle,
 		embedder:  embedder,
 		retriever: retriever,
 		pipe:      pipe,
+		refs:      1,
 	}
 	r.handles[ns] = handle
 	r.lru.PushFront(ns)
 	r.evictLocked()
-	return handle, nil
+	return handle, r.releaseFunc(handle), nil
+}
+
+// releaseFunc builds the idempotent pin-release closure for handle. It is safe
+// to call more than once (subsequent calls are no-ops) and after the registry
+// is closed.
+func (r *Registry) releaseFunc(handle *NamespaceHandle) func() {
+	released := false
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if released {
+			return
+		}
+		released = true
+		if handle.refs > 0 {
+			handle.refs--
+		}
+	}
 }
 
 func (r *Registry) touchLocked(namespace string) {
@@ -169,20 +198,36 @@ func (r *Registry) touchLocked(namespace string) {
 
 // evictLocked keeps the number of opened namespace stores within the configured
 // bound. It runs while mu is held, so a namespace cannot be evicted twice or
-// replaced concurrently. Store.Close is intentionally performed before the
-// next Get can observe the new cache state.
+// replaced concurrently. Only idle handles (refs == 0) are closed; a handle
+// pinned by an in-flight Acquire is skipped so its store is never closed
+// underneath its callers. If every over-budget handle is currently in use the
+// bound is exceeded transiently (soft cap) until a pin is released and a later
+// open reclaims. Store.Close is performed before the next Acquire can observe
+// the new cache state.
 func (r *Registry) evictLocked() {
 	for len(r.handles) > r.maxOpenNamespaces {
-		element := r.lru.Back()
-		if element == nil {
-			return
+		victim := r.oldestIdleLocked()
+		if victim == nil {
+			return // all over-budget handles are in use; tolerate soft overflow
 		}
-		namespace := element.Value.(string)
+		namespace := victim.Value.(string)
 		handle := r.handles[namespace]
 		delete(r.handles, namespace)
-		r.lru.Remove(element)
+		r.lru.Remove(victim)
 		_ = handle.close()
 	}
+}
+
+// oldestIdleLocked returns the least-recently-used LRU element whose handle has
+// no active references, or nil if every open handle is currently pinned. Callers
+// must hold mu.
+func (r *Registry) oldestIdleLocked() *list.Element {
+	for element := r.lru.Back(); element != nil; element = element.Prev() {
+		if handle := r.handles[element.Value.(string)]; handle != nil && handle.refs == 0 {
+			return element
+		}
+	}
+	return nil
 }
 
 // Close closes every opened namespace and prevents future Get calls.

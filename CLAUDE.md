@@ -21,7 +21,7 @@ cmd/
   engram-mcp/        #   engram MCP server binary (thin main → mcpserver)
   locomo-bench/      #   LoCoMo eval harness (product regression + paper infra)
 specs/               # spec-kit SDD: specs/NNN-feature/ spec·plan·tasks·research·data-model·contracts
-docs/                # memory-strategy.md, background-extraction-from-workhorse-agent.md
+docs/                # memory-strategy.md, background-extraction-from-workhorse-agent.md, mcp-server.md
 testdata/            # parity goldens; locomo/ dataset (gitignored, public, not redistributed)
 .github/workflows/   # ci.yml: CGO=0 build + test + vet, Go 1.25
 ```
@@ -74,7 +74,7 @@ Full text: [.specify/memory/constitution.md](.specify/memory/constitution.md) (v
 
 ## Knowledge Map
 
-Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extraction provenance: [docs/background-extraction-from-workhorse-agent.md](docs/background-extraction-from-workhorse-agent.md). Per-feature detail lives in `specs/NNN-*/`. Delivered so far: **001** memory-engine-extraction, **002** mcp-server. Retrieval fidelity is proven by deterministic parity goldens (`testdata/parity/`) + the LoCoMo harness, not by trust.
+Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extraction provenance: [docs/background-extraction-from-workhorse-agent.md](docs/background-extraction-from-workhorse-agent.md). MCP build/wire/modes: [docs/mcp-server.md](docs/mcp-server.md). Per-feature detail lives in `specs/NNN-*/`. Delivered so far: **001** memory-engine-extraction, **002** mcp-server. Retrieval fidelity is proven by deterministic parity goldens (`testdata/parity/`) + the LoCoMo harness, not by trust.
 
 ## Working Rules
 

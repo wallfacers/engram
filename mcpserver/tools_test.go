@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wallfacers/engram/memory/pipeline"
 )
 
 func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
@@ -97,6 +98,54 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 	}
 
 	_ = serverSession
+}
+
+// TestToolsListExposesFullContractWithLLM is the tools/list smoke test for the
+// LLM-configured server: exactly the six-tool contract (CRUD + memory_ingest),
+// each with a non-empty description and a valid input schema (SC-004). The
+// offline five-tool case is covered by TestMemoryToolsRoundTripOverInMemoryMCP.
+func TestToolsListExposesFullContractWithLLM(t *testing.T) {
+	ctx := context.Background()
+	stub := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+		return `{"facts":[]}`, nil
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{DataDir: t.TempDir(), LLMCaller: stub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	clientSession, _ := connectInMemory(t, ctx, NewServer(registry))
+
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"memory_write":  true,
+		"memory_search": true,
+		"memory_list":   true,
+		"memory_get":    true,
+		"memory_delete": true,
+		"memory_ingest": true,
+	}
+	if len(tools.Tools) != len(want) {
+		t.Fatalf("tools/list with LLM returned %d tools, want %d", len(tools.Tools), len(want))
+	}
+	seen := make(map[string]bool, len(want))
+	for _, tool := range tools.Tools {
+		if !want[tool.Name] {
+			t.Fatalf("unexpected tool %q", tool.Name)
+		}
+		if tool.Description == "" || tool.InputSchema == nil {
+			t.Fatalf("tool %q lacks description or input schema (SC-004)", tool.Name)
+		}
+		seen[tool.Name] = true
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Fatalf("tools/list is missing %q", name)
+		}
+	}
 }
 
 func connectInMemory(t *testing.T, ctx context.Context, server *mcp.Server) (*mcp.ClientSession, *mcp.ServerSession) {

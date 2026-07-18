@@ -137,10 +137,11 @@ func (a *toolAdapter) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err := budgets.CheckTrigger(input.Trigger); err != nil {
 		return nil, memoryWriteOutput{}, err
 	}
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryWriteOutput{}, err
 	}
+	defer release()
 	entry := &memory.Entry{
 		Name:      input.Name,
 		Trigger:   input.Trigger,
@@ -168,10 +169,11 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		limit = *input.Limit
 	}
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memorySearchOutput{}, err
 	}
+	defer release()
 	results, err := handle.retriever.Search(ctx, input.Query, limit)
 	if err != nil {
 		return nil, memorySearchOutput{}, err
@@ -200,10 +202,11 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func (a *toolAdapter) memoryList(ctx context.Context, _ *mcp.CallToolRequest, input memoryListInput) (*mcp.CallToolResult, memoryListOutput, error) {
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryListOutput{}, err
 	}
+	defer release()
 	entries, err := handle.entries.List(ctx)
 	if err != nil {
 		return nil, memoryListOutput{}, err
@@ -216,10 +219,11 @@ func (a *toolAdapter) memoryList(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 func (a *toolAdapter) memoryGet(ctx context.Context, _ *mcp.CallToolRequest, input memoryGetInput) (*mcp.CallToolResult, memoryGetOutput, error) {
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryGetOutput{}, err
 	}
+	defer release()
 	entry, err := handle.entries.GetByName(ctx, input.Name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -231,10 +235,11 @@ func (a *toolAdapter) memoryGet(ctx context.Context, _ *mcp.CallToolRequest, inp
 }
 
 func (a *toolAdapter) memoryDelete(ctx context.Context, _ *mcp.CallToolRequest, input memoryDeleteInput) (*mcp.CallToolResult, memoryDeleteOutput, error) {
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryDeleteOutput{}, err
 	}
+	defer release()
 	err = handle.entries.Delete(ctx, input.Name)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, memoryDeleteOutput{Deleted: false}, nil
@@ -246,10 +251,11 @@ func (a *toolAdapter) memoryDelete(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func (a *toolAdapter) memoryIngest(ctx context.Context, _ *mcp.CallToolRequest, input memoryIngestInput) (*mcp.CallToolResult, memoryIngestOutput, error) {
-	handle, err := a.registry.Get(ctx, input.Namespace)
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryIngestOutput{}, err
 	}
+	defer release()
 	if handle.pipe == nil {
 		return nil, memoryIngestOutput{}, errors.New("memory_ingest requires an LLM provider")
 	}

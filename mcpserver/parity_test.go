@@ -15,10 +15,7 @@ func TestMemorySearchMatchesDirectRetrieverOrder(t *testing.T) {
 	}
 	defer registry.Close()
 
-	handle, err := registry.Get(ctx, "default")
-	if err != nil {
-		t.Fatal(err)
-	}
+	handle := getForTest(t, registry, ctx, "default")
 	corpus := []struct {
 		name    string
 		trigger string
