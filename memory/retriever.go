@@ -119,7 +119,16 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	}
 
 	// Signal 1: keyword (BM25 / LIKE). This also bounds the candidate universe.
+	var temporal *TimeWindow
+	if r.options.TemporalScore {
+		if parsed, ok := ParseTemporalIntent(query, r.options.Now); ok {
+			temporal = &parsed
+		}
+	}
 	bm25 := r.keywordRanks(ctx, query, pool)
+	if temporal != nil {
+		bm25 = r.temporalKeywordRanks(ctx, query, pool, *temporal)
+	}
 	// Signal 2: semantic (optional).
 	vector := r.vectorRankContext(ctx, query, pool)
 	vec := vector.ranks
@@ -147,6 +156,9 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	if len(fused) == 0 {
 		return nil, nil
 	}
+	if temporal != nil {
+		fused = r.applyTemporal(ctx, fused, *temporal)
+	}
 	if r.reranker != nil {
 		fused = r.rerank(ctx, query, fused, k)
 	}
@@ -170,6 +182,55 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 		})
 	}
 	return out, nil
+}
+
+func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored, window TimeWindow) []embedding.Scored {
+	tau := r.options.TemporalTau
+	if tau <= 0 {
+		tau = defaultTemporalTau.Seconds()
+	}
+	temporalTau := time.Duration(tau * float64(time.Second))
+	if temporalTau <= 0 {
+		temporalTau = defaultTemporalTau
+	}
+	out := make([]embedding.Scored, 0, len(fused))
+	for _, score := range fused {
+		e, err := r.entries.GetByName(ctx, score.Key)
+		if err != nil {
+			out = append(out, score)
+			continue
+		}
+		start, end := e.EventStart, e.EventEnd
+		if start == nil && end == nil {
+			start, end = e.EventDate, e.EventDate
+		}
+		if r.options.TemporalHardFilter && !temporalIntersects(start, end, window) {
+			continue
+		}
+		score.Score *= TemporalScore(start, end, window, temporalTau)
+		out = append(out, score)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
+}
+
+func temporalIntersects(eventStart, eventEnd *time.Time, window TimeWindow) bool {
+	if eventStart == nil && eventEnd == nil {
+		return true
+	}
+	start, end := temporalBounds(eventStart, eventEnd)
+	if !window.Start.IsZero() && end.Before(window.Start) {
+		return false
+	}
+	if !window.End.IsZero() && start.After(window.End) {
+		return false
+	}
+	return true
 }
 
 // associativeRanks expands query entities through the local graph and then
@@ -334,13 +395,111 @@ func (r *Retriever) entityNeighbors(ctx context.Context, fused []embedding.Score
 // keywordRanks returns a name→rank map (1-based) from the FTS5 BM25 ordering,
 // falling back to the LIKE path exactly as MemorySearch does.
 func (r *Retriever) keywordRanks(ctx context.Context, query string, limit int) map[string]int {
+	return ranksFromOrder(r.keywordNames(ctx, query, limit))
+}
+
+func (r *Retriever) keywordNames(ctx context.Context, query string, limit int) []string {
 	var names []string
 	if matchExpr, ok := buildPlan(query); ok {
 		names = r.ftsNames(ctx, matchExpr, limit)
 	} else {
 		names = r.likeNames(ctx, query, limit)
 	}
+	return names
+}
+
+func (r *Retriever) temporalKeywordRanks(ctx context.Context, query string, limit int, window TimeWindow) map[string]int {
+	names := r.keywordNames(ctx, query, limit)
+	appendUnique := func(extra []string) {
+		seen := make(map[string]struct{}, len(names)+len(extra))
+		for _, name := range names {
+			seen[name] = struct{}{}
+		}
+		for _, name := range extra {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	appendUnique(r.aliasNames(ctx, query, limit))
+	if window.Intent == "before" || window.Intent == "after" {
+		appendUnique(r.directionalEventNames(ctx, window, limit))
+	}
 	return ranksFromOrder(names)
+}
+
+func (r *Retriever) aliasNames(ctx context.Context, query string, limit int) []string {
+	fragments := likeFragments(query)
+	if len(fragments) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var names []string
+	for _, fragment := range fragments {
+		fragment = strings.TrimSpace(fragment)
+		if fragment == "" {
+			continue
+		}
+		match := `"` + strings.ReplaceAll(fragment, `"`, `""`) + `"`
+		rows, err := r.entries.db.QueryContext(ctx, `
+			SELECT entry_name
+			FROM memory_event_aliases_fts
+			WHERE memory_event_aliases_fts MATCH ?
+			ORDER BY rank ASC
+			LIMIT ?`, match, limit)
+		if err != nil {
+			slog.Warn("memory: temporal alias signal degraded", "stage", "temporal_aliases", "err", err)
+			continue
+		}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+		rows.Close() //nolint:errcheck
+		if limit > 0 && len(names) >= limit {
+			break
+		}
+	}
+	return names
+}
+
+func (r *Retriever) directionalEventNames(ctx context.Context, window TimeWindow, limit int) []string {
+	if window.AnchorTime.IsZero() {
+		return nil
+	}
+	var query string
+	var args []any
+	anchorSeconds := window.AnchorTime.Unix()
+	anchorMicros := window.AnchorTime.UnixMicro()
+	if window.Intent == "before" {
+		query = `SELECT name FROM memory_entries
+			WHERE (event_end IS NOT NULL AND event_end < ?)
+			   OR (event_end IS NULL AND event_date IS NOT NULL AND event_date < ?)
+			ORDER BY COALESCE(event_end, event_date / 1000000) DESC LIMIT ?`
+		args = []any{anchorSeconds, anchorMicros, limit}
+	} else {
+		query = `SELECT name FROM memory_entries
+			WHERE (event_start IS NOT NULL AND event_start > ?)
+			   OR (event_start IS NULL AND event_date IS NOT NULL AND event_date > ?)
+			ORDER BY COALESCE(event_start, event_date / 1000000) ASC LIMIT ?`
+		args = []any{anchorSeconds, anchorMicros, limit}
+	}
+	rows, err := r.entries.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		slog.Warn("memory: temporal order signal degraded", "stage", "temporal_order", "err", err)
+		return nil
+	}
+	defer rows.Close() //nolint:errcheck
+	return scanNames(rows)
 }
 
 func (r *Retriever) ftsNames(ctx context.Context, matchExpr string, limit int) []string {

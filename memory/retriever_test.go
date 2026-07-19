@@ -158,6 +158,91 @@ func TestTemporalScoreUsesSoftExponentialGap(t *testing.T) {
 	}
 }
 
+func TestTemporalSearchSoftRanksWithoutDeletingCandidates(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	oldDate := time.Date(2024, time.January, 5, 0, 0, 0, 0, time.UTC)
+	recentDate := time.Date(2024, time.May, 20, 0, 0, 0, 0, time.UTC)
+	for _, entry := range []*memory.Entry{
+		{Name: "old-project", Content: "project May 2024", EventStart: &oldDate, EventEnd: &oldDate},
+		{Name: "recent-project", Content: "project May 2024", EventStart: &recentDate, EventEnd: &recentDate},
+	} {
+		if err := es.Upsert(ctx, entry); err != nil {
+			t.Fatalf("upsert %s: %v", entry.Name, err)
+		}
+	}
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{
+		TemporalScore: true,
+		Now:           time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC),
+	})
+	got, err := r.Search(ctx, "project May 2024", 2)
+	if err != nil {
+		t.Fatalf("temporal search: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "recent-project" {
+		t.Fatalf("soft temporal order = %+v, want recent-project first and old-project retained", got)
+	}
+	if got[1].Name != "old-project" {
+		t.Fatalf("soft temporal search deleted or reordered candidate unexpectedly: %+v", got)
+	}
+}
+
+func TestTemporalSearchUnionsAliasesAndOrderRecall(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	aliasDate := time.Date(2024, time.May, 8, 0, 0, 0, 0, time.UTC)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "tracker-event", Content: "The user bought equipment.", EventStart: &aliasDate, EventEnd: &aliasDate}); err != nil {
+		t.Fatalf("upsert alias entry: %v", err)
+	}
+	if err := es.PutAliases(ctx, "tracker-event", []string{"fitness tracker"}); err != nil {
+		t.Fatalf("put alias: %v", err)
+	}
+	beforeDate := time.Date(2024, time.May, 1, 0, 0, 0, 0, time.UTC)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "before-event", Content: "The user attended a gathering.", EventStart: &beforeDate, EventEnd: &beforeDate}); err != nil {
+		t.Fatalf("upsert before entry: %v", err)
+	}
+	options := memory.RetrieverOptions{
+		TemporalScore: true,
+		Now:           time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC),
+	}
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, options)
+	aliasHits, err := r.Search(ctx, "tracker May 2024", 5)
+	if err != nil {
+		t.Fatalf("alias search: %v", err)
+	}
+	if !containsResult(aliasHits, "tracker-event") {
+		t.Fatalf("alias result missing: %+v", aliasHits)
+	}
+	orderHits, err := r.Search(ctx, "What happened before the conference on 2024-05-10?", 5)
+	if err != nil {
+		t.Fatalf("order search: %v", err)
+	}
+	if !containsResult(orderHits, "before-event") {
+		t.Fatalf("before supplemental result missing: %+v", orderHits)
+	}
+
+	sameDate := time.Date(2024, time.May, 10, 0, 0, 0, 0, time.UTC)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "same-timestamp", Content: "The user attended a gathering.", EventStart: &sameDate, EventEnd: &sameDate}); err != nil {
+		t.Fatalf("upsert same timestamp: %v", err)
+	}
+	orderHits, err = r.Search(ctx, "What happened before the conference on 2024-05-10?", 5)
+	if err != nil {
+		t.Fatalf("same timestamp search: %v", err)
+	}
+	if containsResult(orderHits, "same-timestamp") {
+		t.Fatalf("same timestamp was incorrectly inferred as before: %+v", orderHits)
+	}
+}
+
+func containsResult(results []memory.Result, name string) bool {
+	for _, result := range results {
+		if result.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRetriever_RerankReorders(t *testing.T) {
 	ctx := context.Background()
 	es, vs := seedRetrievalCorpus(t)
