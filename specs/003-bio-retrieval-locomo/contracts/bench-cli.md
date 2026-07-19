@@ -45,6 +45,34 @@ ci_overlap, verdict: "above-noise" | "within-noise"}`。
 --superseded-penalty 0.3
 ```
 
+## 2b. 同进程配对双臂（Amendment 001，Strike 0 方差诊断后新增）
+
+> 动机：中转站对答题模型的后端质量随时间窗漂移（Strike 0 实测 run 间 ±10pp、
+> IDK 率 5%~28%），跨目录 `--compare`（不同时间窗）的 verdict 被漂移淹没。
+> 修正：判定比较必须在**同一次调用内**并跑 baseline 臂与 treatment 臂，
+> 共享记忆库与时间窗，per-question 配对让漂移作为共同因子在 McNemar 中抵消。
+
+```
+--retrieval hybrid,hybrid+assoc   # 逗号分隔多臂；"+flag" 后缀表示该臂启用的机制开关
+                                  # （assoc / temporal / conflict / abstain），
+                                  # 裸开关 flag（--assoc 等）仍为全局默认，臂后缀覆盖之
+```
+
+- 各臂共用同一建库产物（机制开关只影响检索/答题侧时）；含建库侧差异的机制
+  （--conflict-resolution）例外：treatment 臂单独建库，但答题/判分仍同窗交错。
+- 多臂运行时 `--run-dir` 下按臂分文件（沿用现行 results-<arm>.jsonl 命名），
+  stats.json 分臂输出，并直接落盘同窗 `paired.json`（契约同 compare.json，
+  另加 `"paired_in_process": true` 字段）。
+- 判定门：以同窗 paired.json 的 mcnemar_p 为准；跨目录 `--compare` 降级为参考。
+
+## 2c. 反拒答口径（Amendment 001）
+
+```
+--force-answer         # answerable 口径：answer prompt 移除 "I don't know" 出口，
+                       # 必给最佳猜测；与 --abstain-prompt 互斥（Strike 3 用后者）。
+                       # 口径改动独立提交（宪法 IV）；自 Strike 1 起判定运行必开。
+```
+
 ## 3. 数据集与口径
 
 ```
