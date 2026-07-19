@@ -142,7 +142,7 @@
       （依赖 T017；契约 engine-api §1）
 - [x] T020 [US3] query-to-entity 全句匹配：`memory/entities.go` 增整句对
       `entity_raw` 的 FTS/子串匹配路径并入 `entityRanks`（`memory/retriever.go:308`）
-- [ ] T021 [US3] bench 接线 `--assoc`/`--assoc-depth`（`cmd/locomo-bench/main.go`
+- [x] T021 [US3] bench 接线 `--assoc`/`--assoc-depth`（`cmd/locomo-bench/main.go`
       透传 RetrieverOptions），报告带 flag 指纹入 results.jsonl
 - [ ] T022 [US3] ⏸️ **维护者执行**：Strike 1 多跑（estimate→跑→compare vs 校准基线）；
       判定 above-noise 且无类别回退且 token≤1.5×→保留；否则触发备选 PPR（新任务

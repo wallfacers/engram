@@ -19,6 +19,7 @@ type result struct {
 	CategoryName        string `json:"category_name,omitempty"`
 	QuestionType        string `json:"question_type,omitempty"`
 	Adversarial         bool   `json:"adversarial,omitempty"`
+	RetrievalFlags      string `json:"retrieval_flags"`
 	Correct             bool   `json:"correct"`
 	Question            string `json:"question"`
 	Gold                string `json:"gold"`

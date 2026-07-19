@@ -70,6 +70,8 @@ type options struct {
 	chunks         bool
 	chunkQuota     int
 	filterPool     int
+	assoc          bool
+	assocDepth     int
 	opinionPass    bool
 	adversarial    int
 	catTopKSpec    string
@@ -104,6 +106,8 @@ func run() error {
 	flag.BoolVar(&opt.chunks, "chunks", false, "union store: index verbatim session chunks alongside extracted facts (applies to every arm)")
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
 	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
+	flag.BoolVar(&opt.assoc, "assoc", false, "enable associative graph retrieval")
+	flag.IntVar(&opt.assocDepth, "assoc-depth", 2, "associative graph walk depth (maximum 2)")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -498,15 +502,28 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	// semantic signal and the optional rerank stage; fts stays the pure legacy
 	// baseline.
 	retrievers := make(map[string]*memory.Retriever, len(arms))
+	retrieverOpts := retrieverOptionsFor(opt)
 	for _, arm := range arms {
 		if arm == "hybrid" {
-			retrievers[arm] = memory.NewRetriever(es, vectors, embClient).WithReranker(buildBenchReranker())
+			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, buildBenchReranker(), retrieverOpts)
 		} else {
-			retrievers[arm] = memory.NewRetriever(es, vectors, nil)
+			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, nil, nil, retrieverOpts)
 		}
 	}
 	keepStore = true
 	return &conversationRuntime{store: st, retrievers: retrievers}, nil
+}
+
+func retrieverOptionsFor(opt options) memory.RetrieverOptions {
+	return memory.RetrieverOptions{Associative: opt.assoc, AssocDepth: opt.assocDepth}
+}
+
+func retrievalFingerprint(opt options) string {
+	depth := opt.assocDepth
+	if depth <= 0 {
+		depth = 2
+	}
+	return fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
 }
 
 // answerConversation runs only the answer/judge phase for a prepared
@@ -548,6 +565,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					Question:            qa.Question,
 					Gold:                goldFor(qa),
 					Predicted:           predicted,
+					RetrievalFlags:      retrievalFingerprint(opt),
 					InputTokens:         usage.InputTokens,
 					OutputTokens:        usage.OutputTokens,
 					AnswerContextTokens: usage.InputTokens,

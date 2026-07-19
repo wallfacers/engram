@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,28 @@ import (
 
 	"github.com/wallfacers/engram/provider"
 )
+
+func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
+	opt := options{assoc: true, assocDepth: 1}
+	got := retrieverOptionsFor(opt)
+	if !got.Associative || got.AssocDepth != 1 {
+		t.Fatalf("retriever options = %+v, want associative depth 1", got)
+	}
+	flags := retrievalFingerprint(opt)
+	var line result
+	line.RetrievalFlags = flags
+	raw, err := json.Marshal(line)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if decoded["retrieval_flags"] != "assoc=true;assoc_depth=1" {
+		t.Fatalf("retrieval fingerprint = %v", decoded["retrieval_flags"])
+	}
+}
 
 func TestParseLoCoMoDate(t *testing.T) {
 	cases := map[string]bool{ // input → expect non-zero
@@ -354,5 +377,8 @@ func TestAnswerJournalStoresFinalAnswerUsage(t *testing.T) {
 	}
 	if items[0].InputTokens != 11 || items[0].OutputTokens != 7 || items[0].AnswerContextTokens != 11 {
 		t.Fatalf("journal usage = %+v, want answer 11/7/context 11", items[0])
+	}
+	if items[0].RetrievalFlags != "assoc=false;assoc_depth=2" {
+		t.Fatalf("journal retrieval flags = %q", items[0].RetrievalFlags)
 	}
 }
