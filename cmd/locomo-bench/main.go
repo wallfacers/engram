@@ -157,7 +157,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	sampledConversations := 0
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
+		sampledConversations = opt.maxConvs
 		convs = convs[:opt.maxConvs]
 	}
 	prices, err := parsePriceTable(os.Getenv("LOCOMO_PRICE_TABLE"))
@@ -178,14 +180,13 @@ func run() error {
 	}
 	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if sampledConversations > 0 {
+		logger.Info("sampling conversations", "limit", sampledConversations)
+	}
 
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create run dir: %w", err)
 	}
-	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
-		logger.Info("sampling conversations", "limit", opt.maxConvs)
-	}
-
 	// One provider; a global semaphore caps concurrent in-flight LLM calls so
 	// many conversations/questions run in parallel without exceeding the rate
 	// limit. Every LLM call (extraction, answer, judge) passes through it.
@@ -926,10 +927,14 @@ func reportDelta(a, b *armState) {
 }
 
 func pct(n, d int) float64 {
+	return 100 * ratio(n, d)
+}
+
+func ratio(n, d int) float64 {
 	if d == 0 {
 		return 0
 	}
-	return 100 * float64(n) / float64(d)
+	return float64(n) / float64(d)
 }
 
 func loadArmRuns(baseDir, arm string, repeats int) ([][]result, error) {

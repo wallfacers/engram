@@ -59,24 +59,18 @@ func openJournal(runDir, retrieval string) (*journal, error) {
 
 func loadPrior(path string) (map[resultKey]result, error) {
 	seen := map[resultKey]result{}
-	f, err := os.Open(path) //nolint:gosec
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return seen, nil
 		}
 		return nil, fmt.Errorf("read prior journal: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		var r result
-		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
-			continue // tolerate a partial trailing line from an interrupted run
-		}
+	if err := scanResultsJSONL(path, func(r result) {
 		seen[resultKey{Conv: r.Conv, Q: r.Q}] = r
+	}); err != nil {
+		return nil, fmt.Errorf("read prior journal: %w", err)
 	}
-	return seen, sc.Err()
+	return seen, nil
 }
 
 func (j *journal) lookup(k resultKey) (result, bool) {

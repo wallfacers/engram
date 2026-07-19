@@ -77,13 +77,17 @@ func loadDataset(path string) ([]conversation, error) {
 			return nil, fmt.Errorf("conversation %d: %w", i, err)
 		}
 		for qi := range it.QA {
-			it.QA[qi].QuestionID = fmt.Sprintf("conv-%d-q-%d", i, qi)
+			it.QA[qi].QuestionID = questionID(i, qi)
 			it.QA[qi].CategoryName = categoryLabel(it.QA[qi].Category)
 			it.QA[qi].Adversarial = it.QA[qi].Category == adversarialCategory
 		}
 		convs = append(convs, conversation{ID: i, Sessions: sessions, QA: it.QA})
 	}
 	return convs, nil
+}
+
+func questionID(conv, question int) string {
+	return fmt.Sprintf("conv-%d-q-%d", conv, question)
 }
 
 // parseConversation extracts the session_N / session_N_date_time fields from the
@@ -151,19 +155,25 @@ func ensureSession(m map[int]*session, idx int) *session {
 	return s
 }
 
-// parseLoCoMoDate parses the dataset's human date strings, e.g.
-// "1:56 pm on 8 May, 2023" or "7:00 pm on 25 May, 2023". Returns the zero time
-// when unparseable (the pipeline tolerates a zero session date).
+// parseLoCoMoDate parses both LoCoMo human dates and LongMemEval timestamps.
+// It returns the zero time when unparseable.
 func parseLoCoMoDate(s string) time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}
 	}
-	// Strip the leading time-of-day "... on " prefix if present.
 	if idx := strings.Index(s, " on "); idx >= 0 {
 		s = s[idx+4:]
 	}
-	for _, layout := range []string{"2 January, 2006", "2 Jan, 2006", "January 2, 2006", "2006-01-02"} {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2 January, 2006",
+		"2 Jan, 2006",
+		"January 2, 2006",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC()
 		}

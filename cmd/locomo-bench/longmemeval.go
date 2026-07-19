@@ -71,7 +71,7 @@ func loadLongMemEval(path string) ([]longMemEvalItem, error) {
 		items = append(items, longMemEvalItem{
 			ID:           id,
 			Question:     record.Question,
-			Answer:       rawAnswerText(record.Answer),
+			Answer:       (locomoQA{Answer: record.Answer}).AnswerText(),
 			QuestionType: questionType,
 			Category:     questionType,
 			Adversarial:  questionType == "abstention",
@@ -102,14 +102,31 @@ func decodeLongMemEvalRecords(raw []byte) ([]longMemEvalRecord, error) {
 	return nil, fmt.Errorf("parse LongMemEval JSON: expected an array or data/questions/items envelope")
 }
 
-func isLongMemEvalType(questionType string) bool {
-	switch questionType {
-	case "single-session-user", "single-session-assistant", "multi-session",
-		"temporal-reasoning", "knowledge-update", "abstention", "preference":
-		return true
-	default:
-		return false
+var longMemEvalTypes = []struct {
+	ID   int
+	Name string
+}{
+	{6, "single-session-user"},
+	{7, "single-session-assistant"},
+	{8, "multi-session"},
+	{9, "temporal-reasoning"},
+	{10, "knowledge-update"},
+	{11, "abstention"},
+	{12, "preference"},
+}
+
+func longMemEvalType(name string) (int, bool) {
+	for _, item := range longMemEvalTypes {
+		if item.Name == name {
+			return item.ID, true
+		}
 	}
+	return 0, false
+}
+
+func isLongMemEvalType(questionType string) bool {
+	_, ok := longMemEvalType(questionType)
+	return ok
 }
 
 func parseLongMemEvalConversation(raw json.RawMessage, fallbackDate string, id int) (conversation, error) {
@@ -119,7 +136,7 @@ func parseLongMemEvalConversation(raw json.RawMessage, fallbackDate string, id i
 			return conversation{}, fmt.Errorf("haystack_sessions: %w", err)
 		}
 	}
-	date := parseFlexibleDate(fallbackDate)
+	date := parseLoCoMoDate(fallbackDate)
 	con := conversation{ID: id}
 	for index, group := range groups {
 		messages, groupDate, err := parseLongMemEvalSession(group)
@@ -131,7 +148,7 @@ func parseLongMemEvalConversation(raw json.RawMessage, fallbackDate string, id i
 		}
 		if groupDate.IsZero() {
 			for _, message := range messages {
-				if parsed := parseFlexibleDate(message.Date); !parsed.IsZero() {
+				if parsed := parseLoCoMoDate(message.Date); !parsed.IsZero() {
 					groupDate = parsed
 					break
 				}
@@ -179,7 +196,7 @@ func parseLongMemEvalSession(raw json.RawMessage) ([]longMemEvalMessage, time.Ti
 	if len(messages) == 0 {
 		messages = object.Turns
 	}
-	return messages, parseFlexibleDate(object.Date), nil
+	return messages, parseLoCoMoDate(object.Date), nil
 }
 
 func lmeMessageText(raw json.RawMessage) string {
@@ -204,35 +221,6 @@ func lmeMessageText(raw json.RawMessage) string {
 		return strings.Join(parts, "")
 	}
 	return ""
-}
-
-func rawAnswerText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return text
-	}
-	return strings.Trim(string(raw), `"`)
-}
-
-func parseFlexibleDate(raw string) time.Time {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02",
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04",
-	} {
-		if parsed, err := time.Parse(layout, raw); err == nil {
-			return parsed.UTC()
-		}
-	}
-	return time.Time{}
 }
 
 func loadBenchmarkDataset(path, format string) ([]conversation, error) {
@@ -267,24 +255,8 @@ func loadBenchmarkDataset(path, format string) ([]conversation, error) {
 }
 
 func longMemEvalCategoryID(category string) int {
-	switch category {
-	case "single-session-user":
-		return 6
-	case "single-session-assistant":
-		return 7
-	case "multi-session":
-		return 8
-	case "temporal-reasoning":
-		return 9
-	case "knowledge-update":
-		return 10
-	case "abstention":
-		return 11
-	case "preference":
-		return 12
-	default:
-		return 0
-	}
+	id, _ := longMemEvalType(category)
+	return id
 }
 
 func normalizeCompareArgs(args []string) []string {

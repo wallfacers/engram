@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -175,10 +174,5 @@ func (c *costLedger) Report() costReport {
 }
 
 func writeCost(path string, report costReport) error {
-	b, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644) //nolint:gosec // operator-selected run directory
+	return writeJSON(path, report)
 }

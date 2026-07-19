@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-data_path=${1:?usage: .locomo-run/strike0.sh DATA_PATH [RUN_ROOT]}
+data_path=${1:?usage: scripts/strike0.sh DATA_PATH [RUN_ROOT]}
 run_root=${2:-.locomo-run/strike0}
 repeats=${REPEATS:-5}
 extract_a=${EXTRACT_MODEL_A:-${EXTRACT_MODEL:-${LOCOMO_MODEL:-deepseek-v4-pro}}}

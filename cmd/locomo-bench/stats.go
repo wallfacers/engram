@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -180,7 +178,7 @@ func statsFromRuns(runs [][]result) statsReport {
 					correct++
 				}
 			}
-			categoryRates[category] = append(categoryRates[category], rate(correct, len(outcomes)))
+			categoryRates[category] = append(categoryRates[category], ratio(correct, len(outcomes)))
 		}
 		allRates = append(allRates, rateCount(ordinary))
 		comparableRates = append(comparableRates, rateCount(comparable))
@@ -208,14 +206,7 @@ func rateCount(outcomes []bool) float64 {
 			correct++
 		}
 	}
-	return rate(correct, len(outcomes))
-}
-
-func rate(correct, total int) float64 {
-	if total == 0 {
-		return 0
-	}
-	return float64(correct) / float64(total)
+	return ratio(correct, len(outcomes))
 }
 
 func resultCategory(item result) string {
@@ -230,12 +221,7 @@ func isAdversarialResult(item result) bool {
 }
 
 func writeStats(path string, report statsReport) error {
-	b, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644) //nolint:gosec // operator-selected run directory
+	return writeJSON(path, report)
 }
 
 type pairedQuestion struct {
@@ -323,12 +309,7 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 }
 
 func writeCompare(path string, report compareReport) error {
-	b, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644) //nolint:gosec // operator-selected report path
+	return writeJSON(path, report)
 }
 
 func loadRunResults(dir string) ([][]result, error) {
@@ -398,22 +379,13 @@ func loadResultFiles(dir string) ([]result, error) {
 }
 
 func readResultsJSONL(path string) ([]result, error) {
-	f, err := os.Open(path) //nolint:gosec // operator-selected run artifact
-	if err != nil {
+	var out []result
+	if err := scanResultsJSONL(path, func(item result) {
+		out = append(out, item)
+	}); err != nil {
 		return nil, err
 	}
-	defer f.Close() //nolint:errcheck
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var out []result
-	for scanner.Scan() {
-		var item result
-		if err := json.Unmarshal(scanner.Bytes(), &item); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
-		out = append(out, item)
-	}
-	return out, scanner.Err()
+	return out, nil
 }
 
 func majorityResults(runs [][]result) map[string]result {
@@ -454,7 +426,7 @@ func resultID(item result) string {
 	if item.QuestionID != "" {
 		return item.QuestionID
 	}
-	return "conv-" + strconv.Itoa(item.Conv) + "-q-" + strconv.Itoa(item.Q)
+	return questionID(item.Conv, item.Q)
 }
 
 func runNumber(name string) int {
