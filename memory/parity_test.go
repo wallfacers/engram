@@ -253,6 +253,9 @@ func TestSignalDegradation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("query %q keyword failure: %v", query.ID, err)
 		}
+		if len(gotResults) == 0 || gotResults[0].Content == "" {
+			t.Errorf("query %q keyword failure returned result without content: %+v", query.ID, gotResults)
+		}
 		got = resultEntryIDs(t, gotResults, entries)
 		if !reflect.DeepEqual(got, want.NoKeyword) {
 			t.Errorf("query %q keyword failure: got %v, want %v", query.ID, got, want.NoKeyword)
@@ -268,6 +271,9 @@ func TestSignalDegradation(t *testing.T) {
 		gotResults, err = memory.NewRetriever(es, vs, &parityClient{model: parityModel, vectors: queryVectors}).Search(context.Background(), query.Query, query.K)
 		if err != nil {
 			t.Fatalf("query %q entity failure: %v", query.ID, err)
+		}
+		if len(gotResults) == 0 || gotResults[0].Content == "" {
+			t.Errorf("query %q entity failure returned result without content: %+v", query.ID, gotResults)
 		}
 		got = resultEntryIDs(t, gotResults, entries)
 		if !reflect.DeepEqual(got, want.NoEntity) {
@@ -286,6 +292,9 @@ func TestSignalDegradation(t *testing.T) {
 			memory.RetrieverOptions{Associative: true}).Search(context.Background(), query.Query, query.K)
 		if err != nil || len(got) == 0 {
 			t.Fatalf("empty edge degradation: got %v err %v", got, err)
+		}
+		if got[0].Content == "" {
+			t.Fatal("empty edge degradation returned result without content")
 		}
 		_ = s
 	})
@@ -309,6 +318,9 @@ func TestSignalDegradation(t *testing.T) {
 			memory.RetrieverOptions{Associative: true}).Search(context.Background(), query.Query, query.K)
 		if err != nil || len(got) == 0 {
 			t.Fatalf("no-embedding degradation: got %v err %v", got, err)
+		}
+		if got[0].Content == "" {
+			t.Fatal("no-embedding degradation returned result without content")
 		}
 		_ = s
 	})

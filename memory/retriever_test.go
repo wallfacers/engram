@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -262,6 +263,55 @@ func TestAssociativeReusesQueryEmbedding(t *testing.T) {
 	if client.embedCalls != 1 {
 		t.Fatalf("query embedding calls = %d, want 1", client.embedCalls)
 	}
+}
+
+func TestAssociativeSearchSurfacesGraphOnlyEntry(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed-entry", Trigger: "Seed", Content: "anchor fact"}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	if err := es.PutEntities(ctx, "seed-entry", []string{"Seed"}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "a-graph-only", Content: "unrelated fact"}); err != nil {
+		t.Fatalf("graph entry: %v", err)
+	}
+	if err := es.PutEntities(ctx, "a-graph-only", []string{"Target"}); err != nil {
+		t.Fatalf("graph entity: %v", err)
+	}
+	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "Seed", B: "Target", Kind: "co", Weight: 1}}); err != nil {
+		t.Fatalf("graph edge: %v", err)
+	}
+	client := &vectorFakeClient{model: "graph-only", vectors: map[string][]float32{"Seed": {1, 0, 0}}}
+	if err := vs.Put(ctx, "seed-entry", client.model, []float32{1, 0, 0}, time.Now()); err != nil {
+		t.Fatalf("seed vector: %v", err)
+	}
+	if err := vs.Put(ctx, "a-graph-only", client.model, []float32{0, 1, 0}, time.Now()); err != nil {
+		t.Fatalf("graph vector: %v", err)
+	}
+	for i := 0; i < 105; i++ {
+		name := fmt.Sprintf("distractor-%03d", i)
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: "distractor"}); err != nil {
+			t.Fatalf("distractor entry: %v", err)
+		}
+		if err := vs.Put(ctx, name, client.model, []float32{1, 0, 0}, time.Now()); err != nil {
+			t.Fatalf("distractor vector: %v", err)
+		}
+	}
+
+	got, err := memory.NewRetrieverWithOptions(es, vs, client, nil, memory.RetrieverOptions{
+		Associative: true,
+	}).Search(ctx, "Seed", 5)
+	if err != nil {
+		t.Fatalf("associative search: %v", err)
+	}
+	for _, result := range got {
+		if result.Name == "a-graph-only" {
+			return
+		}
+	}
+	t.Fatalf("graph-only entry missing from results: %+v", got)
 }
 
 func TestEntityQueryWholeSentenceMatchesRawEntity(t *testing.T) {
