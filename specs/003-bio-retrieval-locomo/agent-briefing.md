@@ -106,3 +106,26 @@
   是 US4/US5 的契约占位（engine-api §1），勿删。
 - 完成定义/汇报协议同批次 1；不改 specs/ 设计文档（F5 的设计裁决已由规划方
   写入本简报，照此实现即可）。
+
+## 批次 2.6 增补（批次 2.5 复审发现，与 F1-F10 一并执行）
+
+- [ ] F11 **CRITICAL** `cmd/locomo-bench/runner.go` answerPromptForOptions 用
+      「删除含 "i don't know" 的整行」实现 force-answer，误删了两条核心指令：
+      默认 prompt 的 "Make your best supported inference … combine multiple
+      memories if needed"、open-domain 的 "COMBINE the memories with common
+      sense…"。修：不做行过滤，为三个 prompt 各写显式 force-answer 变体——保留
+      原核心指令、仅把 IDK 出口子句替换为必答最佳猜测。测试：forced 变体必须
+      仍包含 "best supported inference"/"COMBINE" 关键指令。
+- [ ] F12 **CRITICAL** `cmd/locomo-bench/main.go` buildCallPlan 忽略臂数：
+      AnswerCalls/JudgeCalls = Questions×repeats，配对双臂真实调用是其 2 倍，
+      --estimate 低估一半（违反 FR-014）。修：×len(arms)；同时按 Strike 0 实测
+      校准常量：estimateAnswerOut 300→50，estimateAnswerIn 7000→4000（含检索
+      上下文余量），estimateJudgeIn 1000→1600。
+- [ ] F13 MEDIUM 未实装机制后缀静默空转：`+temporal`（RetrieverOptions 死字段，
+      US4 未实现）、`+conflict`（无建库侧分支）、`+abstain` 与全局
+      --abstain-prompt（T035 未实现）都被接受却无行为——treatment 臂悄悄等于
+      baseline。修：armsFor/flag 校验对未实装机制直接报错
+      "not implemented until US4/US5"，实装时再放开。
+- [ ] F14 LOW paired.json 只配对 arms[0] vs arms[1]，≥3 臂时其余臂被静默忽略
+      （加 log 说明）；journal 逐题记录缺 answer regime 指纹（force_answer 等
+      口径应可追溯），在 result 或 run 元数据中补记。
