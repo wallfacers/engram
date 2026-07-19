@@ -73,18 +73,23 @@ func chunkTrigger(content string) string {
 // by kind, each side keeps its fused order, and shortfall on either side is
 // backfilled from the other. quota <= 0 degrades to a plain Search.
 func retrieveWithQuota(ctx context.Context, r *memory.Retriever, query string, topK, quota int) ([]memory.Result, error) {
+	hits, _, err := retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota)
+	return hits, err
+}
+
+func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, query string, topK, quota int) ([]memory.Result, memory.SearchDiagnostics, error) {
 	if quota <= 0 {
-		return r.Search(ctx, query, topK)
+		return r.SearchWithDiagnostics(ctx, query, topK)
 	}
 	widePool := topK * 6
 	if widePool < 300 {
 		widePool = 300
 	}
-	wide, err := r.Search(ctx, query, widePool)
+	wide, diagnostics, err := r.SearchWithDiagnostics(ctx, query, widePool)
 	if err != nil {
-		return nil, err
+		return nil, diagnostics, err
 	}
-	return applyChunkQuota(wide, topK, quota), nil
+	return applyChunkQuota(wide, topK, quota), diagnostics, nil
 }
 
 // applyChunkQuota partitions a fused result list into facts and chunks, keeps

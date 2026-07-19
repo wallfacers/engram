@@ -22,6 +22,7 @@ type locomoItem struct {
 type locomoQA struct {
 	Question     string          `json:"question"`
 	Answer       json.RawMessage `json:"answer"` // may be string or number
+	Evidence     []string        `json:"evidence,omitempty"`
 	Category     int             `json:"category"`
 	QuestionID   string          `json:"question_id,omitempty"`
 	QuestionType string          `json:"question_type,omitempty"`

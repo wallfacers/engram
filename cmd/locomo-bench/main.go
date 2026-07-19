@@ -806,7 +806,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				correct, predicted, usage, sweepUsed := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
+				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -827,6 +827,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					AnswerContextTokens: usage.InputTokens,
 					SweepUsed:           sweepUsed,
 					SweepOverBudget:     sweepOverBudget(armOpt, sweepUsed, usage),
+					EvidenceDiagnostics: evidence,
 				})
 			}(s, qa, key, optionsForRun(opt, s.name, len(states) > 1))
 		}
@@ -917,36 +918,53 @@ func answerAndJudge(ctx context.Context, retriever *memory.Retriever, answerCall
 }
 
 func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage, bool) {
+	correct, predicted, usage, sweepUsed, _ := answerAndJudgeWithEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, logger)
+	return correct, predicted, usage, sweepUsed
+}
+
+func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, err := retrieve(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
+	hits, searchDiagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
-		return false, "", provider.Usage{}, false
+		return false, "", provider.Usage{}, false, nil
 	}
-	sweepUsed := hasClusterSweepHit(hits)
+	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
+	answerHits, answerDiagnostics := hits, searchDiagnostics
 	prompt := answerPromptForOptionsWithTemporal(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt)
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, "", usage, sweepUsed
+		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens)
 	}
 
 	if isIDK(predicted) && !opt.noIDKRetry {
-		if retry, retryUsage, ok := retryWithRewriteUsage(ctx, retriever, answerCall, filterCall, rewriteCall, opt, qa, prompt, hits); ok {
+		if retry, retryUsage, retryHits, retryDiagnostics, ok := retryWithRewriteUsageDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, opt, qa, prompt, hits); ok {
 			predicted = retry
 			usage = retryUsage
-		} else if retry, retryUsage, ok := retryWithWiderNetUsage(ctx, retriever, answerCall, opt, qa, prompt); ok {
+			answerHits = retryHits
+			if retryDiagnostics.SweepUsed {
+				answerDiagnostics = retryDiagnostics
+			}
+			sweepUsed = sweepUsed || retryDiagnostics.SweepUsed || hasClusterSweepHit(retryHits)
+		} else if retry, retryUsage, retryHits, retryDiagnostics, ok := retryWithWiderNetUsageDiagnostics(ctx, retriever, answerCall, opt, qa, prompt); ok {
 			predicted = retry
 			usage = retryUsage
+			answerHits = retryHits
+			if retryDiagnostics.SweepUsed {
+				answerDiagnostics = retryDiagnostics
+			}
+			sweepUsed = sweepUsed || retryDiagnostics.SweepUsed || hasClusterSweepHit(retryHits)
 		}
 	}
+	evidence := newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens)
 
 	verdict, _, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
-		return false, predicted, usage, sweepUsed
+		return false, predicted, usage, sweepUsed, evidence
 	}
-	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed
+	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed, evidence
 }
 
 // adversarialGold is the judge-facing gold for category-5 questions. They have
@@ -1000,10 +1018,15 @@ func (o options) retrievalFor(category int) (topK, quota int) {
 // retrieve is the per-question retrieval front door: quota'd top-k, optionally
 // widened + narrowed by the listwise LLM filter when --filter-pool is set.
 func retrieve(ctx context.Context, retriever *memory.Retriever, filterCall modelCaller, query string, topK, quota int, opt options) ([]memory.Result, error) {
+	hits, _, err := retrieveWithDiagnostics(ctx, retriever, filterCall, query, topK, quota, opt)
+	return hits, err
+}
+
+func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall modelCaller, query string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, error) {
 	if opt.filterPool > topK {
-		return retrieveFiltered(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
+		return retrieveFilteredDiagnostics(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
 	}
-	return retrieveWithQuota(ctx, retriever, query, topK, quota)
+	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota)
 }
 
 // retryWithRewrite runs the IDK second round. Returns (answer, true) only when
@@ -1051,18 +1074,23 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 }
 
 func retryWithRewriteUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, opt options, qa locomoQA, prompt string, first []memory.Result) (string, provider.Usage, bool) {
+	retry, usage, _, _, ok := retryWithRewriteUsageDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, opt, qa, prompt, first)
+	return retry, usage, ok
+}
+
+func retryWithRewriteUsageDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, opt options, qa locomoQA, prompt string, first []memory.Result) (string, provider.Usage, []memory.Result, memory.SearchDiagnostics, bool) {
 	rewritten, err := rewriteCall(ctx, queryRewriteSystemPrompt, "QUESTION: "+qa.Question)
 	if err != nil {
-		return "", provider.Usage{}, false
+		return "", provider.Usage{}, nil, memory.SearchDiagnostics{}, false
 	}
 	rewritten = strings.TrimSpace(rewritten)
 	if rewritten == "" || rewritten == qa.Question {
-		return "", provider.Usage{}, false
+		return "", provider.Usage{}, nil, memory.SearchDiagnostics{}, false
 	}
 	topK, quota := opt.retrievalFor(qa.Category)
-	more, err := retrieve(ctx, retriever, filterCall, rewritten, topK, quota, opt)
+	more, diagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, rewritten, topK, quota, opt)
 	if err != nil || len(more) == 0 {
-		return "", provider.Usage{}, false
+		return "", provider.Usage{}, nil, diagnostics, false
 	}
 	seen := make(map[string]struct{}, len(first))
 	union := make([]memory.Result, 0, len(first)+len(more))
@@ -1079,13 +1107,13 @@ func retryWithRewriteUsage(ctx context.Context, retriever *memory.Retriever, ans
 		fresh++
 	}
 	if fresh == 0 {
-		return "", provider.Usage{}, false
+		return "", provider.Usage{}, nil, diagnostics, false
 	}
 	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union))
 	if err != nil || isIDK(retry) {
-		return "", usage, false
+		return "", usage, nil, diagnostics, false
 	}
-	return retry, usage, true
+	return retry, usage, union, diagnostics, true
 }
 
 // retryWithWiderNet is the second-stage IDK escalation: when the rewrite round
@@ -1099,16 +1127,21 @@ func retryWithWiderNet(ctx context.Context, retriever *memory.Retriever, call mo
 }
 
 func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, bool) {
+	retry, usage, _, _, ok := retryWithWiderNetUsageDiagnostics(ctx, retriever, call, opt, qa, prompt)
+	return retry, usage, ok
+}
+
+func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, []memory.Result, memory.SearchDiagnostics, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, err := retrieveWithQuota(ctx, retriever, qa.Question, topK*3, quota*3)
+	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3)
 	if err != nil || len(hits) <= topK {
-		return "", provider.Usage{}, false
+		return "", provider.Usage{}, nil, diagnostics, false
 	}
 	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil || isIDK(retry) {
-		return "", usage, false
+		return "", usage, nil, diagnostics, false
 	}
-	return retry, usage, true
+	return retry, usage, hits, diagnostics, true
 }
 
 // toMemories converts retrieval hits into the prompt-facing form.

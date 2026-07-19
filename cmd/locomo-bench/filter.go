@@ -29,28 +29,33 @@ const filterLineMaxChars = 350
 // Any failure (call error, nothing parsed) falls back to the plain quota'd
 // top-k so a flaky filter can never do worse than the unfiltered baseline.
 func retrieveFiltered(ctx context.Context, r *memory.Retriever, call modelCaller, query string, topK, quota, pool int) ([]memory.Result, error) {
+	hits, _, err := retrieveFilteredDiagnostics(ctx, r, call, query, topK, quota, pool)
+	return hits, err
+}
+
+func retrieveFilteredDiagnostics(ctx context.Context, r *memory.Retriever, call modelCaller, query string, topK, quota, pool int) ([]memory.Result, memory.SearchDiagnostics, error) {
 	if pool <= topK {
-		return retrieveWithQuota(ctx, r, query, topK, quota)
+		return retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota)
 	}
 	scaledQuota := 0
 	if quota > 0 {
 		scaledQuota = quota * pool / topK
 	}
-	wide, err := retrieveWithQuota(ctx, r, query, pool, scaledQuota)
+	wide, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, r, query, pool, scaledQuota)
 	if err != nil {
-		return nil, err
+		return nil, diagnostics, err
 	}
 	if len(wide) <= topK {
-		return wide, nil
+		return wide, diagnostics, nil
 	}
 	selected, ok := listwiseSelect(ctx, call, query, wide)
 	if !ok {
-		return applyChunkQuota(wide, topK, quota), nil
+		return applyChunkQuota(wide, topK, quota), diagnostics, nil
 	}
 	if len(selected) > topK {
 		selected = selected[:topK]
 	}
-	return selected, nil
+	return selected, diagnostics, nil
 }
 
 // listwiseSelect runs the single filter call and maps the returned numbers

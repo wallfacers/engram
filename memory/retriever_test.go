@@ -522,9 +522,12 @@ func TestClusterSweepEnumerationsReplaceTopKWithEntityCluster(t *testing.T) {
 		}
 	}
 	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
-	got, err := r.Search(ctx, "What things did root do?", 3)
+	got, diagnostics, err := r.SearchWithDiagnostics(ctx, "What things did root do?", 3)
 	if err != nil {
 		t.Fatalf("sweep search: %v", err)
+	}
+	if !diagnostics.SweepUsed || diagnostics.SweepCandidatesBefore == 0 || diagnostics.SweepCandidatesAfter != len(got) {
+		t.Fatalf("sweep diagnostics = %+v, results=%d", diagnostics, len(got))
 	}
 	if len(got) != 4 {
 		t.Fatalf("sweep search = %+v, want all four cluster candidates", got)

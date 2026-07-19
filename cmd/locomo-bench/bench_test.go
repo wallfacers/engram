@@ -80,13 +80,13 @@ func TestAnswerAndJudgeTracksSweepHitForBudgetGuard(t *testing.T) {
 	defer st.Close()
 	es := memory.NewEntryStore(st.DB())
 	vs := memory.NewVectorStore(st.DB())
-	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact"}); err != nil {
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact", SourceSessionID: "conv0-sess1"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := es.PutEntities(ctx, "seed", []string{"root"}); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
-	if err := es.Upsert(ctx, &memory.Entry{Name: "cluster", Content: "cluster fact"}); err != nil {
+	if err := es.Upsert(ctx, &memory.Entry{Name: "cluster", Content: "cluster fact", SourceSessionID: "conv0-sess1"}); err != nil {
 		t.Fatalf("cluster: %v", err)
 	}
 	if err := es.PutEntities(ctx, "cluster", []string{"member"}); err != nil {
@@ -103,13 +103,17 @@ func TestAnswerAndJudgeTracksSweepHitForBudgetGuard(t *testing.T) {
 		return `{"correct":true}`, provider.Usage{}, nil
 	}
 	noRetry := func(context.Context, string, string) (string, error) { return "", nil }
-	correct, _, usage, sweepUsed := answerAndJudgeWithUsage(ctx, retriever, answer, noRetry, noRetry, judge, options{topK: 2, noIDKRetry: true}, locomoQA{
+	correct, _, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, retriever, answer, noRetry, noRetry, judge, options{topK: 2, noIDKRetry: true}, locomoQA{
 		Question: "What things did root do?",
 		Answer:   []byte(`"root fact"`),
+		Evidence: []string{"D1:3"},
 		Category: 1,
 	}, slog.Default())
 	if !correct || !sweepUsed || !sweepOverBudget(options{}, sweepUsed, usage) {
 		t.Fatalf("answer result = correct:%v sweep:%v usage:%+v", correct, sweepUsed, usage)
+	}
+	if evidence == nil || evidence.EvidenceSessionRecall != 1 || evidence.AnswerContextTokens != 8000 {
+		t.Fatalf("sweep evidence diagnostic = %+v", evidence)
 	}
 }
 

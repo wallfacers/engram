@@ -107,16 +107,32 @@ type Result struct {
 	Score           float64
 }
 
+// SearchDiagnostics reports optional retrieval-path details for callers that
+// need to inspect a cluster sweep without changing the returned hit set.
+type SearchDiagnostics struct {
+	SweepUsed             bool
+	SweepCandidatesBefore int
+	SweepCandidatesAfter  int
+}
+
 // Search returns the top-k entries for query, fusing whatever signals are
 // available. k <= 0 defaults to 8. It never errors on a single signal's failure:
 // a degraded signal is skipped, not fatal.
 func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, error) {
+	results, _, err := r.SearchWithDiagnostics(ctx, query, k)
+	return results, err
+}
+
+// SearchWithDiagnostics returns Search's results with optional cluster-sweep
+// candidate counts. The zero diagnostic means no sweep candidate set was used.
+func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k int) ([]Result, SearchDiagnostics, error) {
+	diagnostics := SearchDiagnostics{}
 	if r == nil {
-		return nil, nil
+		return nil, diagnostics, nil
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, nil
+		return nil, diagnostics, nil
 	}
 	if k <= 0 {
 		k = 8
@@ -163,12 +179,11 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	}
 	fused := fuseRRF(signals...)
 	if len(fused) == 0 {
-		return nil, nil
+		return nil, diagnostics, nil
 	}
 	if temporal != nil {
 		fused = r.applyTemporal(ctx, fused, *temporal)
 	}
-	clusterSweepUsed := false
 	if r.options.ClusterSweep && ParseEnumerationIntent(query).IsEnumeration {
 		if len(cues) == 0 {
 			var err error
@@ -179,12 +194,14 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			}
 		}
 		if swept := r.clusterSweepCandidates(ctx, fused, cues); len(swept) > 0 {
+			diagnostics.SweepCandidatesBefore = len(fused)
 			fused = mergeClusterSweepCandidates(fused, swept, k)
-			clusterSweepUsed = true
+			diagnostics.SweepCandidatesAfter = len(fused)
+			diagnostics.SweepUsed = true
 		}
 	}
 	kEff := k
-	if clusterSweepUsed {
+	if diagnostics.SweepUsed {
 		kEff = clusterSweepCap
 	}
 	if r.reranker != nil {
@@ -207,11 +224,11 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			EventDate:       e.EventDate,
 			CreatedAt:       e.CreatedAt,
 			SourceSessionID: e.SourceSessionID,
-			ClusterSweep:    clusterSweepUsed,
+			ClusterSweep:    diagnostics.SweepUsed,
 			Score:           s.Score,
 		})
 	}
-	return out, nil
+	return out, diagnostics, nil
 }
 
 func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored, window TimeWindow) []embedding.Scored {

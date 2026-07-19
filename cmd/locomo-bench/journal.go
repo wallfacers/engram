@@ -12,24 +12,25 @@ import (
 // result is one graded question outcome, persisted as a JSONL line for resume.
 // It deliberately never carries any credential — only benchmark content.
 type result struct {
-	Conv                int    `json:"conv"`
-	Q                   int    `json:"q"`
-	QuestionID          string `json:"question_id,omitempty"`
-	Category            int    `json:"category"`
-	CategoryName        string `json:"category_name,omitempty"`
-	QuestionType        string `json:"question_type,omitempty"`
-	Adversarial         bool   `json:"adversarial,omitempty"`
-	RetrievalFlags      string `json:"retrieval_flags"`
-	AnswerRegime        string `json:"answer_regime"`
-	Correct             bool   `json:"correct"`
-	Question            string `json:"question"`
-	Gold                string `json:"gold"`
-	Predicted           string `json:"predicted"`
-	InputTokens         int    `json:"input_tokens,omitempty"`
-	OutputTokens        int    `json:"output_tokens,omitempty"`
-	AnswerContextTokens int    `json:"answer_context_tokens,omitempty"`
-	SweepUsed           bool   `json:"sweep_used,omitempty"`
-	SweepOverBudget     bool   `json:"sweep_over_budget,omitempty"`
+	Conv                int                       `json:"conv"`
+	Q                   int                       `json:"q"`
+	QuestionID          string                    `json:"question_id,omitempty"`
+	Category            int                       `json:"category"`
+	CategoryName        string                    `json:"category_name,omitempty"`
+	QuestionType        string                    `json:"question_type,omitempty"`
+	Adversarial         bool                      `json:"adversarial,omitempty"`
+	RetrievalFlags      string                    `json:"retrieval_flags"`
+	AnswerRegime        string                    `json:"answer_regime"`
+	Correct             bool                      `json:"correct"`
+	Question            string                    `json:"question"`
+	Gold                string                    `json:"gold"`
+	Predicted           string                    `json:"predicted"`
+	InputTokens         int                       `json:"input_tokens,omitempty"`
+	OutputTokens        int                       `json:"output_tokens,omitempty"`
+	AnswerContextTokens int                       `json:"answer_context_tokens,omitempty"`
+	SweepUsed           bool                      `json:"sweep_used,omitempty"`
+	SweepOverBudget     bool                      `json:"sweep_over_budget,omitempty"`
+	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
 }
 
 type resultKey struct {
