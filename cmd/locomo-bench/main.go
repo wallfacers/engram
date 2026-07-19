@@ -517,17 +517,11 @@ func hasArm(arms []string, name string) bool {
 }
 
 // gate wraps a modelCaller so each call holds one slot of the global semaphore
-// for its full duration — the true in-flight-call limit.
+// for its full duration — the true in-flight-call limit. Shares gateUsage's
+// per-call timeout and retry so extraction calls cannot deadlock the
+// semaphore either.
 func gate(sem chan struct{}, c modelCaller) modelCaller {
-	return func(ctx context.Context, system, user string) (string, error) {
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-		defer func() { <-sem }()
-		return c(ctx, system, user)
-	}
+	return modelCallerFromUsage(gateUsage(sem, usageCallerFromModel(c)))
 }
 
 // conversationRuntime owns one prepared conversation store and its read-only

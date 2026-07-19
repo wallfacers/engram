@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wallfacers/engram/provider"
 )
@@ -85,6 +86,13 @@ func newUsageModelCallerWithUsage(p provider.Provider, model string, maxTokens i
 	}
 }
 
+// perCallTimeout bounds one LLM call for as long as it holds a semaphore
+// slot. Without it a relay connection that dies mid-run leaves every
+// in-flight Stream waiting on headers forever and the whole bench deadlocks
+// on the semaphore (observed 2026-07-19, Strike 1). Streamed bench answers
+// finish in seconds; three minutes is generous.
+const perCallTimeout = 3 * time.Minute
+
 func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
 	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
 		select {
@@ -93,7 +101,20 @@ func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
 			return "", provider.Usage{}, ctx.Err()
 		}
 		defer func() { <-sem }()
-		return c(ctx, system, user)
+		var (
+			lastUsage provider.Usage
+			lastErr   error
+		)
+		for attempt := 0; attempt < 2; attempt++ {
+			callCtx, cancel := context.WithTimeout(ctx, perCallTimeout)
+			text, usage, err := c(callCtx, system, user)
+			cancel()
+			if err == nil || ctx.Err() != nil {
+				return text, usage, err
+			}
+			lastUsage, lastErr = usage, err
+		}
+		return "", lastUsage, lastErr
 	}
 }
 
