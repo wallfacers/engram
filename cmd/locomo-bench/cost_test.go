@@ -152,6 +152,35 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	}
 }
 
+func TestOnlyCategorySelectionShrinksAnswerCallPlan(t *testing.T) {
+	conv := conversation{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "when", Answer: []byte(`"May"`), Category: 2},
+		{Question: "where", Answer: []byte(`"Oslo"`), Category: 4},
+		{Question: "unknown", Answer: []byte(`"trap"`), Category: adversarialCategory},
+		{Question: "when again", Answer: []byte(`"June"`), Category: 2},
+	}}
+	opt := options{
+		datasetFormat: "locomo",
+		onlyCategory:  2,
+		adversarial:   -1,
+		repeats:       2,
+		retrieval:     "both",
+	}
+
+	selected := selectQuestions(conv, opt)
+	if len(selected) != 2 {
+		t.Fatalf("selected questions = %+v, want 2 category-2 questions", selected)
+	}
+	for _, question := range selected {
+		if question.QA.Category != 2 {
+			t.Fatalf("selected category = %d, want 2", question.QA.Category)
+		}
+	}
+	if got := buildCallPlan([]conversation{conv}, opt).AnswerCalls; got != 8 {
+		t.Fatalf("answer calls = %d, want 8", got)
+	}
+}
+
 func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
 	convs := []conversation{{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
 		{Question: "When did the trip happen?", Answer: []byte(`"May"`), Category: 2},

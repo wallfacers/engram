@@ -65,6 +65,7 @@ type options struct {
 	retrieval            string
 	maxConvs             int
 	maxQuestions         int
+	onlyCategory         int
 	topK                 int
 	maxTokens            int
 	concurrency          int
@@ -108,6 +109,7 @@ func run() error {
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
+	flag.IntVar(&opt.onlyCategory, "only-category", 0, "evaluate only this question category (0 = all)")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
@@ -1281,6 +1283,9 @@ func selectQuestions(conv conversation, opt options) []selectedQuestion {
 	selected := make([]selectedQuestion, 0, len(conv.QA))
 	answered, adversarial := 0, 0
 	for index, qa := range conv.QA {
+		if opt.onlyCategory > 0 && qa.Category != opt.onlyCategory {
+			continue
+		}
 		if qa.Adversarial || qa.Category == adversarialCategory {
 			include := opt.datasetFormat == "longmemeval" || opt.adversarial < 0 || (opt.adversarial > 0 && adversarial < opt.adversarial)
 			if include {
