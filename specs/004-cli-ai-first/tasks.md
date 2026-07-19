@@ -21,8 +21,8 @@ modified or imported (except read-only `internal/version`).
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Create `cmd/engram/main.go` — `package main`, thin entry that calls `run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)` and `os.Exit`s the returned code.
-- [ ] T002 Verify the new package builds under the hard gate: `CGO_ENABLED=0 go build ./cmd/engram` (skeleton `run` returns 0).
+- [X] T001 Create `cmd/engram/main.go` — `package main`, thin entry that calls `run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)` and `os.Exit`s the returned code.
+- [X] T002 Verify the new package builds under the hard gate: `CGO_ENABLED=0 go build ./cmd/engram` (skeleton `run` returns 0).
 
 ---
 
