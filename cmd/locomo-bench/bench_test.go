@@ -159,8 +159,8 @@ func TestArmsFor(t *testing.T) {
 func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	global := options{assoc: true, temporalScore: true, conflictResolution: true, abstainPrompt: true}
 	plain := optionsForArm(global, "hybrid")
-	if !plain.assoc || !plain.temporalScore || !plain.conflictResolution || !plain.abstainPrompt {
-		t.Fatalf("plain arm lost global mechanisms: %+v", plain)
+	if plain.assoc || plain.temporalScore || plain.conflictResolution || plain.abstainPrompt {
+		t.Fatalf("plain arm should be zero mechanisms when parsed as baseline: %+v", plain)
 	}
 	assoc := optionsForArm(options{}, "hybrid+assoc")
 	if !assoc.assoc || assoc.temporalScore || assoc.conflictResolution || assoc.abstainPrompt {
@@ -169,6 +169,14 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	temporal := optionsForArm(global, "hybrid+temporal")
 	if temporal.assoc || !temporal.temporalScore || temporal.conflictResolution || temporal.abstainPrompt {
 		t.Fatalf("temporal suffix did not override global mechanisms: %+v", temporal)
+	}
+	single := optionsForRun(global, "hybrid", false)
+	if !single.assoc || !single.temporalScore || !single.conflictResolution || !single.abstainPrompt {
+		t.Fatalf("single arm lost global mechanisms: %+v", single)
+	}
+	pairedBaseline := optionsForRun(global, "hybrid", true)
+	if pairedBaseline.assoc || pairedBaseline.temporalScore || pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
+		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
 	}
 }
 

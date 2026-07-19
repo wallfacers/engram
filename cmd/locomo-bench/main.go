@@ -467,8 +467,17 @@ func armBackend(name string) string {
 
 func optionsForArm(global options, name string) options {
 	spec, err := parseArm(name)
-	if err != nil || !spec.overrides {
-		return global
+	if err != nil {
+		return options{}
+	}
+	if !spec.overrides {
+		arm := global
+		arm.assoc = false
+		arm.temporalScore = false
+		arm.temporalHardFilter = false
+		arm.conflictResolution = false
+		arm.abstainPrompt = false
+		return arm
 	}
 	arm := global
 	arm.assoc = spec.mechanisms["assoc"]
@@ -477,6 +486,16 @@ func optionsForArm(global options, name string) options {
 	arm.conflictResolution = spec.mechanisms["conflict"]
 	arm.abstainPrompt = spec.mechanisms["abstain"]
 	return arm
+}
+
+func optionsForRun(global options, name string, multiArm bool) options {
+	if !multiArm {
+		spec, err := parseArm(name)
+		if err == nil && !spec.overrides {
+			return global
+		}
+	}
+	return optionsForArm(global, name)
 }
 
 func hasArm(arms []string, name string) bool {
@@ -613,7 +632,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	// baseline.
 	retrievers := make(map[string]*memory.Retriever, len(arms))
 	for _, arm := range arms {
-		armOpt := optionsForArm(opt, arm)
+		armOpt := optionsForRun(opt, arm, len(arms) > 1)
 		retrieverOpts := retrieverOptionsFor(armOpt)
 		if armBackend(arm) == "hybrid" {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, buildBenchReranker(), retrieverOpts)
@@ -693,7 +712,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					OutputTokens:        usage.OutputTokens,
 					AnswerContextTokens: usage.InputTokens,
 				})
-			}(s, qa, key, optionsForArm(opt, s.name))
+			}(s, qa, key, optionsForRun(opt, s.name, len(states) > 1))
 		}
 	}
 	qwg.Wait()
