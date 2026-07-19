@@ -156,10 +156,10 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 		return relativeWindow(base.Add(-30*24*time.Hour), base, "current", fuzzy), true
 	}
 	if currentPattern.MatchString(query) {
-		return TimeWindow{Start: base.AddDate(-1, 0, 0), End: base, Intent: "current", State: "current", Fuzzy: fuzzy}, true
+		return TimeWindow{Intent: "current", State: "current", Fuzzy: fuzzy}, true
 	}
 	if historicalPattern.MatchString(query) {
-		return relativeWindow(base.AddDate(-10, 0, 0), base, "historical", fuzzy), true
+		return TimeWindow{Intent: "historical", State: "historical", Fuzzy: fuzzy}, true
 	}
 	return TimeWindow{}, false
 }

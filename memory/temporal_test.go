@@ -94,8 +94,6 @@ func TestParseTemporalIntentTable(t *testing.T) {
 			query:  "What is Alice's current job?",
 			anchor: anchor,
 			ok:     true,
-			start:  anchor.AddDate(-1, 0, 0),
-			end:    anchor,
 			intent: "current",
 			state:  "current",
 		},
@@ -139,7 +137,7 @@ func TestParseTemporalIntentTable(t *testing.T) {
 			if !tt.end.IsZero() && !got.End.Equal(tt.end) {
 				t.Errorf("end = %v, want %v", got.End, tt.end)
 			}
-			if got.Start.IsZero() && got.End.IsZero() {
+			if got.Start.IsZero() && got.End.IsZero() && got.Intent != "current" && got.Intent != "historical" {
 				t.Error("successful parse returned an empty time window")
 			}
 			if !got.Start.IsZero() && !got.End.IsZero() && got.Start.After(got.End) {
@@ -198,5 +196,30 @@ func TestParseTemporalIntentChineseBareOrderWords(t *testing.T) {
 		if !ok || got.Intent != tt.intent {
 			t.Errorf("ParseTemporalIntent(%q) = %+v, ok=%t; want intent %q", tt.query, got, ok, tt.intent)
 		}
+	}
+}
+
+func TestCurrentAndHistoricalIntentAreStateOnly(t *testing.T) {
+	anchor := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	oldEvent := time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		query string
+		state string
+	}{
+		{query: "What is Alice's current job?", state: "current"},
+		{query: "What was Alice's job?", state: "historical"},
+	} {
+		t.Run(tt.state, func(t *testing.T) {
+			win, ok := ParseTemporalIntent(tt.query, anchor)
+			if !ok || win.State != tt.state {
+				t.Fatalf("window=%+v ok=%t, want state %q", win, ok, tt.state)
+			}
+			if !win.Start.IsZero() || !win.End.IsZero() {
+				t.Fatalf("state-only intent unexpectedly has window: %+v", win)
+			}
+			if got := TemporalScore(&oldEvent, &oldEvent, win, 0); got != 1 {
+				t.Fatalf("state-only score = %.12f, want neutral 1", got)
+			}
+		})
 	}
 }
