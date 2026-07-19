@@ -129,3 +129,45 @@
 - [ ] F14 LOW paired.json 只配对 arms[0] vs arms[1]，≥3 臂时其余臂被静默忽略
       （加 log 说明）；journal 逐题记录缺 answer regime 指纹（force_answer 等
       口径应可追溯），在 result 或 run 元数据中补记。
+
+---
+
+# 执行简报：批次 3（T023–T028 US4 时间结构化，纯离线零花费）
+
+> 设计依据：tasks.md T023-T028 + **research-ammo-2026-07.md 裁决 1（R1-R4 修订）**。
+> 两文件先读完再动手。设计已冻结，只实现、不重开设计。
+
+## 任务（按序，逐任务 commit，格式 `003-us4: T023 ...`）
+
+- [ ] T023 `memory/temporal_test.go` 可失败测试：ParseTemporalIntent 表驱动
+      （绝对日期/相对时间/事件锚定/次序比较/无时间意图五类；**R2：增
+      current-vs-historical 状态位断言**；R4：相对表述无锚时回退+fuzzy 标记）
+- [ ] T024 `memory/retriever_test.go` 可失败测试：T_score 软加权——**R3 定式
+      `exp(−α·gap)`**（gap=事件区间与查询窗口距离，重叠=0）；时间路是加权/
+      补充召回，语义候选不被删除（软性断言：无时间意图时结果与关闭时一致）
+- [ ] T025 实现 `memory/temporal.go`：`ParseTemporalIntent` 纯规则（无 LLM），
+      输出 {窗口 start/end, 意图类别, 状态位 current|historical, 锚点实体, fuzzy}；
+      R4：相对表述锚定同上下文最近绝对日期，无锚回退 session date 标 fuzzy
+- [ ] T026 抽取扩展：`memory/prompt/memory_extraction.go` 增 event_start/
+      event_end 字段（migration v3 列已存在）；解析失败时字段留空不报错
+- [ ] T027 检索接线：`memory/retriever.go` TemporalScore 开启时——
+      (a) T_score 按 R3 定式加权进融合；(b) keywordRanks union 事件别名 FTS
+      （memory_event_aliases 表已建）；(c) **R3：次序题（before/after 锚点）用
+      SQL 方向谓词（event_end < anchor 等）做补充召回并集，不过滤主候选**；
+      (d) R4：同 timestamp 事件不推导次序。全程尊重降级矩阵：无 event 数据时
+      静默回退，记日志
+- [ ] T028 bench 接线：`--temporal-score`/`--temporal-hard-filter` 透传
+      RetrieverOptions（hard-filter 仅实验用 flag，判定运行不用）；**放开 F13
+      对 `+temporal` 臂后缀的 not-implemented 拒绝**；指纹记录生效值
+- [ ] T028b **（R1 新增，口径改动独立 commit）** temporal 答题计划：
+      `cmd/locomo-bench/runner.go` 增 temporal 类别专用答题 prompt 分支
+      （LoCoMo category 2），固定 CoT：「列出候选记忆的 [event: YYYY-MM-DD]
+      标记 → 归一化 → 比较推理 → 输出绝对日期（自然格式，禁 ISO）」；须与
+      --force-answer 组合有对应变体；abstain 变体留给 T035 不做
+
+## 完成定义 / 约束 / 汇报
+
+同批次 1：build/vet/test 全绿 + CGO_ENABLED=0 + `go test -race ./memory/...` +
+TestRetrievalParity 绿（默认关时行为与 HEAD 一致）。不改 specs/ 设计文档；
+矛盾记 impl-notes.md。不动 `.locomo-run/`（**Strike 1 评测正在其中运行**）。
+完成或阻塞 → 逐任务汇报（状态/commit/文件/测试尾部/遗留）。
