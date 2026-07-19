@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -159,9 +160,34 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		if err := p.entries.PutEntities(ctx, entry.Name, f.Entities); err != nil {
 			slog.Warn("memory: extracted entities index failed", "name", entry.Name, "err", err)
 		}
+		pairs := entityPairs(f.Entities)
+		if err := p.entries.UpsertEdges(ctx, pairs); err != nil {
+			slog.Warn("memory: extracted entity edges failed", "name", entry.Name, "err", err)
+		}
 	}
 	p.embedder.Enqueue(entry.Name) // nil-safe
 	return true
+}
+
+func entityPairs(entities []string) []memory.EntityEdge {
+	seen := make(map[string]struct{}, len(entities))
+	for _, raw := range entities {
+		if norm := memory.EntityNorm(raw); norm != "" {
+			seen[norm] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(seen))
+	for entity := range seen {
+		ordered = append(ordered, entity)
+	}
+	sort.Strings(ordered)
+	pairs := make([]memory.EntityEdge, 0, len(ordered)*(len(ordered)-1)/2)
+	for i := 0; i < len(ordered); i++ {
+		for j := i + 1; j < len(ordered); j++ {
+			pairs = append(pairs, memory.EntityEdge{A: ordered[i], B: ordered[j], Kind: "co", Weight: 1})
+		}
+	}
+	return pairs
 }
 
 // hasSubstance reports whether the batch has any non-empty user/assistant text.

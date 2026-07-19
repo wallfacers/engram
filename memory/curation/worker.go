@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/prompt"
 )
@@ -32,6 +33,7 @@ type Config struct {
 // ever changed by a validated judge decision.
 type Worker struct {
 	store  *memory.EntryStore
+	db     *sql.DB
 	lease  *Lease
 	call   ModelCaller
 	logger *slog.Logger
@@ -65,6 +67,7 @@ func NewWorker(store *memory.EntryStore, db *sql.DB, call ModelCaller, cfg Confi
 	}
 	return &Worker{
 		store:          store,
+		db:             db,
 		lease:          NewLease(db),
 		call:           call,
 		logger:         logger,
@@ -233,6 +236,9 @@ func (w *Worker) shouldRun(ctx context.Context, now time.Time) bool {
 // curate runs the deterministic selection then the LLM judge and applies the
 // verdict. Returns an error to RunPass, which logs it fail-safe.
 func (w *Worker) curate(ctx context.Context, now time.Time) error {
+	if err := w.buildSynonymEdges(ctx); err != nil {
+		w.logger.Warn("curation: synonym edge pass failed; continuing", "error", err)
+	}
 	entries, err := w.store.List(ctx)
 	if err != nil {
 		return err
@@ -261,6 +267,66 @@ func (w *Worker) curate(ctx context.Context, now time.Time) error {
 		return err
 	}
 	return w.apply(ctx, decision, entries)
+}
+
+// buildSynonymEdges compares stored vectors offline and records close pairs.
+// Rows from different embedding models or dimensions are never compared.
+func (w *Worker) buildSynonymEdges(ctx context.Context) error {
+	if w == nil || w.db == nil || w.store == nil {
+		return nil
+	}
+	rows, err := w.db.QueryContext(ctx, `SELECT entry_name, model, vec FROM memory_embeddings ORDER BY entry_name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close() //nolint:errcheck
+	type storedVector struct {
+		name  string
+		model string
+		vec   []float32
+	}
+	var vectors []storedVector
+	for rows.Next() {
+		var name, model string
+		var blob []byte
+		if err := rows.Scan(&name, &model, &blob); err != nil {
+			return err
+		}
+		vec, err := embedding.DecodeVector(blob)
+		if err != nil || len(vec) == 0 {
+			continue
+		}
+		vectors = append(vectors, storedVector{name: name, model: model, vec: vec})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	pairs := make([]memory.EntityEdge, 0)
+	for i := 0; i < len(vectors); i++ {
+		for j := i + 1; j < len(vectors); j++ {
+			if vectors[i].model != vectors[j].model || len(vectors[i].vec) != len(vectors[j].vec) {
+				continue
+			}
+			score := embedding.Cosine(vectors[i].vec, vectors[j].vec)
+			if score <= 0.8 {
+				continue
+			}
+			left, err := w.store.EntitiesOf(ctx, []string{vectors[i].name})
+			if err != nil {
+				return err
+			}
+			right, err := w.store.EntitiesOf(ctx, []string{vectors[j].name})
+			if err != nil {
+				return err
+			}
+			for _, a := range left {
+				for _, b := range right {
+					pairs = append(pairs, memory.EntityEdge{A: a, B: b, Kind: "syn", Weight: score})
+				}
+			}
+		}
+	}
+	return w.store.UpsertEdges(ctx, pairs)
 }
 
 // buildJudgeCandidates converts scored candidates into the prompt's plain DTOs,

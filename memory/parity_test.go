@@ -277,5 +277,40 @@ func TestSignalDegradation(t *testing.T) {
 			t.Errorf("query %q entity failure returned no remaining-signal result", query.ID)
 		}
 	}
+
+	t.Run("associative edge table empty", func(t *testing.T) {
+		query := degradationQueries[0]
+		s, es, vs := newParityStores(t, entries)
+		got, err := memory.NewRetrieverWithOptions(es, vs,
+			&parityClient{model: parityModel, vectors: queryVectors}, nil,
+			memory.RetrieverOptions{Associative: true}).Search(context.Background(), query.Query, query.K)
+		if err != nil || len(got) == 0 {
+			t.Fatalf("empty edge degradation: got %v err %v", got, err)
+		}
+		_ = s
+	})
+
+	t.Run("associative cue absent", func(t *testing.T) {
+		s, es, vs := newParityStores(t, entries)
+		got, err := memory.NewRetrieverWithOptions(es, vs,
+			&parityClient{model: parityModel, vectors: queryVectors}, nil,
+			memory.RetrieverOptions{Associative: true}).Search(context.Background(), "unindexed cue", 3)
+		if err != nil {
+			t.Fatalf("no-cue degradation: %v", err)
+		}
+		_ = got
+		_ = s
+	})
+
+	t.Run("associative embedding absent", func(t *testing.T) {
+		query := degradationQueries[0]
+		s, es, vs := newParityStores(t, entries)
+		got, err := memory.NewRetrieverWithOptions(es, vs, nil, nil,
+			memory.RetrieverOptions{Associative: true}).Search(context.Background(), query.Query, query.K)
+		if err != nil || len(got) == 0 {
+			t.Fatalf("no-embedding degradation: got %v err %v", got, err)
+		}
+		_ = s
+	})
 	t.Logf("signal degradation: %d queries covered semantic, keyword, and entity failures", len(degradationQueries))
 }

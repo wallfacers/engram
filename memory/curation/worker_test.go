@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/store"
 )
@@ -55,6 +56,48 @@ func TestWorkerAppliesEvictAndMerge(t *testing.T) {
 	got := mustGet(t, es, "dup-a")
 	if got.Content != "same fact one and two" || got.Trigger != "merged" {
 		t.Fatalf("dup-a not merged: %+v", got)
+	}
+}
+
+func TestWorkerBuildsSynonymEdgesFromStoredEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "a", Trigger: "a", Content: "alpha fact"})
+	seed(t, es, &memory.Entry{Name: "b", Trigger: "b", Content: "beta fact"})
+	if err := es.PutEntities(ctx, "a", []string{"Alpha"}); err != nil {
+		t.Fatalf("entities a: %v", err)
+	}
+	if err := es.PutEntities(ctx, "b", []string{"Beta"}); err != nil {
+		t.Fatalf("entities b: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `
+		INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at) VALUES
+			(?,?,?,?,?), (?,?,?,?,?)`,
+		"a", "m", 2, embedding.EncodeVector([]float32{1, 0}), 1,
+		"b", "m", 2, embedding.EncodeVector([]float32{0.99, 0.01}), 1); err != nil {
+		t.Fatalf("insert embeddings: %v", err)
+	}
+	w := NewWorker(es, s.DB(), func(context.Context, string, string) (string, error) {
+		return `{"evict":[],"merge":[]}`, nil
+	}, Config{
+		EntryCountHigh: 0, MinInterval: time.Minute, LeaseTTL: time.Minute,
+		MaxCandidatesPerPass: 20, ContentSnippetChars: 200, Weights: defaultWeights,
+		Budgets: memory.DefaultBudgets(),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.nowFn = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+	w.RunPass(ctx)
+
+	edges, err := es.NeighborsOf(ctx, []string{"alpha", "beta"}, []string{"syn"})
+	if err != nil {
+		t.Fatalf("syn neighbors: %v", err)
+	}
+	if len(edges) != 1 || edges[0].A != "alpha" || edges[0].B != "beta" || edges[0].Weight < 0.8 {
+		t.Fatalf("synonym edges = %+v, want alpha/beta cosine > .8", edges)
 	}
 }
 

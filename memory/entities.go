@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -79,4 +81,47 @@ func EntityQueryTokens(query string) []string {
 	}
 	flush()
 	return out
+}
+
+// EntityMatchCountsForQuery combines exact entity-token matching with a whole
+// query substring match against entity_raw. The latter links natural-language
+// questions to multi-word extracted entities without changing the token API.
+func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string) (map[string]int, error) {
+	if s == nil {
+		return nil, nil
+	}
+	tokens := make(map[string]struct{}, len(EntityQueryTokens(query)))
+	for _, token := range EntityQueryTokens(query) {
+		tokens[token] = struct{}{}
+	}
+	queryNorm := strings.ToLower(EntityNorm(query))
+	rows, err := s.db.QueryContext(ctx, `SELECT entry_name, entity_norm, entity_raw FROM memory_entities`)
+	if err != nil {
+		return nil, fmt.Errorf("memory: entity query match: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	counts := make(map[string]int)
+	seen := make(map[string]map[string]struct{})
+	for rows.Next() {
+		var name, entity, raw string
+		if err := rows.Scan(&name, &entity, &raw); err != nil {
+			return nil, fmt.Errorf("memory: scan entity query match: %w", err)
+		}
+		rawNorm := strings.ToLower(EntityNorm(raw))
+		if _, exact := tokens[entity]; !exact && (rawNorm == "" || !strings.Contains(queryNorm, rawNorm)) {
+			continue
+		}
+		if seen[name] == nil {
+			seen[name] = make(map[string]struct{})
+		}
+		if _, duplicate := seen[name][entity]; duplicate {
+			continue
+		}
+		seen[name][entity] = struct{}{}
+		counts[name]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: read entity query match: %w", err)
+	}
+	return counts, nil
 }

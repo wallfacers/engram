@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
@@ -184,6 +185,66 @@ func TestRetriever_EntityExpansionSurfacesNeighbor(t *testing.T) {
 	}
 	if len(got) == 0 || got[0].Name != "midsummer-party" {
 		t.Fatalf("expected entity-expanded neighbor on top, got %+v", got)
+	}
+}
+
+func TestAssociativeNoRegression(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedRetrievalCorpus(t)
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "midsummer-party", Trigger: "holiday plans",
+		Content: "The user hosts a midsummer party each June.", CharCount: 43,
+	}); err != nil {
+		t.Fatalf("upsert neighbor: %v", err)
+	}
+	if err := es.PutEntities(ctx, "midsummer-party", []string{"Sweden", "midsummer"}); err != nil {
+		t.Fatalf("neighbor entities: %v", err)
+	}
+	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "Sweden", B: "midsummer", Kind: "co", Weight: 1}}); err != nil {
+		t.Fatalf("upsert edge: %v", err)
+	}
+	client := &vectorFakeClient{model: "assoc", vectors: map[string][]float32{
+		"Sweden": {1, 0, 0},
+	}}
+	if err := vs.Put(ctx, "sweden-move", client.model, []float32{1, 0, 0}, time.Now()); err != nil {
+		t.Fatalf("sweden vector: %v", err)
+	}
+	if err := vs.Put(ctx, "midsummer-party", client.model, []float32{0.1, 0, 0}, time.Now()); err != nil {
+		t.Fatalf("neighbor vector: %v", err)
+	}
+
+	baseline, err := memory.NewRetriever(es, vs, client).Search(ctx, "Sweden", 2)
+	if err != nil || len(baseline) == 0 {
+		t.Fatalf("baseline search: got %v err %v", baseline, err)
+	}
+	assoc, err := memory.NewRetrieverWithOptions(es, vs, client, nil, memory.RetrieverOptions{
+		Associative: true,
+	}).Search(ctx, "Sweden", 2)
+	if err != nil || len(assoc) == 0 {
+		t.Fatalf("associative search: got %v err %v", assoc, err)
+	}
+	if assoc[0].Name != baseline[0].Name {
+		t.Fatalf("associative changed top-1: baseline=%+v assoc=%+v", baseline, assoc)
+	}
+}
+
+func TestEntityQueryWholeSentenceMatchesRawEntity(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "alice-profile", Trigger: "colleague",
+		Content: "The user has a trusted colleague.", CharCount: 34,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := es.PutEntities(ctx, "alice-profile", []string{"Alice Smith"}); err != nil {
+		t.Fatalf("entities: %v", err)
+	}
+	got, err := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{
+		Associative: true,
+	}).Search(ctx, "What did Alice Smith do?", 3)
+	if err != nil || len(got) == 0 || got[0].Name != "alice-profile" {
+		t.Fatalf("whole-sentence entity match: got %v err %v", got, err)
 	}
 }
 

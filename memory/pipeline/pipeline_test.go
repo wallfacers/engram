@@ -169,3 +169,23 @@ func TestIngest_AgentFactsFirstClass(t *testing.T) {
 		t.Fatalf("expected 1 agent fact, got n=%d err=%v", n, err)
 	}
 }
+
+func TestIngestBuildsCooccurrenceEdges(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newStore(t)
+	p := pipeline.New(pipeline.Config{
+		Entries: es,
+		Budgets: memory.DefaultBudgets(),
+		Call:    staticCaller(`{"facts":[{"fact":"Alpha and Beta are related.","entities":[" Alpha ","BETA"]}]}`),
+	})
+	if _, err := p.Ingest(ctx, time.Now(), "s", []pipeline.Message{{Role: "user", Text: "Alpha and Beta"}}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	edges, err := es.NeighborsOf(ctx, []string{"alpha"}, []string{"co"})
+	if err != nil {
+		t.Fatalf("neighbors: %v", err)
+	}
+	if len(edges) != 1 || edges[0].A != "alpha" || edges[0].B != "beta" || edges[0].Weight != 1 {
+		t.Fatalf("co-occurrence edges = %+v, want alpha/beta weight 1", edges)
+	}
+}

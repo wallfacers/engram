@@ -122,25 +122,25 @@
 
 ### Tests for User Story 3
 
-- [ ] T015 [P] [US3] 在 `memory/graph_test.go` 写可失败测试：UpsertEdges 规范化
+- [x] T015 [P] [US3] 在 `memory/graph_test.go` 写可失败测试：UpsertEdges 规范化
       （a<b、共现累计、syn 权重）、NeighborsOf 两向查询、EntityDocFreq、depth-2
       游走含 IDF 加权与深度截断
-- [ ] T016 [P] [US3] 在 `memory/retriever_test.go` 增可失败测试：
+- [x] T016 [P] [US3] 在 `memory/retriever_test.go` 增可失败测试：
       `TestAssociativeNoRegression`（单跳 fixture 开 Associative 后 top-1 不变）+
       `TestSignalDegradation` 扩展（边表空/无 cue/无 embedding 三行降级矩阵）
 
 ### Implementation for User Story 3
 
-- [ ] T017 [P] [US3] 实现 `memory/graph.go` + `memory/entrystore.go` 边表访问器：
+- [x] T017 [P] [US3] 实现 `memory/graph.go` + `memory/entrystore.go` 边表访问器：
       `EntityEdge`/`UpsertEdges`/`NeighborsOf`/`EntityDocFreq`（契约 engine-api §2）
-- [ ] T018 [P] [US3] 写入侧建边：`memory/pipeline/pipeline.go` storeFact 内同 entry
+- [x] T018 [P] [US3] 写入侧建边：`memory/pipeline/pipeline.go` storeFact 内同 entry
       实体两两 UpsertEdges；`memory/curation/worker.go` curation pass 内离线补同义边
       （扫 `memory_embeddings` 余弦>0.8，复用 `embedding.Cosine`）
-- [ ] T019 [US3] 实现游走信号并接入检索：`memory/graph.go` cue→IDF 种子→depth-2
+- [x] T019 [US3] 实现游走信号并接入检索：`memory/graph.go` cue→IDF 种子→depth-2
       质心游走→原 query embedding 重排；`memory/retriever.go` 加 `RetrieverOptions`/
       `NewRetrieverWithOptions`、`fuseRRF` 扩可变多路、`associativeRanks` 第 4 路
       （依赖 T017；契约 engine-api §1）
-- [ ] T020 [US3] query-to-entity 全句匹配：`memory/entities.go` 增整句对
+- [x] T020 [US3] query-to-entity 全句匹配：`memory/entities.go` 增整句对
       `entity_raw` 的 FTS/子串匹配路径并入 `entityRanks`（`memory/retriever.go:308`）
 - [ ] T021 [US3] bench 接线 `--assoc`/`--assoc-depth`（`cmd/locomo-bench/main.go`
       透传 RetrieverOptions），报告带 flag 指纹入 results.jsonl

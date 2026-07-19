@@ -33,6 +33,18 @@ const expansionSeeds = 10
 // expansionLimit caps how many entity-neighbor entries join the rerank pool.
 const expansionLimit = 25
 
+// RetrieverOptions controls optional retrieval signals. The zero value keeps
+// the original three-signal RRF behavior.
+type RetrieverOptions struct {
+	Associative        bool
+	AssocDepth         int
+	TemporalScore      bool
+	TemporalTau        float64
+	TemporalHardFilter bool
+	SupersededPenalty  float64
+	Now                time.Time
+}
+
 // Retriever implements three-signal hybrid retrieval with RRF fusion
 // (memory-hybrid-retrieval-locomo). The three signals are:
 //
@@ -51,11 +63,18 @@ type Retriever struct {
 	vectors  *VectorStore
 	client   embedding.Client   // may be nil
 	reranker embedding.Reranker // may be nil
+	options  RetrieverOptions
 }
 
 // NewRetriever builds a Retriever. A nil client disables the semantic signal.
 func NewRetriever(entries *EntryStore, vectors *VectorStore, client embedding.Client) *Retriever {
-	return &Retriever{entries: entries, vectors: vectors, client: client}
+	return NewRetrieverWithOptions(entries, vectors, client, nil, RetrieverOptions{})
+}
+
+// NewRetrieverWithOptions builds a Retriever with optional retrieval signals.
+// Search's public signature remains unchanged; zero options equal NewRetriever.
+func NewRetrieverWithOptions(entries *EntryStore, vectors *VectorStore, client embedding.Client, reranker embedding.Reranker, opts RetrieverOptions) *Retriever {
+	return &Retriever{entries: entries, vectors: vectors, client: client, reranker: reranker, options: opts}
 }
 
 // WithReranker enables the cross-encoder rerank stage (and, with it, 1-hop
@@ -103,9 +122,13 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	// Signal 2: semantic (optional).
 	vec := r.vectorRanks(ctx, query, pool)
 	// Signal 3: entity.
-	ent := r.entityRanks(ctx, query)
+	ent := r.entityRanks(ctx, query, r.options.Associative)
 
-	fused := fuseRRF(bm25, vec, ent)
+	signals := []map[string]int{bm25, vec, ent}
+	if r.options.Associative {
+		signals = append(signals, r.associativeRanks(ctx, query, pool))
+	}
+	fused := fuseRRF(signals...)
 	if len(fused) == 0 {
 		return nil, nil
 	}
@@ -132,6 +155,72 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 		})
 	}
 	return out, nil
+}
+
+// associativeRanks expands query entities through the local graph and then
+// ranks the resulting entries with the original query embedding. Any missing
+// dependency or storage/embedding failure drops this signal only.
+func (r *Retriever) associativeRanks(ctx context.Context, query string, limit int) map[string]int {
+	if r.client == nil || r.vectors == nil || r.entries == nil {
+		return nil
+	}
+	cues, err := r.entries.EntityCues(ctx, query)
+	if err != nil || len(cues) == 0 {
+		return nil
+	}
+	depth := r.options.AssocDepth
+	if depth <= 0 {
+		depth = maxAssociativeDepth
+	}
+	entityScores, err := r.entries.WalkEntityGraph(ctx, cues, depth)
+	if err != nil || len(entityScores) == 0 {
+		return nil
+	}
+	candidates, err := r.entries.EntityEntryScores(ctx, entityScores)
+	if err != nil || len(candidates) == 0 {
+		return nil
+	}
+	queryVectors, err := r.client.Embed(ctx, []string{query})
+	if err != nil || len(queryVectors) != 1 || len(queryVectors[0]) == 0 {
+		return nil
+	}
+	stored, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
+	if err != nil {
+		return nil
+	}
+	type scored struct {
+		name  string
+		query float64
+		graph float64
+	}
+	ordered := make([]scored, 0, len(candidates))
+	for name, graphScore := range candidates {
+		vec, ok := stored[name]
+		if !ok {
+			continue
+		}
+		ordered = append(ordered, scored{name: name, query: embedding.Cosine(queryVectors[0], vec), graph: graphScore})
+	}
+	if len(ordered) == 0 {
+		return nil
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].query != ordered[j].query {
+			return ordered[i].query > ordered[j].query
+		}
+		if ordered[i].graph != ordered[j].graph {
+			return ordered[i].graph > ordered[j].graph
+		}
+		return ordered[i].name < ordered[j].name
+	})
+	if limit > 0 && len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+	names := make([]string, len(ordered))
+	for i, item := range ordered {
+		names[i] = item.name
+	}
+	return ranksFromOrder(names)
 }
 
 // rerank widens the fused list with 1-hop entity neighbors, scores every
@@ -305,8 +394,14 @@ func (r *Retriever) vectorRanks(ctx context.Context, query string, limit int) ma
 
 // entityRanks orders entries by how many distinct query entity tokens they
 // match, then maps to ranks.
-func (r *Retriever) entityRanks(ctx context.Context, query string) map[string]int {
-	counts, err := r.entries.EntityMatchCounts(ctx, EntityQueryTokens(query))
+func (r *Retriever) entityRanks(ctx context.Context, query string, wholeSentence bool) map[string]int {
+	var counts map[string]int
+	var err error
+	if wholeSentence {
+		counts, err = r.entries.EntityMatchCountsForQuery(ctx, query)
+	} else {
+		counts, err = r.entries.EntityMatchCounts(ctx, EntityQueryTokens(query))
+	}
 	if err != nil || len(counts) == 0 {
 		return nil
 	}
