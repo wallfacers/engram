@@ -126,6 +126,9 @@ func run() error {
 	if err := validatePromptModes(opt); err != nil {
 		return err
 	}
+	if err := validateAssocDepth(opt.assocDepth); err != nil {
+		return err
+	}
 
 	if opt.compareSpec != "" {
 		dirs, err := parseCompareSpec(opt.compareSpec)
@@ -655,10 +658,17 @@ func retrieverOptionsFor(opt options) memory.RetrieverOptions {
 
 func retrievalFingerprint(opt options) string {
 	depth := opt.assocDepth
-	if depth <= 0 {
+	if depth <= 0 || depth > 2 {
 		depth = 2
 	}
 	return fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
+}
+
+func validateAssocDepth(depth int) error {
+	if depth > 2 {
+		return fmt.Errorf("--assoc-depth must be at most 2, got %d", depth)
+	}
+	return nil
 }
 
 func validatePromptModes(opt options) error {

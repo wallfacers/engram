@@ -37,6 +37,18 @@ func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
 	}
 }
 
+func TestAssocDepthAboveMaximumIsRejected(t *testing.T) {
+	if err := validateAssocDepth(3); err == nil {
+		t.Fatal("assoc depth 3 should be rejected at startup")
+	}
+	if err := validateAssocDepth(2); err != nil {
+		t.Fatalf("assoc depth 2 rejected: %v", err)
+	}
+	if got := retrievalFingerprint(options{assoc: true, assocDepth: 0}); got != "assoc=true;assoc_depth=2" {
+		t.Fatalf("zero assoc depth fingerprint = %q", got)
+	}
+}
+
 func TestParseLoCoMoDate(t *testing.T) {
 	cases := map[string]bool{ // input → expect non-zero
 		"1:56 pm on 8 May, 2023":  true,
