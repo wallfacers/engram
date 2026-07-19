@@ -208,6 +208,25 @@ func TestRetrievedMemoryLine(t *testing.T) {
 	}
 }
 
+func TestSweepAnswerPromptGroupsMemoriesBySessionAndDate(t *testing.T) {
+	memories := []retrievedMemory{
+		{Name: "late", Content: "late event", EventDate: "2023-05-03", SourceSessionID: "conv0-sess2"},
+		{Name: "early", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"},
+		{Name: "middle", Content: "middle event", EventDate: "2023-05-02", SourceSessionID: "conv0-sess1"},
+	}
+	got := buildSweepAnswerPrompt("What happened?", memories)
+	want := "RETRIEVED MEMORIES:\n" +
+		"[session 1, 2023-05-01]\n" +
+		"1. [event: 2023-05-01] early event\n" +
+		"2. [event: 2023-05-02] middle event\n" +
+		"[session 2, 2023-05-03]\n" +
+		"3. [event: 2023-05-03] late event\n" +
+		"\nQUESTION: What happened?\n\nAnswer:"
+	if got != want {
+		t.Fatalf("sweep prompt = %q, want %q", got, want)
+	}
+}
+
 func TestJournalResume(t *testing.T) {
 	dir := t.TempDir()
 	j, err := openJournal(dir, "hybrid")

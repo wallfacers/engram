@@ -96,12 +96,13 @@ func (r *Retriever) WithReranker(rr embedding.Reranker) *Retriever {
 // Result is one fused retrieval hit. Content carries the full entry body; the
 // tool layer derives a snippet. EventDate/CreatedAt drive time-aware rendering.
 type Result struct {
-	Name      string
-	Trigger   string
-	Content   string
-	EventDate *time.Time
-	CreatedAt time.Time
-	Score     float64
+	Name            string
+	Trigger         string
+	Content         string
+	EventDate       *time.Time
+	CreatedAt       time.Time
+	SourceSessionID string
+	Score           float64
 }
 
 // Search returns the top-k entries for query, fusing whatever signals are
@@ -179,12 +180,13 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			continue // entry removed between ranking and load; skip
 		}
 		out = append(out, Result{
-			Name:      e.Name,
-			Trigger:   e.Trigger,
-			Content:   e.Content,
-			EventDate: e.EventDate,
-			CreatedAt: e.CreatedAt,
-			Score:     s.Score,
+			Name:            e.Name,
+			Trigger:         e.Trigger,
+			Content:         e.Content,
+			EventDate:       e.EventDate,
+			CreatedAt:       e.CreatedAt,
+			SourceSessionID: e.SourceSessionID,
+			Score:           s.Score,
 		})
 	}
 	return out, nil

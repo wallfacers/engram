@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -245,11 +247,106 @@ func buildAnswerPrompt(question string, memories []retrievedMemory) string {
 	return b.String()
 }
 
+// buildSweepAnswerPrompt groups broad-sweep hits by their source session so
+// the answering model can scan one conversation block at a time. The ordinary
+// buildAnswerPrompt path intentionally remains unchanged.
+func buildSweepAnswerPrompt(question string, memories []retrievedMemory) string {
+	type sweepGroup struct {
+		id       string
+		session  string
+		date     string
+		memories []retrievedMemory
+	}
+	groupsByID := make(map[string]*sweepGroup)
+	for _, memory := range memories {
+		id := memory.SourceSessionID
+		if id == "" {
+			id = "__unattributed__"
+		}
+		group := groupsByID[id]
+		if group == nil {
+			group = &sweepGroup{id: id, session: sweepSessionLabel(id), date: memory.EventDate}
+			groupsByID[id] = group
+		}
+		if group.date == "" || (memory.EventDate != "" && memory.EventDate < group.date) {
+			group.date = memory.EventDate
+		}
+		group.memories = append(group.memories, memory)
+	}
+	groups := make([]*sweepGroup, 0, len(groupsByID))
+	for _, group := range groupsByID {
+		sort.SliceStable(group.memories, func(i, j int) bool {
+			if group.memories[i].EventDate != group.memories[j].EventDate {
+				return group.memories[i].EventDate < group.memories[j].EventDate
+			}
+			if group.memories[i].Name != group.memories[j].Name {
+				return group.memories[i].Name < group.memories[j].Name
+			}
+			return group.memories[i].Content < group.memories[j].Content
+		})
+		groups = append(groups, group)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].date != groups[j].date {
+			return groups[i].date < groups[j].date
+		}
+		if groups[i].session != groups[j].session {
+			return sweepSessionNumber(groups[i].session) < sweepSessionNumber(groups[j].session)
+		}
+		return groups[i].id < groups[j].id
+	})
+
+	var b strings.Builder
+	b.WriteString("RETRIEVED MEMORIES:\n")
+	if len(memories) == 0 {
+		b.WriteString("(none)\n")
+	}
+	position := 1
+	for _, group := range groups {
+		date := group.date
+		if date == "" {
+			date = "unknown"
+		}
+		fmt.Fprintf(&b, "[session %s, %s]\n", group.session, date)
+		for _, memory := range group.memories {
+			fmt.Fprintf(&b, "%d. %s\n", position, memory.Line())
+			position++
+		}
+	}
+	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)
+	return b.String()
+}
+
+func sweepSessionLabel(source string) string {
+	if source == "__unattributed__" {
+		return "unknown"
+	}
+	const marker = "-sess"
+	idx := strings.LastIndex(source, marker)
+	if idx < 0 {
+		return source
+	}
+	if _, err := strconv.Atoi(source[idx+len(marker):]); err != nil {
+		return source
+	}
+	return source[idx+len(marker):]
+}
+
+func sweepSessionNumber(label string) int {
+	n, err := strconv.Atoi(label)
+	if err != nil {
+		return int(^uint(0) >> 1)
+	}
+	return n
+}
+
 // retrievedMemory is one hit passed to the answering model.
 type retrievedMemory struct {
-	Content   string
-	EventDate string // rendered date or ""
-	Recorded  string
+	Name            string
+	Content         string
+	EventDate       string // rendered date or ""
+	Recorded        string
+	SourceSessionID string
 }
 
 // Line renders a memory with its time markers, mirroring MemorySearch output so

@@ -1084,7 +1084,7 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 func toMemories(hits []memory.Result) []retrievedMemory {
 	mems := make([]retrievedMemory, 0, len(hits))
 	for _, h := range hits {
-		rm := retrievedMemory{Content: h.Content}
+		rm := retrievedMemory{Name: h.Name, Content: h.Content, SourceSessionID: h.SourceSessionID}
 		if h.EventDate != nil && !h.EventDate.IsZero() {
 			rm.EventDate = h.EventDate.Format("2006-01-02")
 		}
