@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -494,6 +495,64 @@ func TestEntityQueryRawMatchUsesTokenBoundaries(t *testing.T) {
 	for _, result := range got {
 		if result.Name == "sam-profile" {
 			t.Fatalf("entity Sam matched same: %+v", got)
+		}
+	}
+}
+
+func TestClusterSweepEnumerationsReplaceTopKWithEntityCluster(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := es.PutEntities(ctx, "seed", []string{"root"}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("cluster-%d", i)
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: fmt.Sprintf("unrelated fact %d", i)}); err != nil {
+			t.Fatalf("cluster entry: %v", err)
+		}
+		entity := fmt.Sprintf("member-%d", i)
+		if err := es.PutEntities(ctx, name, []string{entity}); err != nil {
+			t.Fatalf("cluster entity: %v", err)
+		}
+		if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "root", B: entity, Kind: "co"}}); err != nil {
+			t.Fatalf("cluster edge: %v", err)
+		}
+	}
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
+	got, err := r.Search(ctx, "What things did root do?", 3)
+	if err != nil {
+		t.Fatalf("sweep search: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("sweep search = %+v, want three candidates", got)
+	}
+	if got[0].Name != "seed" {
+		t.Fatalf("sweep seed order = %+v, want seed first", got)
+	}
+	if got[1].Name != "cluster-0" || got[2].Name != "cluster-1" {
+		t.Fatalf("sweep candidates = %+v, want cluster entries after seed", got)
+	}
+}
+
+func TestClusterSweepDisabledOrNonEnumerationPreservesResults(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedRetrievalCorpus(t)
+	baseline := memory.NewRetriever(es, vs, nil)
+	withSweep := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
+	for _, query := range []string{"Sweden", "What is the user's favorite language?"} {
+		want, err := baseline.Search(ctx, query, 5)
+		if err != nil {
+			t.Fatalf("baseline %q: %v", query, err)
+		}
+		got, err := withSweep.Search(ctx, query, 5)
+		if err != nil {
+			t.Fatalf("sweep %q: %v", query, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("non-enumeration %q changed results:\n got=%+v\nwant=%+v", query, got, want)
 		}
 	}
 }

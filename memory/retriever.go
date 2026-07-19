@@ -44,6 +44,7 @@ const clusterSweepCap = 120
 type RetrieverOptions struct {
 	Associative        bool
 	AssocDepth         int
+	ClusterSweep       bool
 	TemporalScore      bool
 	TemporalTau        float64
 	TemporalHardFilter bool
@@ -165,6 +166,19 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	}
 	if temporal != nil {
 		fused = r.applyTemporal(ctx, fused, *temporal)
+	}
+	if r.options.ClusterSweep && ParseEnumerationIntent(query).IsEnumeration {
+		if len(cues) == 0 {
+			var err error
+			cues, _, err = r.entries.EntitySignalsForQuery(ctx, query)
+			if err != nil {
+				slog.Warn("memory: cluster sweep entity cues degraded", "stage", "cluster_sweep_cues", "err", err)
+				cues = nil
+			}
+		}
+		if swept := r.clusterSweepCandidates(ctx, fused, cues); len(swept) > 0 {
+			fused = swept
+		}
 	}
 	if r.reranker != nil {
 		fused = r.rerank(ctx, query, fused, k)

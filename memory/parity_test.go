@@ -186,9 +186,13 @@ func parityResultByQuery(t *testing.T, results []parityResult) map[string]parity
 }
 
 func searchParityQuery(t *testing.T, entries []parityEntry, query parityQuery, client embedding.Client) []string {
+	return searchParityQueryWithOptions(t, entries, query, client, memory.RetrieverOptions{})
+}
+
+func searchParityQueryWithOptions(t *testing.T, entries []parityEntry, query parityQuery, client embedding.Client, opts memory.RetrieverOptions) []string {
 	t.Helper()
 	_, es, vs := newParityStores(t, entries)
-	r := memory.NewRetriever(es, vs, client)
+	r := memory.NewRetrieverWithOptions(es, vs, client, nil, opts)
 	got, err := r.Search(context.Background(), query.Query, query.K)
 	if err != nil {
 		t.Fatalf("search query %q: %v", query.ID, err)
@@ -209,6 +213,11 @@ func TestRetrievalParity(t *testing.T) {
 		got := searchParityQuery(t, entries, query, client)
 		if !reflect.DeepEqual(got, want.EntryIDs) {
 			t.Errorf("query %q (%s): got %v, want %v", query.ID, query.Query, got, want.EntryIDs)
+			continue
+		}
+		zeroSweep := searchParityQueryWithOptions(t, entries, query, client, memory.RetrieverOptions{ClusterSweep: false})
+		if !reflect.DeepEqual(zeroSweep, got) {
+			t.Errorf("query %q zero-value cluster sweep changed parity: got %v, want %v", query.ID, zeroSweep, got)
 			continue
 		}
 		matched++
