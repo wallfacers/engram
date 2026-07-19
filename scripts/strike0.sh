@@ -7,7 +7,8 @@ repeats=${REPEATS:-5}
 extract_a=${EXTRACT_MODEL_A:-${EXTRACT_MODEL:-${LOCOMO_MODEL:-deepseek-v4-pro}}}
 extract_b=${EXTRACT_MODEL_B:-${LOCOMO_MODEL:-deepseek-v4-pro}}
 
-export LOCOMO_PRICE_TABLE=${LOCOMO_PRICE_TABLE:-'{"gpt-5.6-sol":{"in":1.25,"out":10.0},"gpt-5.4-mini":{"in":0.15,"out":0.6}}'}
+# 单价为占位值（USD/1M token），正式跑前以中转站实际计价覆盖 LOCOMO_PRICE_TABLE
+export LOCOMO_PRICE_TABLE=${LOCOMO_PRICE_TABLE:-'{"gpt-5.6-sol":{"in":1.25,"out":10.0},"gpt-5.6-luna":{"in":0.6,"out":4.8}}'}
 
 mkdir -p "$run_root"
 if [[ -e "$run_root/extract-a" || -e "$run_root/extract-b" ]]; then
