@@ -28,6 +28,8 @@ type result struct {
 	InputTokens         int    `json:"input_tokens,omitempty"`
 	OutputTokens        int    `json:"output_tokens,omitempty"`
 	AnswerContextTokens int    `json:"answer_context_tokens,omitempty"`
+	SweepUsed           bool   `json:"sweep_used,omitempty"`
+	SweepOverBudget     bool   `json:"sweep_over_budget,omitempty"`
 }
 
 type resultKey struct {

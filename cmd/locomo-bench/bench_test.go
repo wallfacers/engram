@@ -54,6 +54,65 @@ func TestClusterSweepBenchFlagIsForwardedAndFingerprinted(t *testing.T) {
 	}
 }
 
+func TestSweepBudgetGuardAndStatsCountOnlySweepHits(t *testing.T) {
+	if !sweepOverBudget(options{}, true, provider.Usage{InputTokens: 7718}) {
+		t.Fatal("sweep answer above 1.5x default baseline should be marked")
+	}
+	if sweepOverBudget(options{}, false, provider.Usage{InputTokens: 9000}) {
+		t.Fatal("non-sweep answer should not be marked")
+	}
+	stats := statsFromRuns([][]result{{
+		{QuestionID: "q1", Correct: true, SweepUsed: true, SweepOverBudget: true},
+		{QuestionID: "q2", Correct: true, SweepUsed: true},
+		{QuestionID: "q3", Correct: true, SweepOverBudget: true},
+	}})
+	if stats.SweepQuestions != 2 || stats.SweepOverBudget != 1 || stats.SweepOverBudgetRate != 0.5 {
+		t.Fatalf("sweep budget stats = %+v, want 2/1/0.5", stats)
+	}
+}
+
+func TestAnswerAndJudgeTracksSweepHitForBudgetGuard(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	es := memory.NewEntryStore(st.DB())
+	vs := memory.NewVectorStore(st.DB())
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := es.PutEntities(ctx, "seed", []string{"root"}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "cluster", Content: "cluster fact"}); err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	if err := es.PutEntities(ctx, "cluster", []string{"member"}); err != nil {
+		t.Fatalf("cluster entity: %v", err)
+	}
+	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "root", B: "member", Kind: "co"}}); err != nil {
+		t.Fatalf("edge: %v", err)
+	}
+	retriever := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
+	answer := func(context.Context, string, string) (string, provider.Usage, error) {
+		return "root fact", provider.Usage{InputTokens: 8000, OutputTokens: 5}, nil
+	}
+	judge := func(context.Context, string, string) (string, provider.Usage, error) {
+		return `{"correct":true}`, provider.Usage{}, nil
+	}
+	noRetry := func(context.Context, string, string) (string, error) { return "", nil }
+	correct, _, usage, sweepUsed := answerAndJudgeWithUsage(ctx, retriever, answer, noRetry, noRetry, judge, options{topK: 2, noIDKRetry: true}, locomoQA{
+		Question: "What things did root do?",
+		Answer:   []byte(`"root fact"`),
+		Category: 1,
+	}, slog.Default())
+	if !correct || !sweepUsed || !sweepOverBudget(options{}, sweepUsed, usage) {
+		t.Fatalf("answer result = correct:%v sweep:%v usage:%+v", correct, sweepUsed, usage)
+	}
+}
+
 func TestTemporalBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
 	anchor := time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC)
 	opt := options{temporalScore: true, temporalHardFilter: true}

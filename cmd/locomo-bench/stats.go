@@ -20,10 +20,13 @@ type metricSummary struct {
 }
 
 type statsReport struct {
-	Repeats           int                      `json:"repeats"`
-	Categories        map[string]metricSummary `json:"categories"`
-	Overall           metricSummary            `json:"overall"`
-	OverallComparable metricSummary            `json:"overall_comparable"`
+	Repeats             int                      `json:"repeats"`
+	Categories          map[string]metricSummary `json:"categories"`
+	Overall             metricSummary            `json:"overall"`
+	OverallComparable   metricSummary            `json:"overall_comparable"`
+	SweepQuestions      int                      `json:"sweep_questions"`
+	SweepOverBudget     int                      `json:"sweep_over_budget"`
+	SweepOverBudgetRate float64                  `json:"sweep_over_budget_rate"`
 }
 
 // summarize computes a two-sided 95% confidence interval using the sample
@@ -164,6 +167,12 @@ func statsFromRuns(runs [][]result) statsReport {
 		byCategory := map[string][]bool{}
 		var ordinary, comparable []bool
 		for _, item := range run {
+			if item.SweepUsed {
+				report.SweepQuestions++
+				if item.SweepOverBudget {
+					report.SweepOverBudget++
+				}
+			}
 			category := resultCategory(item)
 			byCategory[category] = append(byCategory[category], item.Correct)
 			comparable = append(comparable, item.Correct)
@@ -196,6 +205,9 @@ func statsFromRuns(runs [][]result) statsReport {
 	}
 	report.Overall = summarize(allRates)
 	report.OverallComparable = summarize(comparableRates)
+	if report.SweepQuestions > 0 {
+		report.SweepOverBudgetRate = float64(report.SweepOverBudget) / float64(report.SweepQuestions)
+	}
 	return report
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/provider"
 )
 
@@ -245,6 +246,14 @@ func buildAnswerPrompt(question string, memories []retrievedMemory) string {
 	}
 	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)
 	return b.String()
+}
+
+func buildAnswerContextPrompt(question string, hits []memory.Result) string {
+	memories := toMemories(hits)
+	if hasClusterSweepHit(hits) {
+		return buildSweepAnswerPrompt(question, memories)
+	}
+	return buildAnswerPrompt(question, memories)
 }
 
 // buildSweepAnswerPrompt groups broad-sweep hits by their source session so

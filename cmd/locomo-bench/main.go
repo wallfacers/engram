@@ -399,6 +399,19 @@ func formatBudgetSummary(mean, baseline float64) string {
 	return fmt.Sprintf("answer_context_tokens_mean=%.0f budget_ratio=%.2fx%s", mean, ratio, warning)
 }
 
+const defaultSweepBudgetBaseline = 5145
+
+func sweepOverBudget(opt options, sweepUsed bool, usage provider.Usage) bool {
+	if !sweepUsed {
+		return false
+	}
+	baseline := opt.budgetBaseline
+	if baseline <= 0 {
+		baseline = defaultSweepBudgetBaseline
+	}
+	return float64(usage.InputTokens) > baseline*1.5
+}
+
 // armState holds one retrieval arm's grading state.
 type armState struct {
 	name    string
@@ -787,7 +800,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				correct, predicted, usage := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
+				correct, predicted, usage, sweepUsed := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -806,6 +819,8 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					InputTokens:         usage.InputTokens,
 					OutputTokens:        usage.OutputTokens,
 					AnswerContextTokens: usage.InputTokens,
+					SweepUsed:           sweepUsed,
+					SweepOverBudget:     sweepOverBudget(armOpt, sweepUsed, usage),
 				})
 			}(s, qa, key, optionsForRun(opt, s.name, len(states) > 1))
 		}
@@ -891,22 +906,23 @@ func validateTemporalStore(ctx context.Context, db *sql.DB, facts int) error {
 // round's, and the question is answered again (EverMemOS-style second round,
 // paid only for the IDK tail). Returns (correct, predicted answer).
 func answerAndJudge(ctx context.Context, retriever *memory.Retriever, answerCall, judgeCall modelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string) {
-	correct, predicted, _ := answerAndJudgeWithUsage(ctx, retriever, usageCallerFromModel(answerCall), answerCall, answerCall, usageCallerFromModel(judgeCall), opt, qa, logger)
+	correct, predicted, _, _ := answerAndJudgeWithUsage(ctx, retriever, usageCallerFromModel(answerCall), answerCall, answerCall, usageCallerFromModel(judgeCall), opt, qa, logger)
 	return correct, predicted
 }
 
-func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage) {
+func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	hits, err := retrieve(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
-		return false, "", provider.Usage{}
+		return false, "", provider.Usage{}, false
 	}
+	sweepUsed := hasClusterSweepHit(hits)
 	prompt := answerPromptForOptionsWithTemporal(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt)
-	predicted, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
+	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, "", usage
+		return false, "", usage, sweepUsed
 	}
 
 	if isIDK(predicted) && !opt.noIDKRetry {
@@ -922,9 +938,9 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 	verdict, _, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
-		return false, predicted, usage
+		return false, predicted, usage, sweepUsed
 	}
-	return parseJudgeVerdict(verdict), predicted, usage
+	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed
 }
 
 // adversarialGold is the judge-facing gold for category-5 questions. They have
@@ -1021,7 +1037,7 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 	if fresh == 0 {
 		return "", false
 	}
-	retry, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(union)))
+	retry, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union))
 	if err != nil || isIDK(retry) {
 		return "", false
 	}
@@ -1059,7 +1075,7 @@ func retryWithRewriteUsage(ctx context.Context, retriever *memory.Retriever, ans
 	if fresh == 0 {
 		return "", provider.Usage{}, false
 	}
-	retry, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(union)))
+	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union))
 	if err != nil || isIDK(retry) {
 		return "", usage, false
 	}
@@ -1082,7 +1098,7 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, false
 	}
-	retry, usage, err := call(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
+	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil || isIDK(retry) {
 		return "", usage, false
 	}
@@ -1090,6 +1106,15 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 }
 
 // toMemories converts retrieval hits into the prompt-facing form.
+func hasClusterSweepHit(hits []memory.Result) bool {
+	for _, hit := range hits {
+		if hit.ClusterSweep {
+			return true
+		}
+	}
+	return false
+}
+
 func toMemories(hits []memory.Result) []retrievedMemory {
 	mems := make([]retrievedMemory, 0, len(hits))
 	for _, h := range hits {
@@ -1399,4 +1424,7 @@ func printStatsSummary(arm string, stats statsReport) {
 	}
 	fmt.Printf("  %-24s mean=%5.1f%% ci95=[%5.1f%%,%5.1f%%]\n", "OVERALL", stats.Overall.Mean*100, stats.Overall.CI95[0]*100, stats.Overall.CI95[1]*100)
 	fmt.Printf("  %-24s mean=%5.1f%% ci95=[%5.1f%%,%5.1f%%]\n", "OVERALL_COMPARABLE", stats.OverallComparable.Mean*100, stats.OverallComparable.CI95[0]*100, stats.OverallComparable.CI95[1]*100)
+	if stats.SweepQuestions > 0 {
+		fmt.Printf("  %-24s %d/%d  %5.1f%%\n", "SWEEP_OVER_BUDGET", stats.SweepOverBudget, stats.SweepQuestions, stats.SweepOverBudgetRate*100)
+	}
 }

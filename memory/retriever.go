@@ -103,6 +103,7 @@ type Result struct {
 	EventDate       *time.Time
 	CreatedAt       time.Time
 	SourceSessionID string
+	ClusterSweep    bool
 	Score           float64
 }
 
@@ -167,6 +168,7 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	if temporal != nil {
 		fused = r.applyTemporal(ctx, fused, *temporal)
 	}
+	clusterSweepUsed := false
 	if r.options.ClusterSweep && ParseEnumerationIntent(query).IsEnumeration {
 		if len(cues) == 0 {
 			var err error
@@ -178,6 +180,7 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 		}
 		if swept := r.clusterSweepCandidates(ctx, fused, cues); len(swept) > 0 {
 			fused = swept
+			clusterSweepUsed = true
 		}
 	}
 	if r.reranker != nil {
@@ -200,6 +203,7 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			EventDate:       e.EventDate,
 			CreatedAt:       e.CreatedAt,
 			SourceSessionID: e.SourceSessionID,
+			ClusterSweep:    clusterSweepUsed,
 			Score:           s.Score,
 		})
 	}
