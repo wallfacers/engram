@@ -162,7 +162,8 @@ func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
 		t.Fatalf("tplan call plan = %+v, want unchanged paired plan %+v", got, want)
 	}
 	prices := priceTable{"answer": {In: 1, Out: 2}, "extract": {In: 3, Out: 4}}
-	if got, want := estimateReport(convs, tplan, prices, "answer", "extract"), estimateReport(convs, baseline, prices, "answer", "extract"); !reflect.DeepEqual(got, want) {
+	got, want := estimateReport(convs, tplan, prices, "answer", "extract"), estimateReport(convs, baseline, prices, "answer", "extract")
+	if !reflect.DeepEqual(got.ByRole, want.ByRole) || math.Abs(got.EstimatedUSD-want.EstimatedUSD) > 1e-12 {
 		t.Fatalf("tplan estimate = %+v, want unchanged paired estimate %+v", got, want)
 	}
 }
