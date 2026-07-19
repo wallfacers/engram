@@ -69,9 +69,36 @@ and the keep/revert decision together.
 
 ## Strike 1: Associative Retrieval
 
-- Date:
-- Dataset / repeats:
-- Flags:
+### 2026-07-19 运行事故记录（判定前，两次中止）
+
+第一次运行（18:14 启动）在答题阶段开始时死锁，17 分钟仅产出 4 题后被
+SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因：
+
+1. **第一因 — embedding 无界并发**：答题阶段每题一个 goroutine，LLM 调用
+   受 24 槽信号量门控但检索侧不受控 → 数千个 query embedding 同时打到
+   本地 Ollama 单 runner，排队超过 30s HTTP 超时后全体失败（15 秒内
+   3080 次 `semantic signal degraded`），runner 被压崩（health EOF）。
+   19:12 第二次运行立即复现，确认为并发压垮而非偶发。
+2. **第二因 — LLM 调用无超时 + HTTP/2 单连接**：所有中转站请求 multiplex
+   在同一条经本地代理（127.0.0.1:7897）的 HTTP/2 连接上；该连接在同一
+   时间窗挂死后，~3000 个 in-flight Stream 无超时永久等待 header，信号量
+   槽位全部占死 → 全局死锁。
+
+修复（均为 harness/基础设施改动，非评测口径、非引擎算法）：
+
+- `e0f4403` fix(embedding): HTTPClient 加 MaxInflight 信号量（默认 4，
+  与 Ollama 默认并行度匹配），排队不消耗 HTTP 超时。
+- `2a4b78b` fix(bench): gateUsage/gate 每次 LLM 调用加 3 分钟超时 +
+  单次重试，超时取消释放槽位；重跑环境加 `GODEBUG=http2client=0`
+  禁用 HTTP/2 单连接复用（HTTP/1.1 下单连接死亡不再殃及全部请求）。
+
+费用影响：建库产物（s1-store，luna extraction）完整保留并被第三次运行
+复用（"reusing persisted extraction"），事故净损失仅前两次的 ~7 题答题，
+金额可忽略。第三次运行（19:14 启动）健康：degraded=0，答题稳定产出。
+
+- Date: 2026-07-19（第三次运行，前两次中止见上）
+- Dataset / repeats: locomo10 全量 × 5 repeats × 双臂
+- Flags: `--retrieval hybrid,hybrid+assoc --no-idk-retry --force-answer`（同进程配对，Amendment 001）
 - Estimate output:
 - Actual cost (`cost.json`):
 - `stats.json`:
