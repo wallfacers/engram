@@ -72,7 +72,7 @@ func TestWorkerBuildsSynonymEdgesFromStoredEmbeddings(t *testing.T) {
 	if err := es.PutEntities(ctx, "a", []string{"Alpha"}); err != nil {
 		t.Fatalf("entities a: %v", err)
 	}
-	if err := es.PutEntities(ctx, "b", []string{"Beta"}); err != nil {
+	if err := es.PutEntities(ctx, "b", []string{"Alpha project"}); err != nil {
 		t.Fatalf("entities b: %v", err)
 	}
 	if _, err := s.DB().ExecContext(ctx, `
@@ -92,12 +92,54 @@ func TestWorkerBuildsSynonymEdgesFromStoredEmbeddings(t *testing.T) {
 	w.nowFn = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 	w.RunPass(ctx)
 
-	edges, err := es.NeighborsOf(ctx, []string{"alpha", "beta"}, []string{"syn"})
+	edges, err := es.NeighborsOf(ctx, []string{"alpha", "alpha project"}, []string{"syn"})
 	if err != nil {
 		t.Fatalf("syn neighbors: %v", err)
 	}
-	if len(edges) != 1 || edges[0].A != "alpha" || edges[0].B != "beta" || edges[0].Weight < 0.8 {
-		t.Fatalf("synonym edges = %+v, want alpha/beta cosine > .8", edges)
+	if len(edges) != 1 || edges[0].A != "alpha" || edges[0].B != "alpha project" || edges[0].Weight < 0.8 {
+		t.Fatalf("synonym edges = %+v, want alpha/alpha project cosine > .8", edges)
+	}
+}
+
+func TestWorkerSynonymEdgesRequireAliasEvidence(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "a", Content: "alpha fact"})
+	seed(t, es, &memory.Entry{Name: "b", Content: "beta fact"})
+	if err := es.PutEntities(ctx, "a", []string{"Alice"}); err != nil {
+		t.Fatalf("entities a: %v", err)
+	}
+	if err := es.PutEntities(ctx, "b", []string{"Camping"}); err != nil {
+		t.Fatalf("entities b: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `
+		INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at) VALUES
+			(?,?,?,?,?), (?,?,?,?,?)`,
+		"a", "m", 2, embedding.EncodeVector([]float32{1, 0}), 1,
+		"b", "m", 2, embedding.EncodeVector([]float32{0.99, 0.01}), 1); err != nil {
+		t.Fatalf("insert embeddings: %v", err)
+	}
+	w := NewWorker(es, s.DB(), func(context.Context, string, string) (string, error) {
+		return `{"evict":[],"merge":[]}`, nil
+	}, Config{
+		EntryCountHigh: 0, MinInterval: time.Minute, LeaseTTL: time.Minute,
+		MaxCandidatesPerPass: 20, ContentSnippetChars: 200, Weights: defaultWeights,
+		Budgets: memory.DefaultBudgets(),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.nowFn = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+	w.RunPass(ctx)
+
+	edges, err := es.NeighborsOf(ctx, []string{"alice", "camping"}, []string{"syn"})
+	if err != nil {
+		t.Fatalf("syn neighbors: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("unrelated entities became synonym edges: %+v", edges)
 	}
 }
 

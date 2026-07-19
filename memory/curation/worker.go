@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +54,7 @@ type Worker struct {
 	minInterval    time.Duration
 	leaseTTL       time.Duration
 	lastPass       time.Time
+	synonymSeen    map[string]struct{}
 
 	// trigger is a buffered(1) debounced pressure signal: a pending wake
 	// suppresses duplicates so a write burst enqueues at most one pass.
@@ -81,6 +84,7 @@ func NewWorker(store *memory.EntryStore, db *sql.DB, call ModelCaller, cfg Confi
 		minInterval:    cfg.MinInterval,
 		leaseTTL:       cfg.LeaseTTL,
 		trigger:        make(chan struct{}, 1),
+		synonymSeen:    make(map[string]struct{}),
 	}
 }
 
@@ -301,8 +305,36 @@ func (w *Worker) buildSynonymEdges(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	w.mu.Lock()
+	newNames := make(map[string]struct{})
+	for _, vector := range vectors {
+		if _, seen := w.synonymSeen[vector.name]; !seen {
+			newNames[vector.name] = struct{}{}
+		}
+	}
+	w.mu.Unlock()
+	if len(newNames) == 0 {
+		return nil
+	}
+	allNames := make([]string, 0, len(vectors))
+	seenNames := make(map[string]struct{}, len(vectors))
+	for _, vector := range vectors {
+		if _, seen := seenNames[vector.name]; seen {
+			continue
+		}
+		seenNames[vector.name] = struct{}{}
+		allNames = append(allNames, vector.name)
+	}
+	sort.Strings(allNames)
+	entitiesByEntry, err := w.store.EntitiesByEntry(ctx, allNames)
+	if err != nil {
+		return err
+	}
 	pairs := make([]memory.EntityEdge, 0)
 	for i := 0; i < len(vectors); i++ {
+		if _, isNew := newNames[vectors[i].name]; !isNew {
+			continue
+		}
 		for j := i + 1; j < len(vectors); j++ {
 			if vectors[i].model != vectors[j].model || len(vectors[i].vec) != len(vectors[j].vec) {
 				continue
@@ -311,22 +343,47 @@ func (w *Worker) buildSynonymEdges(ctx context.Context) error {
 			if score <= 0.8 {
 				continue
 			}
-			left, err := w.store.EntitiesOf(ctx, []string{vectors[i].name})
-			if err != nil {
-				return err
-			}
-			right, err := w.store.EntitiesOf(ctx, []string{vectors[j].name})
-			if err != nil {
-				return err
-			}
+			left := entitiesByEntry[vectors[i].name]
+			right := entitiesByEntry[vectors[j].name]
 			for _, a := range left {
 				for _, b := range right {
+					if !synonymAlias(a, b) {
+						continue
+					}
 					pairs = append(pairs, memory.EntityEdge{A: a, B: b, Kind: "syn", Weight: score})
 				}
 			}
 		}
 	}
-	return w.store.UpsertEdges(ctx, pairs)
+	if err := w.store.UpsertEdges(ctx, pairs); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	for name := range newNames {
+		w.synonymSeen[name] = struct{}{}
+	}
+	w.mu.Unlock()
+	return nil
+}
+
+func synonymAlias(left, right string) bool {
+	left = memory.EntityNorm(left)
+	right = memory.EntityNorm(right)
+	if left == "" || right == "" || left == right {
+		return false
+	}
+	for _, l := range strings.Fields(left) {
+		for _, r := range strings.Fields(right) {
+			if l == r {
+				return true
+			}
+		}
+	}
+	return hasPrefixOfAtLeastFour(left, right) || hasPrefixOfAtLeastFour(right, left)
+}
+
+func hasPrefixOfAtLeastFour(prefix, value string) bool {
+	return len([]rune(prefix)) >= 4 && strings.HasPrefix(value, prefix)
 }
 
 // buildJudgeCandidates converts scored candidates into the prompt's plain DTOs,

@@ -426,6 +426,39 @@ func (s *EntryStore) EntitiesOf(ctx context.Context, names []string) ([]string, 
 	return out, rows.Err()
 }
 
+// EntitiesByEntry returns normalized entity keys grouped by entry name in one
+// query. It is used by maintenance jobs that compare many entries without
+// issuing one entity lookup per pair.
+func (s *EntryStore) EntitiesByEntry(ctx context.Context, names []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(names))
+	if s == nil || len(names) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	args := make([]any, len(names))
+	for i, name := range names {
+		args[i] = name
+	}
+	rows, err := s.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT entry_name, entity_norm FROM memory_entities WHERE entry_name IN (%s) ORDER BY entry_name, entity_norm`, placeholders),
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("memory: entities by entry: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	for rows.Next() {
+		var name, entity string
+		if err := rows.Scan(&name, &entity); err != nil {
+			return nil, fmt.Errorf("memory: scan entities by entry: %w", err)
+		}
+		out[name] = append(out[name], entity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: read entities by entry: %w", err)
+	}
+	return out, nil
+}
+
 // BumpUsage records a usage hit: increments hit_count and stamps last_used_at.
 // It is best-effort — a name that does not exist is not an error (0 rows
 // affected is silently fine), matching the read-only-tool usage-log semantics.
