@@ -23,7 +23,7 @@ var knownCommands = map[string]struct{}{
 func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	config, commandArgs, err := loadConfig(args, os.Getenv)
 	if err != nil {
-		return diagnose(stderr, exitUsage, err.Error(), "set ENGRAM_DATA_DIR or pass --data-dir")
+		return diagnose(stderr, exitUsage, err.Error(), "run: engram [--data-dir <dir>] <command>")
 	}
 	if len(commandArgs) == 0 {
 		return diagnose(stderr, exitUsage, "command is required", "run: engram <command>")
@@ -32,14 +32,19 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	if _, ok := knownCommands[command]; !ok {
 		return diagnose(stderr, exitUsage, fmt.Sprintf("unknown command %q", command), "run: engram <command>")
 	}
+	// version is a build-probe that needs no data dir or namespace — dispatch it
+	// before the data-dir requirement below.
+	if command == "version" {
+		return runVersion(commandArgs[1:], stdout, stderr)
+	}
+	if config.DataDir == "" {
+		return diagnose(stderr, exitUsage, errDataDirRequired.Error(), "set ENGRAM_DATA_DIR or pass --data-dir")
+	}
 	if _, err := normalizeNamespace(config.Namespace); err != nil {
 		return diagnose(stderr, exitInvalidNS, err.Error(), "allowed: ^[A-Za-z0-9._-]{1,64}$")
 	}
 	if command == "namespaces" {
 		return runNamespaces(config, commandArgs[1:], stdout, stderr)
-	}
-	if command == "version" {
-		return runVersion(commandArgs[1:], stdout, stderr)
 	}
 
 	handle, err := openEngine(context.Background(), config)

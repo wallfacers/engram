@@ -55,8 +55,8 @@ func loadConfig(args []string, getenv func(string) string) (Config, []string, er
 		LLMProvider:  strings.TrimSpace(*llmProvider),
 		LLMAPIKey:    getenv("ENGRAM_LLM_API_KEY"),
 	}
-	if config.DataDir == "" {
-		return Config{}, nil, errDataDirRequired
-	}
+	// data-dir is required by every command that opens a store, but not by
+	// `version` (a build-probe). Enforcement therefore lives in run(), after the
+	// command is known, not here — so `engram version` works with no data dir.
 	return config, fs.Args(), nil
 }

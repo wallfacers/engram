@@ -54,6 +54,23 @@ func TestStoreOperations(t *testing.T) {
 	}
 }
 
+// TestVersionDoesNotRequireDataDir locks the frozen contract: `version` is a
+// build-probe that prints and exits 0 with no data directory configured. A prior
+// implementation required --data-dir for every command, which broke this probe.
+func TestVersionDoesNotRequireDataDir(t *testing.T) {
+	setOfflineEnvironment(t) // clears ENGRAM_DATA_DIR and all other ENGRAM_* vars
+	code, stdout, stderr := runCommand(t, []string{"version"}, "")
+	if code != exitOK {
+		t.Fatalf("version exit code = %d, stderr = %q", code, stderr)
+	}
+	if got, want := stdout, version.Version+"\n"; got != want {
+		t.Errorf("version stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Errorf("version stderr = %q, want empty", stderr)
+	}
+}
+
 func markdownListItems(document string) []string {
 	var items []string
 	for _, line := range strings.Split(document, "\n") {
