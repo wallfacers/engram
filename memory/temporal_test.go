@@ -309,3 +309,21 @@ func TestParseTemporalIntentStativeYiqianIsHistorical(t *testing.T) {
 		t.Fatalf("stative 以前 state = %q, want historical: %+v", win.State, win)
 	}
 }
+
+func TestParseTemporalIntentChineseAnchorPrecedesOrderWord(t *testing.T) {
+	anchor := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	win, ok := ParseTemporalIntent("陶艺课之前发生了什么？", anchor)
+	if !ok || win.Intent != "before" {
+		t.Fatalf("Chinese event-anchor order query not parsed as before: %+v ok=%t", win, ok)
+	}
+	if win.AnchorEntity != "陶艺课" {
+		t.Fatalf("AnchorEntity = %q, want 陶艺课 (anchor precedes the order word in Chinese)", win.AnchorEntity)
+	}
+	win, ok = ParseTemporalIntent("What did Melanie do before the pottery class?", anchor)
+	if !ok || win.Intent != "before" {
+		t.Fatalf("English event-anchor order query not parsed as before: %+v ok=%t", win, ok)
+	}
+	if win.AnchorEntity != "pottery class" {
+		t.Fatalf("AnchorEntity = %q, want pottery class", win.AnchorEntity)
+	}
+}

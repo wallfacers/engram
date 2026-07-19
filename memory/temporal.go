@@ -141,7 +141,14 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 	// Date-anchored 以前 ("5月7日以前") is ordinal and handled above; standalone
 	// 以前 is stative ("formerly") and must fall through to historicalPattern.
 	if order, orderStart, orderEnd := temporalOrder(query); order != "" && query[orderStart:orderEnd] != "以前" {
-		entity := cleanAnchorEntity(query[orderEnd:])
+		// The anchor sits on opposite sides of the order word by language:
+		// English "before the pottery class" → after; Chinese "陶艺课之前" → before.
+		var entity string
+		if matched := query[orderStart:orderEnd]; strings.HasPrefix(matched, "之") || matched == "以后" {
+			entity = cleanAnchorEntity(query[:orderStart])
+		} else {
+			entity = cleanAnchorEntity(query[orderEnd:])
+		}
 		if entity != "" {
 			return TimeWindow{Intent: order, State: "historical", AnchorEntity: entity}, true
 		}
@@ -401,6 +408,6 @@ func cleanAnchorEntity(s string) string {
 	s = strings.TrimSpace(strings.TrimPrefix(s, "a "))
 	s = strings.TrimSpace(strings.TrimSuffix(s, " on"))
 	s = strings.TrimSpace(strings.TrimSuffix(s, " at"))
-	s = strings.Trim(s, " '.,?!")
+	s = strings.Trim(s, " '.,?!？！，。、")
 	return s
 }
