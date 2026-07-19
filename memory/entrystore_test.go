@@ -412,6 +412,27 @@ func TestEntityMatchCounts(t *testing.T) {
 	}
 }
 
+func TestEntitySignalsForQueryCombinesCuesAndCounts(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newEntryStore(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "alice", Content: "profile"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := es.PutEntities(ctx, "alice", []string{"Alice Smith", "Berlin"}); err != nil {
+		t.Fatalf("entities: %v", err)
+	}
+	cues, counts, err := es.EntitySignalsForQuery(ctx, "What did Alice Smith do?")
+	if err != nil {
+		t.Fatalf("entity signals: %v", err)
+	}
+	if len(cues) != 1 || cues[0] != "alice smith" {
+		t.Fatalf("cues = %v, want [alice smith]", cues)
+	}
+	if counts["alice"] != 1 {
+		t.Fatalf("counts = %v, want alice=1", counts)
+	}
+}
+
 func TestPutEntitiesReplaces(t *testing.T) {
 	es, _ := newEntryStore(t)
 	ctx := context.Background()

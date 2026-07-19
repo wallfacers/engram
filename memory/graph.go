@@ -141,11 +141,31 @@ func (s *EntryStore) NeighborsOf(ctx context.Context, entities []string, kinds [
 
 // EntityDocFreq returns the number of distinct entries containing each entity.
 func (s *EntryStore) EntityDocFreq(ctx context.Context) (map[string]int, error) {
+	return s.entityDocFreq(ctx, nil)
+}
+
+// EntityDocFreqFor returns document frequencies only for the requested entity
+// keys. Walkers use this bounded form so unrelated entities do not require a
+// full-table GROUP BY on every query.
+func (s *EntryStore) EntityDocFreqFor(ctx context.Context, entities []string) (map[string]int, error) {
+	return s.entityDocFreq(ctx, entities)
+}
+
+func (s *EntryStore) entityDocFreq(ctx context.Context, entities []string) (map[string]int, error) {
 	if s == nil {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT entity_norm, COUNT(DISTINCT entry_name) FROM memory_entities GROUP BY entity_norm`)
+	query := `SELECT entity_norm, COUNT(DISTINCT entry_name) FROM memory_entities`
+	args := make([]any, 0, len(entities))
+	if len(entities) > 0 {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(entities)), ",")
+		query += ` WHERE entity_norm IN (` + placeholders + `)`
+		for _, entity := range entities {
+			args = append(args, EntityNorm(entity))
+		}
+	}
+	query += ` GROUP BY entity_norm`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("memory: entity doc frequency: %w", err)
 	}
@@ -175,16 +195,25 @@ func (s *EntryStore) WalkEntityGraph(ctx context.Context, seeds []string, depth 
 	if depth > maxAssociativeDepth {
 		depth = maxAssociativeDepth
 	}
-	freq, err := s.EntityDocFreq(ctx)
-	if err != nil {
-		return nil, err
-	}
-	frontier := make(map[string]float64)
+	normalizedSeeds := make([]string, 0, len(seeds))
+	seenSeeds := make(map[string]struct{}, len(seeds))
 	for _, raw := range seeds {
 		entity := EntityNorm(raw)
 		if entity == "" {
 			continue
 		}
+		if _, seen := seenSeeds[entity]; seen {
+			continue
+		}
+		seenSeeds[entity] = struct{}{}
+		normalizedSeeds = append(normalizedSeeds, entity)
+	}
+	freq, err := s.EntityDocFreqFor(ctx, normalizedSeeds)
+	if err != nil {
+		return nil, err
+	}
+	frontier := make(map[string]float64)
+	for _, entity := range normalizedSeeds {
 		if count := freq[entity]; count > 0 {
 			frontier[entity] += 1 / float64(count)
 		}
@@ -240,41 +269,8 @@ func (s *EntryStore) WalkEntityGraph(ctx context.Context, seeds []string, depth 
 // to exact normalized-token matches, it matches entity_raw as a substring of the
 // whole query so names such as "Alice Smith" survive natural-language wording.
 func (s *EntryStore) EntityCues(ctx context.Context, query string) ([]string, error) {
-	if s == nil {
-		return nil, nil
-	}
-	tokens := make(map[string]struct{}, len(EntityQueryTokens(query)))
-	for _, token := range EntityQueryTokens(query) {
-		tokens[token] = struct{}{}
-	}
-	queryWordTokens := entityWordTokens(query)
-	rows, err := s.db.QueryContext(ctx, `SELECT entity_norm, entity_raw FROM memory_entities`)
-	if err != nil {
-		return nil, fmt.Errorf("memory: entity cues: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-	seen := make(map[string]struct{})
-	for rows.Next() {
-		var entity, raw string
-		if err := rows.Scan(&entity, &raw); err != nil {
-			return nil, fmt.Errorf("memory: scan entity cue: %w", err)
-		}
-		rawNorm := EntityNorm(raw)
-		_, exact := tokens[entity]
-		phrase := rawNorm != "" && containsEntityTokenSequence(queryWordTokens, entityWordTokens(rawNorm))
-		if exact || phrase {
-			seen[entity] = struct{}{}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("memory: read entity cues: %w", err)
-	}
-	out := make([]string, 0, len(seen))
-	for entity := range seen {
-		out = append(out, entity)
-	}
-	sort.Strings(out)
-	return out, nil
+	cues, _, err := s.EntitySignalsForQuery(ctx, query)
+	return cues, err
 }
 
 // EntityEntryScores maps graph entity scores to the entries carrying those

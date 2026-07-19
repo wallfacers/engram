@@ -123,11 +123,22 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	vector := r.vectorRankContext(ctx, query, pool)
 	vec := vector.ranks
 	// Signal 3: entity.
-	ent := r.entityRanks(ctx, query, r.options.Associative)
+	var ent map[string]int
+	var cues []string
+	if r.options.Associative {
+		var counts map[string]int
+		var err error
+		cues, counts, err = r.entries.EntitySignalsForQuery(ctx, query)
+		if err == nil {
+			ent = ranksFromEntityCounts(counts)
+		}
+	} else {
+		ent = r.entityRanks(ctx, query, false)
+	}
 
 	signals := []map[string]int{bm25, vec, ent}
 	if r.options.Associative {
-		signals = append(signals, r.associativeRanks(ctx, query, pool, vector.query, vector.stored))
+		signals = append(signals, r.associativeRanks(ctx, pool, vector.query, vector.stored, cues))
 	}
 	fused := fuseRRF(signals...)
 	if len(fused) == 0 {
@@ -161,12 +172,11 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 // associativeRanks expands query entities through the local graph and then
 // ranks the resulting entries with the original query embedding. Any missing
 // dependency or storage/embedding failure drops this signal only.
-func (r *Retriever) associativeRanks(ctx context.Context, query string, limit int, queryVector []float32, stored map[string][]float32) map[string]int {
+func (r *Retriever) associativeRanks(ctx context.Context, limit int, queryVector []float32, stored map[string][]float32, cues []string) map[string]int {
 	if r.entries == nil || len(queryVector) == 0 || len(stored) == 0 {
 		return nil
 	}
-	cues, err := r.entries.EntityCues(ctx, query)
-	if err != nil || len(cues) == 0 {
+	if len(cues) == 0 {
 		return nil
 	}
 	depth := r.options.AssocDepth
@@ -406,6 +416,13 @@ func (r *Retriever) entityRanks(ctx context.Context, query string, wholeSentence
 		counts, err = r.entries.EntityMatchCounts(ctx, EntityQueryTokens(query))
 	}
 	if err != nil || len(counts) == 0 {
+		return nil
+	}
+	return ranksFromEntityCounts(counts)
+}
+
+func ranksFromEntityCounts(counts map[string]int) map[string]int {
+	if len(counts) == 0 {
 		return nil
 	}
 	type nc struct {

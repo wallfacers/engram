@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -130,12 +131,11 @@ func containsEntityTokenSequence(query, entity []string) bool {
 	return false
 }
 
-// EntityMatchCountsForQuery combines exact entity-token matching with a whole
-// query substring match against entity_raw. The latter links natural-language
-// questions to multi-word extracted entities without changing the token API.
-func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string) (map[string]int, error) {
+// EntitySignalsForQuery scans the entity index once and returns both the query
+// cues used for graph expansion and per-entry match counts used for ranking.
+func (s *EntryStore) EntitySignalsForQuery(ctx context.Context, query string) ([]string, map[string]int, error) {
 	if s == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	tokens := make(map[string]struct{}, len(EntityQueryTokens(query)))
 	for _, token := range EntityQueryTokens(query) {
@@ -144,15 +144,16 @@ func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string
 	queryWordTokens := entityWordTokens(query)
 	rows, err := s.db.QueryContext(ctx, `SELECT entry_name, entity_norm, entity_raw FROM memory_entities`)
 	if err != nil {
-		return nil, fmt.Errorf("memory: entity query match: %w", err)
+		return nil, nil, fmt.Errorf("memory: entity query match: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
 	counts := make(map[string]int)
+	cues := make(map[string]struct{})
 	seen := make(map[string]map[string]struct{})
 	for rows.Next() {
 		var name, entity, raw string
 		if err := rows.Scan(&name, &entity, &raw); err != nil {
-			return nil, fmt.Errorf("memory: scan entity query match: %w", err)
+			return nil, nil, fmt.Errorf("memory: scan entity query match: %w", err)
 		}
 		rawNorm := EntityNorm(raw)
 		_, exact := tokens[entity]
@@ -160,6 +161,7 @@ func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string
 		if !exact && !phrase {
 			continue
 		}
+		cues[entity] = struct{}{}
 		if seen[name] == nil {
 			seen[name] = make(map[string]struct{})
 		}
@@ -170,7 +172,20 @@ func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string
 		counts[name]++
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("memory: read entity query match: %w", err)
+		return nil, nil, fmt.Errorf("memory: read entity query match: %w", err)
 	}
-	return counts, nil
+	orderedCues := make([]string, 0, len(cues))
+	for cue := range cues {
+		orderedCues = append(orderedCues, cue)
+	}
+	sort.Strings(orderedCues)
+	return orderedCues, counts, nil
+}
+
+// EntityMatchCountsForQuery combines exact entity-token matching with a whole
+// query substring match against entity_raw. The latter links natural-language
+// questions to multi-word extracted entities without changing the token API.
+func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string) (map[string]int, error) {
+	_, counts, err := s.EntitySignalsForQuery(ctx, query)
+	return counts, err
 }
