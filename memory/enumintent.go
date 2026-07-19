@@ -12,7 +12,7 @@ type EnumerationIntent struct {
 }
 
 var (
-	enumerationPattern = regexp.MustCompile(`(?i)\b(?:what\s+(?:thing|things|item|items|activity|activities|place|places|event|events|ways)|which\s+(?:thing|things|item|items|activity|activities|place|places|event|events|option|options|ones)|how\s+(?:many|often)|all\s+the|every\s+time|list\s+(?:of|all|the|out|every|your|their|his|her|its|our|my|them|us|down))\b|哪些|几次|多少(?:个|次|种|项|件|人|地方)?|每次|分别`)
+	enumerationPattern = regexp.MustCompile(`(?i)\b(?:what\s+(?:thing|things|item|items|activity|activities|place|places|event|events|ways)|which\s+(?:thing|things|item|items|activity|activities|place|places|event|events|option|options|ones)|how\s+(?:many|often)|all\s+the|every\s+time|list\s+(?:of|all|the|out|every|your|their|his|her|its|our|my|them|us|down))\b|哪些|几次|多少[^钱价金费]|每次|分别`)
 	comparisonPattern  = regexp.MustCompile(`(?i)\b(?:compare|comparison|difference\s+between)\b|\bwhich\b[^?!.]{0,80}\b(?:more|less|than)\b|比较|差异|哪个[^?。！？]{0,40}(?:更多|更少|较多|较少)`)
 )
 

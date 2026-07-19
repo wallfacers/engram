@@ -29,8 +29,9 @@ func TestEnumerationIntentRecognizesChineseEnumeration(t *testing.T) {
 		"他参加了几次活动？",
 		"他们提到了多少次旅行？",
 		"多少国家？",
-		"多少？",
-		"多少钱？",
+		"多少本书？",
+		"多少次？",
+		"你收集了多少？",
 		"每次会议发生了什么？",
 	} {
 		if got := ParseEnumerationIntent(query); !got.IsEnumeration {
@@ -52,9 +53,13 @@ func TestEnumerationIntentDoesNotMisclassifySingleFactQuestions(t *testing.T) {
 	}
 }
 
-func TestEnumerationIntentDoesNotMistakeListPriceForEnumeration(t *testing.T) {
+func TestEnumerationIntentDoesNotMistakePricesForEnumeration(t *testing.T) {
 	for _, query := range []string{
 		"What is the list price of the camera?",
+		"多少钱？",
+		"多少价格？",
+		"多少费用？",
+		"多少金额？",
 	} {
 		if got := ParseEnumerationIntent(query); got.IsEnumeration {
 			t.Errorf("ParseEnumerationIntent(%q) = %+v, want non-enumeration", query, got)
