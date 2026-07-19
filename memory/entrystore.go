@@ -114,8 +114,8 @@ func boolToInt(b bool) int {
 // upsertTx writes e via INSERT ... ON CONFLICT(name) DO UPDATE within the given
 // querier (a *sql.DB or *sql.Tx). It mutates e in place to fill ID/CreatedAt/
 // UpdatedAt defaults so callers observe what was persisted. On conflict the
-	// existing created_at/hit_count/last_used_at and lifecycle fields are
-	// preserved; only the mutable fields and updated_at are refreshed.
+// existing created_at/hit_count/last_used_at and lifecycle fields are
+// preserved; only the mutable fields and updated_at are refreshed.
 type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -205,6 +205,21 @@ func (s *EntryStore) GetByName(ctx context.Context, name string) (*Entry, error)
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+entrySelectCols+` FROM memory_entries WHERE name = ?`, name)
 	return scanEntry(row)
+}
+
+// HasContent reports whether an entry with the exact stored content exists.
+// Pipelines use this as their idempotency guard before creating derived indexes.
+func (s *EntryStore) HasContent(ctx context.Context, content string) (bool, error) {
+	var found int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM memory_entries WHERE content = ? LIMIT 1`, content).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("memory: check entry content: %w", err)
+	}
+	return found != 0, nil
 }
 
 // List returns all entries, sorted by name ascending.

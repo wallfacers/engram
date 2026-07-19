@@ -136,6 +136,14 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		slog.Warn("memory: extracted fact rejected", "reason", "content_too_large", "err", err)
 		return false
 	}
+	exists, err := p.entries.HasContent(ctx, content)
+	if err != nil {
+		slog.Warn("memory: extracted fact dedup check failed", "err", err)
+		return false
+	}
+	if exists {
+		return false
+	}
 	trigger := deriveTrigger(content, p.budgets.TriggerChars)
 	if err := p.budgets.CheckTrigger(trigger); err != nil {
 		trigger = "" // a bad derived trigger is non-fatal; store without one
