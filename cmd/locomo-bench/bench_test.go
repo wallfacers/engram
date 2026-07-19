@@ -429,6 +429,81 @@ func TestTPlanArmMechanismControlsTemporalAnswerPrompt(t *testing.T) {
 	}
 }
 
+func TestTPlanArmsWriteDistinctAnswerRegimes(t *testing.T) {
+	ctx := context.Background()
+	conv := conversation{
+		ID:       11,
+		Sessions: []session{{Index: 1, Turns: []turn{{Speaker: "user", Text: "I visited Oslo in May."}}}},
+		QA:       []locomoQA{{Question: "When did I visit Oslo?", Answer: []byte(`"May"`), Category: 2}},
+	}
+	opt := options{
+		datasetFormat: "locomo",
+		retrieval:     "fts,fts+tplan",
+		topK:          5,
+		storeDir:      t.TempDir(),
+		noIDKRetry:    true,
+		forceAnswer:   true,
+	}
+	arms, err := armsFor(opt.retrieval)
+	if err != nil {
+		t.Fatalf("parse arms: %v", err)
+	}
+	extract := func(context.Context, string, string) (string, error) {
+		return `{"facts":[{"fact":"The user visited Oslo in May.","entities":["Oslo"],"category":"event"}]}`, nil
+	}
+	runtime, err := buildConversationRuntime(ctx, opt, conv, extract, nil, arms, slog.Default())
+	if err != nil {
+		t.Fatalf("build runtime: %v", err)
+	}
+	defer runtime.Close()
+	answer := func(context.Context, string, string) (string, provider.Usage, error) {
+		return "May", provider.Usage{}, nil
+	}
+	judge := func(context.Context, string, string) (string, provider.Usage, error) {
+		return `{"correct":true}`, provider.Usage{}, nil
+	}
+	runDir := t.TempDir()
+	states := make([]*armState, 0, len(arms))
+	for _, arm := range arms {
+		journal, err := openJournal(runDir, arm)
+		if err != nil {
+			t.Fatalf("open %s journal: %v", arm, err)
+		}
+		states = append(states, &armState{name: arm, agg: newAggregator(), journal: journal})
+	}
+	if err := answerConversationWithUsage(ctx, opt, conv, runtime, answer, func(context.Context, string, string) (string, error) { return "", nil }, func(context.Context, string, string) (string, error) { return "", nil }, judge, states, slog.Default()); err != nil {
+		t.Fatalf("answer conversation: %v", err)
+	}
+	for _, state := range states {
+		state.journal.Close()
+	}
+
+	for _, tc := range []struct {
+		arm, want string
+	}{
+		{"fts", "force_answer=true;abstain_prompt=false;no_idk_retry=true"},
+		{"fts+tplan", "force_answer=true;abstain_prompt=false;no_idk_retry=true;temporal_answer_prompt=true"},
+	} {
+		items, err := readResultsJSONL(filepath.Join(runDir, "results-"+tc.arm+".jsonl"))
+		if err != nil || len(items) != 1 {
+			t.Fatalf("read %s journal = %d items, err=%v", tc.arm, len(items), err)
+		}
+		if items[0].AnswerRegime != tc.want {
+			t.Fatalf("%s answer regime = %q, want %q", tc.arm, items[0].AnswerRegime, tc.want)
+		}
+	}
+	if err := validatePromptModes(optionsForArm(options{forceAnswer: true}, "hybrid+tplan")); err != nil {
+		t.Fatalf("force-answer tplan arm rejected: %v", err)
+	}
+	regimeOpt := options{runDir: t.TempDir(), retrieval: "hybrid,hybrid+tplan"}
+	if err := checkRunDirRegime(regimeOpt); err != nil {
+		t.Fatalf("pin tplan run dir: %v", err)
+	}
+	if err := checkRunDirRegime(regimeOpt); err != nil {
+		t.Fatalf("reopen tplan run dir: %v", err)
+	}
+}
+
 func TestPairedReportSchemaAndWrite(t *testing.T) {
 	a := [][]result{{
 		{QuestionID: "q1", Correct: false, Category: 1},
