@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -131,6 +132,8 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 		cues, counts, err = r.entries.EntitySignalsForQuery(ctx, query)
 		if err == nil {
 			ent = ranksFromEntityCounts(counts)
+		} else {
+			slog.Warn("memory: entity signal degraded", "stage", "entity_signals", "err", err)
 		}
 	} else {
 		ent = r.entityRanks(ctx, query, false)
@@ -184,11 +187,19 @@ func (r *Retriever) associativeRanks(ctx context.Context, limit int, queryVector
 		depth = maxAssociativeDepth
 	}
 	entityScores, err := r.entries.WalkEntityGraph(ctx, cues, depth)
-	if err != nil || len(entityScores) == 0 {
+	if err != nil {
+		slog.Warn("memory: associative signal degraded", "stage", "graph_walk", "err", err)
+		return nil
+	}
+	if len(entityScores) == 0 {
 		return nil
 	}
 	candidates, err := r.entries.EntityEntryScores(ctx, entityScores)
-	if err != nil || len(candidates) == 0 {
+	if err != nil {
+		slog.Warn("memory: associative signal degraded", "stage", "entry_scores", "err", err)
+		return nil
+	}
+	if len(candidates) == 0 {
 		return nil
 	}
 	type scored struct {
@@ -390,11 +401,19 @@ func (r *Retriever) vectorRankContext(ctx context.Context, query string, limit i
 		return vectorRankContext{}
 	}
 	vecs, err := r.client.Embed(ctx, []string{query})
-	if err != nil || len(vecs) != 1 || len(vecs[0]) == 0 || r.vectors == nil {
+	if err != nil {
+		slog.Warn("memory: semantic signal degraded", "stage", "vector_embed", "err", err)
+		return vectorRankContext{}
+	}
+	if len(vecs) != 1 || len(vecs[0]) == 0 || r.vectors == nil {
 		return vectorRankContext{}
 	}
 	candidates, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
-	if err != nil || len(candidates) == 0 {
+	if err != nil {
+		slog.Warn("memory: semantic signal degraded", "stage", "vector_load", "err", err)
+		return vectorRankContext{}
+	}
+	if len(candidates) == 0 {
 		return vectorRankContext{}
 	}
 	scored := embedding.TopKCosine(vecs[0], candidates, limit)
