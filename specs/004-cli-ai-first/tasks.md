@@ -46,14 +46,14 @@ modified or imported (except read-only `internal/version`).
 **Goal**: `add/search/get/list/delete` work fully offline with AI-friendly markdown.
 **Independent test**: empty temp data dir, no endpoints → add→search/get/list→delete round-trip, asserting markdown names the fact.
 
-- [ ] T011 [P] [US1] Write `cmd/engram/commands_test.go` — offline round-trip (SC-001): `add`→`search`(matching)→`get`→`list`→`delete`→`get`(not found, exit 3); assert markdown content and exit codes. (Red first.)
-- [ ] T012 [P] [US1] Write `cmd/engram/parity_test.go` — SC-002: seed entries, assert `engram search <q>` hit set/order == direct `memory.Retriever.Search(q, limit)` on the same store.
-- [ ] T013 [P] [US1] Implement `add` handler in `cmd/engram/add.go` — validate name, build `memory.Entry`, `EntryStore.Upsert`, `Embedder.Enqueue`; budget error → exit 6; markdown write confirmation.
-- [ ] T014 [P] [US1] Implement `search` handler in `cmd/engram/search.go` — `Retriever.Search(query, limit)` (default 8; `--limit<=0` → exit 2); render hits (name/score/snippet/content); honest `degraded.semantic` marker when embedding absent (FR-006).
-- [ ] T015 [P] [US1] Implement `get` handler in `cmd/engram/get.go` — `EntryStore.GetByName`; not found → exit 3 with `... — run: engram list`; render stable fields only.
-- [ ] T016 [P] [US1] Implement `list` handler in `cmd/engram/list.go` — `EntryStore.List`; render all, pinned-first; empty store → valid empty doc.
-- [ ] T017 [P] [US1] Implement `delete` handler in `cmd/engram/delete.go` — `EntryStore.Delete`; not found → exit 3; markdown deletion confirmation.
-- [ ] T018 [US1] Confirm the MVP: `CGO_ENABLED=0 go test -count=1 ./cmd/engram/...` green; T011/T012 pass.
+- [X] T011 [P] [US1] Write `cmd/engram/commands_test.go` — offline round-trip (SC-001): `add`→`search`(matching)→`get`→`list`→`delete`→`get`(not found, exit 3); assert markdown content and exit codes. (Red first.)
+- [X] T012 [P] [US1] Write `cmd/engram/parity_test.go` — SC-002: seed entries, assert `engram search <q>` hit set/order == direct `memory.Retriever.Search(q, limit)` on the same store.
+- [X] T013 [P] [US1] Implement `add` handler in `cmd/engram/add.go` — validate name, build `memory.Entry`, `EntryStore.Upsert`, `Embedder.Enqueue`; budget error → exit 6; markdown write confirmation.
+- [X] T014 [P] [US1] Implement `search` handler in `cmd/engram/search.go` — `Retriever.Search(query, limit)` (default 8; `--limit<=0` → exit 2); render hits (name/score/snippet/content); honest `degraded.semantic` marker when embedding absent (FR-006).
+- [X] T015 [P] [US1] Implement `get` handler in `cmd/engram/get.go` — `EntryStore.GetByName`; not found → exit 3 with `... — run: engram list`; render stable fields only.
+- [X] T016 [P] [US1] Implement `list` handler in `cmd/engram/list.go` — `EntryStore.List`; render all, pinned-first; empty store → valid empty doc.
+- [X] T017 [P] [US1] Implement `delete` handler in `cmd/engram/delete.go` — `EntryStore.Delete`; not found → exit 3; markdown deletion confirmation.
+- [X] T018 [US1] Confirm the MVP: `CGO_ENABLED=0 go test -count=1 ./cmd/engram/...` green; T011/T012 pass.
 
 **Checkpoint**: US1 is a shippable offline memory CLI.
 

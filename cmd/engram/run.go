@@ -20,7 +20,7 @@ var knownCommands = map[string]struct{}{
 	"version":    {},
 }
 
-func run(args []string, _ io.Reader, _ io.Writer, stderr io.Writer) int {
+func run(args []string, _ io.Reader, stdout io.Writer, stderr io.Writer) int {
 	config, commandArgs, err := loadConfig(args, os.Getenv)
 	if err != nil {
 		return diagnose(stderr, exitUsage, err.Error(), "set ENGRAM_DATA_DIR or pass --data-dir")
@@ -42,5 +42,17 @@ func run(args []string, _ io.Reader, _ io.Writer, stderr io.Writer) int {
 	}
 	defer handle.Close() //nolint:errcheck // Close drains queued embeddings before process exit.
 
+	switch command {
+	case "add":
+		return runAdd(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "search":
+		return runSearch(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "get":
+		return runGet(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "list":
+		return runList(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "delete":
+		return runDelete(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	}
 	return diagnose(stderr, exitUsage, fmt.Sprintf("command %q is not available", command), "run: engram help")
 }
