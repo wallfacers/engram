@@ -64,10 +64,10 @@ modified or imported (except read-only `internal/version`).
 **Goal**: `engram ingest` extracts facts when an LLM is configured; clean failure when not; vectors durable on exit.
 **Independent test**: stub `pipeline.ModelCaller` → ingest → new entries via `list`; no-LLM → exit 4.
 
-- [ ] T019 [P] [US2] Write `cmd/engram/ingest_test.go` — with a stub `pipeline.ModelCaller` returning facts: stdin turns → entries stored + count rendered; no-LLM config → exit 4 with the required diagnostic.
-- [ ] T020 [P] [US2] Write `cmd/engram/lifecycle_test.go` — FR-008/SC-003: with a stub embedding client, `add` then a fresh handle open shows the entry's vector present (drain-before-exit); assert no vector lost.
-- [ ] T021 [P] [US2] Implement `ingest` handler in `cmd/engram/ingest.go` — parse stdin turns (one turn per line, `user:`/`assistant:` prefix per quickstart; multi-line text is out of scope) into `[]pipeline.Message`; require `handle.pipe != nil` else exit 4; `Pipeline.Ingest`; render extracted count + new entry names.
-- [ ] T022 [US2] Verify drain-on-exit path in `engine.go` `Close()` covers `add` and `ingest` (T020 green); ingest tests green.
+- [X] T019 [P] [US2] Write `cmd/engram/ingest_test.go` — with a stub `pipeline.ModelCaller` returning facts: stdin turns → entries stored + count rendered; no-LLM config → exit 4 with the required diagnostic.
+- [X] T020 [P] [US2] Write `cmd/engram/lifecycle_test.go` — FR-008/SC-003: with a stub embedding client, `add` then a fresh handle open shows the entry's vector present (drain-before-exit); assert no vector lost.
+- [X] T021 [P] [US2] Implement `ingest` handler in `cmd/engram/ingest.go` — parse stdin turns (one turn per line, `user:`/`assistant:` prefix per quickstart; multi-line text is out of scope) into `[]pipeline.Message`; require `handle.pipe != nil` else exit 4; `Pipeline.Ingest`; render extracted count + new entry names.
+- [X] T022 [US2] Verify drain-on-exit path in `engine.go` `Close()` covers `add` and `ingest` (T020 green); ingest tests green.
 
 **Checkpoint**: memory can be grown from dialogue; offline MVP still intact.
 

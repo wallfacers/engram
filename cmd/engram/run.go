@@ -20,7 +20,7 @@ var knownCommands = map[string]struct{}{
 	"version":    {},
 }
 
-func run(args []string, _ io.Reader, stdout io.Writer, stderr io.Writer) int {
+func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	config, commandArgs, err := loadConfig(args, os.Getenv)
 	if err != nil {
 		return diagnose(stderr, exitUsage, err.Error(), "set ENGRAM_DATA_DIR or pass --data-dir")
@@ -53,6 +53,8 @@ func run(args []string, _ io.Reader, stdout io.Writer, stderr io.Writer) int {
 		return runList(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	case "delete":
 		return runDelete(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "ingest":
+		return runIngest(context.Background(), handle, stdin, stdout, stderr)
 	}
 	return diagnose(stderr, exitUsage, fmt.Sprintf("command %q is not available", command), "run: engram help")
 }
