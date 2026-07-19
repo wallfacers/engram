@@ -3,6 +3,7 @@ package memory_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"testing"
@@ -128,6 +129,32 @@ func TestRetriever_TimeAwareFields(t *testing.T) {
 	}
 	if got[0].CreatedAt.IsZero() {
 		t.Fatal("expected CreatedAt populated on result")
+	}
+}
+
+func TestTemporalScoreUsesSoftExponentialGap(t *testing.T) {
+	windowStart := time.Date(2024, time.May, 10, 0, 0, 0, 0, time.UTC)
+	windowEnd := windowStart
+	window := memory.TimeWindow{Start: windowStart, End: windowEnd}
+	tau := 30 * 24 * time.Hour
+
+	overlap := windowStart
+	if got := memory.TemporalScore(&overlap, &overlap, window, tau); got != 1 {
+		t.Fatalf("overlap score = %.12f, want 1", got)
+	}
+
+	outside := time.Date(2024, time.May, 1, 0, 0, 0, 0, time.UTC)
+	got := memory.TemporalScore(&outside, &outside, window, tau)
+	want := math.Exp(-9.0 / 30.0)
+	if math.Abs(got-want) > 1e-12 {
+		t.Fatalf("outside score = %.12f, want exp(-9/30)=%.12f", got, want)
+	}
+	if got <= 0 || got >= 1 {
+		t.Fatalf("outside score = %.12f, want a positive soft score below 1", got)
+	}
+
+	if got := memory.TemporalScore(nil, nil, window, tau); got != 1 {
+		t.Fatalf("unknown event score = %.12f, want neutral 1", got)
 	}
 }
 
