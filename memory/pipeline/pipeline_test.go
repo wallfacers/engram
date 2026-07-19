@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,63 @@ func TestIngest_ExtractsFactsAndEntities(t *testing.T) {
 	counts, _ := es.EntityMatchCounts(ctx, memory.EntityQueryTokens("Sweden"))
 	if len(counts) == 0 {
 		t.Fatal("expected an entity match for Sweden")
+	}
+}
+
+func TestIngestStoresEventRangeAndAliases(t *testing.T) {
+	ctx := context.Background()
+	es, db := newStore(t)
+	var systemPrompt string
+	p := pipeline.New(pipeline.Config{
+		Entries: es,
+		Budgets: memory.DefaultBudgets(),
+		Call: func(_ context.Context, system, _ string) (string, error) {
+			systemPrompt = system
+			return `{"facts":[{"fact":"The user bought a fitness tracker.","entities":["fitness tracker"],"event_date":"2023-05-02","event_start":"2023-05-01","event_end":"2023-05-03","aliases":["step counter","activity band"],"category":"event","durability":"volatile"}]}`, nil
+		},
+	})
+
+	if n, err := p.Ingest(ctx, time.Date(2023, 5, 20, 0, 0, 0, 0, time.UTC), "session-range", []pipeline.Message{{Role: "user", Text: "I bought a fitness tracker."}}); err != nil || n != 1 {
+		t.Fatalf("ingest: n=%d err=%v", n, err)
+	}
+	if !strings.Contains(systemPrompt, "event_start") || !strings.Contains(systemPrompt, "event_end") || !strings.Contains(systemPrompt, "aliases") {
+		t.Fatalf("extraction prompt omits temporal/alias fields: %q", systemPrompt)
+	}
+	entries, err := es.List(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries: got %d err=%v", len(entries), err)
+	}
+	start := time.Date(2023, 5, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2023, 5, 3, 0, 0, 0, 0, time.UTC)
+	if entries[0].EventStart == nil || !entries[0].EventStart.Equal(start) || entries[0].EventEnd == nil || !entries[0].EventEnd.Equal(end) {
+		t.Fatalf("event range: start=%v end=%v", entries[0].EventStart, entries[0].EventEnd)
+	}
+	var aliases int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_event_aliases WHERE entry_name = ?`, entries[0].Name).Scan(&aliases); err != nil {
+		t.Fatalf("alias count: %v", err)
+	}
+	if aliases != 2 {
+		t.Fatalf("alias count = %d, want 2", aliases)
+	}
+}
+
+func TestIngestIgnoresMalformedEventRange(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newStore(t)
+	p := pipeline.New(pipeline.Config{
+		Entries: es,
+		Budgets: memory.DefaultBudgets(),
+		Call:    staticCaller(`{"facts":[{"fact":"The user attended a meeting.","event_start":"not-a-date","event_end":"2023-xx-99","aliases":["sync"],"category":"event"}]}`),
+	})
+	if n, err := p.Ingest(ctx, time.Now().UTC(), "session-bad-range", []pipeline.Message{{Role: "user", Text: "I attended a meeting."}}); err != nil || n != 1 {
+		t.Fatalf("malformed range should not reject fact: n=%d err=%v", n, err)
+	}
+	entries, err := es.List(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries: got %d err=%v", len(entries), err)
+	}
+	if entries[0].EventStart != nil || entries[0].EventEnd != nil {
+		t.Fatalf("malformed range should remain empty: %+v", entries[0])
 	}
 }
 

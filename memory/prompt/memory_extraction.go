@@ -27,6 +27,8 @@ What to extract (one memory per distinct fact):
 - Each "fact" MUST be a single self-contained sentence understandable with no surrounding context: resolve pronouns and name the subject explicitly.
 - "entities": the salient named entities in the fact (people, places, organizations, products, concepts).
 - "event_date": if the fact happened at a time, resolve it to an ISO date (YYYY-MM-DD, or YYYY-MM / YYYY if only month/year is known). Resolve relative expressions ("last month", "four years ago", "two weeks ago") against the SESSION DATE, never against today. Omit only when there is genuinely no time reference.
+- "event_start" and "event_end": for an event range, resolve both bounds to ISO dates against the SESSION DATE. For a point event use the same date for both. Omit either field when the time cannot be resolved; never invent a range.
+- "aliases": short alternate names or paraphrases for the event/object that a future question might use (for example ["step counter", "activity band"]). Omit when there is no useful alias.
 - "category": one of user, agent, preference, event, reference. "durability": "evergreen" for stable traits, "volatile" for datable events and changeable states.
 
 What NOT to extract:
@@ -36,7 +38,7 @@ What NOT to extract:
 Keep it tight: each "fact" is ONE short sentence (no compound clauses — split them). Merge near-duplicates. Cover every distinct event and trait, but do not pad; most sessions yield a handful to ~20 facts.
 
 Output shape (STRICT JSON, no markdown, no prose):
-{"facts":[{"fact":"...","entities":["..."],"event_date":"YYYY-MM-DD","category":"event","durability":"volatile"}]}
+{"facts":[{"fact":"...","entities":["..."],"event_date":"YYYY-MM-DD","event_start":"YYYY-MM-DD","event_end":"YYYY-MM-DD","aliases":["..."],"category":"event","durability":"volatile"}]}
 If there is genuinely nothing to remember, output {"facts":[]}.`
 
 // BuildMemoryExtractionUserPrompt renders the session date and message batch into

@@ -71,6 +71,9 @@ type extractedFact struct {
 	Fact       string   `json:"fact"`
 	Entities   []string `json:"entities"`
 	EventDate  string   `json:"event_date"`
+	EventStart string   `json:"event_start"`
+	EventEnd   string   `json:"event_end"`
+	Aliases    []string `json:"aliases"`
 	Category   string   `json:"category"`
 	Durability string   `json:"durability"`
 }
@@ -160,6 +163,7 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		FactSource:      "extraction",
 		EventDate:       parseEventDate(f.EventDate, sessionDate),
 	}
+	entry.EventStart, entry.EventEnd = parseEventRange(f.EventStart, f.EventEnd, f.EventDate, sessionDate)
 	if err := p.entries.Upsert(ctx, entry); err != nil {
 		slog.Warn("memory: extracted fact upsert failed", "name", entry.Name, "err", err)
 		return false
@@ -171,6 +175,11 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		pairs := entityPairs(f.Entities)
 		if err := p.entries.UpsertEdges(ctx, pairs); err != nil {
 			slog.Warn("memory: extracted entity edges failed", "name", entry.Name, "err", err)
+		}
+	}
+	if len(f.Aliases) > 0 {
+		if err := p.entries.PutAliases(ctx, entry.Name, f.Aliases); err != nil {
+			slog.Warn("memory: extracted event aliases index failed", "name", entry.Name, "err", err)
 		}
 	}
 	p.embedder.Enqueue(entry.Name) // nil-safe
@@ -253,6 +262,28 @@ func parseEventDate(s string, _ time.Time) *time.Time {
 		}
 	}
 	return nil
+}
+
+func parseEventRange(startText, endText, dateText string, sessionDate time.Time) (*time.Time, *time.Time) {
+	start := parseEventDate(startText, sessionDate)
+	end := parseEventDate(endText, sessionDate)
+	if start == nil && end == nil {
+		point := parseEventDate(dateText, sessionDate)
+		if point != nil {
+			return point, point
+		}
+		return nil, nil
+	}
+	if start == nil {
+		start = end
+	}
+	if end == nil {
+		end = start
+	}
+	if start != nil && end != nil && end.Before(*start) {
+		return nil, nil
+	}
+	return start, end
 }
 
 // deriveTrigger produces a short recall cue from the fact by truncating to the

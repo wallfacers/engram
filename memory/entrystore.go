@@ -358,6 +358,42 @@ func (s *EntryStore) PutEntities(ctx context.Context, name string, entities []st
 	return nil
 }
 
+// PutAliases replaces the event alias index for an entry. Aliases are stored
+// verbatim enough for display but whitespace-normalized for stable FTS rows;
+// blanks and duplicates are ignored. The FTS mirror is maintained by the
+// schema trigger in the same transaction.
+func (s *EntryStore) PutAliases(ctx context.Context, name string, aliases []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("memory: put aliases begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM memory_event_aliases WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: clear aliases %q: %w", name, err)
+	}
+	seen := make(map[string]struct{}, len(aliases))
+	for _, raw := range aliases {
+		alias := strings.Join(strings.Fields(raw), " ")
+		if alias == "" {
+			continue
+		}
+		key := strings.ToLower(alias)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO memory_event_aliases(entry_name, alias) VALUES (?,?)`, name, alias); err != nil {
+			return fmt.Errorf("memory: insert alias %q/%q: %w", name, alias, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: put aliases commit: %w", err)
+	}
+	return nil
+}
+
 // EntityMatchCounts returns, for the given normalized entity tokens, a map from
 // entry name to the number of distinct query tokens that entry matches. Entries
 // with zero matches are absent. Used to build the entity retrieval signal.
