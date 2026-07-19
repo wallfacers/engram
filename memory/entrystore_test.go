@@ -326,7 +326,7 @@ func TestEventTimeRangeAndSupersededRoundTrip(t *testing.T) {
 	}
 }
 
-func TestUpsertPreservesLifecycleFieldsOnConflict(t *testing.T) {
+func TestUpsertPreservesSupersededFieldOnConflict(t *testing.T) {
 	es, _ := newEntryStore(t)
 	ctx := context.Background()
 	start := time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC)
@@ -348,11 +348,33 @@ func TestUpsertPreservesLifecycleFieldsOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.EventStart == nil || !got.EventStart.Equal(start) || got.EventEnd == nil || !got.EventEnd.Equal(end) {
-		t.Fatalf("lifecycle range was cleared: start=%v end=%v", got.EventStart, got.EventEnd)
+	if got.EventStart != nil || got.EventEnd != nil {
+		t.Fatalf("zero-value refresh should clear event range: start=%v end=%v", got.EventStart, got.EventEnd)
 	}
 	if got.SupersededBy != "newer-entry" {
 		t.Fatalf("superseded_by = %q, want newer-entry", got.SupersededBy)
+	}
+}
+
+func TestUpsertUpdatesEventRangeOnConflict(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+	oldStart := time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC)
+	oldEnd := oldStart.Add(24 * time.Hour)
+	newStart := time.Date(2024, time.March, 4, 0, 0, 0, 0, time.UTC)
+	newEnd := newStart.Add(72 * time.Hour)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "range-refresh", Content: "old", EventStart: &oldStart, EventEnd: &oldEnd}); err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "range-refresh", Content: "new", EventStart: &newStart, EventEnd: &newEnd}); err != nil {
+		t.Fatalf("refresh upsert: %v", err)
+	}
+	got, err := es.GetByName(ctx, "range-refresh")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.EventStart == nil || !got.EventStart.Equal(newStart) || got.EventEnd == nil || !got.EventEnd.Equal(newEnd) {
+		t.Fatalf("event range was not refreshed: start=%v end=%v", got.EventStart, got.EventEnd)
 	}
 }
 
