@@ -142,6 +142,24 @@ func answerPromptFor(category int) string {
 	}
 }
 
+func answerPromptForOptions(category int, forceAnswer bool) string {
+	base := answerPromptFor(category)
+	if !forceAnswer {
+		return base
+	}
+	lines := strings.Split(base, "\n")
+	var b strings.Builder
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), "i don't know") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteString("- This is an answerable evaluation: always provide your best guess based on the retrieved memories and reasonable inference. Never decline with an uncertainty response.")
+	return b.String()
+}
+
 // queryRewriteSystemPrompt turns a failed question into an alternative retrieval
 // query (EverMemOS-style second-round rewriting, triggered only on IDK).
 const queryRewriteSystemPrompt = `A memory search for the following question returned nothing relevant. Write ONE alternative search query for the same information need: use different words — synonyms, the underlying event or object, likely entity names — not a rephrasing of the question. Output ONLY the query text, a short keyword-style phrase, no quotes, no explanation.`

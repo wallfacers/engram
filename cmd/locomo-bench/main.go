@@ -76,6 +76,7 @@ type options struct {
 	temporalHardFilter bool
 	conflictResolution bool
 	abstainPrompt      bool
+	forceAnswer        bool
 	opinionPass        bool
 	adversarial        int
 	catTopKSpec        string
@@ -112,12 +113,17 @@ func run() error {
 	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
 	flag.BoolVar(&opt.assoc, "assoc", false, "enable associative graph retrieval")
 	flag.IntVar(&opt.assocDepth, "assoc-depth", 2, "associative graph walk depth (maximum 2)")
+	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
+	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
+		return err
+	}
+	if err := validatePromptModes(opt); err != nil {
 		return err
 	}
 
@@ -150,6 +156,11 @@ func run() error {
 	arms, err := armsFor(opt.retrieval)
 	if err != nil {
 		return err
+	}
+	for _, arm := range arms {
+		if err := validatePromptModes(optionsForArm(opt, arm)); err != nil {
+			return fmt.Errorf("arm %s: %w", arm, err)
+		}
 	}
 	if opt.catTopK, err = parseCatOverrides(opt.catTopKSpec); err != nil {
 		return fmt.Errorf("--cat-top-k: %w", err)
@@ -631,6 +642,13 @@ func retrievalFingerprint(opt options) string {
 	return fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
 }
 
+func validatePromptModes(opt options) error {
+	if opt.forceAnswer && opt.abstainPrompt {
+		return fmt.Errorf("--force-answer and --abstain-prompt are mutually exclusive")
+	}
+	return nil
+}
+
 // answerConversation runs only the answer/judge phase for a prepared
 // conversation. Questions run concurrently and are bounded by the global
 // LLM-call semaphore.
@@ -737,7 +755,7 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
 		return false, "", provider.Usage{}
 	}
-	prompt := answerPromptFor(qa.Category)
+	prompt := answerPromptForOptions(qa.Category, opt.forceAnswer)
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)

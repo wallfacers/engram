@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -205,6 +206,31 @@ func TestPairedReportSchemaAndWrite(t *testing.T) {
 	}
 	if !decoded.PairedInProcess || len(decoded.Questions) != 2 || decoded.McNemarP <= 0 {
 		t.Fatalf("paired JSON = %+v", decoded)
+	}
+}
+
+func TestForceAnswerPromptsRequireBestGuess(t *testing.T) {
+	for _, category := range []int{1, 2, 3} {
+		defaultPrompt := answerPromptFor(category)
+		forced := answerPromptForOptions(category, true)
+		if strings.Contains(strings.ToLower(forced), "i don't know") {
+			t.Fatalf("category %d force prompt still exposes IDK: %q", category, forced)
+		}
+		if !strings.Contains(strings.ToLower(forced), "best guess") {
+			t.Fatalf("category %d force prompt lacks best-guess instruction: %q", category, forced)
+		}
+		if got := answerPromptForOptions(category, false); got != defaultPrompt {
+			t.Fatalf("category %d default prompt changed", category)
+		}
+	}
+}
+
+func TestForceAnswerAndAbstainPromptAreMutuallyExclusive(t *testing.T) {
+	if err := validatePromptModes(options{forceAnswer: true, abstainPrompt: true}); err == nil {
+		t.Fatal("expected force-answer and abstain-prompt conflict")
+	}
+	if err := validatePromptModes(options{forceAnswer: true}); err != nil {
+		t.Fatalf("force-answer alone rejected: %v", err)
 	}
 }
 
