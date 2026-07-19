@@ -52,29 +52,30 @@ import (
 )
 
 type options struct {
-	dataPath      string
-	runDir        string
-	storeDir      string
-	datasetFormat string
-	compareSpec   string
-	repeats       int
-	estimate      bool
-	noIDKRetry    bool
-	retrieval     string
-	maxConvs      int
-	maxQuestions  int
-	topK          int
-	maxTokens     int
-	concurrency   int
-	chunks        bool
-	chunkQuota    int
-	filterPool    int
-	opinionPass   bool
-	adversarial   int
-	catTopKSpec   string
-	catQuotaSpec  string
-	catTopK       map[int]int
-	catQuota      map[int]int
+	dataPath       string
+	runDir         string
+	storeDir       string
+	datasetFormat  string
+	compareSpec    string
+	repeats        int
+	estimate       bool
+	noIDKRetry     bool
+	budgetBaseline float64
+	retrieval      string
+	maxConvs       int
+	maxQuestions   int
+	topK           int
+	maxTokens      int
+	concurrency    int
+	chunks         bool
+	chunkQuota     int
+	filterPool     int
+	opinionPass    bool
+	adversarial    int
+	catTopKSpec    string
+	catQuotaSpec   string
+	catTopK        map[int]int
+	catQuota       map[int]int
 }
 
 func main() {
@@ -93,6 +94,7 @@ func run() error {
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
+	flag.Float64Var(&opt.budgetBaseline, "budget-baseline", 0, "calibrated answer context token baseline for the 1.5x budget gate")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
@@ -202,13 +204,12 @@ func run() error {
 	sem := make(chan struct{}, opt.concurrency)
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
-		ledger.Add(role, model, usage.InputTokens, usage.OutputTokens)
-		if role == "answer" {
-			ledger.AddContextTokens(usage.InputTokens)
-		}
+		recordBenchUsage(ledger, role, model, usage)
 	}
-	answerCall := gate(sem, newModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
-	judgeCall := gate(sem, newModelCallerWithUsage(prov, model, opt.maxTokens, "judge", recordUsage))
+	answerUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
+	filterCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "filter", recordUsage)))
+	rewriteCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "rewrite", recordUsage)))
+	judgeUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "judge", recordUsage))
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
 
 	// The embedding client is shared across conversations (safe for concurrent
@@ -289,7 +290,7 @@ func run() error {
 					logger.Warn("conversation runtime unavailable", "conversation", conv.ID)
 					return
 				}
-				if err := answerConversation(ctx, repeatOpt, conv, runtimes[index], answerCall, judgeCall, current, logger); err != nil {
+				if err := answerConversationWithUsage(ctx, repeatOpt, conv, runtimes[index], answerUsageCall, filterCall, rewriteCall, judgeUsageCall, current, logger); err != nil {
 					logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
 				}
 			}(convs[ci], states)
@@ -322,8 +323,27 @@ func run() error {
 		}
 		printStatsSummary(arm, stats)
 	}
-	fmt.Printf("cost: actual_usd=%.6f answer_context_tokens_mean=%.0f\n", ledger.ActualUSD(), ledger.AnswerContextTokensMean())
+	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
 	return nil
+}
+
+func recordBenchUsage(ledger *costLedger, role, model string, usage provider.Usage) {
+	ledger.Add(role, model, usage.InputTokens, usage.OutputTokens)
+	if role == "answer" {
+		ledger.AddContextTokens(usage.InputTokens)
+	}
+}
+
+func formatBudgetSummary(mean, baseline float64) string {
+	if baseline <= 0 {
+		return fmt.Sprintf("answer_context_tokens_mean=%.0f budget_ratio=unavailable", mean)
+	}
+	ratio := mean / baseline
+	warning := ""
+	if ratio > 1.5 {
+		warning = " WARNING: answer context budget exceeds 1.5x baseline; uplift may be budget inflation and is invalid"
+	}
+	return fmt.Sprintf("answer_context_tokens_mean=%.0f budget_ratio=%.2fx%s", mean, ratio, warning)
 }
 
 // armState holds one retrieval arm's grading state.
@@ -492,27 +512,18 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 // conversation. Questions run concurrently and are bounded by the global
 // LLM-call semaphore.
 func answerConversation(ctx context.Context, opt options, conv conversation, runtime *conversationRuntime, answerCall, judgeCall modelCaller, states []*armState, logger *slog.Logger) error {
+	return answerConversationWithUsage(ctx, opt, conv, runtime, usageCallerFromModel(answerCall), answerCall, answerCall, usageCallerFromModel(judgeCall), states, logger)
+}
+
+func answerConversationWithUsage(ctx context.Context, opt options, conv conversation, runtime *conversationRuntime, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, states []*armState, logger *slog.Logger) error {
 	if runtime == nil {
 		return fmt.Errorf("conversation runtime is nil")
 	}
 
 	var qwg sync.WaitGroup
-	answered, advAnswered := 0, 0
-	for qi, qa := range conv.QA {
-		if qa.Adversarial || qa.Category == adversarialCategory {
-			if opt.datasetFormat == "longmemeval" {
-				// LongMemEval_S abstention questions are part of the full
-				// target set and are always included.
-			} else if opt.adversarial == 0 || (opt.adversarial > 0 && advAnswered >= opt.adversarial) {
-				continue
-			}
-			advAnswered++
-		} else {
-			if opt.maxQuestions > 0 && answered >= opt.maxQuestions {
-				break
-			}
-			answered++
-		}
+	selected := selectQuestions(conv, opt)
+	for _, selectedQuestion := range selected {
+		qi, qa := selectedQuestion.Index, selectedQuestion.QA
 		key := resultKey{Conv: conv.ID, Q: qi}
 		for _, s := range states {
 			if prev, ok := s.journal.lookup(key); ok {
@@ -522,26 +533,29 @@ func answerConversation(ctx context.Context, opt options, conv conversation, run
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey) {
 				defer qwg.Done()
-				correct, predicted := answerAndJudge(ctx, runtime.retrievers[s.name], answerCall, judgeCall, opt, qa, logger)
+				correct, predicted, usage := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, opt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
-					Conv:         key.Conv,
-					Q:            key.Q,
-					QuestionID:   qa.QuestionID,
-					Category:     qa.Category,
-					CategoryName: qa.CategoryName,
-					QuestionType: qa.QuestionType,
-					Adversarial:  qa.Adversarial || qa.Category == adversarialCategory,
-					Correct:      correct,
-					Question:     qa.Question,
-					Gold:         goldFor(qa),
-					Predicted:    predicted,
+					Conv:                key.Conv,
+					Q:                   key.Q,
+					QuestionID:          qa.QuestionID,
+					Category:            qa.Category,
+					CategoryName:        qa.CategoryName,
+					QuestionType:        qa.QuestionType,
+					Adversarial:         qa.Adversarial || qa.Category == adversarialCategory,
+					Correct:             correct,
+					Question:            qa.Question,
+					Gold:                goldFor(qa),
+					Predicted:           predicted,
+					InputTokens:         usage.InputTokens,
+					OutputTokens:        usage.OutputTokens,
+					AnswerContextTokens: usage.InputTokens,
 				})
 			}(s, qa, key)
 		}
 	}
 	qwg.Wait()
-	logger.Info("conversation done", "conversation", conv.ID, "answered", answered)
+	logger.Info("conversation done", "conversation", conv.ID, "answered", len(selected))
 	return nil
 }
 
@@ -588,33 +602,40 @@ func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
 // round's, and the question is answered again (EverMemOS-style second round,
 // paid only for the IDK tail). Returns (correct, predicted answer).
 func answerAndJudge(ctx context.Context, retriever *memory.Retriever, answerCall, judgeCall modelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string) {
+	correct, predicted, _ := answerAndJudgeWithUsage(ctx, retriever, usageCallerFromModel(answerCall), answerCall, answerCall, usageCallerFromModel(judgeCall), opt, qa, logger)
+	return correct, predicted
+}
+
+func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, err := retrieve(ctx, retriever, answerCall, qa.Question, topK, quota, opt)
+	hits, err := retrieve(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
-		return false, ""
+		return false, "", provider.Usage{}
 	}
 	prompt := answerPromptFor(qa.Category)
-	predicted, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
+	predicted, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, ""
+		return false, "", usage
 	}
 
 	if isIDK(predicted) && !opt.noIDKRetry {
-		if retry, ok := retryWithRewrite(ctx, retriever, answerCall, opt, qa, prompt, hits); ok {
+		if retry, retryUsage, ok := retryWithRewriteUsage(ctx, retriever, answerCall, filterCall, rewriteCall, opt, qa, prompt, hits); ok {
 			predicted = retry
-		} else if retry, ok := retryWithWiderNet(ctx, retriever, answerCall, opt, qa, prompt); ok {
+			usage = retryUsage
+		} else if retry, retryUsage, ok := retryWithWiderNetUsage(ctx, retriever, answerCall, opt, qa, prompt); ok {
 			predicted = retry
+			usage = retryUsage
 		}
 	}
 
-	verdict, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
+	verdict, _, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
-		return false, predicted
+		return false, predicted, usage
 	}
-	return parseJudgeVerdict(verdict), predicted
+	return parseJudgeVerdict(verdict), predicted, usage
 }
 
 // adversarialGold is the judge-facing gold for category-5 questions. They have
@@ -667,9 +688,9 @@ func (o options) retrievalFor(category int) (topK, quota int) {
 
 // retrieve is the per-question retrieval front door: quota'd top-k, optionally
 // widened + narrowed by the listwise LLM filter when --filter-pool is set.
-func retrieve(ctx context.Context, retriever *memory.Retriever, call modelCaller, query string, topK, quota int, opt options) ([]memory.Result, error) {
+func retrieve(ctx context.Context, retriever *memory.Retriever, filterCall modelCaller, query string, topK, quota int, opt options) ([]memory.Result, error) {
 	if opt.filterPool > topK {
-		return retrieveFiltered(ctx, retriever, call, query, topK, quota, opt.filterPool)
+		return retrieveFiltered(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
 	}
 	return retrieveWithQuota(ctx, retriever, query, topK, quota)
 }
@@ -677,7 +698,11 @@ func retrieve(ctx context.Context, retriever *memory.Retriever, call modelCaller
 // retryWithRewrite runs the IDK second round. Returns (answer, true) only when
 // the retry produced a non-IDK answer worth keeping.
 func retryWithRewrite(ctx context.Context, retriever *memory.Retriever, call modelCaller, opt options, qa locomoQA, prompt string, first []memory.Result) (string, bool) {
-	rewritten, err := call(ctx, queryRewriteSystemPrompt, "QUESTION: "+qa.Question)
+	return retryWithRewriteLegacy(ctx, retriever, call, call, call, opt, qa, prompt, first)
+}
+
+func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, answerCall, filterCall, rewriteCall modelCaller, opt options, qa locomoQA, prompt string, first []memory.Result) (string, bool) {
+	rewritten, err := rewriteCall(ctx, queryRewriteSystemPrompt, "QUESTION: "+qa.Question)
 	if err != nil {
 		return "", false
 	}
@@ -686,7 +711,7 @@ func retryWithRewrite(ctx context.Context, retriever *memory.Retriever, call mod
 		return "", false
 	}
 	topK, quota := opt.retrievalFor(qa.Category)
-	more, err := retrieve(ctx, retriever, call, rewritten, topK, quota, opt)
+	more, err := retrieve(ctx, retriever, filterCall, rewritten, topK, quota, opt)
 	if err != nil || len(more) == 0 {
 		return "", false
 	}
@@ -707,11 +732,49 @@ func retryWithRewrite(ctx context.Context, retriever *memory.Retriever, call mod
 	if fresh == 0 {
 		return "", false
 	}
-	retry, err := call(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(union)))
+	retry, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(union)))
 	if err != nil || isIDK(retry) {
 		return "", false
 	}
 	return retry, true
+}
+
+func retryWithRewriteUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, opt options, qa locomoQA, prompt string, first []memory.Result) (string, provider.Usage, bool) {
+	rewritten, err := rewriteCall(ctx, queryRewriteSystemPrompt, "QUESTION: "+qa.Question)
+	if err != nil {
+		return "", provider.Usage{}, false
+	}
+	rewritten = strings.TrimSpace(rewritten)
+	if rewritten == "" || rewritten == qa.Question {
+		return "", provider.Usage{}, false
+	}
+	topK, quota := opt.retrievalFor(qa.Category)
+	more, err := retrieve(ctx, retriever, filterCall, rewritten, topK, quota, opt)
+	if err != nil || len(more) == 0 {
+		return "", provider.Usage{}, false
+	}
+	seen := make(map[string]struct{}, len(first))
+	union := make([]memory.Result, 0, len(first)+len(more))
+	for _, h := range first {
+		seen[h.Name] = struct{}{}
+		union = append(union, h)
+	}
+	fresh := 0
+	for _, h := range more {
+		if _, dup := seen[h.Name]; dup {
+			continue
+		}
+		union = append(union, h)
+		fresh++
+	}
+	if fresh == 0 {
+		return "", provider.Usage{}, false
+	}
+	retry, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(union)))
+	if err != nil || isIDK(retry) {
+		return "", usage, false
+	}
+	return retry, usage, true
 }
 
 // retryWithWiderNet is the second-stage IDK escalation: when the rewrite round
@@ -720,16 +783,21 @@ func retryWithRewrite(ctx context.Context, retriever *memory.Retriever, call mod
 // grounded answer beats a bail-out. Returns (answer, true) only on a non-IDK
 // answer.
 func retryWithWiderNet(ctx context.Context, retriever *memory.Retriever, call modelCaller, opt options, qa locomoQA, prompt string) (string, bool) {
+	retry, _, ok := retryWithWiderNetUsage(ctx, retriever, usageCallerFromModel(call), opt, qa, prompt)
+	return retry, ok
+}
+
+func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	hits, err := retrieveWithQuota(ctx, retriever, qa.Question, topK*3, quota*3)
 	if err != nil || len(hits) <= topK {
-		return "", false
+		return "", provider.Usage{}, false
 	}
-	retry, err := call(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
+	retry, usage, err := call(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
 	if err != nil || isIDK(retry) {
-		return "", false
+		return "", usage, false
 	}
-	return retry, true
+	return retry, usage, true
 }
 
 // toMemories converts retrieval hits into the prompt-facing form.
@@ -881,72 +949,133 @@ func loadArmRuns(baseDir, arm string, repeats int) ([][]result, error) {
 	return runs, nil
 }
 
+type selectedQuestion struct {
+	Index int
+	QA    locomoQA
+}
+
+// selectQuestions is the single source of truth for both execution and
+// estimate question counts. Normal questions obey maxQuestions, while the
+// separately configured adversarial tail remains eligible after that limit.
+func selectQuestions(conv conversation, opt options) []selectedQuestion {
+	selected := make([]selectedQuestion, 0, len(conv.QA))
+	answered, adversarial := 0, 0
+	for index, qa := range conv.QA {
+		if qa.Adversarial || qa.Category == adversarialCategory {
+			include := opt.datasetFormat == "longmemeval" || opt.adversarial < 0 || (opt.adversarial > 0 && adversarial < opt.adversarial)
+			if include {
+				selected = append(selected, selectedQuestion{Index: index, QA: qa})
+				adversarial++
+			}
+			continue
+		}
+		if opt.maxQuestions > 0 && answered >= opt.maxQuestions {
+			continue
+		}
+		selected = append(selected, selectedQuestion{Index: index, QA: qa})
+		answered++
+	}
+	return selected
+}
+
 func countSelectedQuestions(convs []conversation, opt options) int {
 	total := 0
 	for _, conv := range convs {
-		answered, adversarial := 0, 0
-		for _, qa := range conv.QA {
-			if qa.Adversarial || qa.Category == adversarialCategory {
-				if opt.datasetFormat == "longmemeval" || opt.adversarial < 0 || (opt.adversarial > 0 && adversarial < opt.adversarial) {
-					total++
-					adversarial++
-				}
-				continue
-			}
-			if opt.maxQuestions > 0 && answered >= opt.maxQuestions {
-				break
-			}
-			answered++
-			total++
-		}
+		total += len(selectQuestions(conv, opt))
 	}
 	return total
 }
 
-func estimateDatasetCost(convs []conversation, opt options, prices priceTable, model, extractModel string) float64 {
+const (
+	estimateExtractIn  = 4_000
+	estimateExtractOut = 500
+	estimateAnswerIn   = 7_000
+	estimateAnswerOut  = 300
+	estimateFilterIn   = 1_000
+	estimateFilterOut  = 0
+	estimateJudgeIn    = 1_000
+	estimateJudgeOut   = 100
+)
+
+type callPlan struct {
+	Questions       int
+	ExtractionCalls int
+	AnswerCalls     int
+	AnswerInTokens  int
+	AnswerOutTokens int
+	FilterCalls     int
+	FilterInTokens  int
+	FilterOutTokens int
+	JudgeCalls      int
+	JudgeInTokens   int
+	JudgeOutTokens  int
+}
+
+func buildCallPlan(convs []conversation, opt options) callPlan {
 	repeats := opt.repeats
-	questions := countSelectedQuestions(convs, opt)
-	extractionCalls := 0
+	if repeats < 1 {
+		repeats = 1
+	}
+	plan := callPlan{Questions: countSelectedQuestions(convs, opt)}
 	for _, conv := range convs {
-		extractionCalls += len(conv.Sessions)
+		plan.ExtractionCalls += len(conv.Sessions)
 	}
-	answerCalls := questions
-	judgeCalls := questions
+	plan.AnswerCalls = plan.Questions * repeats
+	plan.AnswerInTokens = plan.AnswerCalls * estimateAnswerIn
+	plan.AnswerOutTokens = plan.AnswerCalls * estimateAnswerOut
+	plan.FilterCalls = 0
 	if opt.filterPool > opt.topK {
-		answerCalls += questions
+		plan.FilterCalls = plan.Questions * repeats
+		plan.FilterInTokens = plan.FilterCalls * estimateFilterIn
+		plan.FilterOutTokens = plan.FilterCalls * estimateFilterOut
 	}
-	extract, _ := estimateCost(prices, extractModel, extractionCalls*repeats, 4_000, 500)
-	answer, _ := estimateCost(prices, model, answerCalls*repeats, 7_000, 300)
-	judge, _ := estimateCost(prices, model, judgeCalls*repeats, 1_000, 100)
-	return extract + answer + judge
+	plan.JudgeCalls = plan.Questions * repeats
+	plan.JudgeInTokens = plan.JudgeCalls * estimateJudgeIn
+	plan.JudgeOutTokens = plan.JudgeCalls * estimateJudgeOut
+	return plan
+}
+
+func estimateRole(prices priceTable, model string, calls, inTokens, outTokens int) *roleCost {
+	role := &roleCost{Calls: calls, InTokens: inTokens, OutTokens: outTokens}
+	if price, ok := prices.Lookup(model); ok {
+		role.USD = tokenUSD(price, inTokens, outTokens)
+	}
+	return role
+}
+
+func estimateReport(convs []conversation, opt options, prices priceTable, model, extractModel string) costReport {
+	plan := buildCallPlan(convs, opt)
+	report := costReport{ByRole: map[string]*roleCost{
+		"extract": estimateRole(prices, extractModel, plan.ExtractionCalls, plan.ExtractionCalls*estimateExtractIn, plan.ExtractionCalls*estimateExtractOut),
+		"answer":  estimateRole(prices, model, plan.AnswerCalls, plan.AnswerInTokens, plan.AnswerOutTokens),
+		"filter":  estimateRole(prices, model, plan.FilterCalls, plan.FilterInTokens, plan.FilterOutTokens),
+		"judge":   estimateRole(prices, model, plan.JudgeCalls, plan.JudgeInTokens, plan.JudgeOutTokens),
+		"embed":   {},
+	}}
+	for _, role := range report.ByRole {
+		report.EstimatedUSD += role.USD
+	}
+	if _, ok := prices.Lookup(model); !ok {
+		report.UnpricedModels = append(report.UnpricedModels, model)
+	}
+	if _, ok := prices.Lookup(extractModel); !ok && extractModel != model {
+		report.UnpricedModels = append(report.UnpricedModels, extractModel)
+	}
+	sort.Strings(report.UnpricedModels)
+	return report
+}
+
+func estimateDatasetCost(convs []conversation, opt options, prices priceTable, model, extractModel string) float64 {
+	return estimateReport(convs, opt, prices, model, extractModel).EstimatedUSD
 }
 
 func printEstimate(convs []conversation, opt options, prices priceTable, model, extractModel string) error {
-	questions := countSelectedQuestions(convs, opt)
-	extractionCalls := 0
-	for _, conv := range convs {
-		extractionCalls += len(conv.Sessions)
-	}
-	report := costReport{
-		EstimatedUSD: estimateDatasetCost(convs, opt, prices, model, extractModel),
-		ByRole: map[string]*roleCost{
-			"extract": {Calls: extractionCalls * opt.repeats, InTokens: extractionCalls * opt.repeats * 4_000, OutTokens: extractionCalls * opt.repeats * 500},
-			"answer":  {Calls: questions * opt.repeats, InTokens: questions * opt.repeats * 7_000, OutTokens: questions * opt.repeats * 300},
-			"judge":   {Calls: questions * opt.repeats, InTokens: questions * opt.repeats * 1_000, OutTokens: questions * opt.repeats * 100},
-			"embed":   {},
-		},
-	}
-	if opt.filterPool > opt.topK {
-		report.ByRole["answer"].Calls += questions * opt.repeats
-		report.ByRole["answer"].InTokens += questions * opt.repeats * 1_000
-	}
+	plan := buildCallPlan(convs, opt)
+	report := estimateReport(convs, opt, prices, model, extractModel)
 	fmt.Printf("estimate: dataset=%s repeats=%d questions=%d extract_calls=%d estimated_usd=%.6f\n",
-		opt.datasetFormat, opt.repeats, questions, extractionCalls*opt.repeats, report.EstimatedUSD)
-	if _, ok := prices.Lookup(model); !ok {
-		fmt.Printf("estimate: unpriced model=%s\n", model)
-	}
-	if _, ok := prices.Lookup(extractModel); !ok {
-		fmt.Printf("estimate: unpriced model=%s\n", extractModel)
+		opt.datasetFormat, opt.repeats, plan.Questions, plan.ExtractionCalls, report.EstimatedUSD)
+	for _, modelName := range report.UnpricedModels {
+		fmt.Printf("estimate: unpriced model=%s\n", modelName)
 	}
 	return nil
 }

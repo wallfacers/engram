@@ -114,8 +114,8 @@ func boolToInt(b bool) int {
 // upsertTx writes e via INSERT ... ON CONFLICT(name) DO UPDATE within the given
 // querier (a *sql.DB or *sql.Tx). It mutates e in place to fill ID/CreatedAt/
 // UpdatedAt defaults so callers observe what was persisted. On conflict the
-// existing created_at/hit_count/last_used_at are preserved; only the mutable
-// fields and updated_at are refreshed.
+	// existing created_at/hit_count/last_used_at and lifecycle fields are
+	// preserved; only the mutable fields and updated_at are refreshed.
 type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -149,9 +149,6 @@ func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error 
 			source_session_id = excluded.source_session_id,
 			event_date        = excluded.event_date,
 			fact_source       = excluded.fact_source,
-			event_start       = excluded.event_start,
-			event_end         = excluded.event_end,
-			superseded_by     = excluded.superseded_by,
 			updated_at        = excluded.updated_at`,
 		e.ID, e.Name, e.Trigger, e.Content, boolToInt(e.Pinned), e.Durability, e.Category,
 		e.HitCount, entryNullableMicros(e.LastUsedAt),

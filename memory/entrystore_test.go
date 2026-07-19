@@ -326,6 +326,36 @@ func TestEventTimeRangeAndSupersededRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpsertPreservesLifecycleFieldsOnConflict(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+	start := time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	initial := &memory.Entry{
+		Name:         "lifecycle",
+		Content:      "original",
+		EventStart:   &start,
+		EventEnd:     &end,
+		SupersededBy: "newer-entry",
+	}
+	if err := es.Upsert(ctx, initial); err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "lifecycle", Content: "updated"}); err != nil {
+		t.Fatalf("conflict upsert: %v", err)
+	}
+	got, err := es.GetByName(ctx, "lifecycle")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.EventStart == nil || !got.EventStart.Equal(start) || got.EventEnd == nil || !got.EventEnd.Equal(end) {
+		t.Fatalf("lifecycle range was cleared: start=%v end=%v", got.EventStart, got.EventEnd)
+	}
+	if got.SupersededBy != "newer-entry" {
+		t.Fatalf("superseded_by = %q, want newer-entry", got.SupersededBy)
+	}
+}
+
 func TestDeleteCascadesDerived(t *testing.T) {
 	es, db := newEntryStore(t)
 	ctx := context.Background()

@@ -11,6 +11,22 @@ import (
 // modelCaller is one text-in/text-out call against the benchmark model.
 type modelCaller func(ctx context.Context, system, user string) (string, error)
 
+type usageModelCaller func(ctx context.Context, system, user string) (string, provider.Usage, error)
+
+func modelCallerFromUsage(c usageModelCaller) modelCaller {
+	return func(ctx context.Context, system, user string) (string, error) {
+		text, _, err := c(ctx, system, user)
+		return text, err
+	}
+}
+
+func usageCallerFromModel(c modelCaller) usageModelCaller {
+	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
+		text, err := c(ctx, system, user)
+		return text, provider.Usage{}, err
+	}
+}
+
 // newModelCaller wraps a provider.Provider into a modelCaller.
 func newModelCaller(p provider.Provider, model string, maxTokens int) modelCaller {
 	return newModelCallerWithUsage(p, model, maxTokens, "", nil)
@@ -21,7 +37,11 @@ func newModelCaller(p provider.Provider, model string, maxTokens int) modelCalle
 // wrapper preserves the text-only modelCaller contract while forwarding totals
 // to the benchmark cost ledger.
 func newModelCallerWithUsage(p provider.Provider, model string, maxTokens int, role string, record func(role, model string, usage provider.Usage)) modelCaller {
-	return func(ctx context.Context, system, user string) (string, error) {
+	return modelCallerFromUsage(newUsageModelCallerWithUsage(p, model, maxTokens, role, record))
+}
+
+func newUsageModelCallerWithUsage(p provider.Provider, model string, maxTokens int, role string, record func(role, model string, usage provider.Usage)) usageModelCaller {
+	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
 		req := provider.Request{
 			Model:     model,
 			System:    system,
@@ -36,7 +56,7 @@ func newModelCallerWithUsage(p provider.Provider, model string, maxTokens int, r
 			if record != nil {
 				record(role, model, provider.Usage{})
 			}
-			return "", err
+			return "", provider.Usage{}, err
 		}
 		var sb strings.Builder
 		usage := provider.Usage{}
@@ -54,14 +74,26 @@ func newModelCallerWithUsage(p provider.Provider, model string, maxTokens int, r
 					if record != nil {
 						record(role, model, usage)
 					}
-					return "", ev.Error
+					return "", usage, ev.Error
 				}
 			}
 		}
 		if record != nil {
 			record(role, model, usage)
 		}
-		return sb.String(), nil
+		return sb.String(), usage, nil
+	}
+}
+
+func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
+	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return "", provider.Usage{}, ctx.Err()
+		}
+		defer func() { <-sem }()
+		return c(ctx, system, user)
 	}
 }
 

@@ -57,7 +57,7 @@ type costLedger struct {
 
 func newCostLedger(prices priceTable) *costLedger {
 	byRole := map[string]*roleCost{}
-	for _, role := range []string{"extract", "answer", "judge", "embed"} {
+	for _, role := range []string{"extract", "answer", "filter", "rewrite", "judge", "embed"} {
 		byRole[role] = &roleCost{}
 	}
 	return &costLedger{

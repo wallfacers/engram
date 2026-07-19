@@ -2,8 +2,11 @@ package main
 
 import (
 	"math"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/wallfacers/engram/provider"
 )
 
 func TestPriceTableAndCostLedger(t *testing.T) {
@@ -93,5 +96,59 @@ func TestCostLedgerConcurrentUpdatesAndReports(t *testing.T) {
 	}
 	if report.AnswerContextTokensMean != 3 {
 		t.Fatalf("context mean = %.0f, want 3", report.AnswerContextTokensMean)
+	}
+}
+
+func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
+	conv := conversation{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "normal 1", Answer: []byte(`"one"`), Category: 4},
+		{Question: "unknown", Answer: []byte(`"trap"`), Category: adversarialCategory},
+		{Question: "normal 2", Answer: []byte(`"two"`), Category: 4},
+	}}
+	opt := options{
+		datasetFormat: "locomo",
+		maxQuestions:  1,
+		adversarial:   1,
+		repeats:       3,
+		topK:          5,
+		filterPool:    10,
+	}
+	selected := selectQuestions(conv, opt)
+	if len(selected) != 2 || selected[0].QA.Question != "normal 1" || selected[1].QA.Question != "unknown" {
+		t.Fatalf("selected questions = %+v, want normal 1 plus tail adversarial", selected)
+	}
+	plan := buildCallPlan([]conversation{conv}, opt)
+	if plan.Questions != len(selected) || plan.ExtractionCalls != 1 {
+		t.Fatalf("call plan = %+v, want questions=2 extraction=1", plan)
+	}
+	report := estimateReport([]conversation{conv}, opt, priceTable{
+		"answer-model":  {In: 1, Out: 2},
+		"extract-model": {In: 3, Out: 4},
+	}, "answer-model", "extract-model")
+	if report.ByRole["answer"].Calls != plan.AnswerCalls || report.ByRole["extract"].Calls != plan.ExtractionCalls {
+		t.Fatalf("report roles = %+v, plan = %+v", report.ByRole, plan)
+	}
+	var byRoleUSD float64
+	for _, role := range report.ByRole {
+		byRoleUSD += role.USD
+	}
+	if math.Abs(byRoleUSD-report.EstimatedUSD) > 1e-12 {
+		t.Fatalf("by_role usd = %.12f, estimate = %.12f", byRoleUSD, report.EstimatedUSD)
+	}
+}
+
+func TestAnswerContextBudgetExcludesFilterAndPrintsWarning(t *testing.T) {
+	ledger := newCostLedger(nil)
+	recordBenchUsage(ledger, "filter", "filter-model", provider.Usage{InputTokens: 9_000})
+	recordBenchUsage(ledger, "rewrite", "rewrite-model", provider.Usage{InputTokens: 8_000})
+	recordBenchUsage(ledger, "answer", "answer-model", provider.Usage{InputTokens: 2_000})
+	if got := ledger.AnswerContextTokensMean(); got != 2_000 {
+		t.Fatalf("answer context mean = %.0f, want 2000", got)
+	}
+	if warning := formatBudgetSummary(2_000, 1_000); !strings.Contains(warning, "WARNING") {
+		t.Fatalf("budget summary = %q, want WARNING", warning)
+	}
+	if warning := formatBudgetSummary(1_500, 1_000); strings.Contains(warning, "WARNING") {
+		t.Fatalf("budget summary at 1.5x = %q, want no WARNING", warning)
 	}
 }

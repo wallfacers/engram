@@ -314,3 +314,45 @@ func TestRepeatedAnswersReusePreparedConversation(t *testing.T) {
 		t.Fatalf("answer/judge calls = %d/%d, want 3/3", got, judgeCalls.Load())
 	}
 }
+
+func TestAnswerJournalStoresFinalAnswerUsage(t *testing.T) {
+	ctx := context.Background()
+	conv := conversation{
+		ID:       8,
+		Sessions: []session{{Index: 1, Turns: []turn{{Speaker: "user", Text: "I live in Oslo."}}}},
+		QA:       []locomoQA{{Question: "Where do I live?", Answer: []byte(`"Oslo"`), Category: 4}},
+	}
+	opt := options{datasetFormat: "locomo", retrieval: "fts", topK: 5, storeDir: t.TempDir(), noIDKRetry: true}
+	extract := func(context.Context, string, string) (string, error) {
+		return `{"facts":[{"fact":"The user lives in Oslo.","entities":["Oslo"],"category":"user"}]}`, nil
+	}
+	runtime, err := buildConversationRuntime(ctx, opt, conv, extract, nil, []string{"fts"}, slog.Default())
+	if err != nil {
+		t.Fatalf("build conversation: %v", err)
+	}
+	defer runtime.Close()
+	answer := func(context.Context, string, string) (string, provider.Usage, error) {
+		return "Oslo", provider.Usage{InputTokens: 11, OutputTokens: 7}, nil
+	}
+	filter := func(context.Context, string, string) (string, error) { return "", nil }
+	judge := func(context.Context, string, string) (string, provider.Usage, error) {
+		return `{"correct":true}`, provider.Usage{InputTokens: 13, OutputTokens: 2}, nil
+	}
+	runDir := t.TempDir()
+	journal, err := openJournal(runDir, "fts")
+	if err != nil {
+		t.Fatalf("open journal: %v", err)
+	}
+	state := &armState{name: "fts", agg: newAggregator(), journal: journal}
+	if err := answerConversationWithUsage(ctx, opt, conv, runtime, answer, filter, filter, judge, []*armState{state}, slog.Default()); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	journal.Close()
+	items, err := readResultsJSONL(filepath.Join(runDir, "results-fts.jsonl"))
+	if err != nil || len(items) != 1 {
+		t.Fatalf("journal items = %d, err=%v", len(items), err)
+	}
+	if items[0].InputTokens != 11 || items[0].OutputTokens != 7 || items[0].AnswerContextTokens != 11 {
+		t.Fatalf("journal usage = %+v, want answer 11/7/context 11", items[0])
+	}
+}
