@@ -107,3 +107,32 @@ func TestEntityDocFreqAndDepthTwoWalkUseIDFAndDepthLimit(t *testing.T) {
 		t.Fatalf("target IDF score = %v, want %v", got, want)
 	}
 }
+
+func TestWalkEntityGraphDoesNotEchoVisitedSeeds(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newGraphStore(t)
+	for _, item := range []struct {
+		name   string
+		entity string
+	}{
+		{"entry-a", "a"},
+		{"entry-b", "b"},
+	} {
+		if err := es.Upsert(ctx, &Entry{Name: item.name, Content: item.name}); err != nil {
+			t.Fatalf("upsert %s: %v", item.name, err)
+		}
+		if err := es.PutEntities(ctx, item.name, []string{item.entity}); err != nil {
+			t.Fatalf("entities %s: %v", item.name, err)
+		}
+	}
+	if err := es.UpsertEdges(ctx, []EntityEdge{{A: "a", B: "b", Kind: "co", Weight: 1}}); err != nil {
+		t.Fatalf("edge: %v", err)
+	}
+	scores, err := es.WalkEntityGraph(ctx, []string{"a"}, 2)
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if _, echoed := scores["a"]; echoed {
+		t.Fatalf("walk echoed visited seed: %+v", scores)
+	}
+}

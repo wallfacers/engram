@@ -197,7 +197,7 @@ func TestAssociativeNoRegression(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert neighbor: %v", err)
 	}
-	if err := es.PutEntities(ctx, "midsummer-party", []string{"Sweden", "midsummer"}); err != nil {
+	if err := es.PutEntities(ctx, "midsummer-party", []string{"midsummer"}); err != nil {
 		t.Fatalf("neighbor entities: %v", err)
 	}
 	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "Sweden", B: "midsummer", Kind: "co", Weight: 1}}); err != nil {
@@ -209,7 +209,7 @@ func TestAssociativeNoRegression(t *testing.T) {
 	if err := vs.Put(ctx, "sweden-move", client.model, []float32{1, 0, 0}, time.Now()); err != nil {
 		t.Fatalf("sweden vector: %v", err)
 	}
-	if err := vs.Put(ctx, "midsummer-party", client.model, []float32{0.1, 0, 0}, time.Now()); err != nil {
+	if err := vs.Put(ctx, "midsummer-party", client.model, []float32{0, 0.1, 0}, time.Now()); err != nil {
 		t.Fatalf("neighbor vector: %v", err)
 	}
 

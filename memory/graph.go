@@ -192,6 +192,10 @@ func (s *EntryStore) WalkEntityGraph(ctx context.Context, seeds []string, depth 
 	if len(frontier) == 0 {
 		return nil, nil
 	}
+	visited := make(map[string]struct{}, len(frontier))
+	for entity := range frontier {
+		visited[entity] = struct{}{}
+	}
 	scores := make(map[string]float64)
 	for hop := 0; hop < depth && len(frontier) > 0; hop++ {
 		entities := make([]string, 0, len(frontier))
@@ -217,11 +221,15 @@ func (s *EntryStore) WalkEntityGraph(ctx context.Context, seeds []string, depth 
 				if target == "" || edge.Weight <= 0 {
 					continue
 				}
+				if _, seen := visited[target]; seen {
+					continue
+				}
 				next[target] += sourceScore * edge.Weight
 			}
 		}
 		for entity, score := range next {
 			scores[entity] += score
+			visited[entity] = struct{}{}
 		}
 		frontier = next
 	}
