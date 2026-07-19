@@ -171,3 +171,80 @@
 TestRetrievalParity 绿（默认关时行为与 HEAD 一致）。不改 specs/ 设计文档；
 矛盾记 impl-notes.md。不动 `.locomo-run/`（**Strike 1 评测正在其中运行**）。
 完成或阻塞 → 逐任务汇报（状态/commit/文件/测试尾部/遗留）。
+
+---
+
+## 批次 3.5：US4 评审返工（H1-H8 + S1-S3，2026-07-19 评审裁决）
+
+批次 3 评审（三角度并行 + 本人核实）发现 1 个 blocker panic 与多个判定污染
+缺陷，**批次 3 不予核销**。按序修复，逐项 commit（`003-us4: H1 ...`）。
+
+### MUST-FIX（阻塞 Strike 2 评测）
+
+- **H1（blocker panic）** `memory/temporal.go` ParseTemporalIntent：
+  `query[orderStart:date.start]` 在 order 词位于日期之后时（中文"之前/之后"
+  永远如此，英文 "on May 1 … after" 亦然）slice 越界 panic，已三例复现
+  （"2023年5月7日之前发生了什么？" 等）。且偏移在 `lower` 上匹配却切原
+  `query`，Unicode 下可错位。修复：日期与 order 词在**同一坐标系**匹配；
+  AnchorEntity 取两位置 min..max 之间文本并 clamp 边界；补 date-then-order
+  布局的回归测试（中英文各至少 2 例）。
+- **H2** orderPattern `之前|以后|之前的|之后的` 缺**裸「之后」与「以前」**：
+  "X之后"（最常见中文 after 形式）落入 range 分支，衰减方向反转且不触发
+  方向补充召回。补全 alternation 并加方向断言测试。
+- **H3** current 意图生成 `[now−1y, now]` 窗 + tau=30d：一年前陈述的仍有效
+  事实得分 ~3e-6，数值上等价硬过滤，违反 R3。裁决：currentPattern/
+  historicalPattern 分支**只携带 State 状态位，不设 Start/End**（无窗则
+  TemporalScore 中性 1；State 留给 US5 压制 superseded 用，即 R2 本意）；
+  显式近期词（recent/最近）的 30 天窗保留。
+- **H4** yearPattern 裸 `\b20\d{2}\b` 无时间语境门控："reach 2048 in the
+  game" 生成 2048 年窗把全部有日期记忆打到 ~0。裁决：裸年份仅在伴随时间
+  语境时生效（中文"…年"已由 chineseDatePattern 覆盖；英文要求
+  `(in|during|since|until|before|after|by)\s+20\d{2}`），否则不成窗。
+- **H5（口径契约违反）** `cmd/locomo-bench/runner.go` answerPromptFor 按
+  category==2 **无条件**分发 temporalAnswerPrompt——bench-cli 契约 §6 要求
+  "不带任何新 flag 时行为与 HEAD 完全一致"，此改动使所有历史口径漂移。
+  修复：新增全局答题口径 flag `--temporal-answer-prompt`（默认 off，off 时
+  category-2 回到 answerSystemPrompt/forceAnswerSystemPrompt），此项独立
+  commit（宪法 IV）。force 变体矩阵保持完整。
+- **H6** `memory/entrystore.go` upsert 的 ON CONFLICT DO UPDATE 缺
+  `event_start/event_end`：同名事实重抽取后留下陈旧区间，而 applyTemporal
+  优先用区间。补全 UPDATE 列并加 upsert 回归测试。
+- **H7** findAbsoluteDate 只取第一个日期："between 2022 and 2023" 塌缩为
+  2022 单年窗，span 后半段被指数衰减。裁决：解析全部日期匹配，≥2 个时取
+  `[min(start), max(end)]` 并集窗，intent=range。
+- **H8（F13 门禁）** 旧建库产物（pre-T026 store）无 event_start/alias 数据，
+  `+temporal` 臂在其上静默空转（全中性 1.0）。修复：buildConversationRuntime
+  复用持久化 store 且该运行含 temporal 机制时，检测
+  `event_start IS NOT NULL` 计数与 alias 表行数——facts>0 但两者皆 0 →
+  启动报错要求重建库，禁止静默降级。
+
+### SHOULD-FIX（同批次完成，不阻塞）
+
+- **S1** TimeWindow.AnchorEntity 解析后从未被消费：directionalEventNames 只认
+  AnchorTime（仅查询含显式日期时存在），主流"事件锚点"次序题（"before the
+  pottery class"）拿不到方向补充召回。实装：无 AnchorTime 时按 AnchorEntity
+  在库内解析锚事件日期再做方向谓词；若本批次实装成本过高，在 impl-notes.md
+  记录降级并在 fingerprint 中如实标注。
+- **S2** applyTemporal 对整个融合并集逐条 GetByName（200-400 次点查/题，F7
+  教训）且 keywordRanks 被丢弃后在 temporalKeywordRanks 内重算。批量预取
+  （EntitiesByEntry 同款模式）+ 复用共享 name 列表。
+- **S3** `event_start/event_end` 无索引，directionalEventNames 全表扫描。
+  加迁移建索引。
+
+### 已知限制（记 impl-notes.md，不修）
+
+- rerank 启用时（EMBED_RERANK_MODEL 非空）temporal 乘子会被 cross-encoder
+  覆盖，且 entityNeighbors 扩展可重新引入被 hard-filter 剔除的条目。当前
+  评测 env 未启用 rerank，不影响 Strike 2；记录为交互限制。
+- `--abstain-prompt` 在答题路径是 no-op（批次 3 之前遗留），US5/Strike 3
+  批次修复，本批不动。
+
+### 完成定义
+
+批次 3 同款门禁（build/vet/test/CGO=0/race/TestRetrievalParity），另加：
+- TestRetrievalParity 语义扩展：默认 flag 全关时**答题 prompt 选择**也与
+  批次 3 之前一致（验证 H5）。
+- H1 panic 回归用例必须先红后绿（date-then-order 中英文）。
+- 不动 `.locomo-run/`（Strike 1 产物在其中）；不覆盖仓库根 `./locomo-bench`
+  二进制；不改 specs/ 设计文档（本简报除外的矛盾记 impl-notes.md）。
+完成或阻塞 → 逐任务汇报（状态/commit/文件/测试尾部/遗留）。
