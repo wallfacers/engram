@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ type EntityEdge struct {
 }
 
 const maxAssociativeDepth = 2
+
+const entityEntryScoreEntityCap = 200
 
 // UpsertEdges normalizes and stores entity relationships. Co-occurrence weights
 // accumulate across writes, while a synonym edge records the latest similarity
@@ -330,6 +333,16 @@ func (s *EntryStore) EntityEntryScores(ctx context.Context, entityScores map[str
 	entities := make([]string, 0, len(entityScores))
 	for entity := range entityScores {
 		entities = append(entities, entity)
+	}
+	sort.Slice(entities, func(i, j int) bool {
+		if entityScores[entities[i]] != entityScores[entities[j]] {
+			return entityScores[entities[i]] > entityScores[entities[j]]
+		}
+		return entities[i] < entities[j]
+	})
+	if len(entities) > entityEntryScoreEntityCap {
+		slog.Warn("memory: entity entry score entities capped", "cap", entityEntryScoreEntityCap, "dropped", len(entities)-entityEntryScoreEntityCap)
+		entities = entities[:entityEntryScoreEntityCap]
 	}
 	sort.Strings(entities)
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(entities)), ",")

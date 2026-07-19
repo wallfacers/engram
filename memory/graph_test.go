@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"testing"
 
@@ -177,5 +178,37 @@ func TestEntityClusterEntriesIncludesSeedAndOneHopCoSyn(t *testing.T) {
 	}
 	if present["two-hop-entry"] {
 		t.Errorf("cluster entries = %v, unexpectedly included two-hop entry", got)
+	}
+}
+
+func TestEntityEntryScoresCapsDenseEntitySetsByScore(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newGraphStore(t)
+	const maxEntities = 200
+	entityScores := make(map[string]float64, maxEntities+1)
+	for i := 0; i <= maxEntities; i++ {
+		name := fmt.Sprintf("entry-%03d", i)
+		entity := fmt.Sprintf("entity-%03d", i)
+		if err := es.Upsert(ctx, &Entry{Name: name, Content: name}); err != nil {
+			t.Fatalf("upsert %s: %v", name, err)
+		}
+		if err := es.PutEntities(ctx, name, []string{entity}); err != nil {
+			t.Fatalf("entity %s: %v", name, err)
+		}
+		entityScores[entity] = float64(i)
+	}
+
+	got, err := es.EntityEntryScores(ctx, entityScores)
+	if err != nil {
+		t.Fatalf("entity entry scores: %v", err)
+	}
+	if len(got) != maxEntities {
+		t.Fatalf("entity entry score count = %d, want capped %d", len(got), maxEntities)
+	}
+	if _, ok := got["entry-000"]; ok {
+		t.Fatal("lowest-score entry survived entity score cap")
+	}
+	if _, ok := got["entry-200"]; !ok {
+		t.Fatal("highest-score entry missing after entity score cap")
 	}
 }
