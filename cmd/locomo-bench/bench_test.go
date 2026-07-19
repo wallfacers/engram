@@ -124,9 +124,12 @@ func TestJournalResume(t *testing.T) {
 
 func TestArmsFor(t *testing.T) {
 	cases := map[string][]string{
-		"fts":    {"fts"},
-		"hybrid": {"hybrid"},
-		"both":   {"fts", "hybrid"},
+		"fts":                         {"fts"},
+		"hybrid":                      {"hybrid"},
+		"both":                        {"fts", "hybrid"},
+		"hybrid,hybrid+assoc":         {"hybrid", "hybrid+assoc"},
+		"hybrid+assoc+temporal":       {"hybrid+assoc+temporal"},
+		"fts+conflict,hybrid+abstain": {"fts+conflict", "hybrid+abstain"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -142,11 +145,29 @@ func TestArmsFor(t *testing.T) {
 			}
 		}
 	}
-	if _, err := armsFor("bogus"); err == nil {
-		t.Fatal("armsFor(bogus) should error")
+	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid,hybrid"} {
+		if _, err := armsFor(in); err == nil {
+			t.Fatalf("armsFor(%q) should error", in)
+		}
 	}
 	if !hasArm([]string{"fts", "hybrid"}, "hybrid") || hasArm([]string{"fts"}, "hybrid") {
 		t.Fatal("hasArm wrong")
+	}
+}
+
+func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
+	global := options{assoc: true, temporalScore: true, conflictResolution: true, abstainPrompt: true}
+	plain := optionsForArm(global, "hybrid")
+	if !plain.assoc || !plain.temporalScore || !plain.conflictResolution || !plain.abstainPrompt {
+		t.Fatalf("plain arm lost global mechanisms: %+v", plain)
+	}
+	assoc := optionsForArm(options{}, "hybrid+assoc")
+	if !assoc.assoc || assoc.temporalScore || assoc.conflictResolution || assoc.abstainPrompt {
+		t.Fatalf("assoc suffix did not override global mechanisms: %+v", assoc)
+	}
+	temporal := optionsForArm(global, "hybrid+temporal")
+	if temporal.assoc || !temporal.temporalScore || temporal.conflictResolution || temporal.abstainPrompt {
+		t.Fatalf("temporal suffix did not override global mechanisms: %+v", temporal)
 	}
 }
 

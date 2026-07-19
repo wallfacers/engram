@@ -52,32 +52,36 @@ import (
 )
 
 type options struct {
-	dataPath       string
-	runDir         string
-	storeDir       string
-	datasetFormat  string
-	compareSpec    string
-	repeats        int
-	estimate       bool
-	noIDKRetry     bool
-	budgetBaseline float64
-	retrieval      string
-	maxConvs       int
-	maxQuestions   int
-	topK           int
-	maxTokens      int
-	concurrency    int
-	chunks         bool
-	chunkQuota     int
-	filterPool     int
-	assoc          bool
-	assocDepth     int
-	opinionPass    bool
-	adversarial    int
-	catTopKSpec    string
-	catQuotaSpec   string
-	catTopK        map[int]int
-	catQuota       map[int]int
+	dataPath           string
+	runDir             string
+	storeDir           string
+	datasetFormat      string
+	compareSpec        string
+	repeats            int
+	estimate           bool
+	noIDKRetry         bool
+	budgetBaseline     float64
+	retrieval          string
+	maxConvs           int
+	maxQuestions       int
+	topK               int
+	maxTokens          int
+	concurrency        int
+	chunks             bool
+	chunkQuota         int
+	filterPool         int
+	assoc              bool
+	assocDepth         int
+	temporalScore      bool
+	temporalHardFilter bool
+	conflictResolution bool
+	abstainPrompt      bool
+	opinionPass        bool
+	adversarial        int
+	catTopKSpec        string
+	catQuotaSpec       string
+	catTopK            map[int]int
+	catQuota           map[int]int
 }
 
 func main() {
@@ -359,19 +363,97 @@ type armState struct {
 }
 
 func armsFor(retrieval string) ([]string, error) {
-	switch retrieval {
-	case "fts", "hybrid":
-		return []string{retrieval}, nil
-	case "both":
-		return []string{"fts", "hybrid"}, nil
-	default:
-		return nil, fmt.Errorf("--retrieval must be fts, hybrid, or both, got %q", retrieval)
+	if strings.TrimSpace(retrieval) == "" {
+		return nil, fmt.Errorf("--retrieval must not be empty")
 	}
+	var arms []string
+	seen := map[string]struct{}{}
+	for _, raw := range strings.Split(retrieval, ",") {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "both" {
+			for _, defaultArm := range []string{"fts", "hybrid"} {
+				if _, duplicate := seen[defaultArm]; duplicate {
+					return nil, fmt.Errorf("duplicate retrieval arm %q", defaultArm)
+				}
+				seen[defaultArm] = struct{}{}
+				arms = append(arms, defaultArm)
+			}
+			continue
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, fmt.Errorf("duplicate retrieval arm %q", name)
+		}
+		if _, err := parseArm(name); err != nil {
+			return nil, err
+		}
+		seen[name] = struct{}{}
+		arms = append(arms, name)
+	}
+	if len(arms) == 0 {
+		return nil, fmt.Errorf("--retrieval must specify at least one arm")
+	}
+	return arms, nil
+}
+
+type armSpec struct {
+	backend    string
+	overrides  bool
+	mechanisms map[string]bool
+}
+
+var supportedArmMechanisms = map[string]struct{}{
+	"assoc": {}, "temporal": {}, "conflict": {}, "abstain": {},
+}
+
+func parseArm(name string) (armSpec, error) {
+	parts := strings.Split(strings.TrimSpace(name), "+")
+	backend := strings.ToLower(strings.TrimSpace(parts[0]))
+	if backend != "fts" && backend != "hybrid" {
+		return armSpec{}, fmt.Errorf("invalid retrieval arm %q: backend must be fts or hybrid", name)
+	}
+	spec := armSpec{backend: backend, mechanisms: map[string]bool{}}
+	for _, raw := range parts[1:] {
+		mechanism := strings.ToLower(strings.TrimSpace(raw))
+		if mechanism == "" {
+			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: empty mechanism suffix", name)
+		}
+		if _, ok := supportedArmMechanisms[mechanism]; !ok {
+			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: unsupported mechanism %q", name, mechanism)
+		}
+		if spec.mechanisms[mechanism] {
+			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: duplicate mechanism %q", name, mechanism)
+		}
+		spec.overrides = true
+		spec.mechanisms[mechanism] = true
+	}
+	return spec, nil
+}
+
+func armBackend(name string) string {
+	spec, err := parseArm(name)
+	if err != nil {
+		return strings.SplitN(strings.ToLower(name), "+", 2)[0]
+	}
+	return spec.backend
+}
+
+func optionsForArm(global options, name string) options {
+	spec, err := parseArm(name)
+	if err != nil || !spec.overrides {
+		return global
+	}
+	arm := global
+	arm.assoc = spec.mechanisms["assoc"]
+	arm.temporalScore = spec.mechanisms["temporal"]
+	arm.temporalHardFilter = false
+	arm.conflictResolution = spec.mechanisms["conflict"]
+	arm.abstainPrompt = spec.mechanisms["abstain"]
+	return arm
 }
 
 func hasArm(arms []string, name string) bool {
 	for _, a := range arms {
-		if a == name {
+		if armBackend(a) == name {
 			return true
 		}
 	}
@@ -502,9 +584,10 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	// semantic signal and the optional rerank stage; fts stays the pure legacy
 	// baseline.
 	retrievers := make(map[string]*memory.Retriever, len(arms))
-	retrieverOpts := retrieverOptionsFor(opt)
 	for _, arm := range arms {
-		if arm == "hybrid" {
+		armOpt := optionsForArm(opt, arm)
+		retrieverOpts := retrieverOptionsFor(armOpt)
+		if armBackend(arm) == "hybrid" {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, buildBenchReranker(), retrieverOpts)
 		} else {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, nil, nil, retrieverOpts)
@@ -515,7 +598,12 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
-	return memory.RetrieverOptions{Associative: opt.assoc, AssocDepth: opt.assocDepth}
+	return memory.RetrieverOptions{
+		Associative:        opt.assoc,
+		AssocDepth:         opt.assocDepth,
+		TemporalScore:      opt.temporalScore,
+		TemporalHardFilter: opt.temporalHardFilter,
+	}
 }
 
 func retrievalFingerprint(opt options) string {
@@ -549,9 +637,9 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 				continue
 			}
 			qwg.Add(1)
-			go func(s *armState, qa locomoQA, key resultKey) {
+			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				correct, predicted, usage := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, opt, qa, logger)
+				correct, predicted, usage := answerAndJudgeWithUsage(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -565,12 +653,12 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					Question:            qa.Question,
 					Gold:                goldFor(qa),
 					Predicted:           predicted,
-					RetrievalFlags:      retrievalFingerprint(opt),
+					RetrievalFlags:      retrievalFingerprint(armOpt),
 					InputTokens:         usage.InputTokens,
 					OutputTokens:        usage.OutputTokens,
 					AnswerContextTokens: usage.InputTokens,
 				})
-			}(s, qa, key)
+			}(s, qa, key, optionsForArm(opt, s.name))
 		}
 	}
 	qwg.Wait()
