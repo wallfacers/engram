@@ -97,15 +97,38 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
 金额可忽略。第三次运行（19:14 启动）健康：degraded=0，答题稳定产出。
 
 - Date: 2026-07-19（第三次运行，前两次中止见上）
-- Dataset / repeats: locomo10 全量 × 5 repeats × 双臂
+- Dataset / repeats: locomo10 全量（1540 题）× 5 repeats × 双臂 = 15400 answer calls
 - Flags: `--retrieval hybrid,hybrid+assoc --no-idk-retry --force-answer`（同进程配对，Amendment 001）
-- Estimate output:
-- Actual cost (`cost.json`):
-- `stats.json`:
-- `compare.json` / verdict:
-- Token budget ratio:
-- Decision (keep / revert):
+- Estimate output: ¥95.40
+- Actual cost (`cost.json`): **¥139.50**（超预估 46%。分角色：answer ¥78.95、judge
+  ¥60.55。偏差源：judge 输入实测 ~4055 tok/题，estimate 常量 1600 偏低 2.5×；
+  answer 输入实测 ~5146 tok/题，常量 4000 略低。→ 待办：校正 estimateJudgeIn
+  至 4000、estimateAnswerIn 至 5100）
+- `stats.json`: A=hybrid overall **65.4%** CI[64.6, 66.3]；B=hybrid+assoc
+  **58.8%** CI[57.9, 59.7]。per-category A/B：multi-hop 44.2/39.2、temporal
+  74.1/63.0、single-hop 70.3/64.0、open-domain 56.2/55.8
+- `paired.json` / verdict: 同窗 McNemar **p=3.1e-10, above-noise**，但方向为
+  **负**：flips B→A 205 vs A→B 95，B 臂 overall **−6.7pp**。分类别配对：
+  multi-hop −5.7pp（目标类别反而回退）、temporal −12.5pp、single-hop −6.7pp、
+  open-domain +2.0pp（唯一小涨，within-noise 量级）
+- Token budget ratio: answer_context_tokens_mean 5145（cost.json 为双臂合并值，
+  B 臂已判负，预算门无需单独裁定）
+- Decision (keep / revert): **revert**。--assoc 不进判定基线，保留为实验 flag。
 - Notes:
+  1. **第一枪脱靶且为显著负效果**：F1-F14 全部修复后 assoc 仍在固定 top-k=30
+     预算下将净噪声注入候选，挤掉相关记忆——temporal −12.5pp 是最重伤类别
+     （联想边把非目标时间的记忆拉进来）。这与调研裁决 2 完全一致：multi-hop
+     病根是**覆盖截断**而非缺联想信号（全证据平均需 10.81 块 vs top-k 内
+     实际相关块不足），图游走类信号（assoc/PPR 同族）对此无结构性帮助。
+  2. **基线大幅抬升**：hybrid 65.4% vs Strike 0 的 51.0%。主要来自
+     force-answer 反拒答口径（Strike 0 诊断的最大杠杆，IDK 失分归零）+
+     embedding 并发修复后 semantic 路满血 + 后端时间窗较好。multi-hop 44.2%
+     仍是最大洼地，temporal 74.1% 已接近可用。
+  3. 触发 Strike 1.5 预案：multi-hop 44.2% < 50% → 按调研裁决启动
+     cluster-sweep（枚举意图→实体簇全召回→按 session 分组聚合）设计。
+  4. 费用累计：¥73.92 + ¥139.50 = **¥213.42**；放行时余额 ¥248.34 →
+     现余 ~¥108.84（以后台实际为准）。判定运行费用超预估 46%，estimate
+     常量校正后下次预估应可信。
 
 ## Strike 2: Temporal Retrieval
 
