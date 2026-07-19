@@ -66,6 +66,7 @@ type options struct {
 	maxConvs             int
 	maxQuestions         int
 	onlyCategory         int
+	onlyEnumeration      bool
 	topK                 int
 	maxTokens            int
 	concurrency          int
@@ -110,6 +111,7 @@ func run() error {
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
 	flag.IntVar(&opt.onlyCategory, "only-category", 0, "evaluate only this question category (0 = all)")
+	flag.BoolVar(&opt.onlyEnumeration, "only-enumeration", false, "evaluate only enumeration questions")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
@@ -1277,13 +1279,17 @@ type selectedQuestion struct {
 }
 
 // selectQuestions is the single source of truth for both execution and
-// estimate question counts. Normal questions obey maxQuestions, while the
-// separately configured adversarial tail remains eligible after that limit.
+// estimate question counts. Category and enumeration filters apply before
+// normal questions obey maxQuestions; the separately configured adversarial
+// tail remains eligible after that limit.
 func selectQuestions(conv conversation, opt options) []selectedQuestion {
 	selected := make([]selectedQuestion, 0, len(conv.QA))
 	answered, adversarial := 0, 0
 	for index, qa := range conv.QA {
 		if opt.onlyCategory > 0 && qa.Category != opt.onlyCategory {
+			continue
+		}
+		if opt.onlyEnumeration && !memory.ParseEnumerationIntent(qa.Question).IsEnumeration {
 			continue
 		}
 		if qa.Adversarial || qa.Category == adversarialCategory {

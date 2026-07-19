@@ -181,6 +181,34 @@ func TestOnlyCategorySelectionShrinksAnswerCallPlan(t *testing.T) {
 	}
 }
 
+func TestOnlyEnumerationWithCategoryShrinksAnswerCallPlan(t *testing.T) {
+	conv := conversation{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "What things did Alice collect?", Answer: []byte(`"stamps"`), Category: 1},
+		{Question: "What was Alice's favorite color?", Answer: []byte(`"blue"`), Category: 1},
+		{Question: "How many times did Alice travel?", Answer: []byte(`"two"`), Category: 2},
+		{Question: "unknown", Answer: []byte(`"trap"`), Category: adversarialCategory},
+	}}
+	categoryOnly := options{
+		datasetFormat: "locomo",
+		onlyCategory:  1,
+		adversarial:   -1,
+		repeats:       2,
+		retrieval:     "both",
+	}
+	if got := buildCallPlan([]conversation{conv}, categoryOnly).AnswerCalls; got != 8 {
+		t.Fatalf("category-only answer calls = %d, want 8", got)
+	}
+
+	categoryOnly.onlyEnumeration = true
+	selected := selectQuestions(conv, categoryOnly)
+	if len(selected) != 1 || selected[0].QA.Question != "What things did Alice collect?" {
+		t.Fatalf("selected questions = %+v, want only the category-1 enumeration", selected)
+	}
+	if got := buildCallPlan([]conversation{conv}, categoryOnly).AnswerCalls; got != 4 {
+		t.Fatalf("enumeration-filtered answer calls = %d, want 4", got)
+	}
+}
+
 func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
 	convs := []conversation{{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
 		{Question: "When did the trip happen?", Answer: []byte(`"May"`), Category: 2},
