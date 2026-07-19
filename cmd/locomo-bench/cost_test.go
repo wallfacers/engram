@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"sync"
 	"testing"
 )
 
@@ -61,5 +62,36 @@ func TestEstimateAndContextBudgetWarning(t *testing.T) {
 	ledger.AddContextTokens(1_500)
 	if ledger.BudgetWarning(1_000) {
 		t.Fatal("context mean at exactly 1.5x baseline should not warn")
+	}
+}
+
+func TestCostLedgerConcurrentUpdatesAndReports(t *testing.T) {
+	ledger := newCostLedger(priceTable{"model": {In: 1, Out: 1}})
+	const workers = 32
+	const updates = 200
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < updates; i++ {
+				ledger.Add("answer", "model", 1, 2)
+				ledger.AddContextTokens(3)
+				_ = ledger.Report()
+			}
+		}()
+	}
+	wg.Wait()
+
+	report := ledger.Report()
+	wantCalls := workers * updates
+	if report.ByRole["answer"].Calls != wantCalls {
+		t.Fatalf("answer calls = %d, want %d", report.ByRole["answer"].Calls, wantCalls)
+	}
+	if report.ByRole["answer"].InTokens != wantCalls || report.ByRole["answer"].OutTokens != wantCalls*2 {
+		t.Fatalf("answer tokens = %d/%d, want %d/%d", report.ByRole["answer"].InTokens, report.ByRole["answer"].OutTokens, wantCalls, wantCalls*2)
+	}
+	if report.AnswerContextTokensMean != 3 {
+		t.Fatalf("context mean = %.0f, want 3", report.AnswerContextTokensMean)
 	}
 }

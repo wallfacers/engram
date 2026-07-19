@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type tokenPrice struct {
@@ -45,10 +46,12 @@ type roleCost struct {
 }
 
 type costLedger struct {
+	mu             sync.Mutex
 	Prices         priceTable
 	ByRole         map[string]*roleCost
 	UnpricedModels map[string]bool
-	contextTokens  []int
+	contextSum     int64
+	contextCount   int
 	EstimatedUSD   float64
 }
 
@@ -71,6 +74,8 @@ func (c *costLedger) Add(role, model string, inTokens, outTokens int) {
 	if outTokens < 0 {
 		outTokens = 0
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	bucket := c.ByRole[role]
 	if bucket == nil {
 		bucket = &roleCost{}
@@ -87,6 +92,12 @@ func (c *costLedger) Add(role, model string, inTokens, outTokens int) {
 }
 
 func (c *costLedger) ActualUSD() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.actualUSDLocked()
+}
+
+func (c *costLedger) actualUSDLocked() float64 {
 	var total float64
 	for _, bucket := range c.ByRole {
 		total += bucket.USD
@@ -96,19 +107,24 @@ func (c *costLedger) ActualUSD() float64 {
 
 func (c *costLedger) AddContextTokens(tokens int) {
 	if tokens >= 0 {
-		c.contextTokens = append(c.contextTokens, tokens)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.contextSum += int64(tokens)
+		c.contextCount++
 	}
 }
 
 func (c *costLedger) AnswerContextTokensMean() float64 {
-	if len(c.contextTokens) == 0 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.answerContextTokensMeanLocked()
+}
+
+func (c *costLedger) answerContextTokensMeanLocked() float64 {
+	if c.contextCount == 0 {
 		return 0
 	}
-	var total int
-	for _, tokens := range c.contextTokens {
-		total += tokens
-	}
-	return float64(total) / float64(len(c.contextTokens))
+	return float64(c.contextSum) / float64(c.contextCount)
 }
 
 func (c *costLedger) BudgetWarning(baseline float64) bool {
@@ -137,6 +153,8 @@ type costReport struct {
 }
 
 func (c *costLedger) Report() costReport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	roles := make(map[string]*roleCost, len(c.ByRole))
 	for role, bucket := range c.ByRole {
 		copyBucket := *bucket
@@ -149,9 +167,9 @@ func (c *costLedger) Report() costReport {
 	sort.Strings(unpriced)
 	return costReport{
 		EstimatedUSD:            c.EstimatedUSD,
-		ActualUSD:               c.ActualUSD(),
+		ActualUSD:               c.actualUSDLocked(),
 		ByRole:                  roles,
-		AnswerContextTokensMean: c.AnswerContextTokensMean(),
+		AnswerContextTokensMean: c.answerContextTokensMeanLocked(),
 		UnpricedModels:          unpriced,
 	}
 }

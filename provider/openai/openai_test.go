@@ -70,6 +70,56 @@ func TestOpenAI_SimpleTextStream(t *testing.T) {
 	}
 }
 
+func TestOpenAI_UsageOnlyTerminalChunkEmitsUsage(t *testing.T) {
+	wire := chunks(
+		`{"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":17,"completion_tokens":5}}`,
+		`[DONE]`,
+	)
+	srv := newSSEServer(wire)
+	defer srv.Close()
+
+	p := openai.New(openai.Options{APIKey: "k", BaseURL: srv.URL, IncludeUsage: true})
+	ch, err := p.Stream(context.Background(), provider.Request{Model: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	events := drain(t, ch)
+	var usage *provider.Usage
+	for _, event := range events {
+		if event.Type == provider.EventUsage {
+			usage = event.Usage
+		}
+	}
+	if usage == nil || usage.InputTokens != 17 || usage.OutputTokens != 5 {
+		t.Fatalf("usage event = %+v, want 17/5", usage)
+	}
+}
+
+func TestOpenAI_DefaultRequestOmitsStreamOptions(t *testing.T) {
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p := openai.New(openai.Options{APIKey: "k", BaseURL: srv.URL})
+	ch, err := p.Stream(context.Background(), provider.Request{Model: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	drain(t, ch)
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(captured, &body); err != nil {
+		t.Fatalf("request body: %v", err)
+	}
+	if _, ok := body["stream_options"]; ok {
+		t.Fatalf("default request unexpectedly contains stream_options: %s", captured)
+	}
+}
+
 // Scenario from spec: 并发 tool_calls 累积（index 字段）.
 func TestOpenAI_ConcurrentToolCalls(t *testing.T) {
 	wire := chunks(

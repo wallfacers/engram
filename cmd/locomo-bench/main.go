@@ -193,7 +193,7 @@ func run() error {
 	var prov provider.Provider
 	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
 	case "openai":
-		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL})
+		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true})
 	case "anthropic", "":
 		prov = anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
 	default:

@@ -26,9 +26,10 @@ const DefaultBaseURL = "https://api.openai.com/v1"
 // OpenAI-compatible third party (DeepSeek, Qwen, Ollama, ...) — per spec we
 // don't promise to support those, but technical compatibility is fine.
 type Options struct {
-	APIKey     string
-	BaseURL    string
-	HTTPClient *http.Client
+	APIKey       string
+	BaseURL      string
+	HTTPClient   *http.Client
+	IncludeUsage bool
 }
 
 type Provider struct {
@@ -53,7 +54,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	if err := ctx.Err(); err != nil {
 		return nil, provider.NewProviderError(p.Name(), 0, provider.CodeCanceled, "context canceled before request", err)
 	}
-	body, err := encodeRequest(req)
+	body, err := encodeRequest(req, p.opts.IncludeUsage)
 	if err != nil {
 		return nil, provider.NewProviderError(p.Name(), 0, provider.CodeInvalidRequest, "encode request", err)
 	}
@@ -221,13 +222,15 @@ func classifyOpenAIError(status int, errType, code, msg string) (string, string)
 
 // ---- request encoding ----
 
-func encodeRequest(r provider.Request) ([]byte, error) {
+func encodeRequest(r provider.Request, includeUsage bool) ([]byte, error) {
 	out := openaiReq{
 		Model:       r.Model,
 		Stream:      true,
-		StreamOpts:  &streamOpts{IncludeUsage: true},
 		MaxTokens:   r.MaxTokens,
 		Temperature: r.Temperature,
+	}
+	if includeUsage {
+		out.StreamOpts = &streamOpts{IncludeUsage: true}
 	}
 	if r.System != "" {
 		out.Messages = append(out.Messages, openaiMsg{Role: "system", Content: r.System})
@@ -333,11 +336,20 @@ func (s *openaiStreamState) handle(data []byte) ([]provider.ProviderEvent, bool,
 	if err := json.Unmarshal(data, &chunk); err != nil {
 		return nil, false, err
 	}
+	var out []provider.ProviderEvent
+	if chunk.Usage != nil {
+		out = append(out, provider.ProviderEvent{
+			Type: provider.EventUsage,
+			Usage: &provider.Usage{
+				InputTokens:  chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
+			},
+		})
+	}
 	if len(chunk.Choices) == 0 {
-		return nil, false, nil
+		return out, false, nil
 	}
 	choice := chunk.Choices[0]
-	var out []provider.ProviderEvent
 
 	if choice.Delta.Content != "" {
 		s.textSeen = true
@@ -389,16 +401,6 @@ func (s *openaiStreamState) handle(data []byte) ([]provider.ProviderEvent, bool,
 			}
 			out = append(out, provider.ProviderEvent{Type: provider.EventToolUse, ToolUse: block})
 		}
-	}
-
-	if chunk.Usage != nil {
-		out = append(out, provider.ProviderEvent{
-			Type: provider.EventUsage,
-			Usage: &provider.Usage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
-			},
-		})
 	}
 
 	return out, false, nil
