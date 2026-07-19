@@ -78,11 +78,11 @@ modified or imported (except read-only `internal/version`).
 **Goal**: `stats/export/namespaces/version` for operability and backup.
 **Independent test**: known store across two namespaces → stats counts, namespace list, full export, version.
 
-- [ ] T023 [P] [US3] Write `cmd/engram/ops_test.go` — `stats` counts; `namespaces` lists exactly the present `<ns>.db` and no others; `export` contains every entry; `version` prints and exits 0.
-- [ ] T024 [P] [US3] Implement `stats` handler in `cmd/engram/stats.go` — `EntryStore.Count`/`CountNonPinned`/`ManifestSizeEstimate`; render markdown summary.
-- [ ] T025 [P] [US3] Implement `export` handler in `cmd/engram/export.go` — `EntryStore.List` → `memory.RenderExport`; stream to stdout.
-- [ ] T026 [P] [US3] Implement `namespaces` handler in `cmd/engram/namespaces.go` — enumerate `<data-dir>/*.db`, strip suffix, render sorted list; ignore non-`.db` files.
-- [ ] T027 [P] [US3] Implement `version` handler in `cmd/engram/version.go` — print `internal/version`.`Version` (read-only import); exit 0.
+- [X] T023 [P] [US3] Write `cmd/engram/ops_test.go` — `stats` counts; `namespaces` lists exactly the present `<ns>.db` and no others; `export` contains every entry; `version` prints and exits 0.
+- [X] T024 [P] [US3] Implement `stats` handler in `cmd/engram/stats.go` — `EntryStore.Count`/`CountNonPinned`/`ManifestSizeEstimate`; render markdown summary.
+- [X] T025 [P] [US3] Implement `export` handler in `cmd/engram/export.go` — `EntryStore.List` → `memory.RenderExport`; stream to stdout.
+- [X] T026 [P] [US3] Implement `namespaces` handler in `cmd/engram/namespaces.go` — enumerate `<data-dir>/*.db`, strip suffix, render sorted list; ignore non-`.db` files.
+- [X] T027 [P] [US3] Implement `version` handler in `cmd/engram/version.go` — print `internal/version`.`Version` (read-only import); exit 0.
 
 **Checkpoint**: full 10-command surface complete.
 

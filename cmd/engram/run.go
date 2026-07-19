@@ -35,6 +35,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	if _, err := normalizeNamespace(config.Namespace); err != nil {
 		return diagnose(stderr, exitInvalidNS, err.Error(), "allowed: ^[A-Za-z0-9._-]{1,64}$")
 	}
+	if command == "namespaces" {
+		return runNamespaces(config, commandArgs[1:], stdout, stderr)
+	}
+	if command == "version" {
+		return runVersion(commandArgs[1:], stdout, stderr)
+	}
 
 	handle, err := openEngine(context.Background(), config)
 	if err != nil {
@@ -55,6 +61,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return runDelete(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	case "ingest":
 		return runIngest(context.Background(), handle, stdin, stdout, stderr)
+	case "stats":
+		return runStats(context.Background(), handle, commandArgs[1:], stdout, stderr)
+	case "export":
+		return runExport(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	}
 	return diagnose(stderr, exitUsage, fmt.Sprintf("command %q is not available", command), "run: engram help")
 }
