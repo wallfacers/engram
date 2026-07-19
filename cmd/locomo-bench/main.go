@@ -313,6 +313,23 @@ func run() error {
 			reportDelta(states[0], states[1])
 		}
 	}
+	if len(arms) >= 2 {
+		runsA, err := loadArmRuns(opt.runDir, arms[0], opt.repeats)
+		if err != nil {
+			return fmt.Errorf("load paired arm %s: %w", arms[0], err)
+		}
+		runsB, err := loadArmRuns(opt.runDir, arms[1], opt.repeats)
+		if err != nil {
+			return fmt.Errorf("load paired arm %s: %w", arms[1], err)
+		}
+		paired, err := pairedReport(runsA, runsB)
+		if err != nil {
+			return fmt.Errorf("build paired report: %w", err)
+		}
+		if err := writePaired(filepath.Join(opt.runDir, "paired.json"), paired); err != nil {
+			return fmt.Errorf("write paired.json: %w", err)
+		}
+	}
 	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel)
 	if err := writeCost(filepath.Join(opt.runDir, "cost.json"), ledger.Report()); err != nil {
 		return fmt.Errorf("write cost.json: %w", err)

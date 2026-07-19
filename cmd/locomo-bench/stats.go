@@ -233,14 +233,15 @@ type pairedQuestion struct {
 }
 
 type compareReport struct {
-	Questions []pairedQuestion `json:"questions"`
-	FlipsAToB int              `json:"flips_a_to_b"`
-	FlipsBToA int              `json:"flips_b_to_a"`
-	McNemarP  float64          `json:"mcnemar_p"`
-	CIOverlap bool             `json:"ci_overlap"`
-	NA        int              `json:"n_a"`
-	NB        int              `json:"n_b"`
-	Verdict   string           `json:"verdict"`
+	Questions       []pairedQuestion `json:"questions"`
+	FlipsAToB       int              `json:"flips_a_to_b"`
+	FlipsBToA       int              `json:"flips_b_to_a"`
+	McNemarP        float64          `json:"mcnemar_p"`
+	CIOverlap       bool             `json:"ci_overlap"`
+	NA              int              `json:"n_a"`
+	NB              int              `json:"n_b"`
+	PairedInProcess bool             `json:"paired_in_process,omitempty"`
+	Verdict         string           `json:"verdict"`
 }
 
 // compareRunDirs aligns repeated results by stable question_id, takes a
@@ -254,6 +255,14 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 	if err != nil {
 		return compareReport{}, fmt.Errorf("load compare B: %w", err)
 	}
+	return compareResults(runsA, runsB, false)
+}
+
+func pairedReport(runsA, runsB [][]result) (compareReport, error) {
+	return compareResults(runsA, runsB, true)
+}
+
+func compareResults(runsA, runsB [][]result, pairedInProcess bool) (compareReport, error) {
 	if len(runsA) == 0 || len(runsB) == 0 {
 		return compareReport{}, fmt.Errorf("compare requires at least one non-empty run per side (got A=%d B=%d)", len(runsA), len(runsB))
 	}
@@ -269,7 +278,7 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 	if len(ids) == 0 {
 		return compareReport{}, fmt.Errorf("compare requires at least one aligned question")
 	}
-	report := compareReport{Questions: make([]pairedQuestion, 0, len(ids))}
+	report := compareReport{Questions: make([]pairedQuestion, 0, len(ids)), PairedInProcess: pairedInProcess}
 	report.NA = len(runsA)
 	report.NB = len(runsB)
 	aOutcomes := make([]bool, 0, len(ids))
@@ -309,6 +318,10 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 }
 
 func writeCompare(path string, report compareReport) error {
+	return writeJSON(path, report)
+}
+
+func writePaired(path string, report compareReport) error {
 	return writeJSON(path, report)
 }
 

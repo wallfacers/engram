@@ -171,6 +171,43 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	}
 }
 
+func TestPairedReportSchemaAndWrite(t *testing.T) {
+	a := [][]result{{
+		{QuestionID: "q1", Correct: false, Category: 1},
+		{QuestionID: "q2", Correct: true, Category: 4},
+	}}
+	b := [][]result{{
+		{QuestionID: "q1", Correct: true, Category: 1},
+		{QuestionID: "q2", Correct: true, Category: 4},
+	}}
+	report, err := pairedReport(a, b)
+	if err != nil {
+		t.Fatalf("paired report: %v", err)
+	}
+	if !report.PairedInProcess || report.FlipsAToB != 1 || report.FlipsBToA != 0 || len(report.Questions) != 2 {
+		t.Fatalf("paired report = %+v", report)
+	}
+	path := filepath.Join(t.TempDir(), "paired.json")
+	if err := writePaired(path, report); err != nil {
+		t.Fatalf("write paired: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read paired: %v", err)
+	}
+	var decoded struct {
+		Questions       []pairedQuestion `json:"questions"`
+		McNemarP        float64          `json:"mcnemar_p"`
+		PairedInProcess bool             `json:"paired_in_process"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode paired: %v", err)
+	}
+	if !decoded.PairedInProcess || len(decoded.Questions) != 2 || decoded.McNemarP <= 0 {
+		t.Fatalf("paired JSON = %+v", decoded)
+	}
+}
+
 func TestGateBoundsConcurrency(t *testing.T) {
 	sem := make(chan struct{}, 2)
 	var mu sync.Mutex
