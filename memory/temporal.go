@@ -117,8 +117,12 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 	lower := strings.ToLower(query)
 
 	if date, start, end, found := findAbsoluteDate(query); found {
-		if order, orderStart := temporalOrder(lower); order != "" {
-			entity := cleanAnchorEntity(query[orderStart:date.start])
+		if order, orderStart, orderEnd := temporalOrder(query); order != "" {
+			left, right := date.end, orderStart
+			if orderStart < date.start {
+				left, right = orderEnd, date.start
+			}
+			entity := cleanAnchorEntity(clampedSlice(query, left, right))
 			if order == "before" {
 				return TimeWindow{End: start.Add(-time.Nanosecond), Intent: order, State: "historical", AnchorEntity: entity, AnchorTime: start}, true
 			}
@@ -196,15 +200,34 @@ func temporalState(query string, eventEnd, anchor time.Time, order bool) string 
 	return "historical"
 }
 
-func temporalOrder(query string) (string, int) {
+func temporalOrder(query string) (string, int, int) {
 	if m := orderPattern.FindStringIndex(query); m != nil {
 		matched := strings.ToLower(query[m[0]:m[1]])
 		if strings.Contains(matched, "before") || strings.Contains(matched, "之前") {
-			return "before", m[1]
+			return "before", m[0], m[1]
 		}
-		return "after", m[1]
+		return "after", m[0], m[1]
 	}
-	return "", 0
+	return "", 0, 0
+}
+
+func clampedSlice(s string, start, end int) string {
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	if start > len(s) {
+		start = len(s)
+	}
+	if end > len(s) {
+		end = len(s)
+	}
+	if start > end {
+		start, end = end, start
+	}
+	return s[start:end]
 }
 
 type temporalDate struct {

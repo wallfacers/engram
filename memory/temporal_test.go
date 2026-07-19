@@ -160,3 +160,27 @@ func TestParseTemporalIntentTable(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTemporalIntentDateThenOrderDoesNotPanic(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		intent string
+	}{
+		{name: "Chinese before", query: "2023年5月7日之前发生了什么？", intent: "before"},
+		{name: "Chinese after", query: "2023年5月7日以后发生了什么？", intent: "after"},
+		{name: "English before", query: "May 1, 2023 before the pottery class", intent: "before"},
+		{name: "English after", query: "May 1, 2023 after the pottery class", intent: "after"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseTemporalIntent(tt.query, time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC))
+			if !ok {
+				t.Fatalf("parse failed: %+v", got)
+			}
+			if got.Intent != tt.intent {
+				t.Fatalf("intent = %q, want %q; window=%+v", got.Intent, tt.intent, got)
+			}
+		})
+	}
+}
