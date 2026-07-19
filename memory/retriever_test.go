@@ -248,6 +248,31 @@ func TestEntityQueryWholeSentenceMatchesRawEntity(t *testing.T) {
 	}
 }
 
+func TestEntityQueryRawMatchUsesTokenBoundaries(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "sam-profile", Trigger: "contact",
+		Content: "The user has a contact.", CharCount: 24,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := es.PutEntities(ctx, "sam-profile", []string{"Sam"}); err != nil {
+		t.Fatalf("entities: %v", err)
+	}
+	got, err := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{
+		Associative: true,
+	}).Search(ctx, "Did they watch the same movie?", 3)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	for _, result := range got {
+		if result.Name == "sam-profile" {
+			t.Fatalf("entity Sam matched same: %+v", got)
+		}
+	}
+}
+
 // fakeReranker scores documents from a fixed map (unknown docs score 0);
 // fail=true simulates an endpoint failure.
 type fakeReranker struct {

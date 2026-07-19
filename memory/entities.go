@@ -83,6 +83,53 @@ func EntityQueryTokens(query string) []string {
 	return out
 }
 
+func entityWordTokens(s string) []string {
+	norm := EntityNorm(s)
+	if norm == "" {
+		return nil
+	}
+	var out []string
+	var current strings.Builder
+	flush := func() {
+		if current.Len() > 0 {
+			out = append(out, current.String())
+			current.Reset()
+		}
+	}
+	for _, r := range norm {
+		switch {
+		case unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r):
+			flush()
+			out = append(out, string(r))
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			current.WriteRune(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+func containsEntityTokenSequence(query, entity []string) bool {
+	if len(entity) == 0 || len(entity) > len(query) {
+		return false
+	}
+	for start := 0; start <= len(query)-len(entity); start++ {
+		matched := true
+		for i := range entity {
+			if query[start+i] != entity[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 // EntityMatchCountsForQuery combines exact entity-token matching with a whole
 // query substring match against entity_raw. The latter links natural-language
 // questions to multi-word extracted entities without changing the token API.
@@ -94,7 +141,7 @@ func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string
 	for _, token := range EntityQueryTokens(query) {
 		tokens[token] = struct{}{}
 	}
-	queryNorm := strings.ToLower(EntityNorm(query))
+	queryWordTokens := entityWordTokens(query)
 	rows, err := s.db.QueryContext(ctx, `SELECT entry_name, entity_norm, entity_raw FROM memory_entities`)
 	if err != nil {
 		return nil, fmt.Errorf("memory: entity query match: %w", err)
@@ -107,8 +154,10 @@ func (s *EntryStore) EntityMatchCountsForQuery(ctx context.Context, query string
 		if err := rows.Scan(&name, &entity, &raw); err != nil {
 			return nil, fmt.Errorf("memory: scan entity query match: %w", err)
 		}
-		rawNorm := strings.ToLower(EntityNorm(raw))
-		if _, exact := tokens[entity]; !exact && (rawNorm == "" || !strings.Contains(queryNorm, rawNorm)) {
+		rawNorm := EntityNorm(raw)
+		_, exact := tokens[entity]
+		phrase := rawNorm != "" && containsEntityTokenSequence(queryWordTokens, entityWordTokens(rawNorm))
+		if !exact && !phrase {
 			continue
 		}
 		if seen[name] == nil {

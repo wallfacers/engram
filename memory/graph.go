@@ -239,7 +239,7 @@ func (s *EntryStore) EntityCues(ctx context.Context, query string) ([]string, er
 	for _, token := range EntityQueryTokens(query) {
 		tokens[token] = struct{}{}
 	}
-	queryNorm := strings.ToLower(EntityNorm(query))
+	queryWordTokens := entityWordTokens(query)
 	rows, err := s.db.QueryContext(ctx, `SELECT entity_norm, entity_raw FROM memory_entities`)
 	if err != nil {
 		return nil, fmt.Errorf("memory: entity cues: %w", err)
@@ -251,8 +251,10 @@ func (s *EntryStore) EntityCues(ctx context.Context, query string) ([]string, er
 		if err := rows.Scan(&entity, &raw); err != nil {
 			return nil, fmt.Errorf("memory: scan entity cue: %w", err)
 		}
-		rawNorm := strings.ToLower(EntityNorm(raw))
-		if _, exact := tokens[entity]; exact || (rawNorm != "" && strings.Contains(queryNorm, rawNorm)) {
+		rawNorm := EntityNorm(raw)
+		_, exact := tokens[entity]
+		phrase := rawNorm != "" && containsEntityTokenSequence(queryWordTokens, entityWordTokens(rawNorm))
+		if exact || phrase {
 			seen[entity] = struct{}{}
 		}
 	}
