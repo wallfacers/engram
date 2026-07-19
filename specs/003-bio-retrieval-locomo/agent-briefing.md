@@ -46,3 +46,63 @@
 
 同批次 1（go build/vet/test 全绿 + CGO_ENABLED=0 + TestRetrievalParity 绿 +
 逐任务 commit）。阻塞或契约矛盾 → 记 impl-notes.md，不改 specs/ 设计文档。
+
+---
+
+# 执行简报：批次 2.6（US3 code review 修复，纯离线零花费）
+
+> 依据：批次 2（81a153f + 694ccea）三路评审，规划方已逐条核实。**在批次 2.5
+> 完成并汇报之后执行**（F1 与 2.5-A1 同代码区）。按编号顺序修，逐项 commit
+> （`003-us3fix: F1 ...`）。每项修复必须先补一个能暴露该 bug 的失败测试。
+
+## CRITICAL（不修则 Strike 1 判定无效）
+
+- [ ] F1 对照臂泄漏：`cmd/locomo-bench/main.go` retrieverOptionsFor 把
+      `Associative: opt.assoc` 传给所有臂，fts/baseline 臂的 entityRanks 因此切到
+      整句匹配路径。若 2.5-A1 的臂后缀机制已实现按臂独立 RetrieverOptions，则只需
+      验证并补测试；否则修为：无 `+assoc` 后缀的臂一律拿零值 options。
+      测试：开 `--assoc` 时 baseline 臂检索结果与完全不带 flag 的运行逐字节一致。
+- [ ] F2 实体匹配无词边界：`memory/entities.go` EntityMatchCountsForQuery 与
+      `memory/graph.go` EntityCues 用裸子串匹配（"sam" 命中 "same"）。修为
+      **规范化词元边界匹配**：entity_raw 规范化后按词元序列在 query 词元序列中
+      找连续子序列；单词元实体等价于旧 token 路径。测试："did they watch the
+      same movie?" 不得命中实体 "Sam"；"Alice Smith" 仍须命中。
+
+## HIGH
+
+- [ ] F3 游走回声：`memory/graph.go` WalkEntityGraph 无 visited 集，hop 2 沿原边
+      回流种子（回声分 = w²，压过真二跳）。修：维护 visited（种子+历代 frontier），
+      target ∈ visited 时跳过。测试：单边 a–b depth=2，a 不得出现在 scores。
+- [ ] F4 建边不幂等：`memory/pipeline/pipeline.go` storeFact 对已存在（去重命中）
+      的 entry 仍执行 UpsertEdges +1 累计，重跑/续跑图分数不可复现。修：entry
+      upsert 命中已存在时跳过建边。测试：同一 fact storeFact 两次 → co 边权重 =1。
+- [ ] F5 同义边语义过宽：`memory/curation/worker.go` buildSynonymEdges 把两个
+      >0.8 余弦 entry 的**全部实体叉积**成 syn 边（Alice–camping 类假边、权重高于
+      真 co 边）。**设计裁决（规划方）**：syn 边仅限"别名对"——x∈entry1、y∈entry2、
+      x≠y 且（共享 ≥1 个规范化词元 或 一方为另一方 ≥4 字符前缀）才建边，
+      weight=cosine；同时加**高水位线**（每 pass 只扫上次之后新增的 entry 与全库
+      配对，不再全库 O(N²) 重扫），EntitiesOf 每 entry 只查一次（批量预取）。
+- [ ] F6 重复嵌入与全表重载：`memory/retriever.go` associativeRanks 重新调
+      Embed(query) 并 LoadAllForModel 全量向量表，而同一次 Search 的 vectorRanks
+      已做过两者。修：Search 内算一次、两信号共享（Strike 1 嵌入调用直接减半）。
+
+## MEDIUM
+
+- [ ] F7 每查询三次全表扫 memory_entities（MatchCountsForQuery / EntityCues /
+      EntityDocFreq）。修：cue 提取与匹配计数合并为一次扫描；EntityDocFreq 加
+      WHERE 限定到游走触到的实体集。
+- [ ] F8 associativeRanks 全链路吞错误无日志，违反契约 engine-api §1（"返回空并
+      记日志"）。修：每个 early-return 前 slog Warn（带 stage 字段）。
+- [ ] F9 `--assoc-depth` 无校验、fingerprint 记录未 clamp 值（depth=5 记入 journal
+      但实际走 2）。修：flag >2 时启动报错；fingerprint 记录生效值。
+- [ ] F10 测试加固：TestAssociativeNoRegression 的 fixture 余弦退化（{0.1,0,0} 与
+      {1,0,0} 同向恒等），降级矩阵子测只断言 err==nil。修：fixture 用非共线向量；
+      降级子测断言结果内容（其余三路信号仍在）；新增正向集成测试——仅图可达
+      （bm25/向量/实体三路都够不着）的 entry 在 --assoc 下进入 top-k。
+
+## 备注
+
+- RetrieverOptions 的 TemporalScore/SupersededPenalty 等字段现为死字段——**保留**，
+  是 US4/US5 的契约占位（engine-api §1），勿删。
+- 完成定义/汇报协议同批次 1；不改 specs/ 设计文档（F5 的设计裁决已由规划方
+  写入本简报，照此实现即可）。

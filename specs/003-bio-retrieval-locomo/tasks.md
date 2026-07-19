@@ -105,7 +105,7 @@
 - [x] T013 [US2] 产出 Strike 0 运行脚本 `.locomo-run/strike0.sh`（quickstart §Strike 0
       的三步：estimate → A/B 两库多跑 → compare），内置价目表与 run-dir 约定；
       所有运行命令带 `--no-idk-retry`（判定口径）
-- [ ] T014 [US2] ⏸️ **维护者执行**：跑 strike0.sh（先 estimate 确认花费）；本方把
+- [x] T014 [US2] ⏸️ **维护者执行**：跑 strike0.sh（先 estimate 确认花费）；本方把
       两库 stats/compare、冻结抽取模型决定、校准基线、模型贡献差值与实际费用记入
       `specs/003-bio-retrieval-locomo/eval-log.md`
 
