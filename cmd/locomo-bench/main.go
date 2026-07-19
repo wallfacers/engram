@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -581,6 +582,11 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	if n, err := countExtracted(ctx, es); err != nil {
 		return nil, err
 	} else if n > 0 {
+		if temporalMechanismEnabled(opt, arms) {
+			if err := validateTemporalStore(ctx, st.DB(), n); err != nil {
+				return nil, err
+			}
+		}
 		logger.Info("reusing persisted extraction", "conversation", conv.ID, "facts", n)
 	} else {
 		for _, s := range conv.Sessions {
@@ -806,6 +812,33 @@ func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func temporalMechanismEnabled(opt options, arms []string) bool {
+	for _, arm := range arms {
+		armOpt := optionsForRun(opt, arm, len(arms) > 1)
+		if armOpt.temporalScore || armOpt.temporalHardFilter {
+			return true
+		}
+	}
+	return false
+}
+
+func validateTemporalStore(ctx context.Context, db *sql.DB, facts int) error {
+	if facts <= 0 {
+		return nil
+	}
+	var ranged, aliases int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_entries WHERE event_start IS NOT NULL`).Scan(&ranged); err != nil {
+		return fmt.Errorf("check temporal event ranges: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_event_aliases`).Scan(&aliases); err != nil {
+		return fmt.Errorf("check temporal aliases: %w", err)
+	}
+	if ranged == 0 && aliases == 0 {
+		return fmt.Errorf("temporal retrieval requires rebuilding persisted store: %d facts have no event ranges or aliases", facts)
+	}
+	return nil
 }
 
 // answerAndJudge retrieves, answers, and grades one question. When the first

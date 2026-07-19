@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/provider"
+	"github.com/wallfacers/engram/store"
 )
 
 func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
@@ -93,6 +95,22 @@ func TestTemporalAnswerPromptIsOptIn(t *testing.T) {
 	}
 	if answerPromptForOptionsWithTemporal(2, true, true) != forceTemporalAnswerPrompt {
 		t.Fatal("temporal answer flag did not select force temporal prompt")
+	}
+}
+
+func TestValidateTemporalStoreRejectsLegacyFacts(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	es := memory.NewEntryStore(st.DB())
+	if err := es.Upsert(ctx, &memory.Entry{Name: "legacy-fact", Content: "The user visited Oslo."}); err != nil {
+		t.Fatalf("insert legacy fact: %v", err)
+	}
+	if err := validateTemporalStore(ctx, st.DB(), 1); err == nil {
+		t.Fatal("legacy facts without temporal fields or aliases should be rejected")
 	}
 }
 
