@@ -85,6 +85,8 @@ var (
 	mdyDatePattern     = regexp.MustCompile(`\b([A-Za-z]+)\s+(\d{1,2}),?\s+(20\d{2})\b`)
 	monthYearPattern   = regexp.MustCompile(`\b([A-Za-z]+)\s+(20\d{2})\b`)
 	yearPattern        = regexp.MustCompile(`\b(20\d{2})\b`)
+	chineseYearPattern = regexp.MustCompile(`(20\d{2})年`)
+	yearContextPattern = regexp.MustCompile(`(?i)(?:in|during|since|until|before|after|by|between)\s*$`)
 	orderPattern       = regexp.MustCompile(`(?i)\b(before|after)\b|之前的?|之后的?|以后|以前`)
 	currentPattern     = regexp.MustCompile(`(?i)\b(current|currently|latest|today|now)\b|当前|目前|现在|如今|今天`)
 	historicalPattern  = regexp.MustCompile(`(?i)\b(was|were|used to|historical|formerly|previously)\b|过去|以前|曾经|历史`)
@@ -266,7 +268,18 @@ func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
 			}
 		}
 	}
+	if match := chineseYearPattern.FindStringSubmatchIndex(query); match != nil {
+		year, err := strconv.Atoi(query[match[2]:match[3]])
+		if err == nil {
+			start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+			end := endOfDay(time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC))
+			return temporalDate{start: match[0], end: match[1]}, start, end, true
+		}
+	}
 	if match := yearPattern.FindStringSubmatchIndex(query); match != nil {
+		if !yearHasTemporalContext(query, match[0]) {
+			return temporalDate{}, time.Time{}, time.Time{}, false
+		}
 		year, err := strconv.Atoi(query[match[2]:match[3]])
 		if err == nil {
 			start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -274,6 +287,17 @@ func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
 		}
 	}
 	return temporalDate{}, time.Time{}, time.Time{}, false
+}
+
+func yearHasTemporalContext(query string, yearStart int) bool {
+	if yearStart < 0 || yearStart > len(query) {
+		return false
+	}
+	prefix := strings.ToLower(query[:yearStart])
+	if len(prefix) > 32 {
+		prefix = prefix[len(prefix)-32:]
+	}
+	return yearContextPattern.MatchString(prefix)
 }
 
 func dateFromYMD(match []int, query string) (time.Time, bool) {

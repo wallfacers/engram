@@ -223,3 +223,38 @@ func TestCurrentAndHistoricalIntentAreStateOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTemporalIntentGatesBareYearsByContext(t *testing.T) {
+	anchor := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, query := range []string{
+		"reach 2048 in the game",
+		"the model supports 2023 tokens",
+	} {
+		if _, ok := ParseTemporalIntent(query, anchor); ok {
+			t.Errorf("ordinary number was parsed as temporal intent: %q", query)
+		}
+	}
+	for _, query := range []string{
+		"events in 2023",
+		"events during 2023",
+		"events since 2023",
+		"events until 2023",
+		"events before 2023",
+		"events after 2023",
+		"events by 2023",
+		"2023年发生了什么？",
+	} {
+		win, ok := ParseTemporalIntent(query, anchor)
+		if !ok {
+			t.Errorf("temporal year was not parsed: query=%q window=%+v ok=%t", query, win, ok)
+			continue
+		}
+		if win.Intent == "before" || win.Intent == "after" {
+			if win.AnchorTime.Year() != 2023 {
+				t.Errorf("temporal order anchor year = %d, want 2023: query=%q window=%+v", win.AnchorTime.Year(), query, win)
+			}
+		} else if win.Start.Year() != 2023 {
+			t.Errorf("temporal year start = %d, want 2023: query=%q window=%+v", win.Start.Year(), query, win)
+		}
+	}
+}
