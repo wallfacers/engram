@@ -20,6 +20,7 @@ type result struct {
 	QuestionType        string `json:"question_type,omitempty"`
 	Adversarial         bool   `json:"adversarial,omitempty"`
 	RetrievalFlags      string `json:"retrieval_flags"`
+	AnswerRegime        string `json:"answer_regime"`
 	Correct             bool   `json:"correct"`
 	Question            string `json:"question"`
 	Gold                string `json:"gold"`

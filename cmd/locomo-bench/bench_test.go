@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -172,6 +173,22 @@ func TestUnsupportedMechanismSuffixesExplainFuturePhase(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "not implemented until US4/US5") {
 			t.Fatalf("armsFor(%q) err = %v, want US4/US5 error", arm, err)
 		}
+	}
+}
+
+func TestThreeArmPairingEmitsLimitWarning(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	warnExtraPairedArms(logger, []string{"fts", "hybrid", "hybrid+assoc"})
+	if !strings.Contains(logs.String(), "first two") {
+		t.Fatalf("pairing warning = %q, want first two arms explanation", logs.String())
+	}
+}
+
+func TestAnswerRegimeFingerprintIsTraceable(t *testing.T) {
+	got := answerRegimeFingerprint(options{forceAnswer: true})
+	if !strings.Contains(got, "force_answer=true") || !strings.Contains(got, "abstain_prompt=false") {
+		t.Fatalf("answer regime fingerprint = %q", got)
 	}
 }
 

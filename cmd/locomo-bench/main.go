@@ -327,6 +327,9 @@ func run() error {
 			reportDelta(states[0], states[1])
 		}
 	}
+	if len(arms) > 2 {
+		warnExtraPairedArms(logger, arms)
+	}
 	if len(arms) >= 2 {
 		runsA, err := loadArmRuns(opt.runDir, arms[0], opt.repeats)
 		if err != nil {
@@ -667,6 +670,17 @@ func retrievalFingerprint(opt options) string {
 	return fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
 }
 
+func answerRegimeFingerprint(opt options) string {
+	return fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
+}
+
+func warnExtraPairedArms(logger *slog.Logger, arms []string) {
+	if len(arms) <= 2 {
+		return
+	}
+	logger.Warn("paired report uses first two arms; remaining arms are not paired", "paired_arms", arms[:2], "all_arms", arms)
+}
+
 func validateAssocDepth(depth int) error {
 	if depth > 2 {
 		return fmt.Errorf("--assoc-depth must be at most 2, got %d", depth)
@@ -721,6 +735,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					Gold:                goldFor(qa),
 					Predicted:           predicted,
 					RetrievalFlags:      retrievalFingerprint(armOpt),
+					AnswerRegime:        answerRegimeFingerprint(armOpt),
 					InputTokens:         usage.InputTokens,
 					OutputTokens:        usage.OutputTokens,
 					AnswerContextTokens: usage.InputTokens,
