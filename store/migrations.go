@@ -181,12 +181,23 @@ var v3BioRetrievalDown = []string{
 	`ALTER TABLE memory_entries DROP COLUMN event_start`,
 }
 
+var v4TemporalIndexes = []string{
+	`CREATE INDEX IF NOT EXISTS idx_memory_entries_event_start ON memory_entries(event_start)`,
+	`CREATE INDEX IF NOT EXISTS idx_memory_entries_event_end ON memory_entries(event_end)`,
+}
+
+var v4TemporalIndexesDown = []string{
+	`DROP INDEX IF EXISTS idx_memory_entries_event_end`,
+	`DROP INDEX IF EXISTS idx_memory_entries_event_start`,
+}
+
 // migrationsByVersion is the ordered list of all migrations. Each entry is
 // applied inside its own transaction; schema_version is bumped per step.
 var migrationsByVersion = []Migration{
 	{Version: 1, Up: v1Memory, Down: v1MemoryDown},
 	{Version: 2, Up: v2MemoryHybrid, Down: v2MemoryHybridDown},
 	{Version: 3, Up: v3BioRetrieval, Down: v3BioRetrievalDown},
+	{Version: 4, Up: v4TemporalIndexes, Down: v4TemporalIndexesDown},
 }
 
 func (s *Store) migrate(ctx context.Context) error {

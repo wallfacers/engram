@@ -28,8 +28,8 @@ func TestMigration_IdempotentRerun(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("expected version 3 after first open, got %d", version)
+	if version != 4 {
+		t.Errorf("expected version 4 after first open, got %d", version)
 	}
 	s.Close()
 
@@ -96,8 +96,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected migration v3, got v%d", version)
+	if version != 4 {
+		t.Fatalf("expected migration v4, got v%d", version)
 	}
 
 	db := s.DB()
@@ -134,9 +134,12 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 		t.Fatalf("indexed alias = %q, want %q", indexed, "fitness tracker")
 	}
 
-	// Apply the v3 Down contract, then reopen so normal migration logic upgrades
-	// the same v2 database back to v3.
+	// Apply the v4/v3 Down contracts, then reopen so normal migration logic
+	// upgrades the same v2 database back to v4.
 	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_memory_entries_event_end`,
+		`DROP INDEX IF EXISTS idx_memory_entries_event_start`,
+		`DELETE FROM schema_version WHERE version = 4`,
 		`DROP TRIGGER IF EXISTS memory_event_aliases_fts_au`,
 		`DROP TRIGGER IF EXISTS memory_event_aliases_fts_ad`,
 		`DROP TRIGGER IF EXISTS memory_event_aliases_fts_ai`,
@@ -166,7 +169,26 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read upgraded schema version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected migration v3 after round trip, got v%d", version)
+	if version != 4 {
+		t.Fatalf("expected migration v4 after round trip, got v%d", version)
+	}
+}
+
+func TestMigration_TemporalEventIndexes(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	for _, index := range []string{"idx_memory_entries_event_start", "idx_memory_entries_event_end"} {
+		var count int
+		if err := s.DB().QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil {
+			t.Fatalf("check index %q: %v", index, err)
+		}
+		if count != 1 {
+			t.Fatalf("index %q missing", index)
+		}
 	}
 }
