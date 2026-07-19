@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-
-	"github.com/wallfacers/engram/memory"
 )
 
 func runExport(ctx context.Context, handle *engineHandle, args []string, stdout, stderr io.Writer) int {
@@ -16,6 +14,6 @@ func runExport(ctx context.Context, handle *engineHandle, args []string, stdout,
 	if err != nil {
 		return diagnose(stderr, exitEngine, "unable to export memories", "check the data directory and try again")
 	}
-	fmt.Fprint(stdout, memory.RenderExport(entries))
+	fmt.Fprint(stdout, renderExport(entries))
 	return exitOK
 }

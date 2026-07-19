@@ -90,11 +90,11 @@ modified or imported (except read-only `internal/version`).
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T028 [P] Write `cmd/engram/e2e_test.go` — build the real binary and run one `os/exec` end-to-end smoke (offline add→search) asserting stdout markdown + exit 0.
-- [ ] T029 [P] Add `docs/cli.md` (operator/agent guide: build, config table, 10 commands, offline verify, agent wiring) and add a Knowledge-Map pointer line to `CLAUDE.md`.
-- [ ] T030 Engine-untouched gate: assert `git diff --name-only -- memory embedding provider store internal` is empty and `mcpserver/` is not imported by `cmd/engram` (SC-006); run `CGO_ENABLED=0 go vet ./cmd/engram/...`.
-- [ ] T031 Full-suite gate: `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test -count=1 ./...` all green.
-- [ ] T032 **LAST — provisional Entry fields**: against the then-frozen Entry shape, extend `get`/`list`/`export` renderers to surface `EventStart`/`EventEnd` (and any newly-stabilized field), with a test; do this only after T031, so the CLI body first ships on stable fields. Re-run T031.
+- [X] T028 [P] Write `cmd/engram/e2e_test.go` — build the real binary and run one `os/exec` end-to-end smoke (offline add→search) asserting stdout markdown + exit 0.
+- [X] T029 [P] Add `docs/cli.md` (operator/agent guide: build, config table, 10 commands, offline verify, agent wiring) and add a Knowledge-Map pointer line to `CLAUDE.md`.
+- [X] T030 Engine-untouched gate: assert `git diff --name-only -- memory embedding provider store internal` is empty and `mcpserver/` is not imported by `cmd/engram` (SC-006); run `CGO_ENABLED=0 go vet ./cmd/engram/...`.
+- [X] T031 Full-suite gate: `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test -count=1 ./...` all green.
+- [X] T032 **LAST — provisional Entry fields**: against the then-frozen Entry shape, extend `get`/`list`/`export` renderers to surface `EventStart`/`EventEnd` (and any newly-stabilized field), with a test; do this only after T031, so the CLI body first ships on stable fields. Re-run T031.
 
 ---
 

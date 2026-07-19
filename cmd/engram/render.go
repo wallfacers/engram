@@ -53,6 +53,27 @@ func renderList(entries []*memory.Entry) string {
 	return b.String()
 }
 
+func renderExport(entries []*memory.Entry) string {
+	base := memory.RenderExport(entries)
+	withEventRange := make([]*memory.Entry, 0)
+	for _, entry := range sortedEntries(entries) {
+		if entry.EventStart != nil || entry.EventEnd != nil {
+			withEventRange = append(withEventRange, entry)
+		}
+	}
+	if len(withEventRange) == 0 {
+		return base
+	}
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteString("\n## temporal metadata\n")
+	for _, entry := range withEventRange {
+		fmt.Fprintf(&b, "\n### %s\n\n", entry.Name)
+		writeEventRange(&b, entry)
+	}
+	return b.String()
+}
+
 func sortedEntries(entries []*memory.Entry) []*memory.Entry {
 	sorted := append([]*memory.Entry(nil), entries...)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -71,9 +92,19 @@ func writeEntry(b *strings.Builder, entry *memory.Entry) {
 	if entry.Trigger != "" {
 		fmt.Fprintf(b, "- trigger: %s\n", entry.Trigger)
 	}
+	writeEventRange(b, entry)
 	b.WriteString("\n")
 	b.WriteString(strings.TrimRight(entry.Content, "\n"))
 	b.WriteString("\n")
+}
+
+func writeEventRange(b *strings.Builder, entry *memory.Entry) {
+	if entry.EventStart != nil {
+		fmt.Fprintf(b, "- event start: %s\n", renderTimeValue(*entry.EventStart))
+	}
+	if entry.EventEnd != nil {
+		fmt.Fprintf(b, "- event end: %s\n", renderTimeValue(*entry.EventEnd))
+	}
 }
 
 func makeSnippet(content string) string {
