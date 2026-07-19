@@ -132,16 +132,33 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
 
 ## Strike 2: Temporal Retrieval
 
-- Date:
-- Dataset / repeats:
-- Flags:
-- Estimate output:
-- Actual cost (`cost.json`):
-- `stats.json`:
-- `compare.json` / verdict:
-- Token budget ratio:
-- Decision (keep / revert):
-- Notes:
+- Date: 2026-07-19 ~ 2026-07-20（全新建库 s2-store，5 repeats）
+- Dataset / repeats: locomo10.json（英文，1540 题）× 5 repeats，配对双臂
+- Flags: `--retrieval hybrid,hybrid+temporal --no-idk-retry --force-answer
+  --temporal-answer-prompt`（**两臂共用 temporal_answer_prompt=true**，唯一
+  变量是检索侧时间打分）
+- Estimate output: 名义 ¥146.61
+- Actual cost (`cost.json`): 名义 **¥151.39**（answer 79.07 + judge 71.87 +
+  extract 0.44），超预估 +3.3%（校正后常量已准）。后台实扣按缓存折扣约
+  ≈¥75（待与余额对账）。answer_context_tokens_mean=5044。
+- `stats.json`: hybrid OVERALL 66.8% [66.2,67.5] / temporal 类目 75.8%
+  [74.9,76.6]；hybrid+temporal OVERALL 66.0% [65.2,66.9] / temporal 类目
+  76.2% [75.3,77.1]。18 次答题网络失败（≈0.12%，噪声级），embedding 降级 0。
+- `paired.json` / verdict: 同窗多数票 McNemar **verdict=within-noise,
+  p=0.266, CI overlap=true**。逐类目：
+  - **temporal（靶心）Δ−0.3pp, p=1.000**（B救活 6 / B搞砸 7）——零效果
+  - single-hop −0.8pp p=0.391（21/28）、multi-hop −1.4pp p=0.556（11/15）、
+    open-domain +0.0pp p=0.752
+  - OVERALL −0.8pp（B救活 43 / B搞砸 55）
+- Token budget ratio: answer 上下文均值 5044 ≈ 基线 5145，未超预算门。
+- Decision (keep / revert): **revert**。`--temporal-score` 不进判定基线，保留
+  为实验 flag（同 --assoc 处置）。event_start/event_end 加列为 additive，无害
+  保留；temporal 答题 prompt 的贡献未在本枪隔离（两臂共有）→ 交批次 5
+  `+tplan` 隔离测。
+- Notes: 第 2 连负（Strike 1 −6.7pp above-noise / Strike 2 −0.8pp within-noise）。
+  靶心类目 p=1.000 坐实"往 RRF 螺栓仿生信号"打法在 sol 后端不成立；run-1~3
+  提前量的 +0.8pp 系噪声，全量多数票归零。转向 cluster-sweep（结构性攻覆盖
+  截断）+ answer-plan 隔离。
 
 ## Strike 3: Abstention and Conflict Resolution
 
