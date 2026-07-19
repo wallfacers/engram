@@ -258,3 +258,15 @@ func TestParseTemporalIntentGatesBareYearsByContext(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTemporalIntentUnionsMultipleAbsoluteDates(t *testing.T) {
+	win, ok := ParseTemporalIntent("What happened between 2022 and 2023?", time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC))
+	if !ok {
+		t.Fatalf("span query was not parsed: %+v", win)
+	}
+	wantStart := time.Date(2022, time.January, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-time.Nanosecond)
+	if win.Intent != "range" || !win.Start.Equal(wantStart) || !win.End.Equal(wantEnd) {
+		t.Fatalf("span window = %+v, want [%v,%v] range", win, wantStart, wantEnd)
+	}
+}

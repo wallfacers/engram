@@ -3,6 +3,7 @@ package memory
 import (
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +87,7 @@ var (
 	monthYearPattern   = regexp.MustCompile(`\b([A-Za-z]+)\s+(20\d{2})\b`)
 	yearPattern        = regexp.MustCompile(`\b(20\d{2})\b`)
 	chineseYearPattern = regexp.MustCompile(`(20\d{2})年`)
-	yearContextPattern = regexp.MustCompile(`(?i)(?:in|during|since|until|before|after|by|between)\s*$`)
+	yearContextPattern = regexp.MustCompile(`(?i)(?:in|during|since|until|before|after|by|between)\s*$|between\s+20\d{2}\s+and\s*$`)
 	orderPattern       = regexp.MustCompile(`(?i)\b(before|after)\b|之前的?|之后的?|以后|以前`)
 	currentPattern     = regexp.MustCompile(`(?i)\b(current|currently|latest|today|now)\b|当前|目前|现在|如今|今天`)
 	historicalPattern  = regexp.MustCompile(`(?i)\b(was|were|used to|historical|formerly|previously)\b|过去|以前|曾经|历史`)
@@ -238,55 +239,88 @@ type temporalDate struct {
 }
 
 func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
-	if match := ymdDatePattern.FindStringSubmatchIndex(query); match != nil {
-		if start, ok := dateFromYMD(match, query); ok {
-			return temporalDate{start: match[0], end: match[1]}, start, endOfDay(start), true
+	var matches []absoluteDateMatch
+	appendMatch := func(match []int, start, end time.Time) {
+		if start.IsZero() || end.IsZero() {
+			return
 		}
-	}
-	if match := chineseDatePattern.FindStringSubmatchIndex(query); match != nil {
-		if start, ok := dateFromChinese(match, query); ok {
-			return temporalDate{start: match[0], end: match[1]}, start, endOfDay(start), true
-		}
-	}
-	if match := dmyDatePattern.FindStringSubmatchIndex(query); match != nil {
-		if start, ok := dateFromDMY(match, query); ok {
-			return temporalDate{start: match[0], end: match[1]}, start, endOfDay(start), true
-		}
-	}
-	if match := mdyDatePattern.FindStringSubmatchIndex(query); match != nil {
-		if start, ok := dateFromMDY(match, query); ok {
-			return temporalDate{start: match[0], end: match[1]}, start, endOfDay(start), true
-		}
-	}
-	if match := monthYearPattern.FindStringSubmatchIndex(query); match != nil {
-		month, ok := monthFromString(query[match[2]:match[3]])
-		if ok {
-			year, err := strconv.Atoi(query[match[4]:match[5]])
-			if err == nil {
-				start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-				return temporalDate{start: match[0], end: match[1]}, start, endOfDay(start.AddDate(0, 1, -1)), true
+		candidate := absoluteDateMatch{temporalDate{start: match[0], end: match[1]}, start, end}
+		for _, existing := range matches {
+			if candidate.temporalDate.start < existing.temporalDate.end && existing.temporalDate.start < candidate.temporalDate.end {
+				return
 			}
 		}
+		matches = append(matches, candidate)
 	}
-	if match := chineseYearPattern.FindStringSubmatchIndex(query); match != nil {
+	for _, match := range ymdDatePattern.FindAllStringSubmatchIndex(query, -1) {
+		if start, ok := dateFromYMD(match, query); ok {
+			appendMatch(match, start, endOfDay(start))
+		}
+	}
+	for _, match := range chineseDatePattern.FindAllStringSubmatchIndex(query, -1) {
+		if start, ok := dateFromChinese(match, query); ok {
+			appendMatch(match, start, endOfDay(start))
+		}
+	}
+	for _, match := range dmyDatePattern.FindAllStringSubmatchIndex(query, -1) {
+		if start, ok := dateFromDMY(match, query); ok {
+			appendMatch(match, start, endOfDay(start))
+		}
+	}
+	for _, match := range mdyDatePattern.FindAllStringSubmatchIndex(query, -1) {
+		if start, ok := dateFromMDY(match, query); ok {
+			appendMatch(match, start, endOfDay(start))
+		}
+	}
+	for _, match := range monthYearPattern.FindAllStringSubmatchIndex(query, -1) {
+		month, ok := monthFromString(query[match[2]:match[3]])
+		if !ok {
+			continue
+		}
+		year, err := strconv.Atoi(query[match[4]:match[5]])
+		if err == nil {
+			start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+			appendMatch(match, start, endOfDay(start.AddDate(0, 1, -1)))
+		}
+	}
+	for _, match := range chineseYearPattern.FindAllStringSubmatchIndex(query, -1) {
 		year, err := strconv.Atoi(query[match[2]:match[3]])
 		if err == nil {
 			start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
-			end := endOfDay(time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC))
-			return temporalDate{start: match[0], end: match[1]}, start, end, true
+			appendMatch(match, start, endOfDay(time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC)))
 		}
 	}
-	if match := yearPattern.FindStringSubmatchIndex(query); match != nil {
+	for _, match := range yearPattern.FindAllStringSubmatchIndex(query, -1) {
 		if !yearHasTemporalContext(query, match[0]) {
-			return temporalDate{}, time.Time{}, time.Time{}, false
+			continue
 		}
 		year, err := strconv.Atoi(query[match[2]:match[3]])
 		if err == nil {
 			start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
-			return temporalDate{start: match[0], end: match[1]}, start, endOfDay(time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC)), true
+			appendMatch(match, start, endOfDay(time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC)))
 		}
 	}
-	return temporalDate{}, time.Time{}, time.Time{}, false
+	if len(matches) == 0 {
+		return temporalDate{}, time.Time{}, time.Time{}, false
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].start.Before(matches[j].start) })
+	minStart, maxEnd := matches[0].start, matches[0].end
+	minPos, maxPos := matches[0].temporalDate.start, matches[0].temporalDate.end
+	for _, match := range matches[1:] {
+		if match.start.Before(minStart) {
+			minStart, minPos = match.start, match.temporalDate.start
+		}
+		if match.end.After(maxEnd) {
+			maxEnd, maxPos = match.end, match.temporalDate.end
+		}
+	}
+	return temporalDate{start: minPos, end: maxPos}, minStart, maxEnd, true
+}
+
+type absoluteDateMatch struct {
+	temporalDate
+	start time.Time
+	end   time.Time
 }
 
 func yearHasTemporalContext(query string, yearStart int) bool {
