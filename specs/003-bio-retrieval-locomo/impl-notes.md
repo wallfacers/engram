@@ -9,3 +9,11 @@
 - `--abstain-prompt` remains a no-op in the answer path from the pre-US5
   implementation. US5/Strike 3 owns that behavior; this batch does not change
   it.
+
+## Batch 5 Answer-Plan Isolation
+
+- The `+tplan` arm suffix enables the temporal reasoning answer prompt only for
+  category 2 questions. Non-temporal categories use byte-identical prompts in
+  the paired arms.
+- Evaluate this isolation only from paired category 2 results. It must not be
+  generalized to the full benchmark score.

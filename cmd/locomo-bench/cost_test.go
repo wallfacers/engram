@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -148,6 +149,21 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	}
 	if math.Abs(byRoleUSD-report.EstimatedUSD) > 1e-12 {
 		t.Fatalf("by_role usd = %.12f, estimate = %.12f", byRoleUSD, report.EstimatedUSD)
+	}
+}
+
+func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
+	convs := []conversation{{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "When did the trip happen?", Answer: []byte(`"May"`), Category: 2},
+	}}}
+	baseline := options{retrieval: "hybrid,hybrid+assoc", repeats: 2}
+	tplan := options{retrieval: "hybrid,hybrid+tplan", repeats: 2}
+	if got, want := buildCallPlan(convs, tplan), buildCallPlan(convs, baseline); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tplan call plan = %+v, want unchanged paired plan %+v", got, want)
+	}
+	prices := priceTable{"answer": {In: 1, Out: 2}, "extract": {In: 3, Out: 4}}
+	if got, want := estimateReport(convs, tplan, prices, "answer", "extract"), estimateReport(convs, baseline, prices, "answer", "extract"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tplan estimate = %+v, want unchanged paired estimate %+v", got, want)
 	}
 }
 
