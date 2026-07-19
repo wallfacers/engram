@@ -69,7 +69,8 @@ cmd/
     ├── namespace.go        # namespace 校验(^[A-Za-z0-9._-]{1,64}$)+ 路径逃逸断言(适配层自持)
     ├── namespace_test.go   # SC-004 逃逸拒绝表 + 库外零文件
     ├── engine.go           # 经公开 API 组装引擎句柄(Open→EntryStore/VectorStore/Embedder/Retriever→pipeline.New)+ Close(退出前 drain embedder)
-    ├── commands.go         # 10 命令 handler:add/ingest/delete/search/get/list/stats/export/namespaces/version
+    ├── add.go search.go get.go list.go delete.go ingest.go   # 每命令一文件 handler(并行编辑无争用)
+    ├── stats.go export.go namespaces.go version.go            # 运维命令 handler
     ├── render.go           # AI 友好 markdown 渲染器(search/get/list/stats);export 复用 memory.RenderExport
     ├── render_test.go      # 确定性、pinned 优先、片段
     ├── errors.go           # AI 友好诊断构造 + 退出码常量

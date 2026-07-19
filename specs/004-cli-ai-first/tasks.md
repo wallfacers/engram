@@ -48,11 +48,11 @@ modified or imported (except read-only `internal/version`).
 
 - [ ] T011 [P] [US1] Write `cmd/engram/commands_test.go` — offline round-trip (SC-001): `add`→`search`(matching)→`get`→`list`→`delete`→`get`(not found, exit 3); assert markdown content and exit codes. (Red first.)
 - [ ] T012 [P] [US1] Write `cmd/engram/parity_test.go` — SC-002: seed entries, assert `engram search <q>` hit set/order == direct `memory.Retriever.Search(q, limit)` on the same store.
-- [ ] T013 [US1] Implement `add` handler in `cmd/engram/commands.go` — validate name, build `memory.Entry`, `EntryStore.Upsert`, `Embedder.Enqueue`; budget error → exit 6; markdown write confirmation.
-- [ ] T014 [US1] Implement `search` handler — `Retriever.Search(query, limit)` (default 8; `--limit<=0` → exit 2); render hits (name/score/snippet/content); honest `degraded.semantic` marker when embedding absent (FR-006).
-- [ ] T015 [P] [US1] Implement `get` handler — `EntryStore.GetByName`; not found → exit 3 with `... — run: engram list`; render stable fields only.
-- [ ] T016 [P] [US1] Implement `list` handler — `EntryStore.List`; render all, pinned-first; empty store → valid empty doc.
-- [ ] T017 [P] [US1] Implement `delete` handler — `EntryStore.Delete`; not found → exit 3; markdown deletion confirmation.
+- [ ] T013 [P] [US1] Implement `add` handler in `cmd/engram/add.go` — validate name, build `memory.Entry`, `EntryStore.Upsert`, `Embedder.Enqueue`; budget error → exit 6; markdown write confirmation.
+- [ ] T014 [P] [US1] Implement `search` handler in `cmd/engram/search.go` — `Retriever.Search(query, limit)` (default 8; `--limit<=0` → exit 2); render hits (name/score/snippet/content); honest `degraded.semantic` marker when embedding absent (FR-006).
+- [ ] T015 [P] [US1] Implement `get` handler in `cmd/engram/get.go` — `EntryStore.GetByName`; not found → exit 3 with `... — run: engram list`; render stable fields only.
+- [ ] T016 [P] [US1] Implement `list` handler in `cmd/engram/list.go` — `EntryStore.List`; render all, pinned-first; empty store → valid empty doc.
+- [ ] T017 [P] [US1] Implement `delete` handler in `cmd/engram/delete.go` — `EntryStore.Delete`; not found → exit 3; markdown deletion confirmation.
 - [ ] T018 [US1] Confirm the MVP: `CGO_ENABLED=0 go test -count=1 ./cmd/engram/...` green; T011/T012 pass.
 
 **Checkpoint**: US1 is a shippable offline memory CLI.
@@ -66,7 +66,7 @@ modified or imported (except read-only `internal/version`).
 
 - [ ] T019 [P] [US2] Write `cmd/engram/ingest_test.go` — with a stub `pipeline.ModelCaller` returning facts: stdin turns → entries stored + count rendered; no-LLM config → exit 4 with the required diagnostic.
 - [ ] T020 [P] [US2] Write `cmd/engram/lifecycle_test.go` — FR-008/SC-003: with a stub embedding client, `add` then a fresh handle open shows the entry's vector present (drain-before-exit); assert no vector lost.
-- [ ] T021 [US2] Implement `ingest` handler in `cmd/engram/commands.go` — parse stdin turns (`user:`/`assistant:` per quickstart) into `[]pipeline.Message`; require `handle.pipe != nil` else exit 4; `Pipeline.Ingest`; render extracted count + new entry names.
+- [ ] T021 [P] [US2] Implement `ingest` handler in `cmd/engram/ingest.go` — parse stdin turns (one turn per line, `user:`/`assistant:` prefix per quickstart; multi-line text is out of scope) into `[]pipeline.Message`; require `handle.pipe != nil` else exit 4; `Pipeline.Ingest`; render extracted count + new entry names.
 - [ ] T022 [US2] Verify drain-on-exit path in `engine.go` `Close()` covers `add` and `ingest` (T020 green); ingest tests green.
 
 **Checkpoint**: memory can be grown from dialogue; offline MVP still intact.
@@ -79,10 +79,10 @@ modified or imported (except read-only `internal/version`).
 **Independent test**: known store across two namespaces → stats counts, namespace list, full export, version.
 
 - [ ] T023 [P] [US3] Write `cmd/engram/ops_test.go` — `stats` counts; `namespaces` lists exactly the present `<ns>.db` and no others; `export` contains every entry; `version` prints and exits 0.
-- [ ] T024 [P] [US3] Implement `stats` handler — `EntryStore.Count`/`CountNonPinned`/`ManifestSizeEstimate`; render markdown summary.
-- [ ] T025 [P] [US3] Implement `export` handler — `EntryStore.List` → `memory.RenderExport`; stream to stdout.
-- [ ] T026 [P] [US3] Implement `namespaces` handler — enumerate `<data-dir>/*.db`, strip suffix, render sorted list; ignore non-`.db` files.
-- [ ] T027 [P] [US3] Implement `version` handler — print `internal/version`.`Version` (read-only import); exit 0.
+- [ ] T024 [P] [US3] Implement `stats` handler in `cmd/engram/stats.go` — `EntryStore.Count`/`CountNonPinned`/`ManifestSizeEstimate`; render markdown summary.
+- [ ] T025 [P] [US3] Implement `export` handler in `cmd/engram/export.go` — `EntryStore.List` → `memory.RenderExport`; stream to stdout.
+- [ ] T026 [P] [US3] Implement `namespaces` handler in `cmd/engram/namespaces.go` — enumerate `<data-dir>/*.db`, strip suffix, render sorted list; ignore non-`.db` files.
+- [ ] T027 [P] [US3] Implement `version` handler in `cmd/engram/version.go` — print `internal/version`.`Version` (read-only import); exit 0.
 
 **Checkpoint**: full 10-command surface complete.
 
@@ -111,9 +111,9 @@ modified or imported (except read-only `internal/version`).
 ## Parallel Opportunities
 
 - Foundational: T003, T004(+T005), T006(+T007) in parallel.
-- US1: tests T011/T012 in parallel; handlers T015/T016/T017 in parallel (distinct
-  logic, same file `commands.go` — coordinate edits or split per-file if needed).
-- US3: T024-T027 all `[P]`.
+- US1: tests T011/T012 in parallel; handlers T013-T017 all `[P]` (one file per
+  command — `add.go`/`search.go`/`get.go`/`list.go`/`delete.go` — no edit contention).
+- US3: T024-T027 all `[P]` (one file per command).
 - Stories US1/US3 can proceed in parallel once Foundational is done; US2 waits on T013.
 
 ## Implementation Strategy
