@@ -1022,8 +1022,12 @@ func buildCallPlan(convs []conversation, opt options) callPlan {
 		repeats = 1
 	}
 	plan := callPlan{Questions: countSelectedQuestions(convs, opt)}
+	passes := 1
+	if opt.opinionPass {
+		passes++
+	}
 	for _, conv := range convs {
-		plan.ExtractionCalls += len(conv.Sessions)
+		plan.ExtractionCalls += len(conv.Sessions) * passes
 	}
 	plan.AnswerCalls = plan.Questions * repeats
 	plan.AnswerInTokens = plan.AnswerCalls * estimateAnswerIn

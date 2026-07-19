@@ -121,6 +121,11 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	if plan.Questions != len(selected) || plan.ExtractionCalls != 1 {
 		t.Fatalf("call plan = %+v, want questions=2 extraction=1", plan)
 	}
+	opt.opinionPass = true
+	if got := buildCallPlan([]conversation{conv}, opt).ExtractionCalls; got != 2 {
+		t.Fatalf("opinion call plan extraction calls = %d, want 2", got)
+	}
+	opt.opinionPass = false
 	report := estimateReport([]conversation{conv}, opt, priceTable{
 		"answer-model":  {In: 1, Out: 2},
 		"extract-model": {In: 3, Out: 4},
