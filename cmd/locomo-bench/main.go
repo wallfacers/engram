@@ -120,11 +120,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if err := writeCompare("compare.json", report); err != nil {
+		if err := writeCompare(filepath.Join(dirs[0], "compare.json"), report); err != nil {
 			return fmt.Errorf("write compare.json: %w", err)
 		}
-		fmt.Printf("compare: flips A→B=%d B→A=%d McNemar p=%.6f CI overlap=%t verdict=%s\n",
-			report.FlipsAToB, report.FlipsBToA, report.McNemarP, report.CIOverlap, report.Verdict)
+		fmt.Printf("compare: n_a=%d n_b=%d flips A→B=%d B→A=%d McNemar p=%.6f CI overlap=%t verdict=%s\n",
+			report.NA, report.NB, report.FlipsAToB, report.FlipsBToA, report.McNemarP, report.CIOverlap, report.Verdict)
 		return nil
 	}
 	if opt.dataPath == "" {
@@ -255,11 +255,6 @@ func run() error {
 			state.journal.Close()
 			report(state, repeatOpt)
 		}
-		if len(states) == 1 {
-			if err := mirrorResultsFile(repeatOpt.runDir, states[0].name); err != nil {
-				return err
-			}
-		}
 		if len(states) == 2 {
 			reportDelta(states[0], states[1])
 		}
@@ -284,18 +279,6 @@ func run() error {
 		printStatsSummary(arm, stats)
 	}
 	fmt.Printf("cost: actual_usd=%.6f answer_context_tokens_mean=%.0f\n", ledger.ActualUSD(), ledger.AnswerContextTokensMean())
-	return nil
-}
-
-func mirrorResultsFile(dir, arm string) error {
-	source := filepath.Join(dir, fmt.Sprintf("results-%s.jsonl", arm))
-	contents, err := os.ReadFile(source) //nolint:gosec // operator-selected run artifact
-	if err != nil {
-		return fmt.Errorf("read results for mirror: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "results.jsonl"), contents, 0o644); err != nil { //nolint:gosec // operator-selected run directory
-		return fmt.Errorf("write results.jsonl: %w", err)
-	}
 	return nil
 }
 

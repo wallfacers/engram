@@ -148,7 +148,10 @@ func ciOverlap(a, b metricSummary) bool {
 }
 
 func aboveNoise(a, b metricSummary, pValue float64) bool {
-	return pValue < 0.05 || !ciOverlap(a, b)
+	if pValue < 0.05 {
+		return true
+	}
+	return a.N >= 2 && b.N >= 2 && !ciOverlap(a, b)
 }
 
 // statsFromRuns computes per-category and overall summaries from repeated
@@ -249,6 +252,8 @@ type compareReport struct {
 	FlipsBToA int              `json:"flips_b_to_a"`
 	McNemarP  float64          `json:"mcnemar_p"`
 	CIOverlap bool             `json:"ci_overlap"`
+	NA        int              `json:"n_a"`
+	NB        int              `json:"n_b"`
 	Verdict   string           `json:"verdict"`
 }
 
@@ -263,6 +268,9 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 	if err != nil {
 		return compareReport{}, fmt.Errorf("load compare B: %w", err)
 	}
+	if len(runsA) == 0 || len(runsB) == 0 {
+		return compareReport{}, fmt.Errorf("compare requires at least one non-empty run per side (got A=%d B=%d)", len(runsA), len(runsB))
+	}
 	majA := majorityResults(runsA)
 	majB := majorityResults(runsB)
 	ids := make([]string, 0, len(majA))
@@ -272,7 +280,12 @@ func compareRunDirs(dirA, dirB string) (compareReport, error) {
 		}
 	}
 	sort.Strings(ids)
+	if len(ids) == 0 {
+		return compareReport{}, fmt.Errorf("compare requires at least one aligned question")
+	}
 	report := compareReport{Questions: make([]pairedQuestion, 0, len(ids))}
+	report.NA = len(runsA)
+	report.NB = len(runsB)
 	aOutcomes := make([]bool, 0, len(ids))
 	bOutcomes := make([]bool, 0, len(ids))
 	for _, id := range ids {
@@ -360,25 +373,28 @@ func loadRunResults(dir string) ([][]result, error) {
 }
 
 func loadResultFiles(dir string) ([]result, error) {
-	paths := []string{}
-	if _, err := os.Stat(filepath.Join(dir, "results.jsonl")); err == nil {
-		paths = append(paths, filepath.Join(dir, "results.jsonl"))
+	canonical := filepath.Join(dir, "results.jsonl")
+	_, canonicalErr := os.Stat(canonical)
+	if canonicalErr != nil && !os.IsNotExist(canonicalErr) {
+		return nil, canonicalErr
 	}
 	legacy, err := filepath.Glob(filepath.Join(dir, "results-*.jsonl"))
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(legacy)
-	paths = append(paths, legacy...)
-	var out []result
-	for _, path := range paths {
-		items, err := readResultsJSONL(path)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, items...)
+	if canonicalErr == nil && len(legacy) > 0 {
+		return nil, fmt.Errorf("ambiguous run directory %s: results.jsonl and arm-specific result files both exist", dir)
 	}
-	return out, nil
+	if canonicalErr == nil {
+		return readResultsJSONL(canonical)
+	}
+	if len(legacy) > 1 {
+		return nil, fmt.Errorf("ambiguous run directory %s: multiple arm-specific result files exist", dir)
+	}
+	if len(legacy) == 0 {
+		return nil, nil
+	}
+	return readResultsJSONL(legacy[0])
 }
 
 func readResultsJSONL(path string) ([]result, error) {
