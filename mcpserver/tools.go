@@ -119,6 +119,8 @@ type entryOutput struct {
 	CharCount       int        `json:"char_count"`
 	SourceSessionID string     `json:"source_session_id"`
 	EventDate       *time.Time `json:"event_date"`
+	EventStart      *time.Time `json:"event_start"`
+	EventEnd        *time.Time `json:"event_end"`
 	FactSource      string     `json:"fact_source"`
 }
 
@@ -309,6 +311,8 @@ func toEntryOutput(entry *memory.Entry) entryOutput {
 		CharCount:       entry.CharCount,
 		SourceSessionID: entry.SourceSessionID,
 		EventDate:       entry.EventDate,
+		EventStart:      entry.EventStart,
+		EventEnd:        entry.EventEnd,
 		FactSource:      entry.FactSource,
 	}
 }
