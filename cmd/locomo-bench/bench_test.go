@@ -219,6 +219,12 @@ func TestForceAnswerPromptsRequireBestGuess(t *testing.T) {
 		if !strings.Contains(strings.ToLower(forced), "best guess") {
 			t.Fatalf("category %d force prompt lacks best-guess instruction: %q", category, forced)
 		}
+		if category == 2 && !strings.Contains(strings.ToLower(forced), "best supported inference") {
+			t.Fatalf("category %d force prompt lost inference instruction: %q", category, forced)
+		}
+		if category == 3 && !strings.Contains(forced, "COMBINE") {
+			t.Fatalf("open-domain force prompt lost COMBINE instruction: %q", forced)
+		}
 		if got := answerPromptForOptions(category, false); got != defaultPrompt {
 			t.Fatalf("category %d default prompt changed", category)
 		}

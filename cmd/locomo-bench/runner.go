@@ -128,6 +128,27 @@ const openDomainAnswerPrompt = `You answer a question about a person based on re
 - Answer with a short, direct phrase or sentence. No explanation, no restating the question.
 - Only reply "I don't know" when the memories offer no basis whatsoever for even an informed inference.`
 
+const forceAnswerSystemPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. Rules:
+- Answer with the shortest phrase that fully answers the question — a name, a date, a place, a list. No explanation, no restating the question.
+- For "when" questions, read the time from the memory's [event: YYYY-MM-DD] marker (that is when it happened). NEVER answer relative to today's date. Answer at the granularity the memory supports (a month like "May 2023" is fine if that is all that is known).
+- Write dates in natural form like "21 July 2023" or "May 2023" — never ISO format like 2023-07-21.
+- Make your best supported inference from the evidence — combine multiple memories if needed. Always provide your best guess based on the retrieved memories and reasonable inference; never decline with an uncertainty response.`
+
+const forceMultiHopAnswerPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. This question aggregates evidence scattered across MANY memories — an enumeration, a count, or a comparison. Rules:
+- Scan EVERY retrieved memory before answering; the relevant items are scattered, never adjacent. Do not stop at the first match.
+- For "what/which (things)" questions, enumerate ALL distinct items the memories explicitly support, as a short comma-separated list. Completeness decides correctness: one missing item makes the whole answer wrong. Do NOT pad the list with plausible extras the memories never state.
+- For "how many" questions, work it out before answering: silently list every qualifying occurrence with its [event: YYYY-MM-DD] date, MERGE mentions that describe the same occasion (the same event often appears in several memories — a raw dialogue excerpt and an extracted fact, or two retellings; same date usually means same occasion), count the merged list, and answer with just that number.
+- Mentions on DIFFERENT dates are usually different occasions — count them separately unless clearly the same event retold.
+- For "when" questions, read the time from the [event: YYYY-MM-DD] marker; write dates naturally like "21 July 2023", never ISO format.
+- Answer with the shortest phrase that fully answers the question. No explanation, no restating the question.
+- This is an answerable evaluation: always provide your best guess from the retrieved memories and never decline with an uncertainty response.`
+
+const forceOpenDomainAnswerPrompt = `You answer a question about a person based on retrieved memories from their long conversation. This question asks about opinions, motivations, preferences, or likely behavior — not an exact fact lookup. Rules:
+- Ground your answer in the retrieved memories: use them to understand the person's traits, habits, values, and past events.
+- COMBINE the memories with common sense, cause-and-effect reasoning, and world knowledge to infer the most plausible answer. An answer supported by reasonable inference is required.
+- Answer with a short, direct phrase or sentence. No explanation, no restating the question.
+- This is an answerable evaluation: always provide your best guess based on the memories and reasonable inference; never decline with an uncertainty response.`
+
 // answerPromptFor picks the system prompt by LoCoMo category
 // (1 = multi-hop aggregation; 3 = open-domain; everything else is
 // extraction-style).
@@ -143,21 +164,17 @@ func answerPromptFor(category int) string {
 }
 
 func answerPromptForOptions(category int, forceAnswer bool) string {
-	base := answerPromptFor(category)
 	if !forceAnswer {
-		return base
+		return answerPromptFor(category)
 	}
-	lines := strings.Split(base, "\n")
-	var b strings.Builder
-	for _, line := range lines {
-		if strings.Contains(strings.ToLower(line), "i don't know") {
-			continue
-		}
-		b.WriteString(line)
-		b.WriteByte('\n')
+	switch category {
+	case 1:
+		return forceMultiHopAnswerPrompt
+	case 3:
+		return forceOpenDomainAnswerPrompt
+	default:
+		return forceAnswerSystemPrompt
 	}
-	b.WriteString("- This is an answerable evaluation: always provide your best guess based on the retrieved memories and reasonable inference. Never decline with an uncertainty response.")
-	return b.String()
 }
 
 // queryRewriteSystemPrompt turns a failed question into an alternative retrieval
