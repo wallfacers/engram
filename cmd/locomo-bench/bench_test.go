@@ -38,6 +38,30 @@ func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
 	}
 }
 
+func TestTemporalBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
+	anchor := time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC)
+	opt := options{temporalScore: true, temporalHardFilter: true}
+	got := retrieverOptionsForAt(opt, anchor)
+	if !got.TemporalScore || !got.TemporalHardFilter || !got.Now.Equal(anchor) {
+		t.Fatalf("temporal retriever options = %+v, want enabled flags and anchor", got)
+	}
+	flags := retrievalFingerprint(opt)
+	if !strings.Contains(flags, "temporal_score=true") || !strings.Contains(flags, "temporal_hard_filter=true") {
+		t.Fatalf("temporal retrieval fingerprint = %q", flags)
+	}
+}
+
+func TestTemporalAnchorUsesLatestSessionDate(t *testing.T) {
+	want := time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC)
+	conv := conversation{Sessions: []session{
+		{Index: 1, Date: time.Date(2024, time.May, 1, 0, 0, 0, 0, time.UTC)},
+		{Index: 2, Date: want},
+	}}
+	if got := temporalNowForConversation(conv); !got.Equal(want) {
+		t.Fatalf("temporal conversation anchor = %v, want %v", got, want)
+	}
+}
+
 func TestAssocDepthAboveMaximumIsRejected(t *testing.T) {
 	if err := validateAssocDepth(3); err == nil {
 		t.Fatal("assoc depth 3 should be rejected at startup")
@@ -157,7 +181,7 @@ func TestArmsFor(t *testing.T) {
 			}
 		}
 	}
-	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+temporal", "hybrid+conflict", "hybrid+abstain", "hybrid,hybrid"} {
+	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+conflict", "hybrid+abstain", "hybrid,hybrid"} {
 		if _, err := armsFor(in); err == nil {
 			t.Fatalf("armsFor(%q) should error", in)
 		}
@@ -168,11 +192,14 @@ func TestArmsFor(t *testing.T) {
 }
 
 func TestUnsupportedMechanismSuffixesExplainFuturePhase(t *testing.T) {
-	for _, arm := range []string{"hybrid+temporal", "hybrid+conflict", "hybrid+abstain"} {
+	for _, arm := range []string{"hybrid+conflict", "hybrid+abstain"} {
 		_, err := armsFor(arm)
 		if err == nil || !strings.Contains(err.Error(), "not implemented until US4/US5") {
 			t.Fatalf("armsFor(%q) err = %v, want US4/US5 error", arm, err)
 		}
+	}
+	if arms, err := armsFor("hybrid+temporal"); err != nil || len(arms) != 1 || arms[0] != "hybrid+temporal" {
+		t.Fatalf("temporal arm should be supported: arms=%v err=%v", arms, err)
 	}
 }
 

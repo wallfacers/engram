@@ -113,6 +113,8 @@ func run() error {
 	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
 	flag.BoolVar(&opt.assoc, "assoc", false, "enable associative graph retrieval")
 	flag.IntVar(&opt.assocDepth, "assoc-depth", 2, "associative graph walk depth (maximum 2)")
+	flag.BoolVar(&opt.temporalScore, "temporal-score", false, "enable soft temporal retrieval scoring")
+	flag.BoolVar(&opt.temporalHardFilter, "temporal-hard-filter", false, "experimental hard temporal candidate filter")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
@@ -436,7 +438,8 @@ type armSpec struct {
 }
 
 var supportedArmMechanisms = map[string]struct{}{
-	"assoc": {},
+	"assoc":    {},
+	"temporal": {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -451,7 +454,7 @@ func parseArm(name string) (armSpec, error) {
 		if mechanism == "" {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: empty mechanism suffix", name)
 		}
-		if mechanism == "temporal" || mechanism == "conflict" || mechanism == "abstain" {
+		if mechanism == "conflict" || mechanism == "abstain" {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: %s not implemented until US4/US5", name, mechanism)
 		}
 		if _, ok := supportedArmMechanisms[mechanism]; !ok {
@@ -636,7 +639,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	retrievers := make(map[string]*memory.Retriever, len(arms))
 	for _, arm := range arms {
 		armOpt := optionsForRun(opt, arm, len(arms) > 1)
-		retrieverOpts := retrieverOptionsFor(armOpt)
+		retrieverOpts := retrieverOptionsForAt(armOpt, temporalNowForConversation(conv))
 		if armBackend(arm) == "hybrid" {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, buildBenchReranker(), retrieverOpts)
 		} else {
@@ -648,11 +651,16 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
+	return retrieverOptionsForAt(opt, time.Time{})
+}
+
+func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
 	return memory.RetrieverOptions{
 		Associative:        opt.assoc,
 		AssocDepth:         opt.assocDepth,
-		TemporalScore:      opt.temporalScore,
+		TemporalScore:      opt.temporalScore || opt.temporalHardFilter,
 		TemporalHardFilter: opt.temporalHardFilter,
+		Now:                now,
 	}
 }
 
@@ -661,7 +669,22 @@ func retrievalFingerprint(opt options) string {
 	if depth <= 0 || depth > 2 {
 		depth = 2
 	}
-	return fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
+	fingerprint := fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
+	if opt.temporalScore || opt.temporalHardFilter {
+		fingerprint += fmt.Sprintf(";temporal_score=%t;temporal_hard_filter=%t", opt.temporalScore || opt.temporalHardFilter, opt.temporalHardFilter)
+	}
+	return fingerprint
+}
+
+func temporalNowForConversation(conv conversation) time.Time {
+	var latest time.Time
+	for _, session := range conv.Sessions {
+		if session.Date.IsZero() || (!latest.IsZero() && !session.Date.After(latest)) {
+			continue
+		}
+		latest = session.Date.UTC()
+	}
+	return latest
 }
 
 func answerRegimeFingerprint(opt options) string {
