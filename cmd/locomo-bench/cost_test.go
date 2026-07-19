@@ -121,6 +121,15 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	if plan.Questions != len(selected) || plan.ExtractionCalls != 1 {
 		t.Fatalf("call plan = %+v, want questions=2 extraction=1", plan)
 	}
+	opt.retrieval = "hybrid,hybrid+assoc"
+	pairedPlan := buildCallPlan([]conversation{conv}, opt)
+	if pairedPlan.AnswerCalls != 12 || pairedPlan.JudgeCalls != 12 || pairedPlan.FilterCalls != 12 {
+		t.Fatalf("paired call plan = %+v, want answer/filter/judge=12", pairedPlan)
+	}
+	if pairedPlan.AnswerInTokens != 12*4000 || pairedPlan.AnswerOutTokens != 12*50 || pairedPlan.JudgeInTokens != 12*1600 {
+		t.Fatalf("paired calibrated tokens = %+v", pairedPlan)
+	}
+	opt.retrieval = ""
 	opt.opinionPass = true
 	if got := buildCallPlan([]conversation{conv}, opt).ExtractionCalls; got != 2 {
 		t.Fatalf("opinion call plan extraction calls = %d, want 2", got)

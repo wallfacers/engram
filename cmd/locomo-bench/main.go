@@ -1135,11 +1135,11 @@ func countSelectedQuestions(convs []conversation, opt options) int {
 const (
 	estimateExtractIn  = 4_000
 	estimateExtractOut = 500
-	estimateAnswerIn   = 7_000
-	estimateAnswerOut  = 300
+	estimateAnswerIn   = 4_000
+	estimateAnswerOut  = 50
 	estimateFilterIn   = 1_000
 	estimateFilterOut  = 0
-	estimateJudgeIn    = 1_000
+	estimateJudgeIn    = 1_600
 	estimateJudgeOut   = 100
 )
 
@@ -1170,16 +1170,20 @@ func buildCallPlan(convs []conversation, opt options) callPlan {
 	for _, conv := range convs {
 		plan.ExtractionCalls += len(conv.Sessions) * passes
 	}
-	plan.AnswerCalls = plan.Questions * repeats
+	armCount := 1
+	if arms, err := armsFor(opt.retrieval); err == nil && len(arms) > 0 {
+		armCount = len(arms)
+	}
+	plan.AnswerCalls = plan.Questions * repeats * armCount
 	plan.AnswerInTokens = plan.AnswerCalls * estimateAnswerIn
 	plan.AnswerOutTokens = plan.AnswerCalls * estimateAnswerOut
 	plan.FilterCalls = 0
 	if opt.filterPool > opt.topK {
-		plan.FilterCalls = plan.Questions * repeats
+		plan.FilterCalls = plan.Questions * repeats * armCount
 		plan.FilterInTokens = plan.FilterCalls * estimateFilterIn
 		plan.FilterOutTokens = plan.FilterCalls * estimateFilterOut
 	}
-	plan.JudgeCalls = plan.Questions * repeats
+	plan.JudgeCalls = plan.Questions * repeats * armCount
 	plan.JudgeInTokens = plan.JudgeCalls * estimateJudgeIn
 	plan.JudgeOutTokens = plan.JudgeCalls * estimateJudgeOut
 	return plan
