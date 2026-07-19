@@ -85,7 +85,7 @@ var (
 	mdyDatePattern     = regexp.MustCompile(`\b([A-Za-z]+)\s+(\d{1,2}),?\s+(20\d{2})\b`)
 	monthYearPattern   = regexp.MustCompile(`\b([A-Za-z]+)\s+(20\d{2})\b`)
 	yearPattern        = regexp.MustCompile(`\b(20\d{2})\b`)
-	orderPattern       = regexp.MustCompile(`(?i)\b(before|after)\b|之前|以后|之前的|之后的`)
+	orderPattern       = regexp.MustCompile(`(?i)\b(before|after)\b|之前的?|之后的?|以后|以前`)
 	currentPattern     = regexp.MustCompile(`(?i)\b(current|currently|latest|today|now)\b|当前|目前|现在|如今|今天`)
 	historicalPattern  = regexp.MustCompile(`(?i)\b(was|were|used to|historical|formerly|previously)\b|过去|以前|曾经|历史`)
 	monthNames         = map[string]time.Month{
@@ -203,7 +203,7 @@ func temporalState(query string, eventEnd, anchor time.Time, order bool) string 
 func temporalOrder(query string) (string, int, int) {
 	if m := orderPattern.FindStringIndex(query); m != nil {
 		matched := strings.ToLower(query[m[0]:m[1]])
-		if strings.Contains(matched, "before") || strings.Contains(matched, "之前") {
+		if strings.Contains(matched, "before") || strings.Contains(matched, "之前") || strings.Contains(matched, "以前") {
 			return "before", m[0], m[1]
 		}
 		return "after", m[0], m[1]

@@ -184,3 +184,19 @@ func TestParseTemporalIntentDateThenOrderDoesNotPanic(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTemporalIntentChineseBareOrderWords(t *testing.T) {
+	tests := []struct {
+		query  string
+		intent string
+	}{
+		{query: "2023年5月7日之后发生了什么？", intent: "after"},
+		{query: "2023年5月7日以前发生了什么？", intent: "before"},
+	}
+	for _, tt := range tests {
+		got, ok := ParseTemporalIntent(tt.query, time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC))
+		if !ok || got.Intent != tt.intent {
+			t.Errorf("ParseTemporalIntent(%q) = %+v, ok=%t; want intent %q", tt.query, got, ok, tt.intent)
+		}
+	}
+}
