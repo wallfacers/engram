@@ -10,7 +10,7 @@
 
 ## Technical Context
 
-**Language/Version**: Go 1.22(与引擎同)
+**Language/Version**: Go 1.25.0(SDK v1.5.0 强制 Go≥1.25;由此把 module 基线从 001 的 1.22 抬到 1.25.0。Go 向后兼容,引擎行为不变、既有测试全绿。见 research R1 修订)
 
 **Primary Dependencies**: `github.com/modelcontextprotocol/go-sdk` v1.5.0(仅 stdio);复用引擎 `github.com/wallfacers/engram/{memory,memory/pipeline,embedding,provider,store}`。无新增需 C 工具链的依赖。
 

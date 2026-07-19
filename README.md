@@ -22,6 +22,29 @@ CGO_ENABLED=0 go build ./...
 go vet ./...
 ```
 
+### 注册 engram MCP server
+
+先构建 MCP server，然后在 MCP 客户端配置中注册本地 stdio 进程：
+
+```bash
+CGO_ENABLED=0 go build -o ./engram-mcp ./cmd/engram-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "/abs/path/to/engram-mcp",
+      "args": ["--data-dir", "/home/you/.engram/memory"]
+    }
+  }
+}
+```
+
+启动后，Agent 可以调用 `memory_write`、`memory_search`、`memory_list`、
+`memory_get` 和 `memory_delete`。不配置 embedding 或 LLM 端点时仍可离线运行；
+LLM provider 通过 `ENGRAM_LLM_*` 环境变量配置，密钥不会作为命令行参数传入。
+
 检索保真门禁和三路信号降级测试无需外网：
 
 ```bash

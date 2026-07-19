@@ -2,6 +2,9 @@
 .claude/settings.local.json
 .claude/**/*.local.json
 
+# Parallel-feature git worktrees (separate checkouts, never part of this tree)
+.claude/worktrees/
+
 # Go build artifacts
 /bin/
 *.exe
