@@ -433,7 +433,7 @@ type armSpec struct {
 }
 
 var supportedArmMechanisms = map[string]struct{}{
-	"assoc": {}, "temporal": {}, "conflict": {}, "abstain": {},
+	"assoc": {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -447,6 +447,9 @@ func parseArm(name string) (armSpec, error) {
 		mechanism := strings.ToLower(strings.TrimSpace(raw))
 		if mechanism == "" {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: empty mechanism suffix", name)
+		}
+		if mechanism == "temporal" || mechanism == "conflict" || mechanism == "abstain" {
+			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: %s not implemented until US4/US5", name, mechanism)
 		}
 		if _, ok := supportedArmMechanisms[mechanism]; !ok {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: unsupported mechanism %q", name, mechanism)

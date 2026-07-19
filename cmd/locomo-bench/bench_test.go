@@ -137,12 +137,10 @@ func TestJournalResume(t *testing.T) {
 
 func TestArmsFor(t *testing.T) {
 	cases := map[string][]string{
-		"fts":                         {"fts"},
-		"hybrid":                      {"hybrid"},
-		"both":                        {"fts", "hybrid"},
-		"hybrid,hybrid+assoc":         {"hybrid", "hybrid+assoc"},
-		"hybrid+assoc+temporal":       {"hybrid+assoc+temporal"},
-		"fts+conflict,hybrid+abstain": {"fts+conflict", "hybrid+abstain"},
+		"fts":                 {"fts"},
+		"hybrid":              {"hybrid"},
+		"both":                {"fts", "hybrid"},
+		"hybrid,hybrid+assoc": {"hybrid", "hybrid+assoc"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -158,13 +156,22 @@ func TestArmsFor(t *testing.T) {
 			}
 		}
 	}
-	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid,hybrid"} {
+	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+temporal", "hybrid+conflict", "hybrid+abstain", "hybrid,hybrid"} {
 		if _, err := armsFor(in); err == nil {
 			t.Fatalf("armsFor(%q) should error", in)
 		}
 	}
 	if !hasArm([]string{"fts", "hybrid"}, "hybrid") || hasArm([]string{"fts"}, "hybrid") {
 		t.Fatal("hasArm wrong")
+	}
+}
+
+func TestUnsupportedMechanismSuffixesExplainFuturePhase(t *testing.T) {
+	for _, arm := range []string{"hybrid+temporal", "hybrid+conflict", "hybrid+abstain"} {
+		_, err := armsFor(arm)
+		if err == nil || !strings.Contains(err.Error(), "not implemented until US4/US5") {
+			t.Fatalf("armsFor(%q) err = %v, want US4/US5 error", arm, err)
+		}
 	}
 }
 
@@ -177,10 +184,6 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	assoc := optionsForArm(options{}, "hybrid+assoc")
 	if !assoc.assoc || assoc.temporalScore || assoc.conflictResolution || assoc.abstainPrompt {
 		t.Fatalf("assoc suffix did not override global mechanisms: %+v", assoc)
-	}
-	temporal := optionsForArm(global, "hybrid+temporal")
-	if temporal.assoc || !temporal.temporalScore || temporal.conflictResolution || temporal.abstainPrompt {
-		t.Fatalf("temporal suffix did not override global mechanisms: %+v", temporal)
 	}
 	single := optionsForRun(global, "hybrid", false)
 	if !single.assoc || !single.temporalScore || !single.conflictResolution || !single.abstainPrompt {
