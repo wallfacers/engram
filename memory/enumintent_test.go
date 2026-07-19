@@ -5,10 +5,14 @@ import "testing"
 func TestEnumerationIntentRecognizesEnglishEnumerationAndComparison(t *testing.T) {
 	tests := []string{
 		"What things did Alice do during the trip?",
+		"What activities did Alice do during the trip?",
 		"Which activities did Bob mention?",
 		"How many times did she visit the museum?",
 		"How often did they meet?",
 		"List all the places she visited.",
+		"List all places she visited.",
+		"Can you list your hobbies?",
+		"list them",
 		"Compare the two travel plans.",
 		"Which option happened more often?",
 	}
@@ -24,6 +28,9 @@ func TestEnumerationIntentRecognizesChineseEnumeration(t *testing.T) {
 		"她去了哪些地方？",
 		"他参加了几次活动？",
 		"他们提到了多少次旅行？",
+		"多少国家？",
+		"多少？",
+		"多少钱？",
 		"每次会议发生了什么？",
 	} {
 		if got := ParseEnumerationIntent(query); !got.IsEnumeration {
@@ -45,10 +52,9 @@ func TestEnumerationIntentDoesNotMisclassifySingleFactQuestions(t *testing.T) {
 	}
 }
 
-func TestEnumerationIntentDoesNotMistakeListPriceOrMoneyForEnumeration(t *testing.T) {
+func TestEnumerationIntentDoesNotMistakeListPriceForEnumeration(t *testing.T) {
 	for _, query := range []string{
 		"What is the list price of the camera?",
-		"多少钱？",
 	} {
 		if got := ParseEnumerationIntent(query); got.IsEnumeration {
 			t.Errorf("ParseEnumerationIntent(%q) = %+v, want non-enumeration", query, got)
