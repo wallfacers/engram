@@ -348,8 +348,11 @@ func TestUpsertPreservesSupersededFieldOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.EventStart != nil || got.EventEnd != nil {
-		t.Fatalf("zero-value refresh should clear event range: start=%v end=%v", got.EventStart, got.EventEnd)
+	// A rangeless upsert (legacy migrate, chunk ingest, content-only edits)
+	// must NOT wipe previously extracted event ranges — nil means "no new
+	// information", not "clear".
+	if got.EventStart == nil || !got.EventStart.Equal(start) || got.EventEnd == nil || !got.EventEnd.Equal(end) {
+		t.Fatalf("rangeless refresh should preserve event range: start=%v end=%v", got.EventStart, got.EventEnd)
 	}
 	if got.SupersededBy != "newer-entry" {
 		t.Fatalf("superseded_by = %q, want newer-entry", got.SupersededBy)

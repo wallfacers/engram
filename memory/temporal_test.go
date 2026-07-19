@@ -270,3 +270,42 @@ func TestParseTemporalIntentUnionsMultipleAbsoluteDates(t *testing.T) {
 		t.Fatalf("span window = %+v, want [%v,%v] range", win, wantStart, wantEnd)
 	}
 }
+
+func TestParseTemporalIntentMultiDateSpanBeatsOrderWords(t *testing.T) {
+	anchor := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	win, ok := ParseTemporalIntent("What happened after May 2023 and before July 2023?", anchor)
+	if !ok {
+		t.Fatalf("multi-date span with order words was not parsed: %+v", win)
+	}
+	wantStart := time.Date(2023, time.May, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2023, time.August, 1, 0, 0, 0, 0, time.UTC).Add(-time.Nanosecond)
+	if win.Intent != "range" || !win.Start.Equal(wantStart) || !win.End.Equal(wantEnd) {
+		t.Fatalf("multi-date span window = %+v, want [%v,%v] range (order branch must not hijack union bounds)", win, wantStart, wantEnd)
+	}
+}
+
+func TestParseTemporalIntentYearContextRequiresWordBoundary(t *testing.T) {
+	anchor := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, query := range []string{
+		"photos of the cabin 2023 renovation",
+		"did Alice run the Berlin 2023 marathon",
+	} {
+		if win, ok := ParseTemporalIntent(query, anchor); ok {
+			t.Errorf("keyword-suffix word treated as year context: %q -> %+v", query, win)
+		}
+	}
+}
+
+func TestParseTemporalIntentStativeYiqianIsHistorical(t *testing.T) {
+	anchor := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	win, ok := ParseTemporalIntent("他以前住在哪里", anchor)
+	if !ok {
+		t.Fatalf("stative 以前 query was not parsed: %+v", win)
+	}
+	if win.Intent == "before" || win.Intent == "after" {
+		t.Fatalf("stative 以前 misread as order intent: %+v", win)
+	}
+	if win.State != "historical" {
+		t.Fatalf("stative 以前 state = %q, want historical: %+v", win.State, win)
+	}
+}

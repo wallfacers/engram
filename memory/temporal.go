@@ -87,7 +87,7 @@ var (
 	monthYearPattern   = regexp.MustCompile(`\b([A-Za-z]+)\s+(20\d{2})\b`)
 	yearPattern        = regexp.MustCompile(`\b(20\d{2})\b`)
 	chineseYearPattern = regexp.MustCompile(`(20\d{2})年`)
-	yearContextPattern = regexp.MustCompile(`(?i)(?:in|during|since|until|before|after|by|between)\s*$|between\s+20\d{2}\s+and\s*$`)
+	yearContextPattern = regexp.MustCompile(`(?i)\b(?:in|during|since|until|before|after|by|between)\s*$|\bbetween\s+20\d{2}\s+and\s*$`)
 	orderPattern       = regexp.MustCompile(`(?i)\b(before|after)\b|之前的?|之后的?|以后|以前`)
 	currentPattern     = regexp.MustCompile(`(?i)\b(current|currently|latest|today|now)\b|当前|目前|现在|如今|今天`)
 	historicalPattern  = regexp.MustCompile(`(?i)\b(was|were|used to|historical|formerly|previously)\b|过去|以前|曾经|历史`)
@@ -119,8 +119,12 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 	base, fuzzy := temporalAnchor(anchor)
 	lower := strings.ToLower(query)
 
-	if date, start, end, found := findAbsoluteDate(query); found {
-		if order, orderStart, orderEnd := temporalOrder(query); order != "" {
+	if date, start, end, dateCount := findAbsoluteDate(query); dateCount > 0 {
+		// The order branch only fires for a single date: with several dates
+		// ("after May 2023 and before July 2023") the union range IS the asked
+		// interval, and anchoring before/after on a union bound would exclude
+		// the whole span.
+		if order, orderStart, orderEnd := temporalOrder(query); order != "" && dateCount == 1 {
 			left, right := date.end, orderStart
 			if orderStart < date.start {
 				left, right = orderEnd, date.start
@@ -134,7 +138,9 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 		state := temporalState(lower, end, base, false)
 		return TimeWindow{Start: start, End: end, Intent: "range", State: state}, true
 	}
-	if order, _, orderEnd := temporalOrder(query); order != "" {
+	// Date-anchored 以前 ("5月7日以前") is ordinal and handled above; standalone
+	// 以前 is stative ("formerly") and must fall through to historicalPattern.
+	if order, orderStart, orderEnd := temporalOrder(query); order != "" && query[orderStart:orderEnd] != "以前" {
 		entity := cleanAnchorEntity(query[orderEnd:])
 		if entity != "" {
 			return TimeWindow{Intent: order, State: "historical", AnchorEntity: entity}, true
@@ -244,7 +250,9 @@ type temporalDate struct {
 	end   int
 }
 
-func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
+// findAbsoluteDate returns the union window over every absolute date in the
+// query and how many distinct dates contributed to it (0 = no date found).
+func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, int) {
 	var matches []absoluteDateMatch
 	appendMatch := func(match []int, start, end time.Time) {
 		if start.IsZero() || end.IsZero() {
@@ -307,7 +315,7 @@ func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
 		}
 	}
 	if len(matches) == 0 {
-		return temporalDate{}, time.Time{}, time.Time{}, false
+		return temporalDate{}, time.Time{}, time.Time{}, 0
 	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].start.Before(matches[j].start) })
 	minStart, maxEnd := matches[0].start, matches[0].end
@@ -320,7 +328,7 @@ func findAbsoluteDate(query string) (temporalDate, time.Time, time.Time, bool) {
 			maxEnd, maxPos = match.end, match.temporalDate.end
 		}
 	}
-	return temporalDate{start: minPos, end: maxPos}, minStart, maxEnd, true
+	return temporalDate{start: minPos, end: maxPos}, minStart, maxEnd, len(matches)
 }
 
 type absoluteDateMatch struct {
