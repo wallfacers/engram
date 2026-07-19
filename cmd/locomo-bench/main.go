@@ -224,6 +224,45 @@ func run() error {
 		"model", model, "extract_model", extractModel, "top_k", opt.topK)
 
 	ctx := context.Background()
+	storeDir := opt.storeDir
+	if storeDir == "" {
+		storeDir = filepath.Join(opt.runDir, ".stores")
+	}
+	buildOpt := opt
+	buildOpt.storeDir = storeDir
+	runtimes := make([]*conversationRuntime, len(convs))
+	var buildWG sync.WaitGroup
+	var buildMu sync.Mutex
+	var buildErr error
+	for ci := range convs {
+		buildWG.Add(1)
+		go func(index int) {
+			defer buildWG.Done()
+			runtime, err := buildConversationRuntime(ctx, buildOpt, convs[index], extractCall, embClient, arms, logger)
+			buildMu.Lock()
+			defer buildMu.Unlock()
+			if err != nil {
+				if buildErr == nil {
+					buildErr = fmt.Errorf("conversation %d: %w", convs[index].ID, err)
+				}
+				return
+			}
+			runtimes[index] = runtime
+		}(ci)
+	}
+	buildWG.Wait()
+	if buildErr != nil {
+		for _, runtime := range runtimes {
+			runtime.Close()
+		}
+		return buildErr
+	}
+	defer func() {
+		for _, runtime := range runtimes {
+			runtime.Close()
+		}
+	}()
+
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
 		repeatOpt := opt
 		if opt.repeats > 1 {
@@ -245,7 +284,12 @@ func run() error {
 			wg.Add(1)
 			go func(conv conversation, current []*armState) {
 				defer wg.Done()
-				if err := processConversation(ctx, repeatOpt, conv, extractCall, answerCall, judgeCall, embClient, current, logger); err != nil {
+				index := conv.ID
+				if index < 0 || index >= len(runtimes) || runtimes[index] == nil {
+					logger.Warn("conversation runtime unavailable", "conversation", conv.ID)
+					return
+				}
+				if err := answerConversation(ctx, repeatOpt, conv, runtimes[index], answerCall, judgeCall, current, logger); err != nil {
 					logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
 				}
 			}(convs[ci], states)
@@ -323,23 +367,41 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 	}
 }
 
-// processConversation ingests one conversation ONCE, then answers/judges its
-// questions under every retrieval arm from that shared store. Extraction is
-// sequential (the store is single-connection); questions run concurrently and
-// are bounded by the global LLM-call semaphore.
-func processConversation(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, answerCall, judgeCall modelCaller, embClient embedding.Client, states []*armState, logger *slog.Logger) error {
+// conversationRuntime owns one prepared conversation store and its read-only
+// retrievers. It stays open across repeated answer/judge runs so extraction and
+// embedding are not paid again for every repeat.
+type conversationRuntime struct {
+	store      *store.Store
+	retrievers map[string]*memory.Retriever
+}
+
+func (r *conversationRuntime) Close() {
+	if r == nil || r.store == nil {
+		return
+	}
+	_ = r.store.Close()
+}
+
+// buildConversationRuntime performs the one-time extraction, optional opinion
+// pass, chunk ingestion, and embedding backfill for one conversation.
+func buildConversationRuntime(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, embClient embedding.Client, arms []string, logger *slog.Logger) (*conversationRuntime, error) {
 	dsn := ":memory:"
 	if opt.storeDir != "" {
 		if err := os.MkdirAll(opt.storeDir, 0o755); err != nil {
-			return fmt.Errorf("create store dir: %w", err)
+			return nil, fmt.Errorf("create store dir: %w", err)
 		}
 		dsn = filepath.Join(opt.storeDir, fmt.Sprintf("conv%d.db", conv.ID))
 	}
 	st, err := store.Open(ctx, store.Options{DSN: dsn})
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close() //nolint:errcheck
+	keepStore := false
+	defer func() {
+		if !keepStore {
+			_ = st.Close()
+		}
+	}()
 
 	es := memory.NewEntryStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
@@ -355,7 +417,7 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 	// Ingest each session with its date (extraction is the shared, once-paid
 	// pass). A persisted store that already holds extracted facts skips it.
 	if n, err := countExtracted(ctx, es); err != nil {
-		return err
+		return nil, err
 	} else if n > 0 {
 		logger.Info("reusing persisted extraction", "conversation", conv.ID, "facts", n)
 	} else {
@@ -414,17 +476,26 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 	// One retriever per arm over the same store. Only the hybrid arm gets the
 	// semantic signal and the optional rerank stage; fts stays the pure legacy
 	// baseline.
-	retrievers := make(map[string]*memory.Retriever, len(states))
-	for _, s := range states {
-		if s.name == "hybrid" {
-			retrievers[s.name] = memory.NewRetriever(es, vectors, embClient).WithReranker(buildBenchReranker())
+	retrievers := make(map[string]*memory.Retriever, len(arms))
+	for _, arm := range arms {
+		if arm == "hybrid" {
+			retrievers[arm] = memory.NewRetriever(es, vectors, embClient).WithReranker(buildBenchReranker())
 		} else {
-			retrievers[s.name] = memory.NewRetriever(es, vectors, nil)
+			retrievers[arm] = memory.NewRetriever(es, vectors, nil)
 		}
 	}
+	keepStore = true
+	return &conversationRuntime{store: st, retrievers: retrievers}, nil
+}
 
-	// Answer/judge questions concurrently across arms; the global semaphore
-	// bounds real in-flight LLM calls.
+// answerConversation runs only the answer/judge phase for a prepared
+// conversation. Questions run concurrently and are bounded by the global
+// LLM-call semaphore.
+func answerConversation(ctx context.Context, opt options, conv conversation, runtime *conversationRuntime, answerCall, judgeCall modelCaller, states []*armState, logger *slog.Logger) error {
+	if runtime == nil {
+		return fmt.Errorf("conversation runtime is nil")
+	}
+
 	var qwg sync.WaitGroup
 	answered, advAnswered := 0, 0
 	for qi, qa := range conv.QA {
@@ -451,7 +522,7 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey) {
 				defer qwg.Done()
-				correct, predicted := answerAndJudge(ctx, retrievers[s.name], answerCall, judgeCall, opt, qa, logger)
+				correct, predicted := answerAndJudge(ctx, runtime.retrievers[s.name], answerCall, judgeCall, opt, qa, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:         key.Conv,
@@ -472,6 +543,21 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 	qwg.Wait()
 	logger.Info("conversation done", "conversation", conv.ID, "answered", answered)
 	return nil
+}
+
+// processConversation remains a one-shot compatibility wrapper for callers
+// that do not need repeated runs.
+func processConversation(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, answerCall, judgeCall modelCaller, embClient embedding.Client, states []*armState, logger *slog.Logger) error {
+	arms := make([]string, 0, len(states))
+	for _, state := range states {
+		arms = append(arms, state.name)
+	}
+	runtime, err := buildConversationRuntime(ctx, opt, conv, extractCall, embClient, arms, logger)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	return answerConversation(ctx, opt, conv, runtime, answerCall, judgeCall, states, logger)
 }
 
 // opinionExtractionAddendum retargets the extraction prompt at the subjective

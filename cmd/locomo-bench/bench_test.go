@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,5 +252,65 @@ func TestModelCallerForwardsProviderUsage(t *testing.T) {
 	}
 	if gotRole != "answer" || gotModel != "test-model" || gotUsage.InputTokens != 12 || gotUsage.OutputTokens != 5 {
 		t.Fatalf("usage hook = role=%q model=%q usage=%+v", gotRole, gotModel, gotUsage)
+	}
+}
+
+func TestRepeatedAnswersReusePreparedConversation(t *testing.T) {
+	ctx := context.Background()
+	conv := conversation{
+		ID: 7,
+		Sessions: []session{{
+			Index: 1,
+			Turns: []turn{{Speaker: "user", Text: "I live in Oslo."}},
+		}},
+		QA: []locomoQA{{
+			Question: "Where do I live?",
+			Answer:   []byte(`"Oslo"`),
+			Category: 4,
+		}},
+	}
+	var extractCalls, answerCalls, judgeCalls atomic.Int32
+	extract := func(context.Context, string, string) (string, error) {
+		extractCalls.Add(1)
+		return `{"facts":[{"fact":"The user lives in Oslo.","entities":["Oslo"],"category":"user","durability":"evergreen"}]}`, nil
+	}
+	answer := func(context.Context, string, string) (string, error) {
+		answerCalls.Add(1)
+		return "Oslo", nil
+	}
+	judge := func(context.Context, string, string) (string, error) {
+		judgeCalls.Add(1)
+		return `{"correct":true}`, nil
+	}
+	opt := options{
+		datasetFormat: "locomo",
+		retrieval:     "fts",
+		topK:          5,
+		storeDir:      t.TempDir(),
+		noIDKRetry:    true,
+	}
+	runtime, err := buildConversationRuntime(ctx, opt, conv, extract, nil, []string{"fts"}, slog.Default())
+	if err != nil {
+		t.Fatalf("build conversation: %v", err)
+	}
+	defer runtime.Close()
+
+	for repeat := 1; repeat <= 3; repeat++ {
+		runDir := t.TempDir()
+		journal, err := openJournal(runDir, "fts")
+		if err != nil {
+			t.Fatalf("open journal: %v", err)
+		}
+		state := &armState{name: "fts", agg: newAggregator(), journal: journal}
+		if err := answerConversation(ctx, opt, conv, runtime, answer, judge, []*armState{state}, slog.Default()); err != nil {
+			t.Fatalf("answer repeat %d: %v", repeat, err)
+		}
+		journal.Close()
+	}
+	if got := extractCalls.Load(); got != 1 {
+		t.Fatalf("extract calls = %d, want 1 across 3 repeats", got)
+	}
+	if got := answerCalls.Load(); got != 3 || judgeCalls.Load() != 3 {
+		t.Fatalf("answer/judge calls = %d/%d, want 3/3", got, judgeCalls.Load())
 	}
 }
