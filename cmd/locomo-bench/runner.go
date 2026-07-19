@@ -124,6 +124,12 @@ const answerSystemPrompt = `You answer a question about a long conversation usin
 - Write dates in natural form like "21 July 2023" or "May 2023" — never ISO format like 2023-07-21.
 - Make your best supported inference from the evidence — combine multiple memories if needed. Only reply "I don't know" when NO retrieved memory is relevant to the question at all; do not bail out just because the phrasing differs.`
 
+const temporalAnswerPrompt = `You answer a temporal question about a long conversation using ONLY the retrieved memories provided. TEMPORAL REASONING PLAN:
+- For every candidate memory, list its [event: YYYY-MM-DD] marker before deciding.
+- normalize the candidate dates to a common timeline, then compare the dates and determine the requested order or interval.
+- Output the absolute date in natural language, never ISO format. Keep the answer short and do not restate the question.
+- Only reply "I don't know" when no retrieved memory is relevant to the question.`
+
 // multiHopAnswerPrompt targets LoCoMo category 1 (multi-hop), which is
 // dominated by enumeration/aggregation questions ("what things has X done",
 // "how many times…") whose gold answers are lists assembled from evidence
@@ -155,6 +161,12 @@ const forceAnswerSystemPrompt = `You answer a question about a long conversation
 - Write dates in natural form like "21 July 2023" or "May 2023" — never ISO format like 2023-07-21.
 - Make your best supported inference from the evidence — combine multiple memories if needed. Always provide your best guess based on the retrieved memories and reasonable inference; never decline with an uncertainty response.`
 
+const forceTemporalAnswerPrompt = `You answer a temporal question about a long conversation using ONLY the retrieved memories provided. TEMPORAL REASONING PLAN:
+- For every candidate memory, list its [event: YYYY-MM-DD] marker before deciding.
+- normalize the candidate dates to a common timeline, then compare the dates and determine the requested order or interval.
+- Output the absolute date in natural language, never ISO format. Keep the answer short and do not restate the question.
+- This is an answerable evaluation: always provide your best guess from the retrieved memories and never decline.`
+
 const forceMultiHopAnswerPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. This question aggregates evidence scattered across MANY memories — an enumeration, a count, or a comparison. Rules:
 - Scan EVERY retrieved memory before answering; the relevant items are scattered, never adjacent. Do not stop at the first match.
 - For "what/which (things)" questions, enumerate ALL distinct items the memories explicitly support, as a short comma-separated list. Completeness decides correctness: one missing item makes the whole answer wrong. Do NOT pad the list with plausible extras the memories never state.
@@ -175,6 +187,8 @@ const forceOpenDomainAnswerPrompt = `You answer a question about a person based 
 // extraction-style).
 func answerPromptFor(category int) string {
 	switch category {
+	case 2:
+		return temporalAnswerPrompt
 	case 1:
 		return multiHopAnswerPrompt
 	case 3:
@@ -189,6 +203,8 @@ func answerPromptForOptions(category int, forceAnswer bool) string {
 		return answerPromptFor(category)
 	}
 	switch category {
+	case 2:
+		return forceTemporalAnswerPrompt
 	case 1:
 		return forceMultiHopAnswerPrompt
 	case 3:

@@ -62,6 +62,25 @@ func TestTemporalAnchorUsesLatestSessionDate(t *testing.T) {
 	}
 }
 
+func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
+	plan := answerPromptFor(2)
+	for _, phrase := range []string{"TEMPORAL REASONING PLAN", "[event: YYYY-MM-DD]", "normalize", "compare", "never ISO"} {
+		if !strings.Contains(plan, phrase) {
+			t.Fatalf("temporal prompt missing %q: %s", phrase, plan)
+		}
+	}
+	force := answerPromptForOptions(2, true)
+	if !strings.Contains(force, "TEMPORAL REASONING PLAN") || !strings.Contains(force, "best guess") {
+		t.Fatalf("force temporal prompt lost plan or best-guess instruction: %s", force)
+	}
+	if strings.Contains(strings.ToLower(force), "i don't know") || strings.Contains(strings.ToLower(force), "do not know") {
+		t.Fatalf("force temporal prompt retains refusal outlet: %s", force)
+	}
+	if answerPromptFor(1) == plan || answerPromptFor(3) == plan {
+		t.Fatal("temporal prompt leaked into non-temporal categories")
+	}
+}
+
 func TestAssocDepthAboveMaximumIsRejected(t *testing.T) {
 	if err := validateAssocDepth(3); err == nil {
 		t.Fatal("assoc depth 3 should be rejected at startup")
@@ -286,8 +305,8 @@ func TestForceAnswerPromptsRequireBestGuess(t *testing.T) {
 		if !strings.Contains(strings.ToLower(forced), "best guess") {
 			t.Fatalf("category %d force prompt lacks best-guess instruction: %q", category, forced)
 		}
-		if category == 2 && !strings.Contains(strings.ToLower(forced), "best supported inference") {
-			t.Fatalf("category %d force prompt lost inference instruction: %q", category, forced)
+		if category == 2 && !strings.Contains(strings.ToLower(forced), "temporal reasoning plan") {
+			t.Fatalf("category %d force prompt lost temporal plan: %q", category, forced)
 		}
 		if category == 3 && !strings.Contains(forced, "COMBINE") {
 			t.Fatalf("open-domain force prompt lost COMBINE instruction: %q", forced)
@@ -416,7 +435,10 @@ func TestAnswerPromptFor(t *testing.T) {
 	if answerPromptFor(1) != multiHopAnswerPrompt {
 		t.Fatal("category 1 must use the multi-hop aggregation prompt")
 	}
-	for _, c := range []int{2, 4} {
+	if answerPromptFor(2) != temporalAnswerPrompt {
+		t.Fatal("category 2 must use the temporal reasoning prompt")
+	}
+	for _, c := range []int{4} {
 		if answerPromptFor(c) != answerSystemPrompt {
 			t.Fatalf("category %d must use the extraction prompt", c)
 		}
