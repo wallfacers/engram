@@ -134,6 +134,12 @@ func ParseTemporalIntent(query string, anchor time.Time) (win TimeWindow, ok boo
 		state := temporalState(lower, end, base, false)
 		return TimeWindow{Start: start, End: end, Intent: "range", State: state}, true
 	}
+	if order, _, orderEnd := temporalOrder(query); order != "" {
+		entity := cleanAnchorEntity(query[orderEnd:])
+		if entity != "" {
+			return TimeWindow{Intent: order, State: "historical", AnchorEntity: entity}, true
+		}
+	}
 
 	if strings.Contains(lower, "last month") || strings.Contains(lower, "previous month") || strings.Contains(query, "上个月") || strings.Contains(query, "上月") {
 		start := time.Date(base.Year(), base.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)

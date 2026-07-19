@@ -234,6 +234,33 @@ func TestTemporalSearchUnionsAliasesAndOrderRecall(t *testing.T) {
 	}
 }
 
+func TestTemporalOrderResolvesAnchorEntityWithoutDate(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	anchorDate := time.Date(2024, time.May, 10, 0, 0, 0, 0, time.UTC)
+	priorDate := time.Date(2024, time.May, 1, 0, 0, 0, 0, time.UTC)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "pottery-class", Content: "The user attended a pottery class.", EventStart: &anchorDate, EventEnd: &anchorDate}); err != nil {
+		t.Fatalf("upsert anchor: %v", err)
+	}
+	if err := es.PutAliases(ctx, "pottery-class", []string{"pottery class"}); err != nil {
+		t.Fatalf("put anchor alias: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "prior-event", Content: "The user visited a museum.", EventStart: &priorDate, EventEnd: &priorDate}); err != nil {
+		t.Fatalf("upsert prior event: %v", err)
+	}
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{
+		TemporalScore: true,
+		Now:           time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC),
+	})
+	got, err := r.Search(ctx, "What happened before the pottery class?", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if !containsResult(got, "prior-event") {
+		t.Fatalf("anchor-entity directional result missing: %+v", got)
+	}
+}
+
 func containsResult(results []memory.Result, name string) bool {
 	for _, result := range results {
 		if result.Name == name {

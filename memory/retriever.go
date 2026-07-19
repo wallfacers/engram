@@ -474,7 +474,11 @@ func (r *Retriever) aliasNames(ctx context.Context, query string, limit int) []s
 
 func (r *Retriever) directionalEventNames(ctx context.Context, window TimeWindow, limit int) []string {
 	if window.AnchorTime.IsZero() {
-		return nil
+		anchor, ok := r.resolveTemporalAnchor(ctx, window.AnchorEntity, window.Intent)
+		if !ok {
+			return nil
+		}
+		window.AnchorTime = anchor
 	}
 	var query string
 	var args []any
@@ -500,6 +504,30 @@ func (r *Retriever) directionalEventNames(ctx context.Context, window TimeWindow
 	}
 	defer rows.Close() //nolint:errcheck
 	return scanNames(rows)
+}
+
+func (r *Retriever) resolveTemporalAnchor(ctx context.Context, entity, intent string) (time.Time, bool) {
+	entity = strings.TrimSpace(strings.ToLower(entity))
+	if entity == "" {
+		return time.Time{}, false
+	}
+	needle := "%" + entity + "%"
+	dateExpr := "COALESCE(e.event_start, e.event_end, e.event_date / 1000000)"
+	if intent == "before" {
+		dateExpr = "COALESCE(e.event_end, e.event_start, e.event_date / 1000000)"
+	}
+	query := `SELECT ` + dateExpr + `
+		FROM memory_entries e
+		LEFT JOIN memory_event_aliases a ON a.entry_name = e.name
+		WHERE (` +
+		`lower(e.name) LIKE ? OR lower(e.trigger) LIKE ? OR lower(e.content) LIKE ? OR lower(a.alias) LIKE ?` +
+		`) AND (` + dateExpr + `) IS NOT NULL
+		ORDER BY e.updated_at DESC LIMIT 1`
+	var seconds sql.NullInt64
+	if err := r.entries.db.QueryRowContext(ctx, query, needle, needle, needle, needle).Scan(&seconds); err != nil || !seconds.Valid {
+		return time.Time{}, false
+	}
+	return time.Unix(seconds.Int64, 0).UTC(), true
 }
 
 func (r *Retriever) ftsNames(ctx context.Context, matchExpr string, limit int) []string {
