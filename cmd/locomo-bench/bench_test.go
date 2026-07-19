@@ -409,6 +409,26 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	}
 }
 
+func TestTPlanArmMechanismControlsTemporalAnswerPrompt(t *testing.T) {
+	baseline := optionsForArm(options{}, "hybrid")
+	tplan := optionsForArm(options{}, "hybrid+tplan")
+	if baseline.temporalAnswerPrompt || !tplan.temporalAnswerPrompt {
+		t.Fatalf("tplan pairing prompt flags = baseline:%t tplan:%t, want false/true", baseline.temporalAnswerPrompt, tplan.temporalAnswerPrompt)
+	}
+
+	global := options{temporalAnswerPrompt: true}
+	legacyBaseline := optionsForArm(global, "hybrid")
+	legacyTemporal := optionsForArm(global, "hybrid+temporal")
+	if !legacyBaseline.temporalAnswerPrompt || !legacyTemporal.temporalAnswerPrompt {
+		t.Fatalf("global temporal prompt compatibility flags = baseline:%t temporal:%t, want true/true", legacyBaseline.temporalAnswerPrompt, legacyTemporal.temporalAnswerPrompt)
+	}
+
+	combined := optionsForArm(options{}, "hybrid+tplan+temporal")
+	if !combined.temporalAnswerPrompt || !combined.temporalScore {
+		t.Fatalf("tplan+temporal arm = %+v, want independent prompt and retrieval mechanisms", combined)
+	}
+}
+
 func TestPairedReportSchemaAndWrite(t *testing.T) {
 	a := [][]result{{
 		{QuestionID: "q1", Correct: false, Category: 1},

@@ -462,6 +462,7 @@ var supportedArmMechanisms = map[string]struct{}{
 	"assoc":    {},
 	"sweep":    {},
 	"temporal": {},
+	"tplan":    {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -521,6 +522,7 @@ func optionsForArm(global options, name string) options {
 	arm.temporalHardFilter = false
 	arm.conflictResolution = spec.mechanisms["conflict"]
 	arm.abstainPrompt = spec.mechanisms["abstain"]
+	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
 	return arm
 }
 
