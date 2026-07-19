@@ -52,37 +52,38 @@ import (
 )
 
 type options struct {
-	dataPath           string
-	runDir             string
-	storeDir           string
-	datasetFormat      string
-	compareSpec        string
-	repeats            int
-	estimate           bool
-	noIDKRetry         bool
-	budgetBaseline     float64
-	retrieval          string
-	maxConvs           int
-	maxQuestions       int
-	topK               int
-	maxTokens          int
-	concurrency        int
-	chunks             bool
-	chunkQuota         int
-	filterPool         int
-	assoc              bool
-	assocDepth         int
-	temporalScore      bool
-	temporalHardFilter bool
-	conflictResolution bool
-	abstainPrompt      bool
-	forceAnswer        bool
-	opinionPass        bool
-	adversarial        int
-	catTopKSpec        string
-	catQuotaSpec       string
-	catTopK            map[int]int
-	catQuota           map[int]int
+	dataPath             string
+	runDir               string
+	storeDir             string
+	datasetFormat        string
+	compareSpec          string
+	repeats              int
+	estimate             bool
+	noIDKRetry           bool
+	budgetBaseline       float64
+	retrieval            string
+	maxConvs             int
+	maxQuestions         int
+	topK                 int
+	maxTokens            int
+	concurrency          int
+	chunks               bool
+	chunkQuota           int
+	filterPool           int
+	assoc                bool
+	assocDepth           int
+	temporalScore        bool
+	temporalHardFilter   bool
+	conflictResolution   bool
+	abstainPrompt        bool
+	forceAnswer          bool
+	temporalAnswerPrompt bool
+	opinionPass          bool
+	adversarial          int
+	catTopKSpec          string
+	catQuotaSpec         string
+	catTopK              map[int]int
+	catQuota             map[int]int
 }
 
 func main() {
@@ -117,6 +118,7 @@ func run() error {
 	flag.BoolVar(&opt.temporalHardFilter, "temporal-hard-filter", false, "experimental hard temporal candidate filter")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
+	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -688,7 +690,11 @@ func temporalNowForConversation(conv conversation) time.Time {
 }
 
 func answerRegimeFingerprint(opt options) string {
-	return fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
+	fingerprint := fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
+	if opt.temporalAnswerPrompt {
+		fingerprint += ";temporal_answer_prompt=true"
+	}
+	return fingerprint
 }
 
 func warnExtraPairedArms(logger *slog.Logger, arms []string) {
@@ -819,7 +825,7 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
 		return false, "", provider.Usage{}
 	}
-	prompt := answerPromptForOptions(qa.Category, opt.forceAnswer)
+	prompt := answerPromptForOptionsWithTemporal(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt)
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerPrompt(qa.Question, toMemories(hits)))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)

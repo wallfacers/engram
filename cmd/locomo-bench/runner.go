@@ -182,35 +182,39 @@ const forceOpenDomainAnswerPrompt = `You answer a question about a person based 
 - Answer with a short, direct phrase or sentence. No explanation, no restating the question.
 - This is an answerable evaluation: always provide your best guess based on the memories and reasonable inference; never decline with an uncertainty response.`
 
-// answerPromptFor picks the system prompt by LoCoMo category
-// (1 = multi-hop aggregation; 3 = open-domain; everything else is
-// extraction-style).
+// answerPromptFor picks the pre-temporal system prompt by LoCoMo category.
 func answerPromptFor(category int) string {
-	switch category {
-	case 2:
+	return answerPromptForOptionsWithTemporal(category, false, false)
+}
+
+func answerPromptForOptions(category int, forceAnswer bool) string {
+	return answerPromptForOptionsWithTemporal(category, forceAnswer, false)
+}
+
+func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswer bool) string {
+	if temporalAnswer && category == 2 {
+		if forceAnswer {
+			return forceTemporalAnswerPrompt
+		}
 		return temporalAnswerPrompt
+	}
+	if forceAnswer {
+		switch category {
+		case 1:
+			return forceMultiHopAnswerPrompt
+		case 3:
+			return forceOpenDomainAnswerPrompt
+		default:
+			return forceAnswerSystemPrompt
+		}
+	}
+	switch category {
 	case 1:
 		return multiHopAnswerPrompt
 	case 3:
 		return openDomainAnswerPrompt
 	default:
 		return answerSystemPrompt
-	}
-}
-
-func answerPromptForOptions(category int, forceAnswer bool) string {
-	if !forceAnswer {
-		return answerPromptFor(category)
-	}
-	switch category {
-	case 2:
-		return forceTemporalAnswerPrompt
-	case 1:
-		return forceMultiHopAnswerPrompt
-	case 3:
-		return forceOpenDomainAnswerPrompt
-	default:
-		return forceAnswerSystemPrompt
 	}
 }
 

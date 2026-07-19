@@ -63,13 +63,13 @@ func TestTemporalAnchorUsesLatestSessionDate(t *testing.T) {
 }
 
 func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
-	plan := answerPromptFor(2)
+	plan := answerPromptForOptionsWithTemporal(2, false, true)
 	for _, phrase := range []string{"TEMPORAL REASONING PLAN", "[event: YYYY-MM-DD]", "normalize", "compare", "never ISO"} {
 		if !strings.Contains(plan, phrase) {
 			t.Fatalf("temporal prompt missing %q: %s", phrase, plan)
 		}
 	}
-	force := answerPromptForOptions(2, true)
+	force := answerPromptForOptionsWithTemporal(2, true, true)
 	if !strings.Contains(force, "TEMPORAL REASONING PLAN") || !strings.Contains(force, "best guess") {
 		t.Fatalf("force temporal prompt lost plan or best-guess instruction: %s", force)
 	}
@@ -78,6 +78,21 @@ func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
 	}
 	if answerPromptFor(1) == plan || answerPromptFor(3) == plan {
 		t.Fatal("temporal prompt leaked into non-temporal categories")
+	}
+}
+
+func TestTemporalAnswerPromptIsOptIn(t *testing.T) {
+	if answerPromptFor(2) != answerSystemPrompt {
+		t.Fatal("default category 2 prompt changed from the pre-temporal baseline")
+	}
+	if answerPromptForOptions(2, true) != forceAnswerSystemPrompt {
+		t.Fatal("default forced category 2 prompt changed from the pre-temporal baseline")
+	}
+	if answerPromptForOptionsWithTemporal(2, false, true) != temporalAnswerPrompt {
+		t.Fatal("temporal answer flag did not select temporal prompt")
+	}
+	if answerPromptForOptionsWithTemporal(2, true, true) != forceTemporalAnswerPrompt {
+		t.Fatal("temporal answer flag did not select force temporal prompt")
 	}
 }
 
@@ -305,8 +320,8 @@ func TestForceAnswerPromptsRequireBestGuess(t *testing.T) {
 		if !strings.Contains(strings.ToLower(forced), "best guess") {
 			t.Fatalf("category %d force prompt lacks best-guess instruction: %q", category, forced)
 		}
-		if category == 2 && !strings.Contains(strings.ToLower(forced), "temporal reasoning plan") {
-			t.Fatalf("category %d force prompt lost temporal plan: %q", category, forced)
+		if category == 2 && !strings.Contains(strings.ToLower(forced), "best supported inference") {
+			t.Fatalf("category %d force prompt lost inference instruction: %q", category, forced)
 		}
 		if category == 3 && !strings.Contains(forced, "COMBINE") {
 			t.Fatalf("open-domain force prompt lost COMBINE instruction: %q", forced)
@@ -435,8 +450,8 @@ func TestAnswerPromptFor(t *testing.T) {
 	if answerPromptFor(1) != multiHopAnswerPrompt {
 		t.Fatal("category 1 must use the multi-hop aggregation prompt")
 	}
-	if answerPromptFor(2) != temporalAnswerPrompt {
-		t.Fatal("category 2 must use the temporal reasoning prompt")
+	if answerPromptFor(2) != answerSystemPrompt {
+		t.Fatal("category 2 must use the pre-temporal extraction prompt by default")
 	}
 	for _, c := range []int{4} {
 		if answerPromptFor(c) != answerSystemPrompt {
