@@ -378,6 +378,23 @@ func TestUpsertUpdatesEventRangeOnConflict(t *testing.T) {
 	}
 }
 
+func TestEntriesByNameBatch(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+	for _, name := range []string{"batch-a", "batch-b"} {
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: name}); err != nil {
+			t.Fatalf("upsert %s: %v", name, err)
+		}
+	}
+	got, err := es.EntriesByName(ctx, []string{"batch-a", "missing", "batch-b"})
+	if err != nil {
+		t.Fatalf("batch lookup: %v", err)
+	}
+	if len(got) != 2 || got["batch-a"].Content != "batch-a" || got["batch-b"].Content != "batch-b" {
+		t.Fatalf("batch entries = %+v, want both stored entries", got)
+	}
+}
+
 func TestDeleteCascadesDerived(t *testing.T) {
 	es, db := newEntryStore(t)
 	ctx := context.Background()

@@ -209,6 +209,56 @@ func (s *EntryStore) GetByName(ctx context.Context, name string) (*Entry, error)
 	return scanEntry(row)
 }
 
+// EntriesByName loads a set of entries in bounded batches. Missing names are
+// omitted, matching Search's race-tolerant GetByName behavior.
+func (s *EntryStore) EntriesByName(ctx context.Context, names []string) (map[string]*Entry, error) {
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		unique = append(unique, name)
+	}
+	out := make(map[string]*Entry, len(unique))
+	for start := 0; start < len(unique); start += 500 {
+		end := start + 500
+		if end > len(unique) {
+			end = len(unique)
+		}
+		batch := unique[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, name := range batch {
+			placeholders[i] = "?"
+			args[i] = name
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT `+entrySelectCols+` FROM memory_entries WHERE name IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("memory: batch entries: %w", err)
+		}
+		for rows.Next() {
+			entry, err := scanEntry(rows)
+			if err != nil {
+				rows.Close() //nolint:errcheck
+				return nil, err
+			}
+			out[entry.Name] = entry
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			return nil, fmt.Errorf("memory: batch entries rows: %w", err)
+		}
+		rows.Close() //nolint:errcheck
+	}
+	return out, nil
+}
+
 // HasContent reports whether an entry with the exact stored content exists.
 // Pipelines use this as their idempotency guard before creating derived indexes.
 func (s *EntryStore) HasContent(ctx context.Context, content string) (bool, error) {

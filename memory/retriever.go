@@ -125,9 +125,10 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			temporal = &parsed
 		}
 	}
-	bm25 := r.keywordRanks(ctx, query, pool)
+	keywordNames := r.keywordNames(ctx, query, pool)
+	bm25 := ranksFromOrder(keywordNames)
 	if temporal != nil {
-		bm25 = r.temporalKeywordRanks(ctx, query, pool, *temporal)
+		bm25 = r.temporalKeywordRanks(ctx, query, pool, *temporal, keywordNames)
 	}
 	// Signal 2: semantic (optional).
 	vector := r.vectorRankContext(ctx, query, pool)
@@ -193,10 +194,19 @@ func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored,
 	if temporalTau <= 0 {
 		temporalTau = defaultTemporalTau
 	}
+	names := make([]string, len(fused))
+	for i, score := range fused {
+		names[i] = score.Key
+	}
+	entries, err := r.entries.EntriesByName(ctx, names)
+	if err != nil {
+		slog.Warn("memory: temporal score signal degraded", "stage", "temporal_load", "err", err)
+		return fused
+	}
 	out := make([]embedding.Scored, 0, len(fused))
 	for _, score := range fused {
-		e, err := r.entries.GetByName(ctx, score.Key)
-		if err != nil {
+		e, ok := entries[score.Key]
+		if !ok {
 			out = append(out, score)
 			continue
 		}
@@ -408,8 +418,8 @@ func (r *Retriever) keywordNames(ctx context.Context, query string, limit int) [
 	return names
 }
 
-func (r *Retriever) temporalKeywordRanks(ctx context.Context, query string, limit int, window TimeWindow) map[string]int {
-	names := r.keywordNames(ctx, query, limit)
+func (r *Retriever) temporalKeywordRanks(ctx context.Context, query string, limit int, window TimeWindow, names []string) map[string]int {
+	names = append([]string(nil), names...)
 	appendUnique := func(extra []string) {
 		seen := make(map[string]struct{}, len(names)+len(extra))
 		for _, name := range names {
