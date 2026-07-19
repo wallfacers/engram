@@ -44,3 +44,14 @@ func TestEnumerationIntentDoesNotMisclassifySingleFactQuestions(t *testing.T) {
 		}
 	}
 }
+
+func TestEnumerationIntentDoesNotMistakeListPriceOrMoneyForEnumeration(t *testing.T) {
+	for _, query := range []string{
+		"What is the list price of the camera?",
+		"多少钱？",
+	} {
+		if got := ParseEnumerationIntent(query); got.IsEnumeration {
+			t.Errorf("ParseEnumerationIntent(%q) = %+v, want non-enumeration", query, got)
+		}
+	}
+}
