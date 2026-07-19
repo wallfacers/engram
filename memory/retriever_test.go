@@ -565,6 +565,63 @@ func TestClusterSweepRerankerKeepsCandidatesPastRequestedK(t *testing.T) {
 	}
 }
 
+func TestClusterSweepRetainsTopFusedFallbackOutsideEntityCluster(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := es.PutEntities(ctx, "seed", []string{"root"}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "cluster", Content: "cluster fact"}); err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	if err := es.PutEntities(ctx, "cluster", []string{"member"}); err != nil {
+		t.Fatalf("cluster entity: %v", err)
+	}
+	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "root", B: "member", Kind: "co"}}); err != nil {
+		t.Fatalf("cluster edge: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "fallback", Content: "list all root values root values"}); err != nil {
+		t.Fatalf("fallback: %v", err)
+	}
+	if err := es.PutEntities(ctx, "fallback", []string{"outside"}); err != nil {
+		t.Fatalf("fallback entity: %v", err)
+	}
+
+	client := &vectorFakeClient{model: "cluster-fallback", vectors: map[string][]float32{
+		"list all root values root values": {1, 0},
+		"List all root values":             {1, 0},
+		"root fact":                        {0, 1},
+		"cluster fact":                     {0, 1},
+	}}
+	for name, vector := range map[string][]float32{
+		"fallback": {1, 0},
+		"seed":     {0, 1},
+		"cluster":  {0, 1},
+	} {
+		if err := vs.Put(ctx, name, client.Model(), vector, time.Now()); err != nil {
+			t.Fatalf("vector %s: %v", name, err)
+		}
+	}
+
+	baseline, err := memory.NewRetriever(es, vs, client).Search(ctx, "List all root values", 3)
+	if err != nil || len(baseline) == 0 {
+		t.Fatalf("baseline search = %+v, %v", baseline, err)
+	}
+	if baseline[0].Name != "fallback" {
+		t.Fatalf("baseline results = %+v, want fallback first", baseline)
+	}
+	got, err := memory.NewRetrieverWithOptions(es, vs, client, nil, memory.RetrieverOptions{ClusterSweep: true}).Search(ctx, "List all root values", 3)
+	if err != nil {
+		t.Fatalf("sweep search: %v", err)
+	}
+	if !containsResult(got, "fallback") {
+		t.Fatalf("sweep results = %+v, want top fused fallback outside entity cluster", got)
+	}
+}
+
 func seedClusterSweepCorpus(t *testing.T, count int) (*memory.EntryStore, *memory.VectorStore) {
 	t.Helper()
 	ctx := context.Background()

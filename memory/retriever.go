@@ -179,7 +179,7 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			}
 		}
 		if swept := r.clusterSweepCandidates(ctx, fused, cues); len(swept) > 0 {
-			fused = swept
+			fused = mergeClusterSweepCandidates(fused, swept, k)
 			clusterSweepUsed = true
 		}
 	}
@@ -374,6 +374,33 @@ func (r *Retriever) clusterSweepCandidates(ctx context.Context, fused []embeddin
 		slog.Warn("memory: cluster sweep cap", "stage", "cluster_sweep", "cap", clusterSweepCap, "candidates", len(out), "truncated", truncated)
 		out = out[:clusterSweepCap]
 	}
+	return out
+}
+
+func mergeClusterSweepCandidates(fused, swept []embedding.Scored, k int) []embedding.Scored {
+	fallbackCount := k / 2
+	if fallbackCount < 1 {
+		fallbackCount = 1
+	}
+	if fallbackCount > len(fused) {
+		fallbackCount = len(fused)
+	}
+	out := make([]embedding.Scored, 0, min(clusterSweepCap, fallbackCount+len(swept)))
+	seen := make(map[string]struct{}, fallbackCount+len(swept))
+	appendUnique := func(candidates []embedding.Scored) {
+		for _, candidate := range candidates {
+			if len(out) == clusterSweepCap {
+				return
+			}
+			if _, ok := seen[candidate.Key]; ok {
+				continue
+			}
+			seen[candidate.Key] = struct{}{}
+			out = append(out, candidate)
+		}
+	}
+	appendUnique(fused[:fallbackCount])
+	appendUnique(swept)
 	return out
 }
 
