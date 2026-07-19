@@ -106,11 +106,32 @@ func TestValidateTemporalStoreRejectsLegacyFacts(t *testing.T) {
 	}
 	defer st.Close()
 	es := memory.NewEntryStore(st.DB())
-	if err := es.Upsert(ctx, &memory.Entry{Name: "legacy-fact", Content: "The user visited Oslo."}); err != nil {
+	// A pre-temporal store carries event_date (the old extraction always
+	// emitted it) but no event ranges or aliases — that signature is rejected.
+	legacyDate := time.Date(2023, 5, 7, 0, 0, 0, 0, time.UTC)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "legacy-fact", Content: "The user visited Oslo.", EventDate: &legacyDate}); err != nil {
 		t.Fatalf("insert legacy fact: %v", err)
 	}
 	if err := validateTemporalStore(ctx, st.DB(), 1); err == nil {
 		t.Fatal("legacy facts without temporal fields or aliases should be rejected")
+	}
+}
+
+func TestValidateTemporalStoreAcceptsDatelessExtraction(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	es := memory.NewEntryStore(st.DB())
+	// A store legitimately built with the new pipeline whose extraction found
+	// no dates at all must pass — rebuilding would reproduce the same state.
+	if err := es.Upsert(ctx, &memory.Entry{Name: "dateless-fact", Content: "The user likes tea."}); err != nil {
+		t.Fatalf("insert dateless fact: %v", err)
+	}
+	if err := validateTemporalStore(ctx, st.DB(), 1); err != nil {
+		t.Fatalf("dateless new-pipeline store should pass: %v", err)
 	}
 }
 

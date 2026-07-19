@@ -214,6 +214,9 @@ func run() error {
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create run dir: %w", err)
 	}
+	if err := checkRunDirRegime(opt); err != nil {
+		return err
+	}
 	// One provider; a global semaphore caps concurrent in-flight LLM calls so
 	// many conversations/questions run in parallel without exceeding the rate
 	// limit. Every LLM call (extraction, answer, judge) passes through it.
@@ -695,6 +698,32 @@ func temporalNowForConversation(conv conversation) time.Time {
 	return latest
 }
 
+// checkRunDirRegime pins a run dir to one answer regime. Journal resume keys
+// on (conversation, question) only, so resuming an existing run dir under a
+// different regime would silently mix results graded under two 口径 in one
+// artifact; refuse instead.
+func checkRunDirRegime(opt options) error {
+	// Arm suffixes can override answer-regime mechanisms per arm (e.g.
+	// +abstain), so the arm layout is part of the pinned regime too.
+	regime := answerRegimeFingerprint(opt) + ";retrieval=" + opt.retrieval
+	path := filepath.Join(opt.runDir, "regime.json")
+	data, err := os.ReadFile(path)
+	if err == nil {
+		prev := strings.TrimSpace(string(data))
+		if prev != regime {
+			return fmt.Errorf("run dir %s was written under answer regime %q; current flags give %q — use a fresh --run-dir (journal resume would mix regimes)", opt.runDir, prev, regime)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("read run dir regime: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(regime+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write run dir regime: %w", err)
+	}
+	return nil
+}
+
 func answerRegimeFingerprint(opt options) string {
 	fingerprint := fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
 	if opt.temporalAnswerPrompt {
@@ -828,15 +857,21 @@ func validateTemporalStore(ctx context.Context, db *sql.DB, facts int) error {
 	if facts <= 0 {
 		return nil
 	}
-	var ranged, aliases int
+	var ranged, aliases, dated int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_entries WHERE event_start IS NOT NULL`).Scan(&ranged); err != nil {
 		return fmt.Errorf("check temporal event ranges: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_event_aliases`).Scan(&aliases); err != nil {
 		return fmt.Errorf("check temporal aliases: %w", err)
 	}
-	if ranged == 0 && aliases == 0 {
-		return fmt.Errorf("temporal retrieval requires rebuilding persisted store: %d facts have no event ranges or aliases", facts)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memory_entries WHERE event_date IS NOT NULL`).Scan(&dated); err != nil {
+		return fmt.Errorf("check temporal event dates: %w", err)
+	}
+	// dated>0 with no ranges/aliases is the pre-T026 extraction signature; a
+	// store whose extraction legitimately produced no dates at all (dated==0)
+	// must pass, or rebuilding would reproduce the same state forever.
+	if ranged == 0 && aliases == 0 && dated > 0 {
+		return fmt.Errorf("temporal retrieval requires rebuilding persisted store: %d facts have event dates but no event ranges or aliases (pre-temporal extraction)", facts)
 	}
 	return nil
 }
