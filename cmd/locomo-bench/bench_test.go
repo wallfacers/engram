@@ -234,6 +234,38 @@ func TestForceAnswerAndAbstainPromptAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestArmJournalsKeepSuffixSpecificResultFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, arm := range []string{"hybrid", "hybrid+assoc"} {
+		j, err := openJournal(dir, arm)
+		if err != nil {
+			t.Fatalf("open %s: %v", arm, err)
+		}
+		j.write(result{Conv: 0, Q: 0, QuestionID: arm, Correct: true})
+		j.Close()
+	}
+	for _, arm := range []string{"hybrid", "hybrid+assoc"} {
+		path := filepath.Join(dir, "results-"+arm+".jsonl")
+		items, err := readResultsJSONL(path)
+		if err != nil || len(items) != 1 || items[0].QuestionID != arm {
+			t.Fatalf("results for %s = %+v err=%v", arm, items, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "results.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected canonical results.jsonl: err=%v", err)
+	}
+}
+
+func TestPairedReportRejectsUnalignedQuestions(t *testing.T) {
+	_, err := pairedReport(
+		[][]result{{{QuestionID: "q-a", Correct: true}}},
+		[][]result{{{QuestionID: "q-b", Correct: true}}},
+	)
+	if err == nil {
+		t.Fatal("expected unaligned paired report to fail")
+	}
+}
+
 func TestGateBoundsConcurrency(t *testing.T) {
 	sem := make(chan struct{}, 2)
 	var mu sync.Mutex
