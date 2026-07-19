@@ -136,3 +136,46 @@ func TestWalkEntityGraphDoesNotEchoVisitedSeeds(t *testing.T) {
 		t.Fatalf("walk echoed visited seed: %+v", scores)
 	}
 }
+
+func TestEntityClusterEntriesIncludesSeedAndOneHopCoSyn(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newGraphStore(t)
+	for _, name := range []string{"seed-entry", "co-entry", "syn-entry", "two-hop-entry"} {
+		if err := es.Upsert(ctx, &Entry{Name: name, Content: name}); err != nil {
+			t.Fatalf("upsert %s: %v", name, err)
+		}
+	}
+	for name, entities := range map[string][]string{
+		"seed-entry":    {"alpha"},
+		"co-entry":      {"beta"},
+		"syn-entry":     {"gamma"},
+		"two-hop-entry": {"delta"},
+	} {
+		if err := es.PutEntities(ctx, name, entities); err != nil {
+			t.Fatalf("entities %s: %v", name, err)
+		}
+	}
+	if err := es.UpsertEdges(ctx, []EntityEdge{
+		{A: "alpha", B: "beta", Kind: "co"},
+		{A: "alpha", B: "gamma", Kind: "syn"},
+		{A: "beta", B: "delta", Kind: "co"},
+	}); err != nil {
+		t.Fatalf("edges: %v", err)
+	}
+	got, err := es.EntityClusterEntries(ctx, []string{"alpha"})
+	if err != nil {
+		t.Fatalf("cluster entries: %v", err)
+	}
+	present := make(map[string]bool, len(got))
+	for _, name := range got {
+		present[name] = true
+	}
+	for _, want := range []string{"seed-entry", "co-entry", "syn-entry"} {
+		if !present[want] {
+			t.Errorf("cluster entries = %v, missing %q", got, want)
+		}
+	}
+	if present["two-hop-entry"] {
+		t.Errorf("cluster entries = %v, unexpectedly included two-hop entry", got)
+	}
+}

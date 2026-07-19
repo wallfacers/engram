@@ -139,6 +139,54 @@ func (s *EntryStore) NeighborsOf(ctx context.Context, entities []string, kinds [
 	return out, nil
 }
 
+// EntityClusterEntries returns entries attached to the seed entities or to
+// their one-hop co-occurrence/synonym neighbors. The result is deterministic;
+// callers decide how to score and cap the returned candidate set.
+func (s *EntryStore) EntityClusterEntries(ctx context.Context, seeds []string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	entitySet := make(map[string]struct{}, len(seeds))
+	for _, raw := range seeds {
+		if entity := EntityNorm(raw); entity != "" {
+			entitySet[entity] = struct{}{}
+		}
+	}
+	if len(entitySet) == 0 {
+		return nil, nil
+	}
+	normalized := make([]string, 0, len(entitySet))
+	for entity := range entitySet {
+		normalized = append(normalized, entity)
+	}
+	edges, err := s.NeighborsOf(ctx, normalized, []string{"co", "syn"})
+	if err != nil {
+		return nil, fmt.Errorf("memory: cluster neighbors: %w", err)
+	}
+	for _, edge := range edges {
+		entitySet[edge.A] = struct{}{}
+		entitySet[edge.B] = struct{}{}
+	}
+	entities := make([]string, 0, len(entitySet))
+	for entity := range entitySet {
+		entities = append(entities, entity)
+	}
+	scores := make(map[string]float64, len(entities))
+	for _, entity := range entities {
+		scores[entity] = 1
+	}
+	entries, err := s.EntityEntryScores(ctx, scores)
+	if err != nil {
+		return nil, fmt.Errorf("memory: cluster entries: %w", err)
+	}
+	result := make([]string, 0, len(entries))
+	for name := range entries {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
 // EntityDocFreq returns the number of distinct entries containing each entity.
 func (s *EntryStore) EntityDocFreq(ctx context.Context) (map[string]int, error) {
 	return s.entityDocFreq(ctx, nil)

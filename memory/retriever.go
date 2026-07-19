@@ -34,6 +34,11 @@ const expansionSeeds = 10
 // expansionLimit caps how many entity-neighbor entries join the rerank pool.
 const expansionLimit = 25
 
+// clusterSweepCap bounds the broad candidate set used for enumeration queries.
+// A bounded set keeps answer contexts finite while the warning makes any
+// coverage loss visible in benchmark logs.
+const clusterSweepCap = 120
+
 // RetrieverOptions controls optional retrieval signals. The zero value keeps
 // the original three-signal RRF behavior.
 type RetrieverOptions struct {
@@ -306,6 +311,46 @@ func (r *Retriever) associativeRanks(ctx context.Context, limit int, queryVector
 		names[i] = item.name
 	}
 	return ranksFromOrder(names)
+}
+
+// clusterSweepCandidates returns every entry attached to the query entity
+// cluster, ordered by the original fused score. Entries outside the ordinary
+// fused candidate universe receive a zero score and are ordered by name. The
+// cap is an explicit budget boundary, not a silent retrieval failure.
+func (r *Retriever) clusterSweepCandidates(ctx context.Context, fused []embedding.Scored, cues []string) []embedding.Scored {
+	if r == nil || r.entries == nil || len(cues) == 0 {
+		return nil
+	}
+	names, err := r.entries.EntityClusterEntries(ctx, cues)
+	if err != nil {
+		slog.Warn("memory: cluster sweep signal degraded", "stage", "cluster_sweep", "err", err)
+		return nil
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	scores := make(map[string]float64, len(fused))
+	for _, item := range fused {
+		if item.Score > scores[item.Key] {
+			scores[item.Key] = item.Score
+		}
+	}
+	out := make([]embedding.Scored, 0, len(names))
+	for _, name := range names {
+		out = append(out, embedding.Scored{Key: name, Score: scores[name]})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Key < out[j].Key
+	})
+	if len(out) > clusterSweepCap {
+		truncated := len(out) - clusterSweepCap
+		slog.Warn("memory: cluster sweep cap", "stage", "cluster_sweep", "cap", clusterSweepCap, "candidates", len(out), "truncated", truncated)
+		out = out[:clusterSweepCap]
+	}
+	return out
 }
 
 // rerank widens the fused list with 1-hop entity neighbors, scores every
