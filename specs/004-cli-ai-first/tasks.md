@@ -30,14 +30,14 @@ modified or imported (except read-only `internal/version`).
 
 **Purpose**: config, namespace safety, engine assembly, dispatch, diagnostics — every command depends on these. No user story can start until this phase is done.
 
-- [ ] T003 [P] Implement `cmd/engram/errors.go` — exit-code constants (0/1/2/3/4/5/6 per contracts/cli-commands.md) and a diagnostic helper that writes `<what> — <next action>` to stderr and returns the code.
-- [ ] T004 [P] Implement `cmd/engram/config.go` — load Config from flags + `ENGRAM_*` env (flag wins) per data-model.md; API keys env-only; never echo keys.
-- [ ] T005 [P] Write `cmd/engram/config_test.go` — flag-wins-over-env; missing `--data-dir` → usage error (exit 2); assert keys never appear in rendered output/errors.
-- [ ] T006 [P] Implement `cmd/engram/namespace.go` — validator `^[A-Za-z0-9._-]{1,64}$`, reject `.`/`..`/separators, resolve `<data-dir>/<ns>.db` and assert the cleaned path stays inside the data dir.
-- [ ] T007 [P] Write `cmd/engram/namespace_test.go` — SC-004 escape table (`../outside`, `a/b`, `a\b`, absolute, `.`, `..`) all rejected (exit 5) and **zero files created outside the data dir**.
-- [ ] T008 Implement `cmd/engram/engine.go` — assemble an engine handle from Config via public API only (`store.Open`→`NewEntryStore`/`NewVectorStore`/`NewEmbedder`/`NewRetriever`→`pipeline.New`; embedder/pipe nil-safe); `Close()` drains `Embedder.Close()` then closes the store. No `mcpserver` import.
-- [ ] T009 Implement `cmd/engram/render.go` — AI-friendly markdown helpers in the `RenderExport` house style (deterministic, pinned-first sort, snippet). Shared by read commands.
-- [ ] T010 Implement `cmd/engram/run.go` — global-flag parse, subcommand dispatch table, stdout=document / stderr=diagnostics stream discipline, unknown command → exit 2.
+- [X] T003 [P] Implement `cmd/engram/errors.go` — exit-code constants (0/1/2/3/4/5/6 per contracts/cli-commands.md) and a diagnostic helper that writes `<what> — <next action>` to stderr and returns the code.
+- [X] T004 [P] Implement `cmd/engram/config.go` — load Config from flags + `ENGRAM_*` env (flag wins) per data-model.md; API keys env-only; never echo keys.
+- [X] T005 [P] Write `cmd/engram/config_test.go` — flag-wins-over-env; missing `--data-dir` → usage error (exit 2); assert keys never appear in rendered output/errors.
+- [X] T006 [P] Implement `cmd/engram/namespace.go` — validator `^[A-Za-z0-9._-]{1,64}$`, reject `.`/`..`/separators, resolve `<data-dir>/<ns>.db` and assert the cleaned path stays inside the data dir.
+- [X] T007 [P] Write `cmd/engram/namespace_test.go` — SC-004 escape table (`../outside`, `a/b`, `a\b`, absolute, `.`, `..`) all rejected (exit 5) and **zero files created outside the data dir**.
+- [X] T008 Implement `cmd/engram/engine.go` — assemble an engine handle from Config via public API only (`store.Open`→`NewEntryStore`/`NewVectorStore`/`NewEmbedder`/`NewRetriever`→`pipeline.New`; embedder/pipe nil-safe); `Close()` drains `Embedder.Close()` then closes the store. No `mcpserver` import.
+- [X] T009 Implement `cmd/engram/render.go` — AI-friendly markdown helpers in the `RenderExport` house style (deterministic, pinned-first sort, snippet). Shared by read commands.
+- [X] T010 Implement `cmd/engram/run.go` — global-flag parse, subcommand dispatch table, stdout=document / stderr=diagnostics stream discipline, unknown command → exit 2.
 
 ---
 
