@@ -73,6 +73,7 @@ type options struct {
 	filterPool           int
 	assoc                bool
 	assocDepth           int
+	clusterSweep         bool
 	temporalScore        bool
 	temporalHardFilter   bool
 	conflictResolution   bool
@@ -115,6 +116,7 @@ func run() error {
 	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
 	flag.BoolVar(&opt.assoc, "assoc", false, "enable associative graph retrieval")
 	flag.IntVar(&opt.assocDepth, "assoc-depth", 2, "associative graph walk depth (maximum 2)")
+	flag.BoolVar(&opt.clusterSweep, "cluster-sweep", false, "sweep one-hop entity clusters for enumeration questions")
 	flag.BoolVar(&opt.temporalScore, "temporal-score", false, "enable soft temporal retrieval scoring")
 	flag.BoolVar(&opt.temporalHardFilter, "temporal-hard-filter", false, "experimental hard temporal candidate filter")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
@@ -445,6 +447,7 @@ type armSpec struct {
 
 var supportedArmMechanisms = map[string]struct{}{
 	"assoc":    {},
+	"sweep":    {},
 	"temporal": {},
 }
 
@@ -493,12 +496,14 @@ func optionsForArm(global options, name string) options {
 		arm.assoc = false
 		arm.temporalScore = false
 		arm.temporalHardFilter = false
+		arm.clusterSweep = false
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
 		return arm
 	}
 	arm := global
 	arm.assoc = spec.mechanisms["assoc"]
+	arm.clusterSweep = spec.mechanisms["sweep"]
 	arm.temporalScore = spec.mechanisms["temporal"]
 	arm.temporalHardFilter = false
 	arm.conflictResolution = spec.mechanisms["conflict"]
@@ -669,6 +674,7 @@ func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
 	return memory.RetrieverOptions{
 		Associative:        opt.assoc,
 		AssocDepth:         opt.assocDepth,
+		ClusterSweep:       opt.clusterSweep,
 		TemporalScore:      opt.temporalScore || opt.temporalHardFilter,
 		TemporalHardFilter: opt.temporalHardFilter,
 		Now:                now,
@@ -681,6 +687,9 @@ func retrievalFingerprint(opt options) string {
 		depth = 2
 	}
 	fingerprint := fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
+	if opt.clusterSweep {
+		fingerprint += ";cluster_sweep=true"
+	}
 	if opt.temporalScore || opt.temporalHardFilter {
 		fingerprint += fmt.Sprintf(";temporal_score=%t;temporal_hard_filter=%t", opt.temporalScore || opt.temporalHardFilter, opt.temporalHardFilter)
 	}

@@ -40,6 +40,20 @@ func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
 	}
 }
 
+func TestClusterSweepBenchFlagIsForwardedAndFingerprinted(t *testing.T) {
+	opt := options{clusterSweep: true}
+	got := retrieverOptionsFor(opt)
+	if !got.ClusterSweep {
+		t.Fatalf("retriever options = %+v, want cluster sweep enabled", got)
+	}
+	if !strings.Contains(retrievalFingerprint(opt), "cluster_sweep=true") {
+		t.Fatalf("cluster sweep retrieval fingerprint = %q", retrievalFingerprint(opt))
+	}
+	if strings.Contains(retrievalFingerprint(options{}), "cluster_sweep") {
+		t.Fatalf("default retrieval fingerprint unexpectedly mentions cluster sweep: %q", retrievalFingerprint(options{}))
+	}
+}
+
 func TestTemporalBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
 	anchor := time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC)
 	opt := options{temporalScore: true, temporalHardFilter: true}
@@ -258,6 +272,7 @@ func TestArmsFor(t *testing.T) {
 		"hybrid":              {"hybrid"},
 		"both":                {"fts", "hybrid"},
 		"hybrid,hybrid+assoc": {"hybrid", "hybrid+assoc"},
+		"hybrid+sweep":        {"hybrid+sweep"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -320,6 +335,10 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	assoc := optionsForArm(options{}, "hybrid+assoc")
 	if !assoc.assoc || assoc.temporalScore || assoc.conflictResolution || assoc.abstainPrompt {
 		t.Fatalf("assoc suffix did not override global mechanisms: %+v", assoc)
+	}
+	sweep := optionsForArm(options{assoc: true}, "hybrid+sweep")
+	if !sweep.clusterSweep || sweep.assoc {
+		t.Fatalf("sweep suffix did not override global mechanisms: %+v", sweep)
 	}
 	single := optionsForRun(global, "hybrid", false)
 	if !single.assoc || !single.temporalScore || !single.conflictResolution || !single.abstainPrompt {
