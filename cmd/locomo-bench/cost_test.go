@@ -126,7 +126,7 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	if pairedPlan.AnswerCalls != 12 || pairedPlan.JudgeCalls != 12 || pairedPlan.FilterCalls != 12 {
 		t.Fatalf("paired call plan = %+v, want answer/filter/judge=12", pairedPlan)
 	}
-	if pairedPlan.AnswerInTokens != 12*4000 || pairedPlan.AnswerOutTokens != 12*50 || pairedPlan.JudgeInTokens != 12*1600 {
+	if pairedPlan.AnswerInTokens != 12*estimateAnswerIn || pairedPlan.AnswerOutTokens != 12*estimateAnswerOut || pairedPlan.JudgeInTokens != 12*estimateJudgeIn {
 		t.Fatalf("paired calibrated tokens = %+v", pairedPlan)
 	}
 	opt.retrieval = ""

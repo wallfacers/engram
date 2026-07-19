@@ -1270,14 +1270,18 @@ func countSelectedQuestions(convs []conversation, opt options) int {
 	return total
 }
 
+// Strike 1 full-run measurements (2026-07-19): answer input ≈5146 tok/question,
+// judge input ≈4055 tok/question (the judge prompt carries the full retrieval
+// context). Nominal prices only — the relay bills cached repeated prefixes at
+// roughly half the computed figure.
 const (
 	estimateExtractIn  = 4_000
 	estimateExtractOut = 500
-	estimateAnswerIn   = 4_000
+	estimateAnswerIn   = 5_100
 	estimateAnswerOut  = 50
 	estimateFilterIn   = 1_000
 	estimateFilterOut  = 0
-	estimateJudgeIn    = 1_600
+	estimateJudgeIn    = 4_000
 	estimateJudgeOut   = 100
 )
 
