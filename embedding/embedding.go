@@ -38,6 +38,13 @@ type Config struct {
 	APIKey     string
 	Dimensions int
 	Timeout    time.Duration
+	// MaxInflight caps concurrent embedding requests from this client.
+	// Local single-runner backends (Ollama) fall over when hundreds of
+	// callers hit them at once: requests queue past the HTTP timeout and
+	// fail wholesale. Excess callers wait on a semaphore instead — the
+	// HTTP timeout only starts once a slot is held. <=0 means the default
+	// of 4, matching Ollama's default parallelism.
+	MaxInflight int
 	// Usage, when supplied, receives token usage for each embedding request.
 	// Local endpoints may omit usage, in which case the callback still records
 	// the call with zero token counts.
@@ -48,6 +55,7 @@ type Config struct {
 type HTTPClient struct {
 	cfg  Config
 	http *http.Client
+	sem  chan struct{}
 }
 
 // New builds an HTTPClient. It returns (nil, nil) when BaseURL or Model is empty
@@ -60,8 +68,15 @@ func New(cfg Config) (*HTTPClient, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30 * time.Second
 	}
+	if cfg.MaxInflight <= 0 {
+		cfg.MaxInflight = 4
+	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
-	return &HTTPClient{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout}}, nil
+	return &HTTPClient{
+		cfg:  cfg,
+		http: &http.Client{Timeout: cfg.Timeout},
+		sem:  make(chan struct{}, cfg.MaxInflight),
+	}, nil
 }
 
 // Model returns the configured model id.
@@ -92,6 +107,12 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float32, er
 	if len(texts) == 0 {
 		return nil, nil
 	}
+	select {
+	case c.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("embedding: %w", ctx.Err())
+	}
+	defer func() { <-c.sem }()
 	body, err := json.Marshal(embedRequest{
 		Model:      c.cfg.Model,
 		Input:      texts,
