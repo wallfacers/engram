@@ -120,13 +120,14 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	// Signal 1: keyword (BM25 / LIKE). This also bounds the candidate universe.
 	bm25 := r.keywordRanks(ctx, query, pool)
 	// Signal 2: semantic (optional).
-	vec := r.vectorRanks(ctx, query, pool)
+	vector := r.vectorRankContext(ctx, query, pool)
+	vec := vector.ranks
 	// Signal 3: entity.
 	ent := r.entityRanks(ctx, query, r.options.Associative)
 
 	signals := []map[string]int{bm25, vec, ent}
 	if r.options.Associative {
-		signals = append(signals, r.associativeRanks(ctx, query, pool))
+		signals = append(signals, r.associativeRanks(ctx, query, pool, vector.query, vector.stored))
 	}
 	fused := fuseRRF(signals...)
 	if len(fused) == 0 {
@@ -160,8 +161,8 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 // associativeRanks expands query entities through the local graph and then
 // ranks the resulting entries with the original query embedding. Any missing
 // dependency or storage/embedding failure drops this signal only.
-func (r *Retriever) associativeRanks(ctx context.Context, query string, limit int) map[string]int {
-	if r.client == nil || r.vectors == nil || r.entries == nil {
+func (r *Retriever) associativeRanks(ctx context.Context, query string, limit int, queryVector []float32, stored map[string][]float32) map[string]int {
+	if r.entries == nil || len(queryVector) == 0 || len(stored) == 0 {
 		return nil
 	}
 	cues, err := r.entries.EntityCues(ctx, query)
@@ -180,14 +181,6 @@ func (r *Retriever) associativeRanks(ctx context.Context, query string, limit in
 	if err != nil || len(candidates) == 0 {
 		return nil
 	}
-	queryVectors, err := r.client.Embed(ctx, []string{query})
-	if err != nil || len(queryVectors) != 1 || len(queryVectors[0]) == 0 {
-		return nil
-	}
-	stored, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
-	if err != nil {
-		return nil
-	}
 	type scored struct {
 		name  string
 		query float64
@@ -199,7 +192,7 @@ func (r *Retriever) associativeRanks(ctx context.Context, query string, limit in
 		if !ok {
 			continue
 		}
-		ordered = append(ordered, scored{name: name, query: embedding.Cosine(queryVectors[0], vec), graph: graphScore})
+		ordered = append(ordered, scored{name: name, query: embedding.Cosine(queryVector, vec), graph: graphScore})
 	}
 	if len(ordered) == 0 {
 		return nil
@@ -370,26 +363,36 @@ func (r *Retriever) likeNames(ctx context.Context, query string, limit int) []st
 	return scanNames(rows)
 }
 
+type vectorRankContext struct {
+	ranks  map[string]int
+	query  []float32
+	stored map[string][]float32
+}
+
 // vectorRanks embeds the query and ranks stored vectors by cosine. Returns nil
 // (no signal) when the client is unset or any step fails.
 func (r *Retriever) vectorRanks(ctx context.Context, query string, limit int) map[string]int {
+	return r.vectorRankContext(ctx, query, limit).ranks
+}
+
+func (r *Retriever) vectorRankContext(ctx context.Context, query string, limit int) vectorRankContext {
 	if r.client == nil {
-		return nil
+		return vectorRankContext{}
 	}
 	vecs, err := r.client.Embed(ctx, []string{query})
-	if err != nil || len(vecs) != 1 {
-		return nil
+	if err != nil || len(vecs) != 1 || len(vecs[0]) == 0 || r.vectors == nil {
+		return vectorRankContext{}
 	}
 	candidates, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
 	if err != nil || len(candidates) == 0 {
-		return nil
+		return vectorRankContext{}
 	}
 	scored := embedding.TopKCosine(vecs[0], candidates, limit)
 	names := make([]string, len(scored))
 	for i, s := range scored {
 		names[i] = s.Key
 	}
-	return ranksFromOrder(names)
+	return vectorRankContext{ranks: ranksFromOrder(names), query: vecs[0], stored: candidates}
 }
 
 // entityRanks orders entries by how many distinct query entity tokens they

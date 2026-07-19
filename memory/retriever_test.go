@@ -228,6 +228,42 @@ func TestAssociativeNoRegression(t *testing.T) {
 	}
 }
 
+func TestAssociativeReusesQueryEmbedding(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedRetrievalCorpus(t)
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "midsummer-party", Trigger: "holiday plans",
+		Content: "The user hosts a midsummer party each June.", CharCount: 43,
+	}); err != nil {
+		t.Fatalf("upsert neighbor: %v", err)
+	}
+	if err := es.PutEntities(ctx, "midsummer-party", []string{"midsummer"}); err != nil {
+		t.Fatalf("neighbor entities: %v", err)
+	}
+	if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "Sweden", B: "midsummer", Kind: "co", Weight: 1}}); err != nil {
+		t.Fatalf("upsert edge: %v", err)
+	}
+	client := &countingVectorClient{vectorFakeClient: vectorFakeClient{
+		model:   "assoc",
+		vectors: map[string][]float32{"Sweden": {1, 0, 0}},
+	}}
+	if err := vs.Put(ctx, "sweden-move", client.model, []float32{1, 0, 0}, time.Now()); err != nil {
+		t.Fatalf("sweden vector: %v", err)
+	}
+	if err := vs.Put(ctx, "midsummer-party", client.model, []float32{0, 1, 0}, time.Now()); err != nil {
+		t.Fatalf("neighbor vector: %v", err)
+	}
+
+	if _, err := memory.NewRetrieverWithOptions(es, vs, client, nil, memory.RetrieverOptions{
+		Associative: true,
+	}).Search(ctx, "Sweden", 2); err != nil {
+		t.Fatalf("associative search: %v", err)
+	}
+	if client.embedCalls != 1 {
+		t.Fatalf("query embedding calls = %d, want 1", client.embedCalls)
+	}
+}
+
 func TestEntityQueryWholeSentenceMatchesRawEntity(t *testing.T) {
 	ctx := context.Background()
 	es, vs := newStores(t)
@@ -302,6 +338,16 @@ func (f *fakeReranker) Rerank(_ context.Context, _ string, docs []string, topN i
 type vectorFakeClient struct {
 	model   string
 	vectors map[string][]float32
+}
+
+type countingVectorClient struct {
+	vectorFakeClient
+	embedCalls int
+}
+
+func (f *countingVectorClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	f.embedCalls++
+	return f.vectorFakeClient.Embed(ctx, texts)
 }
 
 func (f *vectorFakeClient) Model() string { return f.model }
