@@ -183,11 +183,15 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 			clusterSweepUsed = true
 		}
 	}
-	if r.reranker != nil {
-		fused = r.rerank(ctx, query, fused, k)
+	kEff := k
+	if clusterSweepUsed {
+		kEff = clusterSweepCap
 	}
-	if len(fused) > k {
-		fused = fused[:k]
+	if r.reranker != nil {
+		fused = r.rerank(ctx, query, fused, kEff)
+	}
+	if len(fused) > kEff {
+		fused = fused[:kEff]
 	}
 
 	out := make([]Result, 0, len(fused))

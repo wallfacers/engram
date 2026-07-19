@@ -526,15 +526,69 @@ func TestClusterSweepEnumerationsReplaceTopKWithEntityCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweep search: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("sweep search = %+v, want three candidates", got)
+	if len(got) != 4 {
+		t.Fatalf("sweep search = %+v, want all four cluster candidates", got)
 	}
 	if got[0].Name != "seed" {
 		t.Fatalf("sweep seed order = %+v, want seed first", got)
 	}
-	if got[1].Name != "cluster-0" || got[2].Name != "cluster-1" {
+	if got[1].Name != "cluster-0" || got[2].Name != "cluster-1" || got[3].Name != "cluster-2" {
 		t.Fatalf("sweep candidates = %+v, want cluster entries after seed", got)
 	}
+}
+
+func TestClusterSweepKeepsCandidatesPastRequestedK(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedClusterSweepCorpus(t, 31)
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
+
+	got, err := r.Search(ctx, "What things did root do?", 30)
+	if err != nil {
+		t.Fatalf("sweep search: %v", err)
+	}
+	if len(got) != 31 {
+		t.Fatalf("sweep search returned %d candidates, want all 31 cluster candidates", len(got))
+	}
+}
+
+func TestClusterSweepRerankerKeepsCandidatesPastRequestedK(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedClusterSweepCorpus(t, 31)
+	r := memory.NewRetrieverWithOptions(es, vs, nil, &fakeReranker{}, memory.RetrieverOptions{ClusterSweep: true})
+
+	got, err := r.Search(ctx, "What things did root do?", 30)
+	if err != nil {
+		t.Fatalf("reranked sweep search: %v", err)
+	}
+	if len(got) != 31 {
+		t.Fatalf("reranked sweep search returned %d candidates, want all 31 cluster candidates", len(got))
+	}
+}
+
+func seedClusterSweepCorpus(t *testing.T, count int) (*memory.EntryStore, *memory.VectorStore) {
+	t.Helper()
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "seed", Content: "root fact"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := es.PutEntities(ctx, "seed", []string{"root"}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+	for i := 1; i < count; i++ {
+		name := fmt.Sprintf("cluster-%02d", i)
+		entity := fmt.Sprintf("member-%02d", i)
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: "cluster fact"}); err != nil {
+			t.Fatalf("cluster entry %d: %v", i, err)
+		}
+		if err := es.PutEntities(ctx, name, []string{entity}); err != nil {
+			t.Fatalf("cluster entity %d: %v", i, err)
+		}
+		if err := es.UpsertEdges(ctx, []memory.EntityEdge{{A: "root", B: entity, Kind: "co"}}); err != nil {
+			t.Fatalf("cluster edge %d: %v", i, err)
+		}
+	}
+	return es, vs
 }
 
 func TestClusterSweepDisabledOrNonEnumerationPreservesResults(t *testing.T) {
