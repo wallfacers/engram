@@ -23,13 +23,29 @@ const (
 	chunkMaxChars    = 1100 // hard cap for a single oversized turn
 )
 
+// sessionChunk is one verbatim chunk plus the dialogue ids of the turns packed
+// into it, so a retrieved chunk can be resolved back to exact turns for evidence
+// recall.
+type sessionChunk struct {
+	Text   string
+	DiaIDs []string
+}
+
 // buildSessionChunks splits one session's turns into speaker-attributed chunks
 // of at most ~chunkTargetChars code points, never splitting a turn except when
-// a single turn alone exceeds chunkMaxChars (then it is truncated).
-func buildSessionChunks(s session) []string {
-	var chunks []string
+// a single turn alone exceeds chunkMaxChars (then it is truncated). Each chunk
+// records the dialogue ids of the turns it contains (blank ids are dropped).
+func buildSessionChunks(s session) []sessionChunk {
+	var chunks []sessionChunk
 	var b strings.Builder
+	var diaIDs []string
 	size := 0
+	flush := func() {
+		chunks = append(chunks, sessionChunk{Text: b.String(), DiaIDs: diaIDs})
+		b.Reset()
+		diaIDs = nil
+		size = 0
+	}
 	for _, t := range s.Turns {
 		line := t.Speaker + ": " + t.Text
 		if n := utf8.RuneCountInString(line); n > chunkMaxChars {
@@ -37,9 +53,7 @@ func buildSessionChunks(s session) []string {
 		}
 		n := utf8.RuneCountInString(line)
 		if size > 0 && size+1+n > chunkTargetChars {
-			chunks = append(chunks, b.String())
-			b.Reset()
-			size = 0
+			flush()
 		}
 		if size > 0 {
 			b.WriteByte('\n')
@@ -47,9 +61,12 @@ func buildSessionChunks(s session) []string {
 		}
 		b.WriteString(line)
 		size += n
+		if t.DiaID != "" {
+			diaIDs = append(diaIDs, t.DiaID)
+		}
 	}
 	if size > 0 {
-		chunks = append(chunks, b.String())
+		flush()
 	}
 	return chunks
 }
@@ -122,8 +139,10 @@ func applyChunkQuota(wide []memory.Result, topK, quota int) []memory.Result {
 
 // ingestChunks writes one conversation's verbatim chunks as entries. Upsert is
 // keyed by deterministic names, so re-running over a persisted store is
-// idempotent. Returns the number of chunks written.
-func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation) (int, error) {
+// idempotent. Returns a map from each chunk entry name to the dialogue ids its
+// text covers (for exact-turn evidence recall) and the number of chunks written.
+func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation) (map[string][]string, int, error) {
+	chunkTurns := make(map[string][]string)
 	n := 0
 	for _, s := range conv.Sessions {
 		var eventDate *time.Time
@@ -131,11 +150,12 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 			d := s.Date
 			eventDate = &d
 		}
-		for i, content := range buildSessionChunks(s) {
+		for i, chunk := range buildSessionChunks(s) {
+			name := fmt.Sprintf("chunk-c%d-s%d-%03d", conv.ID, s.Index, i)
 			e := &memory.Entry{
-				Name:            fmt.Sprintf("chunk-c%d-s%d-%03d", conv.ID, s.Index, i),
-				Trigger:         chunkTrigger(content),
-				Content:         content,
+				Name:            name,
+				Trigger:         chunkTrigger(chunk.Text),
+				Content:         chunk.Text,
 				Durability:      "volatile",
 				Category:        "chunk",
 				EventDate:       eventDate,
@@ -143,10 +163,13 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 				SourceSessionID: fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index),
 			}
 			if err := es.Upsert(ctx, e); err != nil {
-				return n, fmt.Errorf("chunk %s: %w", e.Name, err)
+				return chunkTurns, n, fmt.Errorf("chunk %s: %w", e.Name, err)
+			}
+			if len(chunk.DiaIDs) > 0 {
+				chunkTurns[name] = chunk.DiaIDs
 			}
 			n++
 		}
 	}
-	return n, nil
+	return chunkTurns, n, nil
 }
