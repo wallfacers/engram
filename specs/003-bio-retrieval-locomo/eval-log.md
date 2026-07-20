@@ -160,6 +160,28 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
   提前量的 +0.8pp 系噪声，全量多数票归零。转向 cluster-sweep（结构性攻覆盖
   截断）+ answer-plan 隔离。
 
+## Answer-Plan Prompt 隔离（tplan，2026-07-20）
+
+低成本假设验证：把 temporal 答题-计划 prompt（Strike 2 两臂共有、烘进基线的
+"最大杠杆"）单独隔离。同进程配对，唯一变量是该 prompt，**只跑 category 2**
+（321 题）省成本。
+
+- Flags: `--retrieval hybrid,hybrid+tplan --only-category 2 --repeats 5
+  --force-answer --no-idk-retry`（**不带**全局 --temporal-answer-prompt；
+  A=hybrid=prompt OFF，B=hybrid+tplan=prompt ON），复用 s2-store，run-dir b-tplan
+- Estimate / Actual: 名义 ¥30.86 / ¥33.41（+8%），实付按缓存折扣 ~¥16。0 失败 0 降级。
+- `paired.json` / verdict: **above-noise, McNemar p=0.0169, CI overlap=False**。
+  多数票 A(prompt OFF)=80.1% vs B(prompt ON)=76.3%，**Δ=−3.7pp**；prompt 救活 5 /
+  搞砸 17（去掉净救活 12，p=0.019）。
+- **Decision: 去掉 `--temporal-answer-prompt`（标准口径）**。调研号称 −17.6pp
+  的"大杠杆"在 sol 后端是负资产（temporal −3.7pp 显著）——首个 above-noise 正
+  结果，靠"做减法"得到。
+- **新有效基线（各块实测拼算，无需重跑）**：temporal 用去-prompt 的 80.1%，其余
+  类目不受影响（prompt 仅作用 cat 2）→ **overall ≈ 67.6%**（vs 带 prompt 66.8%，
+  +0.8pp）。single-hop 71.9 / multi-hop 44.5 / open-domain 58.1 / temporal 80.1。
+- Notes: Strike 2 的 temporal-score 判定不受影响（handicap 对称加两臂）。方法论
+  验证——隔离已烘进基线的成分，能发现"移除即涨点"的杠杆，胜过盲目叠加。
+
 ## Strike 3: Abstention and Conflict Resolution
 
 - Date:
