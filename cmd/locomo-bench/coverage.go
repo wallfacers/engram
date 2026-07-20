@@ -51,11 +51,69 @@ func evidenceRecallAt(qa locomoQA, hits []memory.Result, chunkTurns map[string][
 // exported means are populated by finalize(); the running sums stay unexported so
 // a serialized report carries only the finished averages.
 type coverageBucket struct {
-	N             int     `json:"n"`
-	TurnRecall    float64 `json:"turn_recall"`
-	SessionRecall float64 `json:"session_recall"`
-	turnSum       float64
-	sessionSum    float64
+	N                 int     `json:"n"`
+	TurnRecall        float64 `json:"turn_recall"`
+	SessionRecall     float64 `json:"session_recall"`
+	SelectionSurvival float64 `json:"selection_survival"`
+	ComplementDrop    float64 `json:"complement_drop"`
+	AnchorViolation   int     `json:"anchor_violation"`
+	turnSum           float64
+	sessionSum        float64
+	candidateGold     int
+	selectedGold      int
+	metricQuestions   int
+	complementDrops   int
+}
+
+type selectionMetricInput struct {
+	Candidates []memory.Result
+	Selected   []memory.Result
+	GoldTurns  []string
+	ChunkTurns map[string][]string
+}
+
+func (b *coverageBucket) addSelectionMetrics(input selectionMetricInput) {
+	gold := make(map[string]struct{}, len(input.GoldTurns))
+	for _, turnID := range input.GoldTurns {
+		gold[turnID] = struct{}{}
+	}
+	if len(gold) == 0 {
+		return
+	}
+	b.metricQuestions++
+	candidateGold := coveredGoldTurns(input.Candidates, input.ChunkTurns, gold)
+	selectedGold := coveredGoldTurns(input.Selected, input.ChunkTurns, gold)
+	b.candidateGold += len(candidateGold)
+	b.selectedGold += len(selectedGold)
+	if len(selectedGold) < len(candidateGold) {
+		b.complementDrops++
+	}
+
+	selectedNames := make(map[string]struct{}, len(input.Selected))
+	for _, selected := range input.Selected {
+		selectedNames[selected.Name] = struct{}{}
+	}
+	anchorViolation := false
+	for i := 0; i < len(input.Candidates) && i < 2; i++ {
+		if _, ok := selectedNames[input.Candidates[i].Name]; !ok {
+			anchorViolation = true
+		}
+	}
+	if anchorViolation {
+		b.AnchorViolation++
+	}
+}
+
+func coveredGoldTurns(results []memory.Result, chunkTurns map[string][]string, gold map[string]struct{}) map[string]struct{} {
+	covered := make(map[string]struct{})
+	for _, result := range results {
+		for _, turnID := range chunkTurns[result.Name] {
+			if _, ok := gold[turnID]; ok {
+				covered[turnID] = struct{}{}
+			}
+		}
+	}
+	return covered
 }
 
 func (b *coverageBucket) add(turn, session float64) {
@@ -68,6 +126,13 @@ func (b *coverageBucket) finalize() {
 	if b.N > 0 {
 		b.TurnRecall = b.turnSum / float64(b.N)
 		b.SessionRecall = b.sessionSum / float64(b.N)
+	}
+	b.SelectionSurvival = 1
+	if b.candidateGold > 0 {
+		b.SelectionSurvival = float64(b.selectedGold) / float64(b.candidateGold)
+	}
+	if b.metricQuestions > 0 {
+		b.ComplementDrop = float64(b.complementDrops) / float64(b.metricQuestions)
 	}
 }
 

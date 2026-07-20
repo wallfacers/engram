@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wallfacers/engram/memory"
@@ -164,5 +165,47 @@ func TestCoverageAccumulatorMeansPerCategoryAndOverall(t *testing.T) {
 	}
 	if tp := rep.ByCategory["temporal"]; tp == nil || tp.SessionRecall != 0.5 {
 		t.Fatalf("temporal bucket = %+v, want session=0.5", tp)
+	}
+}
+
+func TestSelectorMetricsGateThresholds(t *testing.T) {
+	bucket := &coverageBucket{}
+	bucket.addSelectionMetrics(selectionMetricInput{
+		Candidates: []memory.Result{{Name: "chunk-a"}, {Name: "chunk-b"}, {Name: "chunk-c"}},
+		Selected:   []memory.Result{{Name: "chunk-a"}, {Name: "chunk-c"}},
+		GoldTurns:  []string{"D1:1", "D1:2", "D1:3"},
+		ChunkTurns: map[string][]string{
+			"chunk-a": {"D1:1", "D1:2"},
+			"chunk-b": {"D1:3"},
+		},
+	})
+	bucket.addSelectionMetrics(selectionMetricInput{
+		Candidates: []memory.Result{{Name: "chunk-d"}},
+		Selected:   []memory.Result{{Name: "chunk-d"}},
+		GoldTurns:  []string{"D2:1"},
+		ChunkTurns: map[string][]string{"chunk-d": {"D2:1"}},
+	})
+	bucket.finalize()
+	if bucket.SelectionSurvival != 0.75 {
+		t.Fatalf("selection_survival = %v, want 0.75", bucket.SelectionSurvival)
+	}
+	if bucket.ComplementDrop != 0.5 {
+		t.Fatalf("complement_drop = %v, want 0.5", bucket.ComplementDrop)
+	}
+	if bucket.AnchorViolation != 1 {
+		t.Fatalf("anchor_violation = %d, want 1", bucket.AnchorViolation)
+	}
+}
+
+func TestCoverageEmitsSelectorMetrics(t *testing.T) {
+	bucket := &coverageBucket{N: 1, SelectionSurvival: 1, ComplementDrop: 0.25, AnchorViolation: 2}
+	raw, err := json.Marshal(bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"selection_survival", "complement_drop", "anchor_violation"} {
+		if !strings.Contains(string(raw), `"`+field+`"`) {
+			t.Fatalf("coverage JSON %s does not contain %q", raw, field)
+		}
 	}
 }
