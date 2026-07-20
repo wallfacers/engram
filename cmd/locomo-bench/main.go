@@ -90,6 +90,7 @@ type options struct {
 	catQuotaSpec         string
 	catTopK              map[int]int
 	catQuota             map[int]int
+	coverageOnly         bool
 }
 
 func main() {
@@ -135,6 +136,7 @@ func run() error {
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
+	flag.BoolVar(&opt.coverageOnly, "coverage-only", false, "retrieval-only bake-off: grade every arm on exact-turn / session evidence recall and write coverage.json, making NO answer or judge LLM call (needs --chunks for turn recall)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -224,8 +226,12 @@ func run() error {
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create run dir: %w", err)
 	}
-	if err := checkRunDirRegime(opt); err != nil {
-		return err
+	if !opt.coverageOnly {
+		// The regime pin guards answer-journal resume from mixing 口径; coverage
+		// writes no journal, so it has no regime to protect.
+		if err := checkRunDirRegime(opt); err != nil {
+			return err
+		}
 	}
 	// One provider; a global semaphore caps concurrent in-flight LLM calls so
 	// many conversations/questions run in parallel without exceeding the rate
@@ -304,6 +310,14 @@ func run() error {
 			runtime.Close()
 		}
 	}()
+
+	if opt.coverageOnly {
+		// Retrieval-only bake-off: no answer/judge tokens are spent, so the only
+		// cost is the one-time store build (reusable via --store-dir) plus query
+		// embeddings from the local sidecar. Skips the repeat/paired/stats/cost
+		// answer machinery entirely.
+		return runCoverage(ctx, opt, convs, runtimes, arms, logger)
+	}
 
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
 		repeatOpt := opt

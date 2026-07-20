@@ -54,3 +54,35 @@ and any effect on scores remain maintainer-gated.
   the paired arms.
 - Evaluate this isolation only from paired category 2 results. It must not be
   generalized to the full benchmark score.
+
+## Batch 8 Offline Coverage Bake-off (`--coverage-only`)
+
+Purpose: a near-zero-cost ruler to decide *which retrieval lever* to pay for. It
+grades every arm on exact-turn / session evidence recall and makes **no answer or
+judge LLM call** — the only cost is the one-time store build (reusable via
+`--store-dir`) plus query embeddings from the local sidecar for hybrid arms. This
+is the discipline gate before any paid answer eval: a lever must first raise
+offline evidence coverage (especially multi-hop) here before it earns a paid run.
+
+- **`cmd/locomo-bench/coverage.go`** — engine untouched (adapter-only).
+  - `evidenceRecallAt(qa, hits, chunkTurns)` — the reusable recall grader. Unlike
+    `newSweepEvidenceDiagnostics` it does **not** gate on the cluster-sweep signal,
+    so the plain-RRF baseline is measured on the same ruler as every mechanism arm.
+    Reuses the Gap-1 chunk `dia_id` provenance for exact-turn matching.
+  - `coverageAccumulator` / `coverageArmReport` — per-category + overall means,
+    mutex-guarded for concurrent conversations.
+  - `computeCoverage` runs **first-round retrieval only** (`retrieveWithQuotaDiagnostics`);
+    the LLM listwise filter (`--filter-pool`) and the IDK-tail rewrite/wider-net
+    escalation are deliberately skipped — this measures raw retrieval coverage, not
+    answer-side recovery.
+  - `runCoverage` writes `coverage.json` and prints a category-major turn@k matrix
+    across arms (the "which lever raises multi-hop coverage?" view).
+- **Wiring** (`main.go`): `--coverage-only` branches right after the shared store
+  build, before the repeat/answer loop; the `checkRunDirRegime` pin is skipped
+  (coverage writes no answer journal, so there is no 口径 to protect). Warns when
+  `--chunks` is off (turn recall is then all-zero; only session recall is meaningful).
+- **`.gitignore`**: the pre-existing `coverage.*` (Go coverage-report artifacts)
+  was un-ignoring-negated for `coverage.go` / `coverage_test.go` sources.
+- Usage: `--coverage-only --chunks --retrieval hybrid,hybrid+sweep --store-dir <dir>`
+  reuses a prebuilt store; a dummy `LOCOMO_API_KEY` suffices once extraction is
+  cached (no answer/judge/extract call fires).
