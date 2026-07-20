@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -30,6 +32,78 @@ func pcicDatasetFingerprint(path string) (string, error) {
 // the conversation it is retrieving within (see PCICSelectionInput.SpanKey).
 func pcicSpanKey(convID int, diaID string) string {
 	return fmt.Sprintf("conv-%d/%s", convID, diaID)
+}
+
+// parsePCICSpanKey is the inverse of pcicSpanKey: "conv-3/D15:1" → (3, "D15:1").
+func parsePCICSpanKey(key string) (int, string, bool) {
+	rest, ok := strings.CutPrefix(key, "conv-")
+	if !ok {
+		return 0, "", false
+	}
+	slash := strings.IndexByte(rest, '/')
+	if slash <= 0 || slash == len(rest)-1 {
+		return 0, "", false
+	}
+	convID, err := strconv.Atoi(rest[:slash])
+	if err != nil {
+		return 0, "", false
+	}
+	return convID, rest[slash+1:], true
+}
+
+// fillPCICMeta re-annotates only the requested conv-scoped turn keys and merges
+// them into an existing sidecar — paying for exactly those turns, never the
+// whole dataset. Used to patch the handful of turns a transient relay blip left
+// unannotated. A turn that still fails (or is claimless) is reported in
+// `missing`, not silently dropped; existing spans are preserved.
+func fillPCICMeta(ctx context.Context, convs []conversation, existing PCICMeta, keys []string, call modelCaller, logger *slog.Logger) (PCICMeta, int, []string, error) {
+	want := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			want[k] = struct{}{}
+		}
+	}
+	spans := make(map[string]SpanClaim, len(existing.Spans)+len(want))
+	for k, v := range existing.Spans {
+		spans[k] = v
+	}
+	filled := 0
+	for _, conv := range convs {
+		for _, sess := range conv.Sessions {
+			for _, tn := range sess.Turns {
+				key := pcicSpanKey(conv.ID, tn.DiaID)
+				if _, ok := want[key]; !ok {
+					continue
+				}
+				claim, ok, err := annotateTurn(ctx, call, tn)
+				if err != nil {
+					if logger != nil {
+						logger.Warn("pcic fill turn failed", "turn", key, "err", err)
+					}
+					continue
+				}
+				if ok {
+					claim.SpanID = key
+					spans[key] = claim
+					filled++
+				}
+			}
+		}
+	}
+	// A requested key still absent from spans could not be filled (persistent
+	// failure, a claimless turn, or a turn not present in the dataset). Report
+	// it rather than dropping it silently.
+	var missing []string
+	for k := range want {
+		if _, ok := spans[k]; !ok {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	meta := existing
+	meta.Spans = spans
+	meta.Header.Count = len(spans)
+	return meta, filled, missing, nil
 }
 
 type ClaimPolarity string

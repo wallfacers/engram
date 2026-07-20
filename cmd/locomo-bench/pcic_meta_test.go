@@ -252,6 +252,79 @@ func TestFailoverModelCaller(t *testing.T) {
 	})
 }
 
+func TestPCICSpanKeyRoundTrip(t *testing.T) {
+	convID, diaID, ok := parsePCICSpanKey(pcicSpanKey(3, "D15:1"))
+	if !ok || convID != 3 || diaID != "D15:1" {
+		t.Fatalf("parse = (%d,%q,%v), want (3,D15:1,true)", convID, diaID, ok)
+	}
+	if _, _, ok := parsePCICSpanKey("garbage"); ok {
+		t.Fatalf("malformed key must not parse")
+	}
+}
+
+// TestFillPCICMetaTargetsOnlyRequestedTurns proves the gap-fill re-annotates
+// exactly the requested turns — paying for only those, never the whole dataset —
+// and preserves every existing span.
+func TestFillPCICMetaTargetsOnlyRequestedTurns(t *testing.T) {
+	convs := []conversation{{ID: 0, Sessions: []session{{Index: 1, Turns: []turn{
+		{Speaker: "Alice", Text: "Alice is an engineer.", DiaID: "D15:1"},
+		{Speaker: "Bob", Text: "unrelated small talk", DiaID: "D9:9"},
+	}}}}}
+	existing := PCICMeta{
+		Header: PCICMetaHeader{AnnotateModel: "gpt-5.6-luna", DatasetFingerprint: "sha256:fixture", Count: 1},
+		Spans: map[string]SpanClaim{
+			pcicSpanKey(0, "D9:9"): {SpanID: pcicSpanKey(0, "D9:9"), Entity: "bob", Slot: "hobby", Value: "chess", Polarity: PolarityAffirm, TimeState: "current"},
+		},
+	}
+	called := 0
+	call := func(_ context.Context, _, user string) (string, error) {
+		called++
+		if !strings.Contains(user, "D15:1") {
+			t.Errorf("fill called on an unrequested turn: %q", user)
+		}
+		return `{"entity":"Alice","slot":"job","value":"engineer","polarity":"affirm","time_state":"current"}`, nil
+	}
+	meta, filled, missing, err := fillPCICMeta(context.Background(), convs, existing, []string{pcicSpanKey(0, "D15:1")}, call, slog.Default())
+	if err != nil {
+		t.Fatalf("fillPCICMeta: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("LLM called %d times, want exactly 1 (only the requested turn)", called)
+	}
+	if filled != 1 || len(missing) != 0 {
+		t.Fatalf("filled=%d missing=%v, want 1/none", filled, missing)
+	}
+	if len(meta.Spans) != 2 || meta.Header.Count != 2 {
+		t.Fatalf("merged span count = %d/%d, want 2", len(meta.Spans), meta.Header.Count)
+	}
+	if got := meta.Spans[pcicSpanKey(0, "D9:9")]; got.Entity != "bob" {
+		t.Fatalf("existing span mutated: %#v", got)
+	}
+	if got := meta.Spans[pcicSpanKey(0, "D15:1")]; got.Entity != memory.EntityNorm("Alice") {
+		t.Fatalf("filled span wrong: %#v", got)
+	}
+}
+
+// TestFillPCICMetaReportsUnfillable ensures a turn that still fails (or is
+// claimless) is reported as missing, not silently dropped, and existing spans
+// are preserved.
+func TestFillPCICMetaReportsUnfillable(t *testing.T) {
+	convs := []conversation{{ID: 0, Sessions: []session{{Index: 1, Turns: []turn{
+		{Speaker: "A", Text: "text", DiaID: "D15:1"},
+	}}}}}
+	existing := PCICMeta{Header: PCICMetaHeader{Count: 0}, Spans: map[string]SpanClaim{}}
+	call := func(_ context.Context, _, _ string) (string, error) {
+		return "", fmt.Errorf("provider/openai: server_error (HTTP 502): Bad Gateway")
+	}
+	_, filled, missing, err := fillPCICMeta(context.Background(), convs, existing, []string{pcicSpanKey(0, "D15:1")}, call, slog.Default())
+	if err != nil {
+		t.Fatalf("a single fill failure should report missing, not error: %v", err)
+	}
+	if filled != 0 || len(missing) != 1 || missing[0] != pcicSpanKey(0, "D15:1") {
+		t.Fatalf("filled=%d missing=%v, want 0 filled / D15:1 missing", filled, missing)
+	}
+}
+
 func TestPCICAnnotateWritesNoEngineState(t *testing.T) {
 	dir := t.TempDir()
 	meta, err := annotatePCICMeta(context.Background(), annotateFixtureConvs(),

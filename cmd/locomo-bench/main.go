@@ -88,6 +88,7 @@ type options struct {
 	pcic                 bool
 	oracle               bool
 	pcicAnnotate         bool
+	pcicFillTurns        string
 	pcicMetaPath         string
 	pcicMeta             *PCICMeta
 	selector             chunkSelector
@@ -142,6 +143,7 @@ func run() error {
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
 	flag.BoolVar(&opt.pcicAnnotate, "pcic-annotate", false, "one-time offline pass: extract per-turn typed claims via the annotation model and write the pcic_meta sidecar, then exit (idempotent: skips when a matching sidecar already exists)")
+	flag.StringVar(&opt.pcicFillTurns, "pcic-fill-turns", "", "with --pcic-annotate: re-annotate ONLY these conv-scoped turn keys (comma-separated, e.g. conv-0/D15:1,conv-0/D14:32) and merge into the existing sidecar — pays for exactly those turns")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -496,6 +498,33 @@ func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, 
 		logger.Info("pcic annotation failover enabled", "fallback", fallbackURL)
 	}
 	call := failoverModelCaller(callers...)
+
+	// Targeted gap-fill: patch only the requested turns into the existing sidecar
+	// (e.g. the handful a transient relay blip left unannotated) — never re-pay
+	// for the whole dataset.
+	if opt.pcicFillTurns != "" {
+		keys := strings.Split(opt.pcicFillTurns, ",")
+		existing, err := loadPCICMeta(metaPath, PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint}, logger)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return fmt.Errorf("--pcic-fill-turns needs an existing matching sidecar at %s", metaPath)
+		}
+		logger.Info("pcic fill starting", "turns", len(keys), "path", metaPath)
+		meta, filled, missing, err := fillPCICMeta(context.Background(), convs, *existing, keys, call, logger)
+		if err != nil {
+			return err
+		}
+		if err := savePCICMeta(metaPath, meta); err != nil {
+			return err
+		}
+		logger.Info("pcic fill complete", "filled", filled, "missing", missing, "spans", len(meta.Spans))
+		if len(missing) > 0 {
+			return fmt.Errorf("pcic fill left %d turn(s) unfilled: %v", len(missing), missing)
+		}
+		return nil
+	}
 
 	logger.Info("pcic annotation starting", "model", model, "conversations", len(convs), "path", metaPath)
 	meta, err := annotatePCICMeta(context.Background(), convs, model, fingerprint, call, opt.concurrency, logger)
