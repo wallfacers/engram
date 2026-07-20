@@ -85,6 +85,11 @@ type options struct {
 	forceAnswer          bool
 	temporalAnswerPrompt bool
 	rerank               bool
+	pcic                 bool
+	oracle               bool
+	pcicMetaPath         string
+	pcicMeta             *PCICMeta
+	selector             chunkSelector
 	opinionPass          bool
 	adversarial          int
 	catTopKSpec          string
@@ -133,6 +138,8 @@ func run() error {
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
+	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
+	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -183,6 +190,13 @@ func run() error {
 		if err := validatePromptModes(optionsForArm(opt, arm)); err != nil {
 			return fmt.Errorf("arm %s: %w", arm, err)
 		}
+		spec, _ := parseArm(arm)
+		if (spec.mechanisms["pcic"] || spec.mechanisms["oracle"]) && spec.backend != "hybrid" {
+			return fmt.Errorf("arm %s: pcic/oracle selection requires the hybrid backend", arm)
+		}
+		if spec.mechanisms["oracle"] && !opt.coverageOnly {
+			return fmt.Errorf("arm %s: oracle is allowed only with --coverage-only", arm)
+		}
 	}
 	if opt.catTopK, err = parseCatOverrides(opt.catTopKSpec); err != nil {
 		return fmt.Errorf("--cat-top-k: %w", err)
@@ -227,6 +241,30 @@ func run() error {
 
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create run dir: %w", err)
+	}
+	if pcicEnabledForRun(opt, arms) {
+		metaPath := opt.pcicMetaPath
+		if metaPath == "" {
+			baseDir := opt.storeDir
+			if baseDir == "" {
+				baseDir = opt.runDir
+			}
+			metaPath = filepath.Join(baseDir, "pcic_meta.json")
+		}
+		fingerprint, err := pcicDatasetFingerprint(opt.dataPath)
+		if err != nil {
+			return err
+		}
+		opt.pcicMeta, err = loadPCICMeta(metaPath, PCICMetaHeader{
+			AnnotateModel:      envOr("PCIC_ANNOTATE_MODEL", "gpt-5.6-luna"),
+			DatasetFingerprint: fingerprint,
+		}, logger)
+		if err != nil {
+			return err
+		}
+		if opt.pcicMeta == nil {
+			logger.Warn("pcic_meta unavailable; selector will use rerank order", "path", metaPath)
+		}
 	}
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
@@ -490,6 +528,8 @@ var supportedArmMechanisms = map[string]struct{}{
 	"conflict": {},
 	"abstain":  {},
 	"rerank":   {},
+	"pcic":     {},
+	"oracle":   {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -538,6 +578,8 @@ func optionsForArm(global options, name string) options {
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
 		arm.rerank = false
+		arm.pcic = false
+		arm.oracle = false
 		return arm
 	}
 	arm := global
@@ -549,7 +591,18 @@ func optionsForArm(global options, name string) options {
 	arm.abstainPrompt = spec.mechanisms["abstain"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
 	arm.rerank = spec.mechanisms["rerank"]
+	arm.pcic = spec.mechanisms["pcic"]
+	arm.oracle = spec.mechanisms["oracle"]
 	return arm
+}
+
+func pcicEnabledForRun(global options, arms []string) bool {
+	for _, arm := range arms {
+		if optionsForRun(global, arm, len(arms) > 1).pcic {
+			return true
+		}
+	}
+	return false
 }
 
 func optionsForRun(global options, name string, multiArm bool) options {
@@ -584,7 +637,9 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 // embedding are not paid again for every repeat.
 type conversationRuntime struct {
 	store      *store.Store
+	entries    *memory.EntryStore
 	retrievers map[string]*memory.Retriever
+	reranked   map[string]bool
 	// chunkTurns maps a verbatim-chunk entry name to the dialogue ids its text
 	// covers (D<session>:<turn>), enabling exact-turn evidence recall. Empty when
 	// chunks are not ingested.
@@ -711,6 +766,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	// semantic signal and the optional rerank stage; fts stays the pure legacy
 	// baseline.
 	retrievers := make(map[string]*memory.Retriever, len(arms))
+	reranked := make(map[string]bool, len(arms))
 	for _, arm := range arms {
 		armOpt := optionsForRun(opt, arm, len(arms) > 1)
 		retrieverOpts := retrieverOptionsForAt(armOpt, temporalNowForConversation(conv))
@@ -719,13 +775,14 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			if armOpt.rerank {
 				reranker = buildBenchReranker()
 			}
+			reranked[arm] = reranker != nil
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, reranker, retrieverOpts)
 		} else {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, nil, nil, retrieverOpts)
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, retrievers: retrievers, chunkTurns: chunkTurns}, nil
+	return &conversationRuntime{store: st, entries: es, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -860,6 +917,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
+				armOpt.selector, _ = selectorForArm(runtime, s.name, armOpt, nil, false)
 				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
@@ -1089,7 +1147,7 @@ func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, f
 	if opt.filterPool > topK {
 		return retrieveFilteredDiagnostics(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
 	}
-	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota)
+	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota, opt.selector)
 }
 
 // retryWithRewrite runs the IDK second round. Returns (answer, true) only when
@@ -1196,7 +1254,7 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 
 func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, []memory.Result, memory.SearchDiagnostics, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3)
+	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, opt.selector)
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}

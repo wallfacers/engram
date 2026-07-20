@@ -35,13 +35,13 @@ func retrieveFiltered(ctx context.Context, r *memory.Retriever, call modelCaller
 
 func retrieveFilteredDiagnostics(ctx context.Context, r *memory.Retriever, call modelCaller, query string, topK, quota, pool int) ([]memory.Result, memory.SearchDiagnostics, error) {
 	if pool <= topK {
-		return retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota)
+		return retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota, nil)
 	}
 	scaledQuota := 0
 	if quota > 0 {
 		scaledQuota = quota * pool / topK
 	}
-	wide, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, r, query, pool, scaledQuota)
+	wide, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, r, query, pool, scaledQuota, nil)
 	if err != nil {
 		return nil, diagnostics, err
 	}
