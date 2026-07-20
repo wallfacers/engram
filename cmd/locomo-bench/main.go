@@ -975,7 +975,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				armOpt.selector, _ = selectorForArm(runtime, s.name, armOpt, nil, false)
+				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
 				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{

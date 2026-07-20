@@ -50,15 +50,16 @@ func TestPCICAnnotateSpanShape(t *testing.T) {
 	if meta.Header.Count != len(meta.Spans) || len(meta.Spans) != 1 {
 		t.Fatalf("count = %d, spans = %d, want 1 claimful span", meta.Header.Count, len(meta.Spans))
 	}
-	claim, ok := meta.Spans["D1:1"]
+	key := pcicSpanKey(0, "D1:1")
+	claim, ok := meta.Spans[key]
 	if !ok {
-		t.Fatalf("D1:1 span missing; got %#v", meta.Spans)
+		t.Fatalf("%s span missing; got %#v", key, meta.Spans)
 	}
-	if _, dup := meta.Spans["D1:2"]; dup {
+	if _, dup := meta.Spans[pcicSpanKey(0, "D1:2")]; dup {
 		t.Fatalf("claimless turn D1:2 must be absent")
 	}
-	if claim.SpanID != "D1:1" {
-		t.Fatalf("span_id = %q, want D1:1", claim.SpanID)
+	if claim.SpanID != key {
+		t.Fatalf("span_id = %q, want %q", claim.SpanID, key)
 	}
 	if claim.Entity != memory.EntityNorm("Alice") {
 		t.Fatalf("entity = %q, want normalized %q", claim.Entity, memory.EntityNorm("Alice"))
@@ -76,6 +77,72 @@ func TestPCICAnnotateSpanShape(t *testing.T) {
 	if err := validatePCICMeta(meta); err != nil {
 		t.Fatalf("annotated meta invalid: %v", err)
 	}
+}
+
+// TestPCICAnnotateScopesSpansPerConversation guards the cross-conversation
+// dia_id collision: LoCoMo dia_ids (e.g. "D1:1") are unique only within one
+// conversation, so a global sidecar keyed by bare dia_id would let conv 1's
+// claim overwrite conv 0's. Keys must be conversation-scoped.
+func TestPCICAnnotateScopesSpansPerConversation(t *testing.T) {
+	convs := []conversation{
+		{ID: 0, Sessions: []session{{Index: 1, Turns: []turn{
+			{Speaker: "Alice", Text: "Alice is an engineer.", DiaID: "D1:1"},
+		}}}},
+		{ID: 1, Sessions: []session{{Index: 1, Turns: []turn{
+			{Speaker: "Bob", Text: "Bob is a teacher.", DiaID: "D1:1"},
+		}}}},
+	}
+	call := func(_ context.Context, _, user string) (string, error) {
+		if strings.Contains(user, "Alice") {
+			return `{"entity":"Alice","slot":"job","value":"engineer","polarity":"affirm","time_state":"current"}`, nil
+		}
+		return `{"entity":"Bob","slot":"job","value":"teacher","polarity":"affirm","time_state":"current"}`, nil
+	}
+	meta, err := annotatePCICMeta(context.Background(), convs, "gpt-5.6-luna", "sha256:fixture", call, 1, slog.Default())
+	if err != nil {
+		t.Fatalf("annotatePCICMeta: %v", err)
+	}
+	if len(meta.Spans) != 2 {
+		t.Fatalf("colliding dia_ids collapsed: got %d spans, want 2 (%#v)", len(meta.Spans), meta.Spans)
+	}
+	c0, ok0 := meta.Spans[pcicSpanKey(0, "D1:1")]
+	c1, ok1 := meta.Spans[pcicSpanKey(1, "D1:1")]
+	if !ok0 || !ok1 {
+		t.Fatalf("both conversations' D1:1 must survive; keys = %v", spanKeys(meta))
+	}
+	if c0.Entity != memory.EntityNorm("Alice") || c1.Entity != memory.EntityNorm("Bob") {
+		t.Fatalf("cross-conv overwrite: conv0=%q conv1=%q", c0.Entity, c1.Entity)
+	}
+}
+
+// TestPCICClaimsForChunkAreConversationScoped proves the selector's lookup keys
+// spans by the current conversation, so a chunk in conv 1 never picks up conv
+// 0's claim for the same dia_id.
+func TestPCICClaimsForChunkAreConversationScoped(t *testing.T) {
+	meta := &PCICMeta{
+		Header: PCICMetaHeader{Count: 2},
+		Spans: map[string]SpanClaim{
+			pcicSpanKey(0, "D1:1"): {SpanID: pcicSpanKey(0, "D1:1"), Entity: "alice", Slot: "job", Value: "engineer", Polarity: PolarityAffirm, TimeState: "current"},
+			pcicSpanKey(1, "D1:1"): {SpanID: pcicSpanKey(1, "D1:1"), Entity: "bob", Slot: "job", Value: "teacher", Polarity: PolarityAffirm, TimeState: "current"},
+		},
+	}
+	input := PCICSelectionInput{
+		Meta:       meta,
+		ChunkTurns: map[string][]string{"chunk-x": {"D1:1"}},
+		SpanKey:    func(d string) string { return pcicSpanKey(1, d) },
+	}
+	claims := claimsForChunk(pcicResult("chunk-x", 1.0, "text"), input)
+	if len(claims) != 1 || claims[0].Entity != "bob" {
+		t.Fatalf("conv-1 lookup got %#v, want bob's claim only", claims)
+	}
+}
+
+func spanKeys(meta PCICMeta) []string {
+	out := make([]string, 0, len(meta.Spans))
+	for k := range meta.Spans {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestPCICAnnotateWritesNoEngineState(t *testing.T) {

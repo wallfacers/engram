@@ -23,6 +23,15 @@ func pcicDatasetFingerprint(path string) (string, error) {
 	return fmt.Sprintf("sha256:%x", sum), nil
 }
 
+// pcicSpanKey scopes a dialogue-turn id to its conversation. LoCoMo dia_ids
+// (e.g. "D1:1") repeat across conversations — 5882 total dia_ids collapse to
+// 1033 globally unique — so the single global sidecar keys every claim by
+// conversation to keep them distinct. The selector rebuilds the same key from
+// the conversation it is retrieving within (see PCICSelectionInput.SpanKey).
+func pcicSpanKey(convID int, diaID string) string {
+	return fmt.Sprintf("conv-%d/%s", convID, diaID)
+}
+
 type ClaimPolarity string
 
 const (
@@ -129,7 +138,8 @@ type pcicClaimJSON struct {
 // the caller must be safe for concurrent use.
 func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerprint string, call modelCaller, concurrency int, logger *slog.Logger) (PCICMeta, error) {
 	type job struct {
-		tn turn
+		convID int
+		tn     turn
 	}
 	var jobs []job
 	for _, conv := range convs {
@@ -138,7 +148,7 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 				if strings.TrimSpace(tn.DiaID) == "" {
 					continue
 				}
-				jobs = append(jobs, job{tn: tn})
+				jobs = append(jobs, job{convID: conv.ID, tn: tn})
 			}
 		}
 	}
@@ -171,7 +181,7 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(tn turn) {
+		go func(convID int, tn turn) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			claim, ok, err := annotateTurn(ctx, call, tn)
@@ -179,14 +189,19 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 			defer mu.Unlock()
 			if err != nil {
 				if firstErr == nil {
-					firstErr = fmt.Errorf("annotate turn %s: %w", tn.DiaID, err)
+					firstErr = fmt.Errorf("annotate conv %d turn %s: %w", convID, tn.DiaID, err)
 				}
 				return
 			}
 			if ok {
-				spans[tn.DiaID] = claim
+				// Key by conversation: LoCoMo dia_ids are unique only within one
+				// conversation, so the global sidecar must scope them or claims
+				// collide across conversations.
+				key := pcicSpanKey(convID, tn.DiaID)
+				claim.SpanID = key
+				spans[key] = claim
 			}
-		}(j.tn)
+		}(j.convID, j.tn)
 	}
 	wg.Wait()
 	if firstErr != nil {

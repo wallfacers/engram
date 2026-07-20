@@ -255,7 +255,8 @@ func TestCoverageThreeArmPCICIntegrationUsesNoAnswerOrJudgeLLM(t *testing.T) {
 	meta := &PCICMeta{
 		Header: PCICMetaHeader{AnnotateModel: "fixture", DatasetFingerprint: "fixture", Count: 1},
 		Spans: map[string]SpanClaim{
-			"D1:13": claim("D1:13", "alice", "job", "acme", "current"),
+			// conv-scoped key: the selector looks spans up by conversation id.
+			pcicSpanKey(0, "D1:13"): claim(pcicSpanKey(0, "D1:13"), "alice", "job", "acme", "current"),
 		},
 	}
 	runtime := &conversationRuntime{

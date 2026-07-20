@@ -292,7 +292,7 @@ func TestPCICSelectorDegradesToRerankOrder(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtime := &conversationRuntime{reranked: map[string]bool{"hybrid+rerank+pcic": tc.reranked}}
-			selector, _ := selectorForArm(runtime, "hybrid+rerank+pcic", options{pcic: true, pcicMeta: tc.meta}, nil, false)
+			selector, _ := selectorForArm(runtime, 0, "hybrid+rerank+pcic", options{pcic: true, pcicMeta: tc.meta}, nil, false)
 			got := selector(context.Background(), "Alice", candidates, 3)
 			assertNames(t, got, "chunk-a", "chunk-b", "chunk-c")
 		})
