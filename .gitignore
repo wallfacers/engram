@@ -31,3 +31,6 @@ testdata/parity/cache/
 # LoCoMo dataset (public, not redistributed via repo)
 /testdata/locomo/
 /.locomo-run/
+pcic_meta*.json
+cov-pcic*
+ans-pcic*
