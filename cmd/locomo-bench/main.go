@@ -1095,7 +1095,7 @@ func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, f
 	if opt.filterPool > topK {
 		return retrieveFilteredDiagnostics(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
 	}
-	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota)
+	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota, nil)
 }
 
 // retryWithRewrite runs the IDK second round. Returns (answer, true) only when
@@ -1202,7 +1202,7 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 
 func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, []memory.Result, memory.SearchDiagnostics, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3)
+	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, nil)
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}

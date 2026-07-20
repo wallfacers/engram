@@ -21,7 +21,10 @@ import (
 const (
 	chunkTargetChars = 900  // soft target per chunk (entry budget is 1200)
 	chunkMaxChars    = 1100 // hard cap for a single oversized turn
+	pcicWindowSize   = 60
 )
+
+type chunkSelector func(ctx context.Context, query string, chunks []memory.Result, budget int) []memory.Result
 
 // sessionChunk is one verbatim chunk plus the dialogue ids of the turns packed
 // into it, so a retrieved chunk can be resolved back to exact turns for evidence
@@ -90,11 +93,11 @@ func chunkTrigger(content string) string {
 // by kind, each side keeps its fused order, and shortfall on either side is
 // backfilled from the other. quota <= 0 degrades to a plain Search.
 func retrieveWithQuota(ctx context.Context, r *memory.Retriever, query string, topK, quota int) ([]memory.Result, error) {
-	hits, _, err := retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota)
+	hits, _, err := retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota, nil)
 	return hits, err
 }
 
-func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, query string, topK, quota int) ([]memory.Result, memory.SearchDiagnostics, error) {
+func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, query string, topK, quota int, selector chunkSelector) ([]memory.Result, memory.SearchDiagnostics, error) {
 	if quota <= 0 {
 		return r.SearchWithDiagnostics(ctx, query, topK)
 	}
@@ -106,7 +109,26 @@ func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, quer
 	if err != nil {
 		return nil, diagnostics, err
 	}
+	if selector != nil {
+		wide = applyChunkSelector(ctx, query, wide, quota, selector)
+	}
 	return applyChunkQuota(wide, topK, quota), diagnostics, nil
+}
+
+func applyChunkSelector(ctx context.Context, query string, wide []memory.Result, budget int, selector chunkSelector) []memory.Result {
+	facts := make([]memory.Result, 0, len(wide))
+	chunks := make([]memory.Result, 0, pcicWindowSize)
+	for _, hit := range wide {
+		if strings.HasPrefix(hit.Name, "chunk-") {
+			if len(chunks) < pcicWindowSize {
+				chunks = append(chunks, hit)
+			}
+			continue
+		}
+		facts = append(facts, hit)
+	}
+	selected := selector(ctx, query, chunks, budget)
+	return append(facts, selected...)
 }
 
 // applyChunkQuota partitions a fused result list into facts and chunks, keeps

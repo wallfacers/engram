@@ -166,7 +166,7 @@ func computeCoverage(ctx context.Context, opt options, convs []conversation, run
 					}
 					armOpt := optionsForRun(opt, arm, multiArm)
 					topK, quota := armOpt.retrievalFor(sq.QA.Category)
-					hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, sq.QA.Question, topK, quota)
+					hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, sq.QA.Question, topK, quota, nil)
 					if err != nil {
 						logger.Warn("coverage retrieve failed", "conversation", conv.ID, "arm", arm, "err", err)
 						continue
