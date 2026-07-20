@@ -127,19 +127,19 @@ coverage twice → second run does no annotation and no query-time LLM.
 
 ### Tests (write first, must fail)
 
-- [ ] T019 [P] [US2] Failing tests in `cmd/locomo-bench/pcic_meta_test.go`:
+- [X] T019 [P] [US2] Failing tests in `cmd/locomo-bench/pcic_meta_test.go`:
   `TestPCICAnnotateWritesNoEngineState` (post-annotate engine diff empty, no store rows) and
   an annotation-shape test (each annotated span yields a well-formed `SpanClaim`).
 
 ### Implementation
 
-- [ ] T020 [US2] Implement a bench-local annotation prompt template + per-turn typed-claim
+- [X] T020 [US2] Implement a bench-local annotation prompt template + per-turn typed-claim
   extraction (`entity/slot/value/polarity/time_state/source_turn_ids`) via `provider.Provider`
   in `cmd/locomo-bench/pcic_meta.go` (prompt lives in the bench, NOT `memory/prompt/`).
-- [ ] T021 [US2] Implement the `--pcic-annotate` subcommand entry in `cmd/locomo-bench/main.go`:
+- [X] T021 [US2] Implement the `--pcic-annotate` subcommand entry in `cmd/locomo-bench/main.go`:
   iterate raw dialogue, call the provider (frozen relay model), write the sidecar with header
   (annotate model + dataset fingerprint); idempotent cache-hit on matching header — green T019.
-- [ ] T022 [US2] Assert secret discipline: annotate key flows env→provider only; add a test
+- [X] T022 [US2] Assert secret discipline: annotate key flows env→provider only; add a test
   that the sidecar and logs contain no API key.
 
 **Checkpoint**: real annotations feed US1's selector; the coverage gate can now run on true

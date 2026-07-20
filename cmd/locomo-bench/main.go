@@ -87,6 +87,7 @@ type options struct {
 	rerank               bool
 	pcic                 bool
 	oracle               bool
+	pcicAnnotate         bool
 	pcicMetaPath         string
 	pcicMeta             *PCICMeta
 	selector             chunkSelector
@@ -140,6 +141,7 @@ func run() error {
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
+	flag.BoolVar(&opt.pcicAnnotate, "pcic-annotate", false, "one-time offline pass: extract per-turn typed claims via the annotation model and write the pcic_meta sidecar, then exit (idempotent: skips when a matching sidecar already exists)")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -237,6 +239,10 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if sampledConversations > 0 {
 		logger.Info("sampling conversations", "limit", sampledConversations)
+	}
+
+	if opt.pcicAnnotate {
+		return runPCICAnnotate(opt, convs, apiKey, baseURL, logger)
 	}
 
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
@@ -439,6 +445,58 @@ func run() error {
 		printStatsSummary(arm, stats)
 	}
 	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
+	return nil
+}
+
+// runPCICAnnotate is the one-time offline `--pcic-annotate` pass. It extracts
+// per-turn typed claims through the annotation model and writes the pcic_meta
+// sidecar, touching no engine store. It is idempotent: a sidecar whose header
+// already matches the annotation model + dataset fingerprint is a cache hit and
+// the pass exits without spending tokens.
+func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, logger *slog.Logger) error {
+	model := envOr("PCIC_ANNOTATE_MODEL", "gpt-5.6-luna")
+	fingerprint, err := pcicDatasetFingerprint(opt.dataPath)
+	if err != nil {
+		return err
+	}
+	metaPath := opt.pcicMetaPath
+	if metaPath == "" {
+		baseDir := opt.storeDir
+		if baseDir == "" {
+			baseDir = opt.runDir
+		}
+		if baseDir == "" {
+			return fmt.Errorf("--pcic-annotate needs --pcic-meta, --store-dir, or --run-dir to place the sidecar")
+		}
+		metaPath = filepath.Join(baseDir, "pcic_meta.json")
+	}
+	expected := PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint}
+	if existing, err := loadPCICMeta(metaPath, expected, logger); err == nil && existing != nil {
+		logger.Info("pcic_meta cache hit; annotation skipped", "path", metaPath, "spans", len(existing.Spans))
+		return nil
+	}
+
+	var prov provider.Provider
+	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
+	case "openai":
+		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true})
+	case "anthropic", "":
+		prov = anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
+	default:
+		return fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	}
+	sem := make(chan struct{}, opt.concurrency)
+	call := gate(sem, newModelCaller(prov, model, opt.maxTokens))
+
+	logger.Info("pcic annotation starting", "model", model, "conversations", len(convs), "path", metaPath)
+	meta, err := annotatePCICMeta(context.Background(), convs, model, fingerprint, call, opt.concurrency, logger)
+	if err != nil {
+		return err
+	}
+	if err := savePCICMeta(metaPath, meta); err != nil {
+		return err
+	}
+	logger.Info("pcic_meta written", "path", metaPath, "spans", len(meta.Spans))
 	return nil
 }
 
