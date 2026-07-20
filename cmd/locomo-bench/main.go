@@ -473,9 +473,13 @@ func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, 
 		metaPath = filepath.Join(baseDir, "pcic_meta.json")
 	}
 	expected := PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint}
-	if existing, err := loadPCICMeta(metaPath, expected, logger); err == nil && existing != nil {
-		logger.Info("pcic_meta cache hit; annotation skipped", "path", metaPath, "spans", len(existing.Spans))
-		return nil
+	// The full-pass cache-hit short-circuit must NOT fire in fill mode: gap-fill
+	// exists precisely to patch turns into an already-written sidecar.
+	if opt.pcicFillTurns == "" {
+		if existing, err := loadPCICMeta(metaPath, expected, logger); err == nil && existing != nil {
+			logger.Info("pcic_meta cache hit; annotation skipped", "path", metaPath, "spans", len(existing.Spans))
+			return nil
+		}
 	}
 
 	// Build one gated caller per endpoint. LOCOMO_BASE_URL_FALLBACK (optional)
