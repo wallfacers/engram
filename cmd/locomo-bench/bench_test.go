@@ -108,7 +108,7 @@ func TestAnswerAndJudgeTracksSweepHitForBudgetGuard(t *testing.T) {
 		Answer:   []byte(`"root fact"`),
 		Evidence: []string{"D1:3"},
 		Category: 1,
-	}, slog.Default())
+	}, nil, slog.Default())
 	if !correct || !sweepUsed || !sweepOverBudget(options{}, sweepUsed, usage) {
 		t.Fatalf("answer result = correct:%v sweep:%v usage:%+v", correct, sweepUsed, usage)
 	}

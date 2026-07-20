@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 
@@ -23,13 +24,19 @@ type sweepEvidenceDiagnostics struct {
 	GoldEvidenceSessions      []int                   `json:"gold_evidence_sessions"`
 	RetrievedMemoryNames      []string                `json:"retrieved_memory_names"`
 	RetrievedSourceSessionIDs []string                `json:"retrieved_source_session_ids"`
+	RetrievedTurnIDs          []string                `json:"retrieved_turn_ids,omitempty"`
 	SweepCandidatesBefore     int                     `json:"sweep_candidates_before"`
 	SweepCandidatesAfter      int                     `json:"sweep_candidates_after"`
 	EvidenceSessionRecall     float64                 `json:"evidence_session_recall"`
+	EvidenceTurnRecall        float64                 `json:"evidence_turn_recall"`
 	AnswerContextTokens       int                     `json:"answer_context_tokens"`
 }
 
-func newSweepEvidenceDiagnostics(qa locomoQA, hits []memory.Result, search memory.SearchDiagnostics, answerContextTokens int) *sweepEvidenceDiagnostics {
+// newSweepEvidenceDiagnostics records both the (inflated) session-level recall
+// and the honest exact-turn recall. chunkTurns maps a retrieved chunk entry name
+// to the dialogue ids (D<session>:<turn>) its verbatim text covers; a nil map
+// (e.g. a facts-only run with no chunk provenance) leaves turn recall at zero.
+func newSweepEvidenceDiagnostics(qa locomoQA, hits []memory.Result, search memory.SearchDiagnostics, answerContextTokens int, chunkTurns map[string][]string) *sweepEvidenceDiagnostics {
 	if !search.SweepUsed {
 		return nil
 	}
@@ -42,9 +49,18 @@ func newSweepEvidenceDiagnostics(qa locomoQA, hits []memory.Result, search memor
 		AnswerContextTokens:    answerContextTokens,
 	}
 	retrievedSessionNumbers := make(map[int]struct{})
+	retrievedTurnIDs := make(map[string]struct{})
 	seenSourceSessions := make(map[string]struct{}, len(hits))
+	seenTurnIDs := make(map[string]struct{})
 	for _, hit := range hits {
 		diagnostic.RetrievedMemoryNames = append(diagnostic.RetrievedMemoryNames, hit.Name)
+		for _, diaID := range chunkTurns[hit.Name] {
+			retrievedTurnIDs[diaID] = struct{}{}
+			if _, seen := seenTurnIDs[diaID]; !seen {
+				diagnostic.RetrievedTurnIDs = append(diagnostic.RetrievedTurnIDs, diaID)
+				seenTurnIDs[diaID] = struct{}{}
+			}
+		}
 		if hit.SourceSessionID == "" {
 			continue
 		}
@@ -66,7 +82,24 @@ func newSweepEvidenceDiagnostics(qa locomoQA, hits []memory.Result, search memor
 		}
 	}
 	diagnostic.EvidenceSessionRecall = float64(matched) / float64(len(diagnostic.GoldEvidenceSessions))
+	diagnostic.EvidenceTurnRecall = exactTurnRecall(diagnostic.GoldEvidenceReferences, retrievedTurnIDs)
 	return diagnostic
+}
+
+// exactTurnRecall is the fraction of gold evidence turns (D<session>:<dialog>)
+// whose exact dialogue id was covered by a retrieved chunk. Unlike session
+// recall, a hit from the right session but the wrong turn does not count.
+func exactTurnRecall(gold []goldEvidenceReference, retrievedTurnIDs map[string]struct{}) float64 {
+	if len(gold) == 0 {
+		return 0
+	}
+	matched := 0
+	for _, ref := range gold {
+		if _, ok := retrievedTurnIDs[fmt.Sprintf("D%d:%d", ref.Session, ref.Dialog)]; ok {
+			matched++
+		}
+	}
+	return float64(matched) / float64(len(gold))
 }
 
 func evidenceSessions(evidence []string) []int {

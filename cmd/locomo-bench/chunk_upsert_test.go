@@ -22,12 +22,12 @@ func TestChunkUpsertAndRetrieve(t *testing.T) {
 		Date:  time.Date(2023, 5, 8, 0, 0, 0, 0, time.UTC),
 		Turns: []turn{{Speaker: "Caroline", Text: "I adopted a golden retriever named Max."}},
 	}}}
-	n, err := ingestChunks(ctx, es, conv)
+	_, n, err := ingestChunks(ctx, es, conv)
 	if err != nil || n != 1 {
 		t.Fatalf("ingestChunks = %d, %v", n, err)
 	}
 	// idempotent re-run
-	if n, err = ingestChunks(ctx, es, conv); err != nil || n != 1 {
+	if _, n, err = ingestChunks(ctx, es, conv); err != nil || n != 1 {
 		t.Fatalf("re-run ingestChunks = %d, %v", n, err)
 	}
 	r := memory.NewRetriever(es, memory.NewVectorStore(st.DB()), nil)

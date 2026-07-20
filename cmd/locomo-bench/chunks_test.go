@@ -15,25 +15,40 @@ func TestBuildSessionChunks(t *testing.T) {
 		Index: 3,
 		Date:  time.Date(2023, 5, 8, 0, 0, 0, 0, time.UTC),
 		Turns: []turn{
-			{Speaker: "Caroline", Text: "I adopted a golden retriever named Max in March."},
-			{Speaker: "Melanie", Text: "That's wonderful! I've been busy with my pottery class."},
-			{Speaker: "Caroline", Text: long},
-			{Speaker: "Melanie", Text: "See you Friday."},
+			{Speaker: "Caroline", Text: "I adopted a golden retriever named Max in March.", DiaID: "D3:1"},
+			{Speaker: "Melanie", Text: "That's wonderful! I've been busy with my pottery class.", DiaID: "D3:2"},
+			{Speaker: "Caroline", Text: long, DiaID: "D3:3"},
+			{Speaker: "Melanie", Text: "See you Friday.", DiaID: "D3:4"},
 		},
 	}
 	chunks := buildSessionChunks(s)
 	if len(chunks) < 2 {
 		t.Fatalf("expected the oversized turn to force a split, got %d chunk(s)", len(chunks))
 	}
+	texts := make([]string, len(chunks))
 	for i, c := range chunks {
-		if n := utf8.RuneCountInString(c); n > chunkMaxChars {
+		texts[i] = c.Text
+		if n := utf8.RuneCountInString(c.Text); n > chunkMaxChars {
 			t.Errorf("chunk %d exceeds hard cap: %d > %d", i, n, chunkMaxChars)
 		}
 	}
-	joined := strings.Join(chunks, "\n")
+	joined := strings.Join(texts, "\n")
 	for _, want := range []string{"Caroline: I adopted", "Melanie: That's wonderful", "Melanie: See you Friday."} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("chunks lost turn content %q", want)
+		}
+	}
+	// Every turn's dialogue id must be attributed to exactly one chunk so
+	// exact-turn evidence recall can resolve retrieved chunks back to turns.
+	seen := map[string]int{}
+	for _, c := range chunks {
+		for _, d := range c.DiaIDs {
+			seen[d]++
+		}
+	}
+	for _, want := range []string{"D3:1", "D3:2", "D3:3", "D3:4"} {
+		if seen[want] != 1 {
+			t.Errorf("dia id %s attributed %d times, want exactly 1", want, seen[want])
 		}
 	}
 	if buildSessionChunks(session{}) != nil {

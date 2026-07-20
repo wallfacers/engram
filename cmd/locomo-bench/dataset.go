@@ -52,6 +52,9 @@ type session struct {
 type turn struct {
 	Speaker string
 	Text    string
+	// DiaID is the dataset's dialogue id (e.g. "D1:3") — the same identifier the
+	// gold `evidence` list references. Empty when the dataset omits it.
+	DiaID string
 }
 
 // conversation is the parsed, ordered set of sessions plus the QA list.
@@ -126,6 +129,7 @@ func parseConversation(raw json.RawMessage) ([]session, error) {
 		var turns []struct {
 			Speaker string `json:"speaker"`
 			Text    string `json:"text"`
+			DiaID   string `json:"dia_id"`
 		}
 		if err := json.Unmarshal(val, &turns); err != nil {
 			continue
@@ -135,7 +139,7 @@ func parseConversation(raw json.RawMessage) ([]session, error) {
 			if strings.TrimSpace(tt.Text) == "" {
 				continue
 			}
-			s.Turns = append(s.Turns, turn{Speaker: tt.Speaker, Text: tt.Text})
+			s.Turns = append(s.Turns, turn{Speaker: tt.Speaker, Text: tt.Text, DiaID: tt.DiaID})
 		}
 	}
 

@@ -566,6 +566,10 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 type conversationRuntime struct {
 	store      *store.Store
 	retrievers map[string]*memory.Retriever
+	// chunkTurns maps a verbatim-chunk entry name to the dialogue ids its text
+	// covers (D<session>:<turn>), enabling exact-turn evidence recall. Empty when
+	// chunks are not ingested.
+	chunkTurns map[string][]string
 }
 
 func (r *conversationRuntime) Close() {
@@ -657,10 +661,12 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 		logger.Info("opinion pass done", "conversation", conv.ID, "entries_added", added)
 	}
+	var chunkTurns map[string][]string
 	if opt.chunks {
-		if n, err := ingestChunks(ctx, es, conv); err != nil {
+		if turns, n, err := ingestChunks(ctx, es, conv); err != nil {
 			logger.Warn("chunk ingest failed", "conversation", conv.ID, "err", err)
 		} else {
+			chunkTurns = turns
 			logger.Info("verbatim chunks ingested", "conversation", conv.ID, "chunks", n)
 		}
 	}
@@ -696,7 +702,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, retrievers: retrievers}, nil
+	return &conversationRuntime{store: st, retrievers: retrievers, chunkTurns: chunkTurns}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -831,7 +837,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, logger)
+				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -952,11 +958,11 @@ func answerAndJudge(ctx context.Context, retriever *memory.Retriever, answerCall
 }
 
 func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage, bool) {
-	correct, predicted, usage, sweepUsed, _ := answerAndJudgeWithEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, logger)
+	correct, predicted, usage, sweepUsed, _ := answerAndJudgeWithEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, nil, logger)
 	return correct, predicted, usage, sweepUsed
 }
 
-func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
+func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	hits, searchDiagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
 	if err != nil {
@@ -969,7 +975,7 @@ func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memor
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens)
+		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
 	}
 
 	if isIDK(predicted) && !opt.noIDKRetry {
@@ -991,7 +997,7 @@ func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memor
 			sweepUsed = sweepUsed || retryDiagnostics.SweepUsed || hasClusterSweepHit(retryHits)
 		}
 	}
-	evidence := newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens)
+	evidence := newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
 
 	verdict, _, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
