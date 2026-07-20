@@ -84,6 +84,7 @@ type options struct {
 	abstainPrompt        bool
 	forceAnswer          bool
 	temporalAnswerPrompt bool
+	rerank               bool
 	opinionPass          bool
 	adversarial          int
 	catTopKSpec          string
@@ -131,6 +132,7 @@ func run() error {
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
+	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -487,6 +489,7 @@ var supportedArmMechanisms = map[string]struct{}{
 	"tplan":    {},
 	"conflict": {},
 	"abstain":  {},
+	"rerank":   {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -534,6 +537,7 @@ func optionsForArm(global options, name string) options {
 		arm.clusterSweep = false
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
+		arm.rerank = false
 		return arm
 	}
 	arm := global
@@ -544,6 +548,7 @@ func optionsForArm(global options, name string) options {
 	arm.conflictResolution = spec.mechanisms["conflict"]
 	arm.abstainPrompt = spec.mechanisms["abstain"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
+	arm.rerank = spec.mechanisms["rerank"]
 	return arm
 }
 
@@ -710,7 +715,11 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		armOpt := optionsForRun(opt, arm, len(arms) > 1)
 		retrieverOpts := retrieverOptionsForAt(armOpt, temporalNowForConversation(conv))
 		if armBackend(arm) == "hybrid" {
-			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, buildBenchReranker(), retrieverOpts)
+			var reranker embedding.Reranker
+			if armOpt.rerank {
+				reranker = buildBenchReranker()
+			}
+			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, embClient, reranker, retrieverOpts)
 		} else {
 			retrievers[arm] = memory.NewRetrieverWithOptions(es, vectors, nil, nil, retrieverOpts)
 		}

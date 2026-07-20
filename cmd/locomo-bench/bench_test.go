@@ -442,6 +442,29 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	}
 }
 
+func TestRerankArmMechanismGatesReranker(t *testing.T) {
+	// The rerank lever must be an explicit per-arm suffix so a paired run
+	// (hybrid,hybrid+rerank) contrasts a no-rerank baseline against rerank in one
+	// process. Bare hybrid never reranks; hybrid+rerank does.
+	baseline := optionsForArm(options{}, "hybrid")
+	rer := optionsForArm(options{}, "hybrid+rerank")
+	if baseline.rerank || !rer.rerank {
+		t.Fatalf("rerank pairing flags = baseline:%t rerank:%t, want false/true", baseline.rerank, rer.rerank)
+	}
+	// A paired baseline must not inherit a global rerank default — otherwise both
+	// arms would rerank and the contrast collapses.
+	pairedBaseline := optionsForRun(options{rerank: true}, "hybrid", true)
+	if pairedBaseline.rerank {
+		t.Fatalf("paired baseline leaked global rerank: %+v", pairedBaseline)
+	}
+	// A single-arm run still honours the global --rerank flag (backward-compat
+	// with the offline bake-off recipe: --rerank + bare hybrid = rerank on).
+	single := optionsForRun(options{rerank: true}, "hybrid", false)
+	if !single.rerank {
+		t.Fatalf("single arm lost global rerank flag: %+v", single)
+	}
+}
+
 func TestConflictArmEnablesSupersededPenalty(t *testing.T) {
 	// "conflict" is now a valid arm suffix (was rejected until US5).
 	arm := optionsForArm(options{supersededPenalty: 0.3}, "hybrid+conflict")
