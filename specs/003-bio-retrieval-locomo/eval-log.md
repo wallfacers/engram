@@ -182,6 +182,51 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
 - Notes: Strike 2 的 temporal-score 判定不受影响（handicap 对称加两臂）。方法论
   验证——隔离已烘进基线的成分，能发现"移除即涨点"的杠杆，胜过盲目叠加。
 
+## Offline Coverage Bake-off（`--coverage-only`，2026-07-20）
+
+零答题成本的检索-only 尺子（`cmd/locomo-bench --coverage-only`）：给每个臂算
+exact-turn / session 证据回收，**不调 answer/judge**。唯一成本是一次性建库
+（gpt-5.6-luna 抽取，10 conv，可 `--store-dir` 复用）+ 本地 fastembed sidecar 的
+query 向量（离线免费）。目的：在花答题钱前，先离线判定哪个检索 lever 真的抬高
+证据覆盖（尤其 multi-hop 这个洞）。
+
+- Store: 10 conv 全量，349±facts/conv + 63–127 chunks/conv；embed=bge-small-en-v1.5(384d)
+- Flags(主对比): `--coverage-only --chunks --retrieval hybrid,hybrid+sweep --top-k 30 --chunk-quota 12`，n=1532 可评题
+- **turn recall @ top-k30/quota12**：
+
+  | 类别 | hybrid | hybrid+sweep | Δ |
+  |------|--------|--------------|---|
+  | multi-hop | 0.559 (281) | 0.480 | **−7.9pp** |
+  | open-domain | 0.462 (89) | 0.442 | −2.0pp |
+  | single-hop | 0.807 (841) | 0.791 | −1.6pp |
+  | temporal | 0.759 (321) | 0.749 | −1.0pp |
+  | OVERALL | **0.732** | 0.705 | −2.7pp |
+
+- **session vs turn 饱和度**：hybrid 总体 sess=0.958 vs turn=0.732；multi-hop
+  sess=0.886 vs turn=0.559（**33pp 鸿沟**）。session recall 会误报"检索基本解决"，
+  turn recall 才露真洞——坐实 Gap-1 measurement 修复的价值。
+- **判决 sweep**：cluster-sweep 全类别一致拖低 turn 覆盖，multi-hop 最惨（−7.9pp，
+  正是它本该帮的类别）。机制：490 个 fact 簇候选（截到 120）挤掉 top-k 里的
+  verbatim chunk，而 turn recall 只来自 chunk。**sweep 方向反了，不值得升级到付费
+  答题评测。** 免费扼杀一个伪 lever。
+- **multi-hop 洞的归因（免费复用建库）**：给 category 1 加 chunk 预算，turn recall
+  平滑随预算上升 → 覆盖是**预算受限**，非 fact-breadth 受限：
+
+  | multi-hop 配置 | turn recall |
+  |----------------|-------------|
+  | top-k30 / quota12 | 0.559 |
+  | top-k50 / quota25 | 0.657 (+9.8pp) |
+  | top-k100 / quota60 | 0.950 (+39.1pp) |
+
+- **诚实边界**：quota60≈抓走每 conv 半数以上 chunk，answer context ~5x → 会触发
+  `budget_ratio>1.5x` 失效护栏，属"覆盖作弊"而非真答题涨点。故真正值得付费验证的
+  lever 是**定预算下的 chunk 重排**（late-interaction / 交叉编码器 / interference-
+  packing），让 gold chunk 挤进前 ~12 而不膨胀 context。coverage 覆盖是答题正确的
+  必要非充分条件——该 bake-off 只要接上 reranker 即可在付费前先量化其覆盖增益。
+- **Decision**：(1) 不为 cluster-sweep 花答题钱（离线证伪）。(2) 下一个候选 = 定
+  预算 chunk 重排，先用同一 bake-off 离线测覆盖增益，过 +Npp 阈值再上付费答题 +
+  McNemar 显著性闸。Artifacts: `cov-full/coverage.json`（scratchpad，未入库）。
+
 ## Strike 3: Abstention and Conflict Resolution
 
 - Date:
