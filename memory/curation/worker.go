@@ -440,12 +440,35 @@ func buildJudgeClusters(clusters [][]*memory.Entry) []prompt.CurationJudgeCluste
 	out := make([]prompt.CurationJudgeCluster, 0, len(clusters))
 	for _, cl := range clusters {
 		names := make([]string, len(cl))
+		members := make([]prompt.CurationJudgeClusterMember, len(cl))
 		for i, e := range cl {
 			names[i] = e.Name
+			members[i] = prompt.CurationJudgeClusterMember{
+				Name:    e.Name,
+				Content: e.Content,
+				When:    entryWhen(e),
+			}
 		}
-		out = append(out, prompt.CurationJudgeCluster{Names: names})
+		out = append(out, prompt.CurationJudgeCluster{Names: names, Members: members})
 	}
 	return out
+}
+
+// entryWhen renders the most relevant time hint for conflict reasoning: the
+// event time (when the fact was true) if known, else the recording time. The
+// judge uses it to pick the newer entry as a conflict winner.
+func entryWhen(e *memory.Entry) string {
+	const day = "2006-01-02"
+	switch {
+	case e.EventStart != nil && !e.EventStart.IsZero():
+		return e.EventStart.Format(day)
+	case e.EventDate != nil && !e.EventDate.IsZero():
+		return e.EventDate.Format(day)
+	case !e.CreatedAt.IsZero():
+		return e.CreatedAt.Format(day) + " (recorded)"
+	default:
+		return ""
+	}
 }
 
 // apply enacts a validated judge decision: merges first (so a name consumed by a

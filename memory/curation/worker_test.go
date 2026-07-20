@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,28 @@ func TestWorkerAppliesConflictsAsSupersede(t *testing.T) {
 	// A name already consumed by the merge is gone; the conflict referencing it
 	// is skipped without error.
 	assertGone(t, es, "merged-b")
+}
+
+func TestBuildJudgeClustersCarriesContentAndTime(t *testing.T) {
+	when := time.Date(2023, time.August, 1, 0, 0, 0, 0, time.UTC)
+	clusters := [][]*memory.Entry{{
+		{Name: "a", Content: "the user lives in Paris"},
+		{Name: "b", Content: "the user lives in Berlin", EventStart: &when},
+	}}
+	got := buildJudgeClusters(clusters)
+	if len(got) != 1 || len(got[0].Members) != 2 {
+		t.Fatalf("clusters = %+v, want one cluster with two members", got)
+	}
+	if got[0].Members[0].Name != "a" || got[0].Members[0].Content != "the user lives in Paris" {
+		t.Fatalf("member content not carried: %+v", got[0].Members[0])
+	}
+	if !strings.Contains(got[0].Members[1].When, "2023-08") {
+		t.Fatalf("member event time not carried: %+v", got[0].Members[1])
+	}
+	// Names stay populated for backward compatibility.
+	if len(got[0].Names) != 2 {
+		t.Fatalf("names not carried: %+v", got[0].Names)
+	}
 }
 
 func TestResolveConflictsPassAppliesOnlyConflicts(t *testing.T) {

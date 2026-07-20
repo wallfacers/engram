@@ -19,10 +19,24 @@ type CurationJudgeCandidate struct {
 	Score      float64
 }
 
-// CurationJudgeCluster is a group of near-duplicate entry names the judge may
-// collapse into one via a merge decision.
+// CurationJudgeClusterMember carries one clustered entry's content and time so
+// the judge can distinguish a compatible duplicate (merge) from a contradiction
+// (conflict), and pick the newer entry as the conflict winner. When is a short
+// time hint (event date if known, else recording date); it may be empty.
+type CurationJudgeClusterMember struct {
+	Name    string
+	Content string
+	When    string
+}
+
+// CurationJudgeCluster is a group of near-duplicate entries the judge may
+// collapse into one via a merge decision, or split via a conflict decision.
+// Members carries the per-entry content/time; Names is retained for callers and
+// tests that only need the identifiers. When Members is empty the prompt renders
+// the bare name list (legacy behavior).
 type CurationJudgeCluster struct {
-	Names []string
+	Names   []string
+	Members []CurationJudgeClusterMember
 }
 
 // CurationJudgeSystemPrompt instructs a small, cheap model to act as a bounded
@@ -62,7 +76,18 @@ func BuildCurationJudgeUserPrompt(candidates []CurationJudgeCandidate, clusters 
 		b.WriteString("(none)\n")
 	}
 	for i, cl := range clusters {
-		fmt.Fprintf(&b, "- cluster %d: %s\n", i+1, strings.Join(cl.Names, ", "))
+		if len(cl.Members) == 0 {
+			fmt.Fprintf(&b, "- cluster %d: %s\n", i+1, strings.Join(cl.Names, ", "))
+			continue
+		}
+		fmt.Fprintf(&b, "- cluster %d:\n", i+1)
+		for _, m := range cl.Members {
+			when := m.When
+			if when == "" {
+				when = "unknown"
+			}
+			fmt.Fprintf(&b, "  - name: %s | when: %s\n    content: %s\n", m.Name, when, oneLine(m.Content))
+		}
 	}
 
 	b.WriteString("\nReturn the JSON decision now.")
