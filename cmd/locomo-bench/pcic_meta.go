@@ -1,12 +1,22 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
+
+func pcicDatasetFingerprint(path string) (string, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // operator-selected benchmark dataset
+	if err != nil {
+		return "", fmt.Errorf("fingerprint PCIC dataset: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("sha256:%x", sum), nil
+}
 
 type ClaimPolarity string
 

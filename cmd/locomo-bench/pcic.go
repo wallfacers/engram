@@ -38,6 +38,47 @@ type PCICSelectionInput struct {
 	Meta              *PCICMeta
 }
 
+type pcicSelectionTrace struct {
+	Candidates []memory.Result
+	Selected   []memory.Result
+}
+
+func selectorForArm(runtime *conversationRuntime, arm string, opt options, goldTurns []string, traceSelection bool) (chunkSelector, *pcicSelectionTrace) {
+	if runtime == nil || (!traceSelection && !opt.pcic && !opt.oracle) {
+		return nil, nil
+	}
+	trace := &pcicSelectionTrace{}
+	selector := func(ctx context.Context, query string, candidates []memory.Result, budget int) []memory.Result {
+		var selected []memory.Result
+		switch {
+		case opt.oracle:
+			selected = pcicOracleSelect(candidates, budget, runtime.chunkTurns, goldTurns)
+		case opt.pcic && opt.pcicMeta != nil && runtime.reranked[arm]:
+			signals, err := derivePCICSignals(ctx, runtime.entries, query, candidates)
+			if err == nil {
+				selected = pcicSelect(PCICSelectionInput{
+					Candidates:        candidates,
+					Budget:            budget,
+					DemandAtoms:       signals.DemandAtoms,
+					CandidateEntities: signals.CandidateEntities,
+					ChunkTurns:        runtime.chunkTurns,
+					Meta:              opt.pcicMeta,
+				})
+			} else {
+				selected = pcicSelect(PCICSelectionInput{Candidates: candidates, Budget: budget})
+			}
+		default:
+			selected = pcicSelect(PCICSelectionInput{Candidates: candidates, Budget: budget})
+		}
+		if traceSelection {
+			trace.Candidates = append([]memory.Result(nil), candidates...)
+			trace.Selected = append([]memory.Result(nil), selected...)
+		}
+		return selected
+	}
+	return selector, trace
+}
+
 func derivePCICSignals(ctx context.Context, entries *memory.EntryStore, query string, candidates []memory.Result) (PCICSignals, error) {
 	names := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {

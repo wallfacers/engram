@@ -153,15 +153,30 @@ type coverageAccumulator struct {
 	mu         sync.Mutex
 	overall    *coverageBucket
 	byCategory map[string]*coverageBucket
+	selector   bool
 }
 
 func newCoverageAccumulator(arm string, topK int) *coverageAccumulator {
+	spec, _ := parseArm(arm)
 	return &coverageAccumulator{
 		arm:        arm,
 		topK:       topK,
 		overall:    &coverageBucket{},
 		byCategory: map[string]*coverageBucket{},
+		selector:   spec.mechanisms["pcic"] || spec.mechanisms["oracle"],
 	}
+}
+
+func (a *coverageAccumulator) addSelection(category string, input selectionMetricInput) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.overall.addSelectionMetrics(input)
+	bucket := a.byCategory[category]
+	if bucket == nil {
+		bucket = &coverageBucket{}
+		a.byCategory[category] = bucket
+	}
+	bucket.addSelectionMetrics(input)
 }
 
 func (a *coverageAccumulator) add(category string, turn, session float64) {
@@ -182,6 +197,14 @@ func (a *coverageAccumulator) report() coverageArmReport {
 	a.overall.finalize()
 	for _, bucket := range a.byCategory {
 		bucket.finalize()
+	}
+	if !a.selector {
+		a.overall.SelectionSurvival = 1
+		a.overall.AnchorViolation = 0
+		for _, bucket := range a.byCategory {
+			bucket.SelectionSurvival = 1
+			bucket.AnchorViolation = 0
+		}
 	}
 	return coverageArmReport{
 		Arm:        a.arm,
@@ -231,7 +254,8 @@ func computeCoverage(ctx context.Context, opt options, convs []conversation, run
 					}
 					armOpt := optionsForRun(opt, arm, multiArm)
 					topK, quota := armOpt.retrievalFor(sq.QA.Category)
-					hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, sq.QA.Question, topK, quota, nil)
+					selector, trace := selectorForArm(rt, arm, armOpt, sq.QA.Evidence, true)
+					hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, sq.QA.Question, topK, quota, selector)
 					if err != nil {
 						logger.Warn("coverage retrieve failed", "conversation", conv.ID, "arm", arm, "err", err)
 						continue
@@ -241,6 +265,12 @@ func computeCoverage(ctx context.Context, opt options, convs []conversation, run
 						continue
 					}
 					accs[arm].add(sq.QA.CategoryName, turn, session)
+					accs[arm].addSelection(sq.QA.CategoryName, selectionMetricInput{
+						Candidates: trace.Candidates,
+						Selected:   trace.Selected,
+						GoldTurns:  sq.QA.Evidence,
+						ChunkTurns: rt.chunkTurns,
+					})
 				}
 			}
 		}(convs[ci])
