@@ -304,6 +304,30 @@ turn recall 随 chunk 深度的曲线：
   主观先验 multi-hop answer +1~3pp、overall +0.3~1.2pp。Artifacts: `hr-q{12,24,48}/`
   （scratchpad，未入库）。
 
+### PCIC-lite 覆盖闸判决：NO-GO（真实 pcic_meta，免费三臂，2026-07-20）
+
+US2 一次性离线标注产出真实 `pcic_meta`（5882 turn → 2710+5 claims，conv 作用域键；
+8 个瞬时失败 turn 事后定向补标：5 有 claim、3 确证 claimless）。随后跑固定 12-chunk
+预算（facts=18）的三臂 coverage-only（零答题/judge token）：
+
+  | 臂 | overall turn | multi-hop turn | selection_survival | anchor_violation |
+  |----|-------------|----------------|--------------------|------------------|
+  | hybrid+rerank（基线） | 0.7996 | 0.6424 | 1.000 | 0 |
+  | **hybrid+rerank+pcic** | **0.7985 (−0.1pp)** | **0.6386 (−0.4pp)** | 0.928 | 0 |
+  | hybrid+rerank+oracle（上界） | 0.8248 (+2.5pp) | 0.7264 (+8.4pp) | 0.997 | — |
+
+- **判决：PCIC-lite 未过 SC-001**（要求 +2pp overall 或 +4pp multi-hop）。+pcic overall
+  −0.1pp、multi-hop −0.4pp，微负。oracle 证明 headroom 真实（multi-hop +8.4pp），但保守
+  的 entity-only-complement 选择器**一点没捞到**。
+- **机理**：+pcic `selection_survival`=0.928（基线 1.0）——选择器确在重排，但净效应是丢掉
+  ~7% 基线本已保留的 in-window gold，且无增益。demand atom 只有 entity、无 slot，
+  “complement” 退化为“覆盖任一 query 实体”，几乎所有 top chunk 都满足，steer 不到桥接轮。
+  `anchor_violation`=0（安全约束守住），但安全不等于有用。
+- **决定**：**STOP，不跑 US3 付费 McNemar 答题**（plan 实施策略第 2 步）。免费覆盖闸在任何
+  付费答题前拦下不涨点杠杆——闸机达到设计目的。MVP 代码保留（惰性、安全降级为 rerank 原序，
+  不改变任何现有臂）。headroom 归为未来工作：需要更强的 selector（带 slot 的 demand atom /
+  结构化桥接推理），而非当前保守词典序。Artifacts: `cov-pcic/coverage.json`（scratchpad，未入库）。
+
 ## Strike 3: Abstention and Conflict Resolution
 
 - Date:

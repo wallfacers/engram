@@ -158,15 +158,15 @@ on answers with McNemar.
 - [ ] T023 [US3] Test in `cmd/locomo-bench/pcic_test.go` (offline stub) that
   `--retrieval hybrid+rerank,hybrid+rerank+pcic` plumbs the `+pcic` selection into the answer
   path and yields a two-arm paired report structure (no new eval code beyond the arm).
-- [ ] T024 [US3] GATED (not auto-run): run the free coverage gate; **iff** SC-001 passes, run
-  the paid multi-hop paired eval per `quickstart.md` Step 3 and capture `paired.json`. This
-  task requires explicit maintainer authorization before spending tokens.
+- [~] T024 [US3] GATED — **NOT RUN (correctly)**: the free coverage gate ran on real
+  `pcic_meta` (2026-07-20) and **SC-001 FAILED** (+pcic overall −0.1pp, multi-hop −0.4pp; see
+  eval-log.md "PCIC-lite 覆盖闸判决：NO-GO"). Per the gate, the paid McNemar eval is not run.
 
 ---
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T025 [P] Record the coverage-gate result and the go/no-go decision in
+- [X] T025 [P] Record the coverage-gate result and the go/no-go decision in
   `specs/003-bio-retrieval-locomo/eval-log.md` (PCIC-lite section); if T024 ran, add the
   McNemar verdict. Eval-result commit is SEPARATE from algorithm commits (Constitution IV).
 - [ ] T026 [P] Run the full suite `CGO_ENABLED=0 go test -count=1 ./...` and re-verify the
