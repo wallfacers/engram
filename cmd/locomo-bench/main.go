@@ -85,6 +85,7 @@ type options struct {
 	forceAnswer          bool
 	temporalAnswerPrompt bool
 	rerank               bool
+	pcic                 bool
 	opinionPass          bool
 	adversarial          int
 	catTopKSpec          string
@@ -133,6 +134,7 @@ func run() error {
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
+	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -490,6 +492,8 @@ var supportedArmMechanisms = map[string]struct{}{
 	"conflict": {},
 	"abstain":  {},
 	"rerank":   {},
+	"pcic":     {},
+	"oracle":   {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -538,6 +542,7 @@ func optionsForArm(global options, name string) options {
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
 		arm.rerank = false
+		arm.pcic = false
 		return arm
 	}
 	arm := global
@@ -549,6 +554,7 @@ func optionsForArm(global options, name string) options {
 	arm.abstainPrompt = spec.mechanisms["abstain"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
 	arm.rerank = spec.mechanisms["rerank"]
+	arm.pcic = spec.mechanisms["pcic"]
 	return arm
 }
 
