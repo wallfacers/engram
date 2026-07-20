@@ -472,6 +472,7 @@ var supportedArmMechanisms = map[string]struct{}{
 	"temporal": {},
 	"tplan":    {},
 	"conflict": {},
+	"abstain":  {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -485,9 +486,6 @@ func parseArm(name string) (armSpec, error) {
 		mechanism := strings.ToLower(strings.TrimSpace(raw))
 		if mechanism == "" {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: empty mechanism suffix", name)
-		}
-		if mechanism == "abstain" {
-			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: %s not implemented until US5", name, mechanism)
 		}
 		if _, ok := supportedArmMechanisms[mechanism]; !ok {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: unsupported mechanism %q", name, mechanism)
@@ -967,7 +965,7 @@ func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memor
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
-	prompt := answerPromptForOptionsWithTemporal(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt)
+	prompt := answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt)
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
