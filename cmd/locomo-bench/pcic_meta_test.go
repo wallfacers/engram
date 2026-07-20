@@ -198,6 +198,60 @@ func TestPCICAnnotateAbortsOnWidespreadFailure(t *testing.T) {
 	}
 }
 
+func TestFailoverModelCaller(t *testing.T) {
+	t.Run("falls over to secondary on primary error", func(t *testing.T) {
+		var seen []string
+		primary := func(_ context.Context, _, _ string) (string, error) {
+			seen = append(seen, "p")
+			return "", fmt.Errorf("provider/openai: server_error (HTTP 502): Bad Gateway")
+		}
+		secondary := func(_ context.Context, _, _ string) (string, error) {
+			seen = append(seen, "s")
+			return "ok", nil
+		}
+		got, err := failoverModelCaller(primary, secondary)(context.Background(), "sys", "user")
+		if err != nil || got != "ok" {
+			t.Fatalf("got %q err %v, want ok/nil", got, err)
+		}
+		if len(seen) != 2 || seen[0] != "p" || seen[1] != "s" {
+			t.Fatalf("call order = %v, want [p s]", seen)
+		}
+	})
+	t.Run("primary success skips secondary", func(t *testing.T) {
+		var seen []string
+		primary := func(_ context.Context, _, _ string) (string, error) { seen = append(seen, "p"); return "ok", nil }
+		secondary := func(_ context.Context, _, _ string) (string, error) { seen = append(seen, "s"); return "no", nil }
+		got, err := failoverModelCaller(primary, secondary)(context.Background(), "sys", "user")
+		if err != nil || got != "ok" {
+			t.Fatalf("got %q err %v", got, err)
+		}
+		if len(seen) != 1 || seen[0] != "p" {
+			t.Fatalf("secondary should not run: %v", seen)
+		}
+	})
+	t.Run("all endpoints down returns last error", func(t *testing.T) {
+		fail := func(_ context.Context, _, _ string) (string, error) { return "", fmt.Errorf("502") }
+		_, err := failoverModelCaller(fail, fail)(context.Background(), "sys", "user")
+		if err == nil {
+			t.Fatal("want error when every endpoint fails")
+		}
+	})
+	t.Run("context cancellation is terminal", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var seen []string
+		primary := func(c context.Context, _, _ string) (string, error) { seen = append(seen, "p"); return "", c.Err() }
+		secondary := func(_ context.Context, _, _ string) (string, error) { seen = append(seen, "s"); return "ok", nil }
+		_, err := failoverModelCaller(primary, secondary)(ctx, "sys", "user")
+		if err == nil {
+			t.Fatal("cancelled context must not fall over")
+		}
+		if len(seen) != 1 {
+			t.Fatalf("secondary must not run after cancellation: %v", seen)
+		}
+	})
+}
+
 func TestPCICAnnotateWritesNoEngineState(t *testing.T) {
 	dir := t.TempDir()
 	meta, err := annotatePCICMeta(context.Background(), annotateFixtureConvs(),

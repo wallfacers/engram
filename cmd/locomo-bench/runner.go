@@ -31,6 +31,35 @@ func usageCallerFromModel(c modelCaller) usageModelCaller {
 	}
 }
 
+// failoverModelCaller tries each caller in order, returning the first success.
+// A non-cancellation error falls over to the next endpoint (e.g. a relay's
+// backup base URL surviving a transient 502 on the primary); a cancelled
+// context is terminal and never falls over. Returns the last error if every
+// endpoint fails. Callers with fewer than two entries degrade to the single
+// caller (or a no-op error when empty).
+func failoverModelCaller(callers ...modelCaller) modelCaller {
+	return func(ctx context.Context, system, user string) (string, error) {
+		var lastErr error
+		for _, c := range callers {
+			if c == nil {
+				continue
+			}
+			text, err := c(ctx, system, user)
+			if err == nil {
+				return text, nil
+			}
+			lastErr = err
+			if ctx.Err() != nil {
+				return "", err
+			}
+		}
+		if lastErr == nil {
+			lastErr = fmt.Errorf("failoverModelCaller: no endpoints configured")
+		}
+		return "", lastErr
+	}
+}
+
 // newModelCaller wraps a provider.Provider into a modelCaller.
 func newModelCaller(p provider.Provider, model string, maxTokens int) modelCaller {
 	return newModelCallerWithUsage(p, model, maxTokens, "", nil)

@@ -476,17 +476,26 @@ func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, 
 		return nil
 	}
 
-	var prov provider.Provider
-	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
-	case "openai":
-		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true})
-	case "anthropic", "":
-		prov = anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
-	default:
-		return fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
-	}
+	// Build one gated caller per endpoint. LOCOMO_BASE_URL_FALLBACK (optional)
+	// is a backup relay base URL: when the primary returns a transient error
+	// mid-pass (e.g. the relay's upstream model backend 502s for a window), the
+	// annotation falls over to the backup instead of skipping the span. Both
+	// share the credential and the semaphore.
 	sem := make(chan struct{}, opt.concurrency)
-	call := gate(sem, newModelCaller(prov, model, opt.maxTokens))
+	primaryProv, err := buildAnnotateProvider(apiKey, baseURL, opt.maxTokens)
+	if err != nil {
+		return err
+	}
+	callers := []modelCaller{gate(sem, newModelCaller(primaryProv, model, opt.maxTokens))}
+	if fallbackURL := os.Getenv("LOCOMO_BASE_URL_FALLBACK"); fallbackURL != "" {
+		fallbackProv, err := buildAnnotateProvider(apiKey, fallbackURL, opt.maxTokens)
+		if err != nil {
+			return err
+		}
+		callers = append(callers, gate(sem, newModelCaller(fallbackProv, model, opt.maxTokens)))
+		logger.Info("pcic annotation failover enabled", "fallback", fallbackURL)
+	}
+	call := failoverModelCaller(callers...)
 
 	logger.Info("pcic annotation starting", "model", model, "conversations", len(convs), "path", metaPath)
 	meta, err := annotatePCICMeta(context.Background(), convs, model, fingerprint, call, opt.concurrency, logger)
@@ -498,6 +507,20 @@ func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, 
 	}
 	logger.Info("pcic_meta written", "path", metaPath, "spans", len(meta.Spans))
 	return nil
+}
+
+// buildAnnotateProvider constructs a provider for one relay base URL, honoring
+// LOCOMO_PROVIDER. Used by the annotation pass to build primary + fallback
+// endpoints that share the same credential.
+func buildAnnotateProvider(apiKey, baseURL string, maxTokens int) (provider.Provider, error) {
+	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
+	case "openai":
+		return openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true}), nil
+	case "anthropic", "":
+		return anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: maxTokens}), nil
+	default:
+		return nil, fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	}
 }
 
 func recordBenchUsage(ledger *costLedger, role, model string, usage provider.Usage) {
