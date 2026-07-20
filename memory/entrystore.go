@@ -45,6 +45,14 @@ type Entry struct {
 	SupersededBy string
 }
 
+// ErrSupersedeSelf is returned when a Supersede call names the same entry as
+// both loser and winner. ErrSupersedePinned protects a pinned entry from being
+// non-destructively suppressed.
+var (
+	ErrSupersedeSelf   = errors.New("memory: cannot supersede an entry with itself")
+	ErrSupersedePinned = errors.New("memory: cannot supersede a pinned entry")
+)
+
 // EntryStore is a thin SQLite-backed accessor for memory_entries. It takes the
 // shared *sql.DB directly (as sessionsearch does for its FTS queries) rather
 // than extending the portable store.Store interface, keeping the blast radius
@@ -371,6 +379,57 @@ func (s *EntryStore) Merge(ctx context.Context, names []string, into *Entry) err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("memory: merge commit: %w", err)
+	}
+	return nil
+}
+
+// Supersede non-destructively suppresses oldName in favor of newName by setting
+// old.superseded_by = newName. Both entries must exist; a pinned loser and a
+// self-reference are refused. The superseded entry stays retrievable — the
+// retriever only downweights it (contract engine-api §4/§7).
+func (s *EntryStore) Supersede(ctx context.Context, oldName, newName string) error {
+	if oldName == newName {
+		return ErrSupersedeSelf
+	}
+	old, err := s.GetByName(ctx, oldName)
+	if err != nil {
+		return err // store.ErrNotFound when the loser is unknown
+	}
+	if old.Pinned {
+		return ErrSupersedePinned
+	}
+	if _, err := s.GetByName(ctx, newName); err != nil {
+		return fmt.Errorf("memory: supersede winner %q: %w", newName, err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE memory_entries SET superseded_by = ? WHERE name = ?`, newName, oldName)
+	if err != nil {
+		return fmt.Errorf("memory: supersede %q: %w", oldName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("memory: supersede %q rows: %w", oldName, err)
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+// Unsupersede clears an entry's superseded_by marker, reversing a misjudged
+// suppression. Returns store.ErrNotFound when no entry matches name.
+func (s *EntryStore) Unsupersede(ctx context.Context, name string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE memory_entries SET superseded_by = NULL WHERE name = ?`, name)
+	if err != nil {
+		return fmt.Errorf("memory: unsupersede %q: %w", name, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("memory: unsupersede %q rows: %w", name, err)
+	}
+	if n == 0 {
+		return store.ErrNotFound
 	}
 	return nil
 }

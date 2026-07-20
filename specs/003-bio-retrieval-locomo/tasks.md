@@ -196,23 +196,23 @@
 
 ### Tests for User Story 5
 
-- [ ] T030 [P] [US5] 在 `memory/entrystore_test.go` 写可失败测试
+- [x] T030 [P] [US5] 在 `memory/entrystore_test.go` 写可失败测试
       `TestSupersedeLifecycle`：Supersede 校验（存在性/非自指/非 pinned）、
       Unsupersede 回退、检索默认降权、时间意图查询不惩罚（契约 engine-api §4/§7）
-- [ ] T031 [P] [US5] 在 `memory/curation/judge_test.go` 增可失败测试：四分类 JSON
+- [x] T031 [P] [US5] 在 `memory/curation/judge_test.go` 增可失败测试：四分类 JSON
       解析（含旧格式无 conflicts 容错）、apply 顺序 merge→conflicts→evict、
       Contradictory→Supersede 落库
 
 ### Implementation for User Story 5
 
-- [ ] T032 [P] [US5] 实现 `EntryStore.Supersede/Unsupersede`（`memory/entrystore.go`）
+- [x] T032 [P] [US5] 实现 `EntryStore.Supersede/Unsupersede`（`memory/entrystore.go`）
       与检索降权：`memory/retriever.go` 融合后乘 `SupersededPenalty`、时间意图豁免
-- [ ] T033 [US5] curation 四分类：`memory/prompt/curation_judge.go` prompt 扩展、
+- [x] T033 [US5] curation 四分类：`memory/prompt/curation_judge.go` prompt 扩展、
       `memory/curation/judge.go` `ConflictDecision` 解析、`memory/curation/worker.go`
       apply 接 Supersede（依赖 T032；契约 engine-api §6）
-- [ ] T034 [US5] bench 接线 `--conflict-resolution`/`--superseded-penalty`
+- [x] T034 [US5] bench 接线 `--conflict-resolution`/`--superseded-penalty`
       （`cmd/locomo-bench/main.go`，作用于建库/curation 阶段）
-- [ ] T035 [US5] **独立提交（口径改动）**：`cmd/locomo-bench/runner.go` 增
+- [x] T035 [US5] **独立提交（口径改动）**：`cmd/locomo-bench/runner.go` 增
       Abstain-R1 1:4 ICL 答题 prompt（拒答须指出缺失信息）；`--abstain-prompt` flag
       门控，仅替换答题 prompt——重试禁用由既有 `--no-idk-retry` 承担（T009），
       二者独立组合；编造率/误拒率进 per-桶报告

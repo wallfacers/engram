@@ -45,6 +45,7 @@ import (
 
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/curation"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/provider"
 	"github.com/wallfacers/engram/provider/anthropic"
@@ -79,6 +80,7 @@ type options struct {
 	temporalScore        bool
 	temporalHardFilter   bool
 	conflictResolution   bool
+	supersededPenalty    float64
 	abstainPrompt        bool
 	forceAnswer          bool
 	temporalAnswerPrompt bool
@@ -123,6 +125,8 @@ func run() error {
 	flag.BoolVar(&opt.clusterSweep, "cluster-sweep", false, "sweep one-hop entity clusters for enumeration questions")
 	flag.BoolVar(&opt.temporalScore, "temporal-score", false, "enable soft temporal retrieval scoring")
 	flag.BoolVar(&opt.temporalHardFilter, "temporal-hard-filter", false, "experimental hard temporal candidate filter")
+	flag.BoolVar(&opt.conflictResolution, "conflict-resolution", false, "resolve contradictory facts during store build (non-destructive supersede) and downweight superseded entries at retrieval")
+	flag.Float64Var(&opt.supersededPenalty, "superseded-penalty", 0.3, "retrieval score multiplier for superseded entries [0,1]; only applies when --conflict-resolution is on")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
@@ -467,6 +471,8 @@ var supportedArmMechanisms = map[string]struct{}{
 	"sweep":    {},
 	"temporal": {},
 	"tplan":    {},
+	"conflict": {},
+	"abstain":  {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -480,9 +486,6 @@ func parseArm(name string) (armSpec, error) {
 		mechanism := strings.ToLower(strings.TrimSpace(raw))
 		if mechanism == "" {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: empty mechanism suffix", name)
-		}
-		if mechanism == "conflict" || mechanism == "abstain" {
-			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: %s not implemented until US4/US5", name, mechanism)
 		}
 		if _, ok := supportedArmMechanisms[mechanism]; !ok {
 			return armSpec{}, fmt.Errorf("invalid retrieval arm %q: unsupported mechanism %q", name, mechanism)
@@ -661,6 +664,17 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			logger.Info("verbatim chunks ingested", "conversation", conv.ID, "chunks", n)
 		}
 	}
+	if conflictMechanismEnabled(opt, arms) {
+		// One non-destructive supersede pass over the built store. Superseded
+		// markers are inert for arms that leave the penalty at zero, so a shared
+		// store stays valid for the paired baseline arm.
+		cw := curation.NewWorker(es, st.DB(), curation.ModelCaller(extractCall), curation.Config{
+			Budgets: memory.DefaultBudgets(),
+		}, logger)
+		if err := cw.ResolveConflictsPass(ctx); err != nil {
+			logger.Warn("conflict resolution pass failed", "conversation", conv.ID, "err", err)
+		}
+	}
 	// Drain embeddings synchronously before answering (only meaningful when a
 	// hybrid arm supplied an embedding client).
 	if err := embedder.Backfill(ctx); err != nil {
@@ -690,12 +704,20 @@ func retrieverOptionsFor(opt options) memory.RetrieverOptions {
 }
 
 func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
+	// The superseded penalty only bites when conflict resolution has actually
+	// marked entries during the build; keeping it zero otherwise preserves
+	// byte-for-byte parity with the baseline arm.
+	supersededPenalty := 0.0
+	if opt.conflictResolution {
+		supersededPenalty = opt.supersededPenalty
+	}
 	return memory.RetrieverOptions{
 		Associative:        opt.assoc,
 		AssocDepth:         opt.assocDepth,
 		ClusterSweep:       opt.clusterSweep,
 		TemporalScore:      opt.temporalScore || opt.temporalHardFilter,
 		TemporalHardFilter: opt.temporalHardFilter,
+		SupersededPenalty:  supersededPenalty,
 		Now:                now,
 	}
 }
@@ -711,6 +733,9 @@ func retrievalFingerprint(opt options) string {
 	}
 	if opt.temporalScore || opt.temporalHardFilter {
 		fingerprint += fmt.Sprintf(";temporal_score=%t;temporal_hard_filter=%t", opt.temporalScore || opt.temporalHardFilter, opt.temporalHardFilter)
+	}
+	if opt.conflictResolution {
+		fingerprint += fmt.Sprintf(";conflict_resolution=true;superseded_penalty=%.3f", opt.supersededPenalty)
 	}
 	return fingerprint
 }
@@ -884,6 +909,15 @@ func temporalMechanismEnabled(opt options, arms []string) bool {
 	return false
 }
 
+func conflictMechanismEnabled(opt options, arms []string) bool {
+	for _, arm := range arms {
+		if optionsForRun(opt, arm, len(arms) > 1).conflictResolution {
+			return true
+		}
+	}
+	return false
+}
+
 func validateTemporalStore(ctx context.Context, db *sql.DB, facts int) error {
 	if facts <= 0 {
 		return nil
@@ -931,7 +965,7 @@ func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memor
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
-	prompt := answerPromptForOptionsWithTemporal(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt)
+	prompt := answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt)
 	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)

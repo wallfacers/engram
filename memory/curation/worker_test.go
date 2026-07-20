@@ -59,6 +59,96 @@ func TestWorkerAppliesEvictAndMerge(t *testing.T) {
 	}
 }
 
+func TestWorkerAppliesConflictsAsSupersede(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+
+	seed(t, es, &memory.Entry{Name: "old-job", Content: "works at Acme"})
+	seed(t, es, &memory.Entry{Name: "new-job", Content: "works at Globex"})
+	seed(t, es, &memory.Entry{Name: "merged-a", Content: "fact one"})
+	seed(t, es, &memory.Entry{Name: "merged-b", Content: "fact two"})
+	seed(t, es, &memory.Entry{Name: "pinned-fact", Content: "protected", Pinned: true})
+
+	w := NewWorker(es, s.DB(), func(context.Context, string, string) (string, error) { return "", nil }, Config{
+		MaxCandidatesPerPass: 20, ContentSnippetChars: 200, Weights: defaultWeights, Budgets: memory.DefaultBudgets(),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	entries := []*memory.Entry{
+		mustGet(t, es, "old-job"), mustGet(t, es, "new-job"),
+		mustGet(t, es, "merged-a"), mustGet(t, es, "merged-b"),
+		mustGet(t, es, "pinned-fact"),
+	}
+	d := &JudgeDecision{
+		Merge: []MergeDecision{{
+			Names: []string{"merged-a", "merged-b"},
+			Into:  MergedEntry{Name: "merged-a", Trigger: "t", Content: "fact one and two", Durability: "volatile", Category: "project"},
+		}},
+		Conflicts: []ConflictDecision{
+			{Loser: "old-job", Winner: "new-job"},
+			{Loser: "pinned-fact", Winner: "new-job"}, // pinned loser must be refused
+			{Loser: "merged-b", Winner: "new-job"},    // consumed by the merge → skipped
+		},
+	}
+	if err := w.apply(ctx, d, entries); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	// Non-destructive suppression: the loser survives, marked superseded.
+	got := mustGet(t, es, "old-job")
+	if got.SupersededBy != "new-job" {
+		t.Fatalf("old-job superseded_by = %q, want new-job", got.SupersededBy)
+	}
+	assertExists(t, es, "new-job")
+	// Pinned loser is protected from suppression.
+	if p := mustGet(t, es, "pinned-fact"); p.SupersededBy != "" {
+		t.Fatalf("pinned-fact superseded_by = %q, want empty", p.SupersededBy)
+	}
+	// A name already consumed by the merge is gone; the conflict referencing it
+	// is skipped without error.
+	assertGone(t, es, "merged-b")
+}
+
+func TestResolveConflictsPassAppliesOnlyConflicts(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+
+	// A contradictory near-duplicate pair (clusters on trigram similarity).
+	seed(t, es, &memory.Entry{Name: "paris-fact", Content: "the user home city location is presently Paris"})
+	seed(t, es, &memory.Entry{Name: "berlin-fact", Content: "the user home city location is presently Berlin"})
+	// Extra entries the judge also names for evict/merge — these must be ignored
+	// by a conflict-only pass.
+	seed(t, es, &memory.Entry{Name: "evict-target", Content: "an unrelated trivial note about nothing here"})
+	seed(t, es, &memory.Entry{Name: "merge-x", Content: "a distinct duplicated statement about kappa alpha"})
+	seed(t, es, &memory.Entry{Name: "merge-y", Content: "a distinct duplicated statement about kappa beta"})
+
+	call := func(context.Context, string, string) (string, error) {
+		return `{"evict":["evict-target"],"merge":[{"names":["merge-x","merge-y"],"into":{"name":"merge-x","trigger":"t","content":"merged","durability":"volatile","category":"project"}}],"conflicts":[{"loser":"paris-fact","winner":"berlin-fact"}]}`, nil
+	}
+	w := NewWorker(es, s.DB(), call, Config{Budgets: memory.DefaultBudgets()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if err := w.ResolveConflictsPass(ctx); err != nil {
+		t.Fatalf("resolve conflicts: %v", err)
+	}
+
+	// The conflict is applied non-destructively.
+	if got := mustGet(t, es, "paris-fact"); got.SupersededBy != "berlin-fact" {
+		t.Fatalf("paris-fact superseded_by = %q, want berlin-fact", got.SupersededBy)
+	}
+	// Evict and merge decisions are NOT applied by a conflict-only pass.
+	assertExists(t, es, "evict-target")
+	assertExists(t, es, "merge-y")
+}
+
 func TestWorkerBuildsSynonymEdgesFromStoredEmbeddings(t *testing.T) {
 	ctx := context.Background()
 	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})

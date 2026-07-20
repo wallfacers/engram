@@ -185,6 +185,23 @@ const forceOpenDomainAnswerPrompt = `You answer a question about a person based 
 - Answer with a short, direct phrase or sentence. No explanation, no restating the question.
 - This is an answerable evaluation: always provide your best guess based on the memories and reasonable inference; never decline with an uncertainty response.`
 
+// abstainAnswerPrompt is the Abstain-R1 answer regime (feature 003 US5, a
+// scoring-convention change committed separately from the algorithm work). It
+// teaches abstention with a 1:4 in-context ratio — one refusal example among
+// four answerable ones — so the model refuses ONLY when the memories cannot
+// support any answer, and when it refuses it names the missing information
+// instead of a bare bail-out. It is mutually exclusive with --force-answer.
+const abstainAnswerPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. Rules:
+- If the memories support an answer, reply with the shortest phrase that fully answers it — a name, a date, a place, a list. No explanation, no restating the question.
+- For "when" questions, read the time from the memory's [event: YYYY-MM-DD] marker; write dates naturally like "21 July 2023", never ISO format.
+- If — and ONLY if — NO retrieved memory contains the information the question asks for, reply "I don't know" and then, in the same line, name the specific fact that is missing (e.g. "I don't know — no memory records where the trip took place"). Do NOT guess or invent facts the memories never state; a confident fabrication is worse than an honest refusal.
+Examples:
+Q: Where does the user work? Memories mention the user's job at Acme. A: Acme
+Q: When did the user visit Oslo? A memory marks [event: 2023-05-07] for the Oslo trip. A: 7 May 2023
+Q: What pets does the user have? A memory says the user adopted a cat named Mittens. A: a cat (Mittens)
+Q: How many siblings does the user have? A memory says the user has two brothers. A: two
+Q: What is the user's blood type? No memory mentions blood type. A: I don't know — no memory records the user's blood type.`
+
 // answerPromptFor picks the pre-temporal system prompt by LoCoMo category.
 func answerPromptFor(category int) string {
 	return answerPromptForOptionsWithTemporal(category, false, false)
@@ -195,6 +212,16 @@ func answerPromptForOptions(category int, forceAnswer bool) string {
 }
 
 func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswer bool) string {
+	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false)
+}
+
+// answerPromptForRegime selects the answer system prompt. The abstention regime
+// takes precedence over category- and temporal-specific answerable prompts: it
+// is a distinct scoring convention (Strike 3), not a per-category refinement.
+func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain bool) string {
+	if abstain {
+		return abstainAnswerPrompt
+	}
 	if temporalAnswer && category == 2 {
 		if forceAnswer {
 			return forceTemporalAnswerPrompt

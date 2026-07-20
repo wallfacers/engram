@@ -184,6 +184,7 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 	if temporal != nil {
 		fused = r.applyTemporal(ctx, fused, *temporal)
 	}
+	fused = r.applySupersededPenalty(ctx, query, fused)
 	if r.options.ClusterSweep && ParseEnumerationIntent(query).IsEnumeration {
 		if len(cues) == 0 {
 			var err error
@@ -265,6 +266,44 @@ func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored,
 		}
 		score.Score *= TemporalScore(start, end, window, temporalTau)
 		out = append(out, score)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
+}
+
+// applySupersededPenalty multiplies the fused score of superseded entries by
+// SupersededPenalty and re-sorts. It is a no-op when the penalty is at its zero
+// value (feature off, preserving byte-for-byte parity) or >= 1 (no downweight).
+// Queries with temporal intent are exempt: an older, superseded fact is often
+// the correct answer to a time-scoped question (contract engine-api §4/§7).
+func (r *Retriever) applySupersededPenalty(ctx context.Context, query string, fused []embedding.Scored) []embedding.Scored {
+	penalty := r.options.SupersededPenalty
+	if penalty <= 0 || penalty >= 1 || len(fused) == 0 {
+		return fused
+	}
+	if _, ok := ParseTemporalIntent(query, r.options.Now); ok {
+		return fused
+	}
+	names := make([]string, len(fused))
+	for i, s := range fused {
+		names[i] = s.Key
+	}
+	entries, err := r.entries.EntriesByName(ctx, names)
+	if err != nil {
+		slog.Warn("memory: superseded penalty degraded", "stage", "superseded_load", "err", err)
+		return fused
+	}
+	out := make([]embedding.Scored, len(fused))
+	for i, s := range fused {
+		if e, ok := entries[s.Key]; ok && e.SupersededBy != "" {
+			s.Score *= penalty
+		}
+		out[i] = s
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {

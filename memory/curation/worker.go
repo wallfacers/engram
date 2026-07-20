@@ -273,6 +273,36 @@ func (w *Worker) curate(ctx context.Context, now time.Time) error {
 	return w.apply(ctx, decision, entries)
 }
 
+// ResolveConflictsPass runs one store-wide conflict-resolution pass: it clusters
+// near-duplicate entries, asks the judge to classify them, and applies ONLY the
+// resulting supersede decisions — no evictions, no merges. Suppression is
+// non-destructive (the loser survives with superseded_by set), so this pass is
+// safe to run over a benchmark corpus without changing which facts are present.
+func (w *Worker) ResolveConflictsPass(ctx context.Context) error {
+	if w == nil || w.store == nil {
+		return nil
+	}
+	entries, err := w.store.List(ctx)
+	if err != nil {
+		return err
+	}
+	if len(entries) < 2 {
+		return nil
+	}
+	clusters := Cluster(entries, DefaultJaccardThreshold, nil)
+	if len(clusters) == 0 {
+		return nil // no near-duplicate pairs → no contradictions to resolve
+	}
+	decision, err := Judge(ctx, w.call, nil, buildJudgeClusters(clusters))
+	if err != nil {
+		return err
+	}
+	if len(decision.Conflicts) == 0 {
+		return nil
+	}
+	return w.apply(ctx, &JudgeDecision{Conflicts: decision.Conflicts}, entries)
+}
+
 // buildSynonymEdges compares stored vectors offline and records close pairs.
 // Rows from different embedding models or dimensions are never compared.
 func (w *Worker) buildSynonymEdges(ctx context.Context) error {
@@ -446,6 +476,38 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 		merged++
 	}
 
+	// Conflicts run after merges (so a merged-away name is not also superseded)
+	// and before evictions. Suppression is non-destructive: the loser survives
+	// with superseded_by set and the retriever downweights it.
+	superseded := 0
+	for _, c := range d.Conflicts {
+		if c.Loser == "" || c.Winner == "" || c.Loser == c.Winner {
+			w.logger.Warn("curation: ill-formed conflict decision; skipping", "loser", c.Loser, "winner", c.Winner)
+			continue
+		}
+		if consumed[c.Loser] {
+			continue // the loser was already removed by a merge
+		}
+		loser, ok := byName[c.Loser]
+		if !ok {
+			w.logger.Warn("curation: conflict names an unknown loser; skipping", "loser", c.Loser)
+			continue
+		}
+		if loser.Pinned {
+			w.logger.Warn("curation: conflict would suppress a pinned entry; refusing", "loser", c.Loser)
+			continue
+		}
+		if _, ok := byName[c.Winner]; !ok {
+			w.logger.Warn("curation: conflict names an unknown winner; skipping", "winner", c.Winner)
+			continue
+		}
+		if err := w.store.Supersede(ctx, c.Loser, c.Winner); err != nil {
+			w.logger.Warn("curation: supersede failed", "loser", c.Loser, "winner", c.Winner, "error", err)
+			continue
+		}
+		superseded++
+	}
+
 	evicted := 0
 	for _, name := range d.Evict {
 		if consumed[name] {
@@ -467,8 +529,8 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 		evicted++
 	}
 
-	if merged > 0 || evicted > 0 {
-		w.logger.Info("curation: pass applied", "merged", merged, "evicted", evicted)
+	if merged > 0 || superseded > 0 || evicted > 0 {
+		w.logger.Info("curation: pass applied", "merged", merged, "superseded", superseded, "evicted", evicted)
 	}
 	return nil
 }

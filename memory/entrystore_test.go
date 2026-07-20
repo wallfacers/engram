@@ -381,6 +381,73 @@ func TestUpsertUpdatesEventRangeOnConflict(t *testing.T) {
 	}
 }
 
+func TestSupersedeLifecycle(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+
+	mustUpsert := func(e *memory.Entry) {
+		t.Helper()
+		if err := es.Upsert(ctx, e); err != nil {
+			t.Fatalf("upsert %s: %v", e.Name, err)
+		}
+	}
+	mustUpsert(&memory.Entry{Name: "old-job", Content: "I work at Acme"})
+	mustUpsert(&memory.Entry{Name: "new-job", Content: "I work at Globex"})
+	mustUpsert(&memory.Entry{Name: "pinned-fact", Content: "birthday is May 7", Pinned: true})
+
+	// Validation: unknown loser → ErrNotFound.
+	if err := es.Supersede(ctx, "ghost", "new-job"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("supersede unknown loser: got %v, want ErrNotFound", err)
+	}
+	// Validation: unknown winner → error (not silently accepted).
+	if err := es.Supersede(ctx, "old-job", "ghost"); err == nil {
+		t.Fatalf("supersede unknown winner: got nil error, want failure")
+	}
+	// Validation: self-supersede refused.
+	if err := es.Supersede(ctx, "old-job", "old-job"); err == nil {
+		t.Fatalf("self-supersede: got nil error, want failure")
+	}
+	// Validation: a pinned entry cannot be superseded.
+	if err := es.Supersede(ctx, "pinned-fact", "new-job"); err == nil {
+		t.Fatalf("supersede pinned: got nil error, want failure")
+	}
+	if got, _ := es.GetByName(ctx, "pinned-fact"); got.SupersededBy != "" {
+		t.Fatalf("pinned entry was superseded: superseded_by=%q", got.SupersededBy)
+	}
+
+	// Happy path: old-job is superseded by new-job.
+	if err := es.Supersede(ctx, "old-job", "new-job"); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	got, err := es.GetByName(ctx, "old-job")
+	if err != nil {
+		t.Fatalf("get after supersede: %v", err)
+	}
+	if got.SupersededBy != "new-job" {
+		t.Fatalf("superseded_by = %q, want new-job", got.SupersededBy)
+	}
+	// The superseded entry is still retrievable (non-destructive suppression).
+	if _, err := es.GetByName(ctx, "old-job"); err != nil {
+		t.Fatalf("superseded entry must still exist: %v", err)
+	}
+
+	// Unsupersede rolls the misjudgment back.
+	if err := es.Unsupersede(ctx, "old-job"); err != nil {
+		t.Fatalf("unsupersede: %v", err)
+	}
+	got, err = es.GetByName(ctx, "old-job")
+	if err != nil {
+		t.Fatalf("get after unsupersede: %v", err)
+	}
+	if got.SupersededBy != "" {
+		t.Fatalf("superseded_by = %q after unsupersede, want empty", got.SupersededBy)
+	}
+	// Unsupersede on an unknown entry → ErrNotFound.
+	if err := es.Unsupersede(ctx, "ghost"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unsupersede unknown: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestEntriesByNameBatch(t *testing.T) {
 	es, _ := newEntryStore(t)
 	ctx := context.Background()

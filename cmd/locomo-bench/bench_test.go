@@ -160,6 +160,32 @@ func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
 	}
 }
 
+func TestAbstainAnswerPromptRegime(t *testing.T) {
+	base := answerPromptForRegime(2, false, false, false)
+	if base != answerSystemPrompt {
+		t.Fatalf("non-abstain regime changed baseline prompt")
+	}
+	abstain := answerPromptForRegime(2, false, false, true)
+	if abstain == base {
+		t.Fatalf("abstain regime did not change the answer prompt")
+	}
+	// The abstention contract: refuse ONLY when unsupported, and name the
+	// missing information (1:4 ICL examples teach both answering and refusing).
+	low := strings.ToLower(abstain)
+	for _, phrase := range []string{"missing", "example"} {
+		if !strings.Contains(low, phrase) {
+			t.Fatalf("abstain prompt missing %q instruction: %s", phrase, abstain)
+		}
+	}
+	if !strings.Contains(low, "i don't know") {
+		t.Fatalf("abstain prompt must keep a refusal outlet: %s", abstain)
+	}
+	// Abstain takes precedence over the category-specific answerable prompts.
+	if answerPromptForRegime(1, false, false, true) != abstain || answerPromptForRegime(2, false, true, true) != abstain {
+		t.Fatalf("abstain regime must override category and temporal prompts")
+	}
+}
+
 func TestTemporalAnswerPromptIsOptIn(t *testing.T) {
 	if answerPromptFor(2) != answerSystemPrompt {
 		t.Fatal("default category 2 prompt changed from the pre-temporal baseline")
@@ -336,6 +362,8 @@ func TestArmsFor(t *testing.T) {
 		"both":                {"fts", "hybrid"},
 		"hybrid,hybrid+assoc": {"hybrid", "hybrid+assoc"},
 		"hybrid+sweep":        {"hybrid+sweep"},
+		"hybrid+conflict":     {"hybrid+conflict"},
+		"hybrid+abstain":      {"hybrid+abstain"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -351,7 +379,7 @@ func TestArmsFor(t *testing.T) {
 			}
 		}
 	}
-	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+conflict", "hybrid+abstain", "hybrid,hybrid"} {
+	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid,hybrid"} {
 		if _, err := armsFor(in); err == nil {
 			t.Fatalf("armsFor(%q) should error", in)
 		}
@@ -361,15 +389,16 @@ func TestArmsFor(t *testing.T) {
 	}
 }
 
-func TestUnsupportedMechanismSuffixesExplainFuturePhase(t *testing.T) {
-	for _, arm := range []string{"hybrid+conflict", "hybrid+abstain"} {
-		_, err := armsFor(arm)
-		if err == nil || !strings.Contains(err.Error(), "not implemented until US4/US5") {
-			t.Fatalf("armsFor(%q) err = %v, want US4/US5 error", arm, err)
+func TestAllArmMechanismsSupported(t *testing.T) {
+	// Every three-strike mechanism now parses to a single-arm run.
+	for _, arm := range []string{"hybrid+assoc", "hybrid+sweep", "hybrid+temporal", "hybrid+tplan", "hybrid+conflict", "hybrid+abstain"} {
+		if arms, err := armsFor(arm); err != nil || len(arms) != 1 || arms[0] != arm {
+			t.Fatalf("%s arm should be supported: arms=%v err=%v", arm, arms, err)
 		}
 	}
-	if arms, err := armsFor("hybrid+temporal"); err != nil || len(arms) != 1 || arms[0] != "hybrid+temporal" {
-		t.Fatalf("temporal arm should be supported: arms=%v err=%v", arms, err)
+	// An unknown suffix still fails with a clear message.
+	if _, err := armsFor("hybrid+telepathy"); err == nil || !strings.Contains(err.Error(), "unsupported mechanism") {
+		t.Fatalf("unknown mechanism should error clearly, got %v", err)
 	}
 }
 
@@ -410,6 +439,26 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	pairedBaseline := optionsForRun(global, "hybrid", true)
 	if pairedBaseline.assoc || pairedBaseline.temporalScore || pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
 		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
+	}
+}
+
+func TestConflictArmEnablesSupersededPenalty(t *testing.T) {
+	// "conflict" is now a valid arm suffix (was rejected until US5).
+	arm := optionsForArm(options{supersededPenalty: 0.3}, "hybrid+conflict")
+	if !arm.conflictResolution {
+		t.Fatalf("hybrid+conflict did not enable conflict resolution: %+v", arm)
+	}
+	base := optionsForArm(options{supersededPenalty: 0.3}, "hybrid")
+	if base.conflictResolution {
+		t.Fatalf("paired baseline leaked conflict resolution: %+v", base)
+	}
+	// The retrieval penalty only reaches RetrieverOptions when conflict
+	// resolution is on; the baseline arm stays at zero for byte-for-byte parity.
+	if got := retrieverOptionsFor(arm).SupersededPenalty; got != 0.3 {
+		t.Fatalf("conflict arm SupersededPenalty = %v, want 0.3", got)
+	}
+	if got := retrieverOptionsFor(base).SupersededPenalty; got != 0 {
+		t.Fatalf("baseline arm SupersededPenalty = %v, want 0", got)
 	}
 }
 

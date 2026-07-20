@@ -38,6 +38,29 @@ func TestParseJudgeDecisionNoJSON(t *testing.T) {
 	}
 }
 
+func TestParseJudgeDecisionParsesConflicts(t *testing.T) {
+	raw := `{"evict":[],"merge":[],"conflicts":[{"loser":"old-fact","winner":"new-fact"}]}`
+	d, err := parseJudgeDecision(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(d.Conflicts) != 1 || d.Conflicts[0].Loser != "old-fact" || d.Conflicts[0].Winner != "new-fact" {
+		t.Fatalf("conflicts = %+v", d.Conflicts)
+	}
+}
+
+func TestParseJudgeDecisionToleratesMissingConflicts(t *testing.T) {
+	// Old three-class output (no "conflicts" key) must still parse cleanly.
+	raw := `{"evict":["x"],"merge":[]}`
+	d, err := parseJudgeDecision(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(d.Conflicts) != 0 {
+		t.Fatalf("conflicts = %+v, want empty for legacy format", d.Conflicts)
+	}
+}
+
 func TestJudgeUsesCallerAndParses(t *testing.T) {
 	var gotSystem, gotUser string
 	call := func(ctx context.Context, system, user string) (string, error) {

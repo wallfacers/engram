@@ -34,11 +34,12 @@ const CurationJudgeSystemPrompt = `You are a memory curator for an AI agent. You
 Rules:
 - Default to KEEP. Only evict an entry that is clearly obsolete, redundant, trivial, or superseded. When unsure, keep it.
 - Evict by listing the entry's exact "name". An entry you do not mention is kept.
-- For a near-duplicate group, you MAY merge it into ONE entry: provide the merged "into" entry (name, trigger, content, durability, category) and the list of source "names" it replaces. Choose the most useful surviving name; write a single trigger line and concise merged content that preserves every distinct fact. Do not merge entries that are merely on the same topic but carry different facts.
-- Never invent names. Every name in "evict" and in any "names" list MUST be one of the names shown below.
+- For a near-duplicate group whose facts are COMPATIBLE, you MAY merge it into ONE entry: provide the merged "into" entry (name, trigger, content, durability, category) and the list of source "names" it replaces. Choose the most useful surviving name; write a single trigger line and concise merged content that preserves every distinct fact. Do not merge entries that are merely on the same topic but carry different facts.
+- For a pair whose facts CONTRADICT — the same attribute with mutually exclusive values, so both cannot be true at once (e.g. "lives in Paris" vs "lives in Berlin") — do NOT merge and do NOT evict. Emit a conflict: {"loser":<older/outdated name>,"winner":<newer/current name>}. Keep both entries; the loser is only suppressed, never deleted. When you cannot tell which is newer, keep both and emit no conflict.
+- Never invent names. Every name in "evict", any merge "names" list, and any conflict "loser"/"winner" MUST be one of the names shown below.
 - Output STRICT JSON and nothing else — no markdown, no code fences, no commentary. Shape:
-{"evict":["name", ...],"merge":[{"names":["a","b"],"into":{"name":"a","trigger":"...","content":"...","durability":"volatile","category":"..."}}]}
-- If there is nothing worth changing, output {"evict":[],"merge":[]}.`
+{"evict":["name", ...],"merge":[{"names":["a","b"],"into":{"name":"a","trigger":"...","content":"...","durability":"volatile","category":"..."}}],"conflicts":[{"loser":"a","winner":"b"}]}
+- If there is nothing worth changing, output {"evict":[],"merge":[],"conflicts":[]}.`
 
 // BuildCurationJudgeUserPrompt renders the candidate list and near-duplicate
 // clusters into the user message for one judgment pass. The format is compact
