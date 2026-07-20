@@ -697,6 +697,91 @@ func (f *fakeReranker) Rerank(_ context.Context, _ string, docs []string, topN i
 
 // vectorFakeClient returns a stored vector by exact input text; unknown inputs
 // map to a zero vector (cosine 0).
+// seedSupersedeCorpus inserts a loser entry with a strictly stronger base
+// signal (two matching entities vs the winner's one) so any demotion observed
+// after superseding is caused by the penalty, not the base ordering.
+func seedSupersedeCorpus(t *testing.T) (*memory.EntryStore, *memory.VectorStore) {
+	t.Helper()
+	ctx := context.Background()
+	es, vs := newStores(t)
+	seed := []struct {
+		name, content string
+		entities      []string
+	}{
+		{"old-plan", "quantum widget gizmo project", []string{"widget", "gizmo"}},
+		{"new-plan", "quantum widget project", []string{"widget"}},
+	}
+	for _, s := range seed {
+		if err := es.Upsert(ctx, &memory.Entry{Name: s.name, Content: s.content, CharCount: len([]rune(s.content))}); err != nil {
+			t.Fatalf("upsert %s: %v", s.name, err)
+		}
+		if err := es.PutEntities(ctx, s.name, s.entities); err != nil {
+			t.Fatalf("entities %s: %v", s.name, err)
+		}
+	}
+	return es, vs
+}
+
+func rankOf(results []memory.Result, name string) int {
+	for i, r := range results {
+		if r.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestRetriever_SupersededPenaltyDemotes(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedSupersedeCorpus(t)
+
+	// Baseline: no penalty (zero value) → the stronger loser ranks first.
+	base, err := memory.NewRetriever(es, vs, nil).Search(ctx, "widget gizmo", 5)
+	if err != nil {
+		t.Fatalf("baseline search: %v", err)
+	}
+	if rankOf(base, "old-plan") != 0 {
+		t.Fatalf("baseline: old-plan should rank first, got %+v", base)
+	}
+
+	if err := es.Supersede(ctx, "old-plan", "new-plan"); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{SupersededPenalty: 0.001})
+	got, err := r.Search(ctx, "widget gizmo", 5)
+	if err != nil {
+		t.Fatalf("penalized search: %v", err)
+	}
+	oldRank, newRank := rankOf(got, "old-plan"), rankOf(got, "new-plan")
+	if oldRank < 0 || newRank < 0 {
+		t.Fatalf("both entries must still be retrievable: %+v", got)
+	}
+	if newRank >= oldRank {
+		t.Fatalf("superseded old-plan (rank %d) should rank below new-plan (rank %d): %+v", oldRank, newRank, got)
+	}
+}
+
+func TestRetriever_SupersededPenaltyExemptOnTemporalIntent(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedSupersedeCorpus(t)
+	if err := es.Supersede(ctx, "old-plan", "new-plan"); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	// A temporal-intent query wants the historical (superseded) fact, so the
+	// penalty is waived and the stronger loser keeps its lead.
+	r := memory.NewRetrieverWithOptions(es, vs, nil, nil, memory.RetrieverOptions{
+		SupersededPenalty: 0.001,
+		Now:               time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC),
+	})
+	got, err := r.Search(ctx, "widget gizmo last month", 5)
+	if err != nil {
+		t.Fatalf("temporal search: %v", err)
+	}
+	if rankOf(got, "old-plan") != 0 {
+		t.Fatalf("temporal-intent query must not penalize superseded entry: %+v", got)
+	}
+}
+
 type vectorFakeClient struct {
 	model   string
 	vectors map[string][]float32

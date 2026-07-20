@@ -27,11 +27,22 @@ type MergeDecision struct {
 	Into  MergedEntry `json:"into"`
 }
 
-// JudgeDecision is the structured keep/evict/merge verdict (design D5). Entries
-// not named in Evict or any merge are kept (conservative default).
+// ConflictDecision names a pair of contradictory entries: Loser is
+// non-destructively suppressed in favor of Winner (its superseded_by is set).
+// Both names must be live entries; the applier refuses pinned or unknown losers.
+type ConflictDecision struct {
+	Loser  string `json:"loser"`
+	Winner string `json:"winner"`
+}
+
+// JudgeDecision is the structured keep/evict/merge/conflict verdict (design D5,
+// extended for feature 003 US5). Entries not named in Evict, any merge, or any
+// conflict are kept (conservative default). Conflicts is omitted by older
+// three-class judge output and parses to an empty slice.
 type JudgeDecision struct {
-	Evict []string        `json:"evict"`
-	Merge []MergeDecision `json:"merge"`
+	Evict     []string           `json:"evict"`
+	Merge     []MergeDecision    `json:"merge"`
+	Conflicts []ConflictDecision `json:"conflicts"`
 }
 
 // ModelCaller performs one text-in/text-out model call. The runtime wires the

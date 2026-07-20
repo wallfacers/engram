@@ -336,6 +336,7 @@ func TestArmsFor(t *testing.T) {
 		"both":                {"fts", "hybrid"},
 		"hybrid,hybrid+assoc": {"hybrid", "hybrid+assoc"},
 		"hybrid+sweep":        {"hybrid+sweep"},
+		"hybrid+conflict":     {"hybrid+conflict"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -351,7 +352,7 @@ func TestArmsFor(t *testing.T) {
 			}
 		}
 	}
-	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+conflict", "hybrid+abstain", "hybrid,hybrid"} {
+	for _, in := range []string{"bogus", "hybrid+", "hybrid+bogus", "hybrid+abstain", "hybrid,hybrid"} {
 		if _, err := armsFor(in); err == nil {
 			t.Fatalf("armsFor(%q) should error", in)
 		}
@@ -362,14 +363,15 @@ func TestArmsFor(t *testing.T) {
 }
 
 func TestUnsupportedMechanismSuffixesExplainFuturePhase(t *testing.T) {
-	for _, arm := range []string{"hybrid+conflict", "hybrid+abstain"} {
-		_, err := armsFor(arm)
-		if err == nil || !strings.Contains(err.Error(), "not implemented until US4/US5") {
-			t.Fatalf("armsFor(%q) err = %v, want US4/US5 error", arm, err)
-		}
+	// abstain remains gated until its answer-prompt regime lands (T035); conflict
+	// is now supported.
+	if _, err := armsFor("hybrid+abstain"); err == nil || !strings.Contains(err.Error(), "not implemented until US5") {
+		t.Fatalf("armsFor(hybrid+abstain) err = %v, want US5 error", err)
 	}
-	if arms, err := armsFor("hybrid+temporal"); err != nil || len(arms) != 1 || arms[0] != "hybrid+temporal" {
-		t.Fatalf("temporal arm should be supported: arms=%v err=%v", arms, err)
+	for _, arm := range []string{"hybrid+temporal", "hybrid+conflict"} {
+		if arms, err := armsFor(arm); err != nil || len(arms) != 1 || arms[0] != arm {
+			t.Fatalf("%s arm should be supported: arms=%v err=%v", arm, arms, err)
+		}
 	}
 }
 
@@ -410,6 +412,26 @@ func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	pairedBaseline := optionsForRun(global, "hybrid", true)
 	if pairedBaseline.assoc || pairedBaseline.temporalScore || pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
 		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
+	}
+}
+
+func TestConflictArmEnablesSupersededPenalty(t *testing.T) {
+	// "conflict" is now a valid arm suffix (was rejected until US5).
+	arm := optionsForArm(options{supersededPenalty: 0.3}, "hybrid+conflict")
+	if !arm.conflictResolution {
+		t.Fatalf("hybrid+conflict did not enable conflict resolution: %+v", arm)
+	}
+	base := optionsForArm(options{supersededPenalty: 0.3}, "hybrid")
+	if base.conflictResolution {
+		t.Fatalf("paired baseline leaked conflict resolution: %+v", base)
+	}
+	// The retrieval penalty only reaches RetrieverOptions when conflict
+	// resolution is on; the baseline arm stays at zero for byte-for-byte parity.
+	if got := retrieverOptionsFor(arm).SupersededPenalty; got != 0.3 {
+		t.Fatalf("conflict arm SupersededPenalty = %v, want 0.3", got)
+	}
+	if got := retrieverOptionsFor(base).SupersededPenalty; got != 0 {
+		t.Fatalf("baseline arm SupersededPenalty = %v, want 0", got)
 	}
 }
 
