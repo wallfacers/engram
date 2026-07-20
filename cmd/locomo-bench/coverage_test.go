@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/store"
 )
 
 func newCoverageTestRuntime(t *testing.T, opt options) (conversation, *conversationRuntime, []string) {
@@ -208,4 +212,136 @@ func TestCoverageEmitsSelectorMetrics(t *testing.T) {
 			t.Fatalf("coverage JSON %s does not contain %q", raw, field)
 		}
 	}
+}
+
+func TestCoverageThreeArmPCICIntegrationUsesNoAnswerOrJudgeLLM(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	entries := memory.NewEntryStore(st.DB())
+	vectors := memory.NewVectorStore(st.DB())
+	chunkTurns := make(map[string][]string)
+	for i := 1; i <= 18; i++ {
+		name := fmt.Sprintf("fact-%02d", i)
+		content := fmt.Sprintf("Alice fact-%02d evidence", i)
+		if err := entries.Upsert(ctx, &memory.Entry{Name: name, Trigger: "Alice", Content: content, CharCount: len(content)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i <= 14; i++ {
+		name := fmt.Sprintf("chunk-%02d", i)
+		content := fmt.Sprintf("Alice chunk-%02d evidence", i)
+		if err := entries.Upsert(ctx, &memory.Entry{Name: name, Trigger: "Alice", Content: content, Category: "chunk", CharCount: len(content)}); err != nil {
+			t.Fatal(err)
+		}
+		turnID := fmt.Sprintf("D1:%d", i)
+		chunkTurns[name] = []string{turnID}
+	}
+	if err := entries.PutEntities(ctx, "chunk-13", []string{"Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := &coverageFixtureReranker{}
+	arms := []string{"hybrid+rerank", "hybrid+rerank+pcic", "hybrid+rerank+oracle"}
+	retrievers := make(map[string]*memory.Retriever, len(arms))
+	rereranked := make(map[string]bool, len(arms))
+	for _, arm := range arms {
+		retrievers[arm] = memory.NewRetrieverWithOptions(entries, vectors, nil, rr, memory.RetrieverOptions{})
+		rereranked[arm] = true
+	}
+	meta := &PCICMeta{
+		Header: PCICMetaHeader{AnnotateModel: "fixture", DatasetFingerprint: "fixture", Count: 1},
+		Spans: map[string]SpanClaim{
+			"D1:13": claim("D1:13", "alice", "job", "acme", "current"),
+		},
+	}
+	runtime := &conversationRuntime{
+		store:      st,
+		entries:    entries,
+		retrievers: retrievers,
+		reranked:   rereranked,
+		chunkTurns: chunkTurns,
+	}
+	conv := conversation{ID: 0, QA: []locomoQA{{
+		Question:     "Alice",
+		Evidence:     []string{"D1:1", "D1:13"},
+		Category:     3,
+		CategoryName: "multi-hop",
+	}}}
+	opt := options{
+		datasetFormat: "locomo",
+		retrieval:     strings.Join(arms, ","),
+		topK:          30,
+		chunkQuota:    12,
+		chunks:        true,
+		coverageOnly:  true,
+		concurrency:   1,
+		pcicMeta:      meta,
+	}
+	reports, err := computeCoverage(ctx, opt, []conversation{conv}, []*conversationRuntime{runtime}, arms, slog.Default())
+	if err != nil {
+		t.Fatalf("computeCoverage: %v", err)
+	}
+	if rr.calls != len(arms) {
+		t.Fatalf("reranker calls = %d, want one retrieval-only call per arm (%d)", rr.calls, len(arms))
+	}
+	if len(reports) != 3 {
+		t.Fatalf("reports = %d, want 3", len(reports))
+	}
+	byArm := make(map[string]coverageArmReport, len(reports))
+	for _, report := range reports {
+		byArm[report.Arm] = report
+	}
+	assertCoverageMetrics(t, byArm["hybrid+rerank"], 0.5, 1, 1, 0)
+	assertCoverageMetrics(t, byArm["hybrid+rerank+pcic"], 1, 1, 0, 0)
+	assertCoverageMetrics(t, byArm["hybrid+rerank+oracle"], 1, 1, 0, 1)
+}
+
+func assertCoverageMetrics(t *testing.T, report coverageArmReport, turnRecall, survival, complementDrop float64, anchorViolation int) {
+	t.Helper()
+	if report.Overall == nil || report.Overall.N != 1 {
+		t.Fatalf("arm %q report = %+v", report.Arm, report)
+	}
+	got := report.Overall
+	if got.TurnRecall != turnRecall || got.SelectionSurvival != survival || got.ComplementDrop != complementDrop || got.AnchorViolation != anchorViolation {
+		t.Fatalf("arm %q metrics = turn:%v survival:%v drop:%v anchor:%d, want %v/%v/%v/%d",
+			report.Arm, got.TurnRecall, got.SelectionSurvival, got.ComplementDrop, got.AnchorViolation,
+			turnRecall, survival, complementDrop, anchorViolation)
+	}
+	category := report.ByCategory["multi-hop"]
+	if category == nil || category.TurnRecall != turnRecall || category.SelectionSurvival != survival || category.ComplementDrop != complementDrop || category.AnchorViolation != anchorViolation {
+		t.Fatalf("arm %q category metrics = %+v", report.Arm, category)
+	}
+}
+
+type coverageFixtureReranker struct {
+	calls int
+}
+
+func (*coverageFixtureReranker) Model() string { return "fixture" }
+
+func (r *coverageFixtureReranker) Rerank(_ context.Context, _ string, documents []string, topN int) ([]embedding.RankedDoc, error) {
+	r.calls++
+	ranked := make([]embedding.RankedDoc, len(documents))
+	for i, document := range documents {
+		score := 0.0
+		var number int
+		switch {
+		case strings.Contains(document, "chunk-"):
+			_, _ = fmt.Sscanf(document, "Alice chunk-%d evidence", &number)
+			score = 100 - float64(number)
+		case strings.Contains(document, "fact-"):
+			_, _ = fmt.Sscanf(document, "Alice fact-%d evidence", &number)
+			score = 200 - float64(number)
+		}
+		ranked[i] = embedding.RankedDoc{Index: i, Score: score}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].Score > ranked[j].Score })
+	if topN > 0 && topN < len(ranked) {
+		ranked = ranked[:topN]
+	}
+	return ranked, nil
 }
