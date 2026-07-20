@@ -71,23 +71,27 @@ func TestPCICSiblingPreservesBaselineRetrievalBytes(t *testing.T) {
 		return r
 	}
 
-	singleOpt := optionsForRun(options{}, "hybrid+rerank", false)
-	single := callRetrieveWithOptionalSelector(t, ctx, buildRetriever(singleOpt), "Alice", 3, 2)
+	for _, baselineArm := range []string{"hybrid", "hybrid+rerank"} {
+		t.Run(baselineArm, func(t *testing.T) {
+			singleOpt := optionsForRun(options{}, baselineArm, false)
+			single := callRetrieveWithOptionalSelector(t, ctx, buildRetriever(singleOpt), "Alice", 3, 2)
 
-	arms := []string{"hybrid+rerank", "hybrid+rerank+pcic"}
-	pairedOpt := optionsForRun(options{}, arms[0], len(arms) > 1)
-	paired := callRetrieveWithOptionalSelector(t, ctx, buildRetriever(pairedOpt), "Alice", 3, 2)
+			arms := []string{baselineArm, "hybrid+rerank+pcic"}
+			pairedOpt := optionsForRun(options{}, arms[0], len(arms) > 1)
+			paired := callRetrieveWithOptionalSelector(t, ctx, buildRetriever(pairedOpt), "Alice", 3, 2)
 
-	singleJSON, err := json.Marshal(single)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pairedJSON, err := json.Marshal(paired)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(singleJSON) != string(pairedJSON) {
-		t.Fatalf("baseline retrieval changed with PCIC sibling:\nalone:   %s\nsibling: %s", singleJSON, pairedJSON)
+			singleJSON, err := json.Marshal(single)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pairedJSON, err := json.Marshal(paired)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(singleJSON) != string(pairedJSON) {
+				t.Fatalf("%s retrieval changed with PCIC sibling:\nalone:   %s\nsibling: %s", baselineArm, singleJSON, pairedJSON)
+			}
+		})
 	}
 }
 
@@ -266,6 +270,32 @@ func TestPCICSelectRespectsSlotAndTokenBudgets(t *testing.T) {
 	}
 	if tokens > 6 {
 		t.Fatalf("selected token cost %d exceeds ceiling 6", tokens)
+	}
+}
+
+func TestPCICSelectorDegradesToRerankOrder(t *testing.T) {
+	candidates := []memory.Result{
+		pcicResult("chunk-a", 1.0, "one"),
+		pcicResult("chunk-b", 0.9, "two"),
+		pcicResult("chunk-c", 0.8, "three"),
+		pcicResult("chunk-d", 0.7, "four"),
+	}
+	meta := &PCICMeta{Header: PCICMetaHeader{Count: 0}, Spans: map[string]SpanClaim{}}
+	for _, tc := range []struct {
+		name     string
+		meta     *PCICMeta
+		reranked bool
+	}{
+		{name: "missing metadata", meta: nil, reranked: true},
+		{name: "missing reranker", meta: meta, reranked: false},
+		{name: "unannotated spans", meta: meta, reranked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := &conversationRuntime{reranked: map[string]bool{"hybrid+rerank+pcic": tc.reranked}}
+			selector, _ := selectorForArm(runtime, "hybrid+rerank+pcic", options{pcic: true, pcicMeta: tc.meta}, nil, false)
+			got := selector(context.Background(), "Alice", candidates, 3)
+			assertNames(t, got, "chunk-a", "chunk-b", "chunk-c")
+		})
 	}
 }
 
