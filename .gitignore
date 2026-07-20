@@ -11,6 +11,8 @@
 *.test
 *.out
 coverage.*
+!coverage.go
+!coverage_test.go
 cmd/locomo-bench/locomo-bench
 /locomo-bench
 
