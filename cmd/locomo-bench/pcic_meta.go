@@ -159,24 +159,17 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 	var (
 		mu       sync.Mutex
 		spans    = make(map[string]SpanClaim, len(jobs))
-		firstErr error
+		failed   int
+		canceled bool
+		lastErr  error
 		wg       sync.WaitGroup
 		sem      = make(chan struct{}, concurrency)
 	)
 	for _, j := range jobs {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			mu.Lock()
-			if firstErr == nil {
-				firstErr = ctx.Err()
-			}
+			canceled = true
 			mu.Unlock()
-		default:
-		}
-		mu.Lock()
-		stop := firstErr != nil
-		mu.Unlock()
-		if stop {
 			break
 		}
 		wg.Add(1)
@@ -188,8 +181,14 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("annotate conv %d turn %s: %w", convID, tn.DiaID, err)
+				// A one-time pass over thousands of turns must survive a transient
+				// per-turn relay error: skip this span (absent = role "unknown" =
+				// safe degradation) rather than discard every other annotation.
+				// A widespread outage is caught by the failure-rate threshold below.
+				failed++
+				lastErr = err
+				if logger != nil {
+					logger.Warn("pcic annotate turn skipped", "conv", convID, "turn", tn.DiaID, "err", err)
 				}
 				return
 			}
@@ -204,11 +203,21 @@ func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerpr
 		}(j.convID, j.tn)
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return PCICMeta{}, firstErr
+	if canceled || ctx.Err() != nil {
+		return PCICMeta{}, ctx.Err()
+	}
+	// Tolerate scattered transient failures (up to ~10%), but fail loudly on a
+	// real outage so a near-empty sidecar never silently degrades the selector to
+	// a no-op. A small floor keeps a couple of blips on a tiny run from aborting.
+	threshold := len(jobs) / 10
+	if threshold < 3 {
+		threshold = 3
+	}
+	if failed > threshold {
+		return PCICMeta{}, fmt.Errorf("pcic annotation aborted: %d/%d turns failed (last: %w)", failed, len(jobs), lastErr)
 	}
 	if logger != nil {
-		logger.Info("pcic annotation complete", "turns", len(jobs), "claims", len(spans))
+		logger.Info("pcic annotation complete", "turns", len(jobs), "claims", len(spans), "skipped", failed)
 	}
 	return PCICMeta{
 		Header: PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint, Count: len(spans)},

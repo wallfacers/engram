@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -143,6 +144,58 @@ func spanKeys(meta PCICMeta) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestPCICAnnotateToleratesTransientTurnFailure reproduces the exact production
+// failure: one turn hits a transient relay 502. The one-time pass must skip that
+// span (absent = safe degradation) and keep every other claim, never aborting
+// thousands of successful annotations over one blip.
+func TestPCICAnnotateToleratesTransientTurnFailure(t *testing.T) {
+	convs := []conversation{{ID: 0, Sessions: []session{{Index: 1, Turns: []turn{
+		{Speaker: "Alice", Text: "Alice is an engineer.", DiaID: "D1:1"},
+		{Speaker: "Bob", Text: "Bob teaches.", DiaID: "D1:2"},
+		{Speaker: "Cara", Text: "Cara paints.", DiaID: "D1:3"},
+	}}}}}
+	call := func(_ context.Context, _, user string) (string, error) {
+		if strings.Contains(user, "D1:2") {
+			return "", fmt.Errorf("provider/openai: server_error (HTTP 502): Bad Gateway")
+		}
+		if strings.Contains(user, "D1:1") {
+			return `{"entity":"Alice","slot":"job","value":"engineer","polarity":"affirm","time_state":"current"}`, nil
+		}
+		return `{"entity":"Cara","slot":"hobby","value":"painting","polarity":"affirm","time_state":"current"}`, nil
+	}
+	meta, err := annotatePCICMeta(context.Background(), convs, "gpt-5.6-luna", "sha256:fixture", call, 1, slog.Default())
+	if err != nil {
+		t.Fatalf("one transient failure must not abort the pass: %v", err)
+	}
+	if len(meta.Spans) != 2 {
+		t.Fatalf("got %d spans, want 2 (the 502 turn skipped): %v", len(meta.Spans), spanKeys(meta))
+	}
+	if _, ok := meta.Spans[pcicSpanKey(0, "D1:2")]; ok {
+		t.Fatalf("failed turn D1:2 must be absent")
+	}
+	if _, ok := meta.Spans[pcicSpanKey(0, "D1:1")]; !ok {
+		t.Fatalf("successful turn D1:1 must survive")
+	}
+}
+
+// TestPCICAnnotateAbortsOnWidespreadFailure guards the other side: a real relay
+// outage (every turn fails) must fail loudly, not silently write an empty
+// sidecar that later degrades the selector to a no-op.
+func TestPCICAnnotateAbortsOnWidespreadFailure(t *testing.T) {
+	turns := make([]turn, 0, 40)
+	for i := 1; i <= 40; i++ {
+		turns = append(turns, turn{Speaker: "X", Text: "text", DiaID: fmt.Sprintf("D1:%d", i)})
+	}
+	convs := []conversation{{ID: 0, Sessions: []session{{Index: 1, Turns: turns}}}}
+	call := func(_ context.Context, _, _ string) (string, error) {
+		return "", fmt.Errorf("provider/openai: server_error (HTTP 502): Bad Gateway")
+	}
+	_, err := annotatePCICMeta(context.Background(), convs, "gpt-5.6-luna", "sha256:fixture", call, 2, slog.Default())
+	if err == nil {
+		t.Fatal("a total outage must fail the pass, not yield an empty sidecar")
+	}
 }
 
 func TestPCICAnnotateWritesNoEngineState(t *testing.T) {
