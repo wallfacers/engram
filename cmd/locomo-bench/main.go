@@ -87,6 +87,8 @@ type options struct {
 	rerank               bool
 	pcic                 bool
 	oracle               bool
+	pcicAnnotate         bool
+	pcicFillTurns        string
 	pcicMetaPath         string
 	pcicMeta             *PCICMeta
 	selector             chunkSelector
@@ -140,6 +142,8 @@ func run() error {
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
+	flag.BoolVar(&opt.pcicAnnotate, "pcic-annotate", false, "one-time offline pass: extract per-turn typed claims via the annotation model and write the pcic_meta sidecar, then exit (idempotent: skips when a matching sidecar already exists)")
+	flag.StringVar(&opt.pcicFillTurns, "pcic-fill-turns", "", "with --pcic-annotate: re-annotate ONLY these conv-scoped turn keys (comma-separated, e.g. conv-0/D15:1,conv-0/D14:32) and merge into the existing sidecar — pays for exactly those turns")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
@@ -237,6 +241,10 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if sampledConversations > 0 {
 		logger.Info("sampling conversations", "limit", sampledConversations)
+	}
+
+	if opt.pcicAnnotate {
+		return runPCICAnnotate(opt, convs, apiKey, baseURL, logger)
 	}
 
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
@@ -440,6 +448,112 @@ func run() error {
 	}
 	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
 	return nil
+}
+
+// runPCICAnnotate is the one-time offline `--pcic-annotate` pass. It extracts
+// per-turn typed claims through the annotation model and writes the pcic_meta
+// sidecar, touching no engine store. It is idempotent: a sidecar whose header
+// already matches the annotation model + dataset fingerprint is a cache hit and
+// the pass exits without spending tokens.
+func runPCICAnnotate(opt options, convs []conversation, apiKey, baseURL string, logger *slog.Logger) error {
+	model := envOr("PCIC_ANNOTATE_MODEL", "gpt-5.6-luna")
+	fingerprint, err := pcicDatasetFingerprint(opt.dataPath)
+	if err != nil {
+		return err
+	}
+	metaPath := opt.pcicMetaPath
+	if metaPath == "" {
+		baseDir := opt.storeDir
+		if baseDir == "" {
+			baseDir = opt.runDir
+		}
+		if baseDir == "" {
+			return fmt.Errorf("--pcic-annotate needs --pcic-meta, --store-dir, or --run-dir to place the sidecar")
+		}
+		metaPath = filepath.Join(baseDir, "pcic_meta.json")
+	}
+	expected := PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint}
+	// The full-pass cache-hit short-circuit must NOT fire in fill mode: gap-fill
+	// exists precisely to patch turns into an already-written sidecar.
+	if opt.pcicFillTurns == "" {
+		if existing, err := loadPCICMeta(metaPath, expected, logger); err == nil && existing != nil {
+			logger.Info("pcic_meta cache hit; annotation skipped", "path", metaPath, "spans", len(existing.Spans))
+			return nil
+		}
+	}
+
+	// Build one gated caller per endpoint. LOCOMO_BASE_URL_FALLBACK (optional)
+	// is a backup relay base URL: when the primary returns a transient error
+	// mid-pass (e.g. the relay's upstream model backend 502s for a window), the
+	// annotation falls over to the backup instead of skipping the span. Both
+	// share the credential and the semaphore.
+	sem := make(chan struct{}, opt.concurrency)
+	primaryProv, err := buildAnnotateProvider(apiKey, baseURL, opt.maxTokens)
+	if err != nil {
+		return err
+	}
+	callers := []modelCaller{gate(sem, newModelCaller(primaryProv, model, opt.maxTokens))}
+	if fallbackURL := os.Getenv("LOCOMO_BASE_URL_FALLBACK"); fallbackURL != "" {
+		fallbackProv, err := buildAnnotateProvider(apiKey, fallbackURL, opt.maxTokens)
+		if err != nil {
+			return err
+		}
+		callers = append(callers, gate(sem, newModelCaller(fallbackProv, model, opt.maxTokens)))
+		logger.Info("pcic annotation failover enabled", "fallback", fallbackURL)
+	}
+	call := failoverModelCaller(callers...)
+
+	// Targeted gap-fill: patch only the requested turns into the existing sidecar
+	// (e.g. the handful a transient relay blip left unannotated) — never re-pay
+	// for the whole dataset.
+	if opt.pcicFillTurns != "" {
+		keys := strings.Split(opt.pcicFillTurns, ",")
+		existing, err := loadPCICMeta(metaPath, PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint}, logger)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return fmt.Errorf("--pcic-fill-turns needs an existing matching sidecar at %s", metaPath)
+		}
+		logger.Info("pcic fill starting", "turns", len(keys), "path", metaPath)
+		meta, filled, missing, err := fillPCICMeta(context.Background(), convs, *existing, keys, call, logger)
+		if err != nil {
+			return err
+		}
+		if err := savePCICMeta(metaPath, meta); err != nil {
+			return err
+		}
+		logger.Info("pcic fill complete", "filled", filled, "missing", missing, "spans", len(meta.Spans))
+		if len(missing) > 0 {
+			return fmt.Errorf("pcic fill left %d turn(s) unfilled: %v", len(missing), missing)
+		}
+		return nil
+	}
+
+	logger.Info("pcic annotation starting", "model", model, "conversations", len(convs), "path", metaPath)
+	meta, err := annotatePCICMeta(context.Background(), convs, model, fingerprint, call, opt.concurrency, logger)
+	if err != nil {
+		return err
+	}
+	if err := savePCICMeta(metaPath, meta); err != nil {
+		return err
+	}
+	logger.Info("pcic_meta written", "path", metaPath, "spans", len(meta.Spans))
+	return nil
+}
+
+// buildAnnotateProvider constructs a provider for one relay base URL, honoring
+// LOCOMO_PROVIDER. Used by the annotation pass to build primary + fallback
+// endpoints that share the same credential.
+func buildAnnotateProvider(apiKey, baseURL string, maxTokens int) (provider.Provider, error) {
+	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
+	case "openai":
+		return openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true}), nil
+	case "anthropic", "":
+		return anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: maxTokens}), nil
+	default:
+		return nil, fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	}
 }
 
 func recordBenchUsage(ledger *costLedger, role, model string, usage provider.Usage) {
@@ -917,7 +1031,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
-				armOpt.selector, _ = selectorForArm(runtime, s.name, armOpt, nil, false)
+				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
 				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{

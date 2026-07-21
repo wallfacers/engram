@@ -36,6 +36,10 @@ type PCICSelectionInput struct {
 	CandidateEntities map[string][]string
 	ChunkTurns        map[string][]string
 	Meta              *PCICMeta
+	// SpanKey maps a chunk's bare dialogue-turn id to its sidecar key. It scopes
+	// the lookup to the current conversation (dia_ids collide across
+	// conversations). Nil means identity — used by unit tests with bare keys.
+	SpanKey func(string) string
 }
 
 type pcicSelectionTrace struct {
@@ -43,10 +47,11 @@ type pcicSelectionTrace struct {
 	Selected   []memory.Result
 }
 
-func selectorForArm(runtime *conversationRuntime, arm string, opt options, goldTurns []string, traceSelection bool) (chunkSelector, *pcicSelectionTrace) {
+func selectorForArm(runtime *conversationRuntime, convID int, arm string, opt options, goldTurns []string, traceSelection bool) (chunkSelector, *pcicSelectionTrace) {
 	if runtime == nil || (!traceSelection && !opt.pcic && !opt.oracle) {
 		return nil, nil
 	}
+	spanKey := func(diaID string) string { return pcicSpanKey(convID, diaID) }
 	trace := &pcicSelectionTrace{}
 	selector := func(ctx context.Context, query string, candidates []memory.Result, budget int) []memory.Result {
 		var selected []memory.Result
@@ -63,6 +68,7 @@ func selectorForArm(runtime *conversationRuntime, arm string, opt options, goldT
 					CandidateEntities: signals.CandidateEntities,
 					ChunkTurns:        runtime.chunkTurns,
 					Meta:              opt.pcicMeta,
+					SpanKey:           spanKey,
 				})
 			} else {
 				selected = pcicSelect(PCICSelectionInput{Candidates: candidates, Budget: budget})
@@ -164,7 +170,11 @@ func claimsForChunk(candidate memory.Result, input PCICSelectionInput) []SpanCla
 	turns := input.ChunkTurns[candidate.Name]
 	claims := make([]SpanClaim, 0, len(turns))
 	for _, turnID := range turns {
-		if claim, ok := input.Meta.Spans[turnID]; ok {
+		key := turnID
+		if input.SpanKey != nil {
+			key = input.SpanKey(turnID)
+		}
+		if claim, ok := input.Meta.Spans[key]; ok {
 			claims = append(claims, claim)
 		}
 	}

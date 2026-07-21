@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/wallfacers/engram/memory"
 )
 
 func pcicDatasetFingerprint(path string) (string, error) {
@@ -16,6 +23,87 @@ func pcicDatasetFingerprint(path string) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("sha256:%x", sum), nil
+}
+
+// pcicSpanKey scopes a dialogue-turn id to its conversation. LoCoMo dia_ids
+// (e.g. "D1:1") repeat across conversations — 5882 total dia_ids collapse to
+// 1033 globally unique — so the single global sidecar keys every claim by
+// conversation to keep them distinct. The selector rebuilds the same key from
+// the conversation it is retrieving within (see PCICSelectionInput.SpanKey).
+func pcicSpanKey(convID int, diaID string) string {
+	return fmt.Sprintf("conv-%d/%s", convID, diaID)
+}
+
+// parsePCICSpanKey is the inverse of pcicSpanKey: "conv-3/D15:1" → (3, "D15:1").
+func parsePCICSpanKey(key string) (int, string, bool) {
+	rest, ok := strings.CutPrefix(key, "conv-")
+	if !ok {
+		return 0, "", false
+	}
+	slash := strings.IndexByte(rest, '/')
+	if slash <= 0 || slash == len(rest)-1 {
+		return 0, "", false
+	}
+	convID, err := strconv.Atoi(rest[:slash])
+	if err != nil {
+		return 0, "", false
+	}
+	return convID, rest[slash+1:], true
+}
+
+// fillPCICMeta re-annotates only the requested conv-scoped turn keys and merges
+// them into an existing sidecar — paying for exactly those turns, never the
+// whole dataset. Used to patch the handful of turns a transient relay blip left
+// unannotated. A turn that still fails (or is claimless) is reported in
+// `missing`, not silently dropped; existing spans are preserved.
+func fillPCICMeta(ctx context.Context, convs []conversation, existing PCICMeta, keys []string, call modelCaller, logger *slog.Logger) (PCICMeta, int, []string, error) {
+	want := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			want[k] = struct{}{}
+		}
+	}
+	spans := make(map[string]SpanClaim, len(existing.Spans)+len(want))
+	for k, v := range existing.Spans {
+		spans[k] = v
+	}
+	filled := 0
+	for _, conv := range convs {
+		for _, sess := range conv.Sessions {
+			for _, tn := range sess.Turns {
+				key := pcicSpanKey(conv.ID, tn.DiaID)
+				if _, ok := want[key]; !ok {
+					continue
+				}
+				claim, ok, err := annotateTurn(ctx, call, tn)
+				if err != nil {
+					if logger != nil {
+						logger.Warn("pcic fill turn failed", "turn", key, "err", err)
+					}
+					continue
+				}
+				if ok {
+					claim.SpanID = key
+					spans[key] = claim
+					filled++
+				}
+			}
+		}
+	}
+	// A requested key still absent from spans could not be filled (persistent
+	// failure, a claimless turn, or a turn not present in the dataset). Report
+	// it rather than dropping it silently.
+	var missing []string
+	for k := range want {
+		if _, ok := spans[k]; !ok {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	meta := existing
+	meta.Spans = spans
+	meta.Header.Count = len(spans)
+	return meta, filled, missing, nil
 }
 
 type ClaimPolarity string
@@ -88,6 +176,190 @@ func loadPCICMeta(path string, expected PCICMetaHeader, logger *slog.Logger) (*P
 func pcicHeadersMatch(got, expected PCICMetaHeader) bool {
 	return (expected.AnnotateModel == "" || got.AnnotateModel == expected.AnnotateModel) &&
 		(expected.DatasetFingerprint == "" || got.DatasetFingerprint == expected.DatasetFingerprint)
+}
+
+// pcicAnnotatePrompt is the bench-local one-time annotation template. It lives
+// in the bench package, NOT memory/prompt/, so the offline annotation pass adds
+// nothing to the engine contract (Constitution II; plan R3). It extracts one
+// typed claim per dialogue turn — the query-time path stays LLM-free.
+const pcicAnnotatePrompt = `You extract ONE typed factual claim from a single dialogue turn for offline memory indexing. Read the turn and output a single JSON object with these fields:
+- "entity": the normalized subject the claim is about (usually a person's name); "" if the turn asserts no durable fact
+- "slot": the attribute or relation name (e.g. "job", "location", "owns_pet"); "" if none
+- "value": the slot's value
+- "polarity": "affirm" if the turn asserts the value, "negate" if it denies it
+- "time_state": a coarse temporal label — "past", "current", or a period key — distinguishing state changes
+- "source_turn_ids": array of turn ids the claim is grounded in (usually just this turn's id)
+
+Rules:
+- Output ONLY the JSON object, nothing else. No markdown, no explanation.
+- If the turn carries no durable factual claim (small talk, a question, an acknowledgement), output {"entity":""}.`
+
+// pcicClaimJSON is the raw shape the annotation model returns per turn.
+type pcicClaimJSON struct {
+	Entity        string   `json:"entity"`
+	Slot          string   `json:"slot"`
+	Value         string   `json:"value"`
+	Polarity      string   `json:"polarity"`
+	TimeState     string   `json:"time_state"`
+	SourceTurnIDs []string `json:"source_turn_ids"`
+}
+
+// annotatePCICMeta runs the one-time offline annotation pass: one typed claim
+// per dialogue turn via the injected model caller. It opens no engine store and
+// writes no engine state — the result is a pure sidecar map keyed by dialogue
+// id. Turns the model reports as claimless are omitted (an absent span is role
+// "unknown" at selection time). concurrency bounds in-flight annotation calls;
+// the caller must be safe for concurrent use.
+func annotatePCICMeta(ctx context.Context, convs []conversation, model, fingerprint string, call modelCaller, concurrency int, logger *slog.Logger) (PCICMeta, error) {
+	type job struct {
+		convID int
+		tn     turn
+	}
+	var jobs []job
+	for _, conv := range convs {
+		for _, sess := range conv.Sessions {
+			for _, tn := range sess.Turns {
+				if strings.TrimSpace(tn.DiaID) == "" {
+					continue
+				}
+				jobs = append(jobs, job{convID: conv.ID, tn: tn})
+			}
+		}
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	var (
+		mu       sync.Mutex
+		spans    = make(map[string]SpanClaim, len(jobs))
+		failed   int
+		canceled bool
+		lastErr  error
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, concurrency)
+	)
+	for _, j := range jobs {
+		if ctx.Err() != nil {
+			mu.Lock()
+			canceled = true
+			mu.Unlock()
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(convID int, tn turn) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			claim, ok, err := annotateTurn(ctx, call, tn)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				// A one-time pass over thousands of turns must survive a transient
+				// per-turn relay error: skip this span (absent = role "unknown" =
+				// safe degradation) rather than discard every other annotation.
+				// A widespread outage is caught by the failure-rate threshold below.
+				failed++
+				lastErr = err
+				if logger != nil {
+					logger.Warn("pcic annotate turn skipped", "conv", convID, "turn", tn.DiaID, "err", err)
+				}
+				return
+			}
+			if ok {
+				// Key by conversation: LoCoMo dia_ids are unique only within one
+				// conversation, so the global sidecar must scope them or claims
+				// collide across conversations.
+				key := pcicSpanKey(convID, tn.DiaID)
+				claim.SpanID = key
+				spans[key] = claim
+			}
+		}(j.convID, j.tn)
+	}
+	wg.Wait()
+	if canceled || ctx.Err() != nil {
+		return PCICMeta{}, ctx.Err()
+	}
+	// Tolerate scattered transient failures (up to ~10%), but fail loudly on a
+	// real outage so a near-empty sidecar never silently degrades the selector to
+	// a no-op. A small floor keeps a couple of blips on a tiny run from aborting.
+	threshold := len(jobs) / 10
+	if threshold < 3 {
+		threshold = 3
+	}
+	if failed > threshold {
+		return PCICMeta{}, fmt.Errorf("pcic annotation aborted: %d/%d turns failed (last: %w)", failed, len(jobs), lastErr)
+	}
+	if logger != nil {
+		logger.Info("pcic annotation complete", "turns", len(jobs), "claims", len(spans), "skipped", failed)
+	}
+	return PCICMeta{
+		Header: PCICMetaHeader{AnnotateModel: model, DatasetFingerprint: fingerprint, Count: len(spans)},
+		Spans:  spans,
+	}, nil
+}
+
+// annotateTurn annotates a single dialogue turn. ok=false means the model
+// reported no durable claim (or its output could not be parsed) — the span is
+// then simply absent from the sidecar.
+func annotateTurn(ctx context.Context, call modelCaller, tn turn) (SpanClaim, bool, error) {
+	user := fmt.Sprintf("Turn id: %s\nSpeaker: %s\nText: %s", tn.DiaID, tn.Speaker, tn.Text)
+	raw, err := call(ctx, pcicAnnotatePrompt, user)
+	if err != nil {
+		return SpanClaim{}, false, err
+	}
+	parsed, ok := parsePCICClaim(raw)
+	if !ok {
+		return SpanClaim{}, false, nil
+	}
+	entity := memory.EntityNorm(parsed.Entity)
+	if entity == "" {
+		return SpanClaim{}, false, nil
+	}
+	polarity := PolarityAffirm
+	if strings.EqualFold(strings.TrimSpace(parsed.Polarity), string(PolarityNegate)) {
+		polarity = PolarityNegate
+	}
+	source := parsed.SourceTurnIDs
+	if len(source) == 0 {
+		source = []string{tn.DiaID}
+	}
+	return SpanClaim{
+		SpanID:        tn.DiaID,
+		Entity:        entity,
+		Slot:          strings.TrimSpace(parsed.Slot),
+		Value:         strings.TrimSpace(parsed.Value),
+		Polarity:      polarity,
+		TimeState:     strings.TrimSpace(parsed.TimeState),
+		SourceTurnIDs: source,
+	}, true, nil
+}
+
+// parsePCICClaim tolerates markdown code fences and stray prose around the JSON
+// object the annotation model returns. ok=false when no claim object is present
+// or the entity is empty (claimless turn).
+func parsePCICClaim(raw string) (pcicClaimJSON, bool) {
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```")
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+	}
+	start := strings.IndexByte(s, '{')
+	end := strings.LastIndexByte(s, '}')
+	if start < 0 || end < start {
+		return pcicClaimJSON{}, false
+	}
+	var c pcicClaimJSON
+	if err := json.Unmarshal([]byte(s[start:end+1]), &c); err != nil {
+		return pcicClaimJSON{}, false
+	}
+	if strings.TrimSpace(c.Entity) == "" {
+		return pcicClaimJSON{}, false
+	}
+	return c, true
 }
 
 func validatePCICMeta(meta PCICMeta) error {
