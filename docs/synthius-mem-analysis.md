@@ -1,6 +1,7 @@
 # Synthius-Mem 分析与在 engram 上的可行性评估(2026-07)
 
-> 🧭 **状态**: 存档(决策记录) · **目标**: 判断闭源论文 Synthius-Mem 抄什么/不抄什么。
+> 🧭 **状态**: 存档(决策记录) · **目标**: 判断闭源论文 Synthius-Mem 抄什么/不抄什么;
+> **§6 附 Mem0 / MemOS 开源实现的源码核查**(论文愿景 vs 实际落地)。
 > P0 洞察(检索空结果=拒答)已落地为 **spec 006 abstention-gate**;可执行 backlog 的
 > **正本**见 [`memory-strategy.md`](./memory-strategy.md) 附二,本文不重复维护。
 >
@@ -210,7 +211,92 @@ Synthius 约 5,200——约 5× 节省。
 **不该做的"扩"**:把六域扩成 7/10/20 个内容域——taxonomy 工程 treadmill,
 边际递减,且违背文献共识与宪法(§4 已论证)。
 
-## 6. 对论文线(`memory-strategy.md` 决策二)的弹药
+## 6. Mem0 / MemOS 开源实现核查(源码精读,2026-07)
+
+> 🧭 与 §2–§5 的闭源论文分析互补:这里核的是**两个头部开源系统的实际代码落地**
+> (不是论文愿景)。上游源码已下载到 `.locomo-run/upstream-src/`(gitignored),逐条
+> 对着行号核实,**未改动 engram 任何文件**。
+>
+> **诚实前提**:结论来自论文 + 静态源码交叉阅读,已核验两个工作树干净、commit 可
+> 复现;**未安装完整依赖、未跑其测试**。
+> - Mem0 `mem0` @ `dd5f7e3`(v2.0.12);另拉 v0.1.88 对照 2025 论文实现。
+> - MemOS `memos` @ `554bb98`(v2.0.24)。
+
+### 6.1 Mem0:论文期 → 现在,已从"LLM 破坏性更新"退回 ADD-only
+
+论文期 v0.1.88 写入是**双 LLM**:抽取 facts → 逐条向量近邻 → 第二次 LLM 判
+ADD/UPDATE/DELETE/NONE → 改向量库 + SQLite 历史 +(可选)Neo4j 实体图。为防 LLM 编
+UUID,先把真 UUID 映射成 0/1/2… 判完再映回。论文写检索 top-10、代码实际 top-5(论文
+与源码有细节差异)。**主要风险:破坏性 UPDATE/DELETE 交给 LLM,误判即信息丢失。**
+
+现在 v2.0.12 已改 **V3 ADD-only**(`mem0/memory/main.py:849` `_add_to_vector_store`;
+`main.py:912` 固定 `ADDITIVE_EXTRACTION_PROMPT`;`prompts.py:472` "Your sole operation
+is ADD")。自动写入流程:
+
+> 对话 + 最近 10 条消息(`main.py:890` `limit=10`,注:prompt 文案写 "up to 20" 但
+> 不生效)+ top-10 相关旧记忆(`main.py:896`)→ 单次 LLM 提取(`main.py:926`)→
+> 批量 embedding(Phase 3)→ **MD5 去重**(仅对 top-10 候选 + 本批次,**非全库**,
+> `main.py:990`)→ 批量写入(Phase 6)→ spaCy 实体抽取(`main.py:1059`)→ 实体集合
+> 关联 memory IDs
+
+旧的 UPDATE/DELETE 提示词(`prompts.py:176-290`)在 main.py **零引用**;显式
+`update()`/`delete()` API 仍在(`main.py:1785`/`1839`),只是自动流程不再破坏性改写。
+
+**检索**(`main.py:1598` `_search_vector_store`)融合 semantic + BM25(sigmoid 归一,
+`scoring.py:54`)+ entity boost(权重 0.5)+ 可选 reranker(实际在公共 `search()`
+`main.py:1470` 层应用,不在 1598 融合函数内)。**两个硬限制:**
+
+- **候选集只从 semantic 构建**(`main.py:1636` "Build candidate set from semantic
+  results"):BM25/entity 只能按 id 给已入选的语义候选**加分**,**无法召回被向量
+  完全漏掉的条目**;semantic threshold 在融合**前**过滤(`scoring.py:110`,门的是
+  纯语义分)。
+- **无 temporal scoring**:`reference_date` 直接 `raise ValueError`(`main.py:1402`,
+  比"报告不支持"更硬),README 所述完整时间打分 OSS 不支持。
+
+### 6.2 MemOS:论文愿景大面积默认关闭 / 占位
+
+核心 `MOSCore`(`src/memos/mem_os/core.py:38`)链路:用户/权限 → MemReader 解析 →
+TextualMemoryItem → General/TreeTextMemory → 可选 MemScheduler → 多路检索 rerank。
+冲突整理(`.../tree_text_memory/organize/handler.py`):embedding 相似度 >0.8
+(`handler.py:23`)→ LLM 判 contradictory/redundant/independent → 融合后旧节点
+`status=archived` + `MERGED_TO` 指向新节点(`handler.py:184-187`);LLM 无法融合时
+按时间戳硬删较旧节点(`handler.py:131`)。
+
+**但论文愿景大面积未落地(默认关闭 / 占位):**
+
+| 论文特性 | OSS 实际 | 证据 |
+|---|---|---|
+| 默认存储 | GeneralTextMemory + Qdrant | `default_config.py:21/216` |
+| MemScheduler 后台整理 | **默认关闭** | `default_config.py:102` |
+| Activation KV cache | **默认关闭**,且需本地 HF/vLLM | `default_config.py:99/234` |
+| 图整理 reorganize | **默认关闭** | `default_config.py:210` |
+| TreeTextMemory 的 WorkingMemory 写入 | **明确暂停**("currently stop adding") | `organize/manager.py:239` |
+| TreeTextMemory `update` | **`raise NotImplementedError`** | `tree.py:350` |
+| 自动冲突融合 | **仅 `reorganize=True` 才跑** | `organize/manager.py:243` |
+| Parametric / LoRA | **占位 stub**(`dump` 只写 `b"Placeholder"`) | `parametric/lora.py:1` |
+| MemLifecycle/Governance/Vault 状态机 | **无对应核心类**;状态仅 activated/resolving/archived/deleted | `textual/item.py:109` |
+
+(严谨补:仓库里有 `dream/types.py` 的 `DreamMemoryLifecycle`、plugins 的 Lifecycle、
+`evolve_to` 软删除字段等**同名干扰项**,但均非论文级治理/生命周期机制,不推翻上表。)
+
+### 6.3 对 engram 的对照:多数"借鉴项"已具备或已起步
+
+| Mem0/MemOS 取舍 | engram 现状 | 判断 |
+|---|---|---|
+| ADD-only + 来源保留 + 实体关联 | pipeline 本就 ADD-only,已有 entity 信号 | **已具备**(甚至更进一步) |
+| MemCube 隔离边界 | namespace → 独立 store(`<ns>.db`) | **已具备**,更干净 |
+| **规避** semantic 候选池锁死 | 三路 RRF **并集**(`memory/retriever.go:176` `fuseRRF(bm25,vec,ent,…)`):任一信号命中即入选融合集 | **既有优势**——Mem0 的本质缺陷 engram 天然没有 |
+| **规避** LLM 破坏性自动更新 | 自动流程无 LLM UPDATE/DELETE;curation 走 judge(keep/evict/merge) | **已规避**,守住即可 |
+| **规避** Neo4j/Redis/KV/LoRA 重设施 | SQLite + FTS5 单二进制,离线降级 | 与宪法 I/V 一致 |
+| 借鉴 MemOS Fast/Fine 两阶段写入 | 单通道抽取 | ⚠️ **可行但需守门**:MemOS 后台整理默认关且重;engram 若做只能是**轻量后台 consolidation**,禁引常驻服务/Redis(宪法 I/V) |
+| 补时间态 / 冲突 / 版本演化 | 已有 `TemporalScore`/`ParseTemporalIntent`/`applyTemporal`/`applySupersededPenalty`(`memory/retriever.go`) | **已部分起步**,非从零 |
+
+**收敛到既有 backlog(不另起)**:上表"待补"三件(时间态状态一致性、冲突消解、
+版本演化)与 §5.4-1 **信念修订链 supersedes**、§4 P2 **域内 consolidation 扩展**、
+`memory-strategy.md` 附二短板 3 **冲突消解四分类**是同一条线;Fast/Fine 若立项,按
+本文档结论节纪律(contract-first + 宪法 IV 评测门)。**本节仅存机制核查,不新增 backlog。**
+
+## 7. 对论文线(`memory-strategy.md` 决策二)的弹药
 
 - Synthius 自报 94.4% / 99.6% 跑在**私有 judge + 自定 taxonomy** 上,是
   **"跨论文分数因协议差异不可比"**论点的又一个一手案例(且闭源不可复现,
@@ -220,7 +306,7 @@ Synthius 约 5,200——约 5× 节省。
 - 六域 vs 单库,与 MemOS 图化、我们 verbatim∪fact union store,共同构成
   **"记忆组织结构如何影响可比性"**的横向对照组。
 
-## 7. 结论与建议动作
+## 8. 结论与建议动作
 
 1. **立刻可做(适配器层,无引擎风险)**:把 §4 P0"检索空/弱→拒答"与已规划的
    Abstain-R1 拒答契约合并为一个答题层实验,用 `--adversarial` 口径 A/B,
