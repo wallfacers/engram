@@ -1,5 +1,7 @@
 # engram MCP server — build & wire into an MCP client
 
+> 🧭 **状态**: 已交付(spec 002-mcp-server) · **目标**: MCP stdio server 的构建与接入 MCP 客户端。
+
 `engram-mcp` exposes the engram memory engine as a Model Context Protocol
 (MCP) **stdio** server, so any MCP client (Claude Code, etc.) can use engram as
 a memory backend. This is the thin adapter over the engine — it only calls the

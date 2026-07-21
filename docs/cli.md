@@ -1,5 +1,7 @@
 # engram CLI
 
+> 🧭 **状态**: 已交付(spec 004-cli-ai-first) · **目标**: engram CLI 适配器用法参考。
+
 `engram` is the AI-first, one-shot command-line adapter for the local engram
 memory engine. Successful commands write deterministic markdown to stdout.
 Failures write one actionable diagnostic to stderr and return a non-zero exit

@@ -1,10 +1,13 @@
 # 记忆子系统:产品与论文战略(2026-07 决策记录)
 
+> 🧭 **状态**: 活跃 · **战略正本** —— 记忆子系统产品方向、论文线与涨点 backlog
+> (生物启发检索 P0/P1/P2)的**权威出处**;其他文档的 backlog/竞品拆解均回链至此。
+>
 > 背景:`memory-hybrid-retrieval-locomo` change 完成五轮消融调优,LoCoMo 从
 > 41.2%(hybrid 初版)打到 ~74.7%(可答题两跑均值)/ 72.6%(Mem0 可比口径,
-> 含 446 对抗题拒答记分)。完整消融记录见
-> `openspec/changes/memory-hybrid-retrieval-locomo/tasks.md`,结论摘要见
-> CLAUDE.md 记忆子系统一节。本文记录在此基础上的两项战略评估与决策。
+> 含 446 对抗题拒答记分)。该五轮消融的原始 tasks 记录来自**已归档的 openspec
+> change `memory-hybrid-retrieval-locomo`**(不在当前 spec-kit `specs/` 树内),
+> 结论摘要见 CLAUDE.md 记忆子系统一节。本文记录在此基础上的两项战略评估与决策。
 
 ## 决策一:产品方向 —— 不做云 SaaS,全力做本地开源记忆产品
 

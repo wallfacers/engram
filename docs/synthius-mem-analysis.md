@@ -1,5 +1,9 @@
 # Synthius-Mem 分析与在 engram 上的可行性评估(2026-07)
 
+> 🧭 **状态**: 存档(决策记录) · **目标**: 判断闭源论文 Synthius-Mem 抄什么/不抄什么。
+> P0 洞察(检索空结果=拒答)已落地为 **spec 006 abstention-gate**;可执行 backlog 的
+> **正本**见 [`memory-strategy.md`](./memory-strategy.md) 附二,本文不重复维护。
+>
 > 论文:*Synthius-Mem: Brain-Inspired Hallucination-Resistant Persona Memory
 > Achieving 94.4% Memory Accuracy and 99.6% Adversarial Robustness on LoCoMo*,
 > Artem Gadzhiev、Andrew Kislov(Synthius.ai),2026-04。
