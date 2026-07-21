@@ -4,6 +4,14 @@
 
 **Design inputs**: [research.md](./research.md) · [data-model.md](./data-model.md) · [contracts/cli-and-artifacts.md](./contracts/cli-and-artifacts.md) · [quickstart.md](./quickstart.md)
 
+## STATUS (2026-07-21): feature CLOSED — free gate NO-GO
+
+- T001–T025 delivered by external agent (uncommitted working tree); reviewed + committed by maintainer at `07563ce` (mechanism) — full suite green, engine untouched.
+- **T016 (free probe): the external agent's run was INVALID** (wrong store from another repo + no pcic_meta → claim signal never ran, confidence degenerate). Maintainer re-ran on the correct engram 10-conv store + 005 pcic_meta: **NO-GO** (confidence signal real, AUC 0.84, but the strict SC-003 corner missed by ~1pp; claim signal dead). Recorded in `specs/003-bio-retrieval-locomo/eval-log.md` (separate eval commit, Constitution IV).
+- **T026 (paid frontier): NOT RUN** — free gate not cleared; stays permanently blocked for this feature.
+- T027 done (eval-log verdict). T028 engine-gate EMPTY ✓. T029 full suite green ✓. T030 review done (this pass).
+- Mechanism code retained (lazy, default-off): `--abstain-*` arms don't touch existing arms; `--abstain-probe` is a standalone offline tool.
+
 ## Delegation & guardrails (read before starting)
 
 - **Execution model**: implementation is delegated to an external AI agent; the maintainer reviews, closes out, and backstops. Each task is self-contained — do not invent scope beyond it.
