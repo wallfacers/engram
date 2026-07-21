@@ -337,6 +337,143 @@ func writePaired(path string, report compareReport) error {
 	return writeJSON(path, report)
 }
 
+func writeFrontier(path string, report frontierReport) error {
+	return writeJSON(path, report)
+}
+
+const frontierBaselineNote = "adversarial accuracy is a NEW declared baseline (Constitution IV)"
+
+type frontierEvaluated struct {
+	Adversarial      int `json:"adversarial"`
+	AnswerableSample int `json:"answerable_sample"`
+	Repeats          int `json:"repeats"`
+}
+
+type frontierMcNemar struct {
+	P       float64 `json:"p"`
+	Verdict string  `json:"verdict"`
+}
+
+type frontierOperatingPoint struct {
+	Name           string           `json:"name"`
+	AdversarialAcc float64          `json:"adversarial_acc"`
+	AnswerableAcc  float64          `json:"answerable_acc"`
+	Combined       float64          `json:"combined"`
+	AnswerCalls    int              `json:"answer_calls"`
+	McNemar        *frontierMcNemar `json:"mcnemar"`
+}
+
+type frontierReport struct {
+	BaselineNote    string                   `json:"baseline_note"`
+	Evaluated       frontierEvaluated        `json:"evaluated"`
+	OperatingPoints []frontierOperatingPoint `json:"operating_points"`
+}
+
+var frontierPointOrder = []string{"force-answer", "prompt-only", "hard-gate", "soft-hint"}
+
+// frontierFromRuns derives the four declared operating points only when a
+// paired run contains every explicit arm. Ordinary benchmark runs therefore do
+// not emit a partial frontier that could be mistaken for an evaluation result.
+func frontierFromRuns(arms []string, runsByArm map[string][][]result) (frontierReport, bool, error) {
+	armByPoint := map[string]string{}
+	for _, arm := range arms {
+		point, ok := frontierPointForArm(arm)
+		if !ok {
+			continue
+		}
+		if _, duplicate := armByPoint[point]; !duplicate {
+			armByPoint[point] = arm
+		}
+	}
+	for _, point := range frontierPointOrder {
+		if armByPoint[point] == "" {
+			return frontierReport{}, false, nil
+		}
+	}
+
+	baselineRuns := runsByArm[armByPoint["force-answer"]]
+	if len(baselineRuns) == 0 {
+		return frontierReport{}, false, nil
+	}
+	report := frontierReport{
+		BaselineNote:    frontierBaselineNote,
+		Evaluated:       frontierPopulation(baselineRuns),
+		OperatingPoints: make([]frontierOperatingPoint, 0, len(frontierPointOrder)),
+	}
+	for _, point := range frontierPointOrder {
+		runs := runsByArm[armByPoint[point]]
+		if len(runs) == 0 {
+			return frontierReport{}, false, nil
+		}
+		operatingPoint := frontierPointFromResults(point, runs)
+		if point != "force-answer" {
+			paired, err := pairedReport(baselineRuns, runs)
+			if err != nil {
+				return frontierReport{}, false, fmt.Errorf("frontier %s vs baseline: %w", point, err)
+			}
+			operatingPoint.McNemar = &frontierMcNemar{P: paired.McNemarP, Verdict: paired.Verdict}
+		}
+		report.OperatingPoints = append(report.OperatingPoints, operatingPoint)
+	}
+	return report, true, nil
+}
+
+func frontierPointForArm(arm string) (string, bool) {
+	spec, err := parseArm(arm)
+	if err != nil {
+		return "", false
+	}
+	switch {
+	case spec.mechanisms["abstain-hard"]:
+		return "hard-gate", true
+	case spec.mechanisms["abstain-soft"]:
+		return "soft-hint", true
+	case spec.mechanisms["abstain"]:
+		return "prompt-only", true
+	case !spec.mechanisms["abstain-hard"] && !spec.mechanisms["abstain-soft"]:
+		return "force-answer", true
+	default:
+		return "", false
+	}
+}
+
+func frontierPopulation(runs [][]result) frontierEvaluated {
+	population := frontierEvaluated{Repeats: len(runs)}
+	if len(runs) == 0 {
+		return population
+	}
+	for _, item := range runs[0] {
+		if isAdversarialResult(item) {
+			population.Adversarial++
+		} else {
+			population.AnswerableSample++
+		}
+	}
+	return population
+}
+
+func frontierPointFromResults(name string, runs [][]result) frontierOperatingPoint {
+	point := frontierOperatingPoint{Name: name}
+	var adversarial, answerable, combined []bool
+	for _, run := range runs {
+		for _, item := range run {
+			combined = append(combined, item.Correct)
+			if isAdversarialResult(item) {
+				adversarial = append(adversarial, item.Correct)
+			} else {
+				answerable = append(answerable, item.Correct)
+			}
+			if !item.HardGated {
+				point.AnswerCalls++
+			}
+		}
+	}
+	point.AdversarialAcc = rateCount(adversarial)
+	point.AnswerableAcc = rateCount(answerable)
+	point.Combined = rateCount(combined)
+	return point
+}
+
 func loadRunResults(dir string) ([][]result, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

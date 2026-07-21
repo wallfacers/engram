@@ -25,6 +25,7 @@ type result struct {
 	Question            string                    `json:"question"`
 	Gold                string                    `json:"gold"`
 	Predicted           string                    `json:"predicted"`
+	HardGated           bool                      `json:"hard_gated,omitempty"`
 	InputTokens         int                       `json:"input_tokens,omitempty"`
 	OutputTokens        int                       `json:"output_tokens,omitempty"`
 	AnswerContextTokens int                       `json:"answer_context_tokens,omitempty"`
