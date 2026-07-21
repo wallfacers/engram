@@ -82,6 +82,8 @@ type options struct {
 	conflictResolution   bool
 	supersededPenalty    float64
 	abstainPrompt        bool
+	abstainHard          bool
+	abstainSoft          bool
 	forceAnswer          bool
 	temporalAnswerPrompt bool
 	rerank               bool
@@ -91,6 +93,10 @@ type options struct {
 	pcicFillTurns        string
 	pcicMetaPath         string
 	pcicMeta             *PCICMeta
+	abstainProbe         bool
+	abstainProbeOut      string
+	abstainGateSpec      string
+	abstainGate          AbstainGate
 	selector             chunkSelector
 	opinionPass          bool
 	adversarial          int
@@ -142,6 +148,9 @@ func run() error {
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
+	flag.BoolVar(&opt.abstainProbe, "abstain-probe", false, "run the zero-cost offline abstention probe and exit")
+	flag.StringVar(&opt.abstainProbeOut, "abstain-probe-out", "", "path for abstain-probe.json (default: <store-dir|run-dir>/abstain-probe.json)")
+	flag.StringVar(&opt.abstainGateSpec, "abstain-gate", "advrecall=0.40,falseabstain=0.05,net=100", "abstention probe gate override: advrecall=FLOAT,falseabstain=FLOAT,net=INT")
 	flag.BoolVar(&opt.pcicAnnotate, "pcic-annotate", false, "one-time offline pass: extract per-turn typed claims via the annotation model and write the pcic_meta sidecar, then exit (idempotent: skips when a matching sidecar already exists)")
 	flag.StringVar(&opt.pcicFillTurns, "pcic-fill-turns", "", "with --pcic-annotate: re-annotate ONLY these conv-scoped turn keys (comma-separated, e.g. conv-0/D15:1,conv-0/D14:32) and merge into the existing sidecar — pays for exactly those turns")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
@@ -208,6 +217,9 @@ func run() error {
 	if opt.catQuota, err = parseCatOverrides(opt.catQuotaSpec); err != nil {
 		return fmt.Errorf("--cat-chunk-quota: %w", err)
 	}
+	if opt.abstainGate, err = parseAbstainGate(opt.abstainGateSpec); err != nil {
+		return err
+	}
 	if opt.concurrency < 1 {
 		opt.concurrency = 1
 	}
@@ -230,27 +242,26 @@ func run() error {
 	if opt.estimate {
 		return printEstimate(convs, opt, prices, model, extractModel)
 	}
-	if opt.runDir == "" {
-		return fmt.Errorf("--run-dir is required unless --estimate or --compare is used")
-	}
-	apiKey := os.Getenv("LOCOMO_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
-	}
-	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if sampledConversations > 0 {
 		logger.Info("sampling conversations", "limit", sampledConversations)
 	}
-
 	if opt.pcicAnnotate {
-		return runPCICAnnotate(opt, convs, apiKey, baseURL, logger)
+		apiKey := os.Getenv("LOCOMO_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
+		}
+		return runPCICAnnotate(opt, convs, apiKey, envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic"), logger)
 	}
-
-	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
-		return fmt.Errorf("create run dir: %w", err)
+	if opt.runDir == "" && !opt.abstainProbe {
+		return fmt.Errorf("--run-dir is required unless --estimate or --compare is used")
 	}
-	if pcicEnabledForRun(opt, arms) {
+	if opt.runDir != "" && !opt.abstainProbe {
+		if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
+			return fmt.Errorf("create run dir: %w", err)
+		}
+	}
+	if pcicEnabledForRun(opt, arms) || opt.abstainProbe {
 		metaPath := opt.pcicMetaPath
 		if metaPath == "" {
 			baseDir := opt.storeDir
@@ -274,6 +285,14 @@ func run() error {
 			logger.Warn("pcic_meta unavailable; selector will use rerank order", "path", metaPath)
 		}
 	}
+	if opt.abstainProbe {
+		return runAbstainProbeCLI(context.Background(), opt, convs, arms, logger)
+	}
+	apiKey := os.Getenv("LOCOMO_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
+	}
+	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
 		// writes no journal, so it has no regime to protect.
@@ -431,11 +450,13 @@ func run() error {
 	if err := writeCost(filepath.Join(opt.runDir, "cost.json"), ledger.Report()); err != nil {
 		return fmt.Errorf("write cost.json: %w", err)
 	}
+	runsByArm := make(map[string][][]result, len(arms))
 	for _, arm := range arms {
 		runs, err := loadArmRuns(opt.runDir, arm, opt.repeats)
 		if err != nil {
 			return err
 		}
+		runsByArm[arm] = runs
 		stats := statsFromRuns(runs)
 		path := filepath.Join(opt.runDir, "stats.json")
 		if len(arms) > 1 {
@@ -445,6 +466,13 @@ func run() error {
 			return fmt.Errorf("write stats: %w", err)
 		}
 		printStatsSummary(arm, stats)
+	}
+	if frontier, complete, err := frontierFromRuns(arms, runsByArm); err != nil {
+		return fmt.Errorf("build frontier: %w", err)
+	} else if complete {
+		if err := writeFrontier(filepath.Join(opt.runDir, "frontier.json"), frontier); err != nil {
+			return fmt.Errorf("write frontier.json: %w", err)
+		}
 	}
 	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
 	return nil
@@ -635,15 +663,17 @@ type armSpec struct {
 }
 
 var supportedArmMechanisms = map[string]struct{}{
-	"assoc":    {},
-	"sweep":    {},
-	"temporal": {},
-	"tplan":    {},
-	"conflict": {},
-	"abstain":  {},
-	"rerank":   {},
-	"pcic":     {},
-	"oracle":   {},
+	"assoc":        {},
+	"sweep":        {},
+	"temporal":     {},
+	"tplan":        {},
+	"conflict":     {},
+	"abstain":      {},
+	"abstain-hard": {},
+	"abstain-soft": {},
+	"rerank":       {},
+	"pcic":         {},
+	"oracle":       {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -691,6 +721,8 @@ func optionsForArm(global options, name string) options {
 		arm.clusterSweep = false
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
+		arm.abstainHard = false
+		arm.abstainSoft = false
 		arm.rerank = false
 		arm.pcic = false
 		arm.oracle = false
@@ -702,7 +734,9 @@ func optionsForArm(global options, name string) options {
 	arm.temporalScore = spec.mechanisms["temporal"]
 	arm.temporalHardFilter = false
 	arm.conflictResolution = spec.mechanisms["conflict"]
-	arm.abstainPrompt = spec.mechanisms["abstain"]
+	arm.abstainPrompt = spec.mechanisms["abstain"] || spec.mechanisms["abstain-soft"]
+	arm.abstainHard = spec.mechanisms["abstain-hard"]
+	arm.abstainSoft = spec.mechanisms["abstain-soft"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
 	arm.rerank = spec.mechanisms["rerank"]
 	arm.pcic = spec.mechanisms["pcic"]
@@ -712,7 +746,8 @@ func optionsForArm(global options, name string) options {
 
 func pcicEnabledForRun(global options, arms []string) bool {
 	for _, arm := range arms {
-		if optionsForRun(global, arm, len(arms) > 1).pcic {
+		armOpt := optionsForRun(global, arm, len(arms) > 1)
+		if armOpt.pcic || armOpt.abstainHard || armOpt.abstainSoft {
 			return true
 		}
 	}
@@ -750,10 +785,12 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 // retrievers. It stays open across repeated answer/judge runs so extraction and
 // embedding are not paid again for every repeat.
 type conversationRuntime struct {
-	store      *store.Store
-	entries    *memory.EntryStore
-	retrievers map[string]*memory.Retriever
-	reranked   map[string]bool
+	store       *store.Store
+	entries     *memory.EntryStore
+	vectors     *memory.VectorStore
+	embedClient embedding.Client
+	retrievers  map[string]*memory.Retriever
+	reranked    map[string]bool
 	// chunkTurns maps a verbatim-chunk entry name to the dialogue ids its text
 	// covers (D<session>:<turn>), enabling exact-turn evidence recall. Empty when
 	// chunks are not ingested.
@@ -896,7 +933,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, entries: es, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns}, nil
+	return &conversationRuntime{store: st, entries: es, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -1032,7 +1069,11 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
 				defer qwg.Done()
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
-				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, logger)
+				var abstainRuntime *abstainRuntimeContext
+				if armOpt.abstainHard || armOpt.abstainSoft {
+					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
+				}
+				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, abstainRuntime, logger)
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -1046,6 +1087,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					Question:            qa.Question,
 					Gold:                goldFor(qa),
 					Predicted:           predicted,
+					HardGated:           abstainRuntime != nil && abstainRuntime.hardGated,
 					RetrievalFlags:      retrievalFingerprint(armOpt),
 					AnswerRegime:        answerRegimeFingerprint(armOpt),
 					InputTokens:         usage.InputTokens,
@@ -1158,6 +1200,47 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 }
 
 func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
+	return answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, nil, logger)
+}
+
+type abstainRuntimeContext struct {
+	runtime   *conversationRuntime
+	convID    int
+	arm       string
+	meta      *PCICMeta
+	hardGated bool
+}
+
+func defaultFrontierAbstainThresholds() AbstainThresholdConfig {
+	return AbstainThresholdConfig{
+		UseClaim:            true,
+		ClaimThreshold:      1,
+		UseConfidence:       true,
+		ConfidenceThreshold: 0.5,
+	}
+}
+
+func abstainDecisionForHits(ctx context.Context, abstain *abstainRuntimeContext, qa locomoQA, hits []memory.Result) (AbstainDecision, error) {
+	if abstain == nil || abstain.runtime == nil {
+		return AbstainDecision{}, nil
+	}
+	signal, err := computeAbstainSignal(ctx, abstain.runtime.entries, qa.Question, abstainSignalInput{
+		QuestionID:        qa.QuestionID,
+		Category:          qa.Category,
+		Candidates:        hits,
+		Meta:              abstain.meta,
+		ChunkTurns:        abstain.runtime.chunkTurns,
+		SpanKey:           func(turnID string) string { return pcicSpanKey(abstain.convID, turnID) },
+		Reranked:          abstain.runtime.reranked[abstain.arm],
+		CosineByCandidate: probeCandidateCosines(ctx, abstain.runtime, qa.Question, hits),
+	})
+	if err != nil {
+		return AbstainDecision{}, err
+	}
+	return decideAbstention(signal, defaultFrontierAbstainThresholds()), nil
+}
+
+func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	hits, searchDiagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
 	if err != nil {
@@ -1167,13 +1250,20 @@ func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memor
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
 	prompt := answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt)
-	predicted, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
+	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
+	if err != nil {
+		logger.Warn("abstain signal failed; answering normally", "err", err)
+	}
+	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits), answerCall)
+	if abstain != nil {
+		abstain.hardGated = hardGated
+	}
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
 		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
 	}
 
-	if isIDK(predicted) && !opt.noIDKRetry {
+	if !hardGated && isIDK(predicted) && !opt.noIDKRetry {
 		if retry, retryUsage, retryHits, retryDiagnostics, ok := retryWithRewriteUsageDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, opt, qa, prompt, hits); ok {
 			predicted = retry
 			usage = retryUsage

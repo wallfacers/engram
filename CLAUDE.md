@@ -114,6 +114,9 @@ Implementation is often delegated to an external agent while this session review
 - Ideas/design/troubleshooting: explore freely. Major changes (new engine capability, new adapter surface, algorithm change) run `superpowers:brainstorming` first, then the spec-kit chain (`specify → plan → tasks → analyze → implement`).
 - Unclear requirements/scope/approach → ask first, never guess.
 
+### Preferred Workflow (maintainer's standing habit)
+- Default sequence for any substantive feature: **brainstorm first (`superpowers:brainstorming`, TDD-minded — nail the failing-test/verification shape while designing), THEN the SDD chain (`specify → plan → tasks → analyze → implement`)**. Brainstorm converges the design + the free/cost gates; SDD formalizes it. Don't jump straight to `specify` for non-trivial work — the brainstorm comes first.
+
 ### Response Style
 - Concise and direct, no filler. Report faithfully: failed test → say so + paste output; skipped step → say it was skipped; done + verified → state it plainly.
 

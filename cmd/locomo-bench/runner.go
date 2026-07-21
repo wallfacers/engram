@@ -17,6 +17,24 @@ type modelCaller func(ctx context.Context, system, user string) (string, error)
 
 type usageModelCaller func(ctx context.Context, system, user string) (string, provider.Usage, error)
 
+const canonicalAbstainDecline = "I don't know; this information is not mentioned in the conversation."
+
+const abstainLowConfidenceHint = "LOW-CONFIDENCE RETRIEVAL HINT: Verify that the retrieved memories support the premise before answering."
+
+// answerWithAbstentionDecision owns the one place an operating point can skip
+// an answer-model call. The judge call remains in the normal runner path so
+// the hard-gate result is graded by the existing adversarial-gold convention.
+func answerWithAbstentionDecision(ctx context.Context, decision AbstainDecision, opt options, systemPrompt, userPrompt string, answerCall usageModelCaller) (string, provider.Usage, bool, error) {
+	if opt.abstainHard && decision.Abstain {
+		return canonicalAbstainDecline, provider.Usage{}, true, nil
+	}
+	if opt.abstainSoft && decision.Abstain {
+		systemPrompt += "\n\n" + abstainLowConfidenceHint
+	}
+	predicted, usage, err := answerCall(ctx, systemPrompt, userPrompt)
+	return predicted, usage, false, err
+}
+
 func modelCallerFromUsage(c usageModelCaller) modelCaller {
 	return func(ctx context.Context, system, user string) (string, error) {
 		text, _, err := c(ctx, system, user)
