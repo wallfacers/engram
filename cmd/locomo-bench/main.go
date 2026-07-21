@@ -86,6 +86,7 @@ type options struct {
 	abstainSoft          bool
 	forceAnswer          bool
 	temporalAnswerPrompt bool
+	judgeMem0Aligned     bool
 	rerank               bool
 	pcic                 bool
 	oracle               bool
@@ -145,6 +146,7 @@ func run() error {
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
+	flag.BoolVar(&opt.judgeMem0Aligned, "judge-mem0-aligned", false, "use the Mem0-aligned lenient judge rules")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
@@ -1019,7 +1021,17 @@ func answerRegimeFingerprint(opt options) string {
 	if opt.temporalAnswerPrompt {
 		fingerprint += ";temporal_answer_prompt=true"
 	}
+	if opt.judgeMem0Aligned {
+		fingerprint += ";judge=mem0-aligned"
+	}
 	return fingerprint
+}
+
+func (o options) judgeAlignmentMode() string {
+	if o.judgeMem0Aligned {
+		return "mem0-aligned"
+	}
+	return "strict"
 }
 
 func warnExtraPairedArms(logger *slog.Logger, arms []string) {
@@ -1284,7 +1296,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retrie
 	}
 	evidence := newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
 
-	verdict, _, err := judgeCall(ctx, judgeSystemPrompt, buildJudgePrompt(qa.Question, goldFor(qa), predicted))
+	verdict, _, err := judgeCall(ctx, judgeSystemPromptFor(opt.judgeAlignmentMode()), buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
 		return false, predicted, usage, sweepUsed, evidence

@@ -456,6 +456,26 @@ Mark "correct": true when the prediction conveys the SAME key fact as the gold a
 - Accept a coarser-but-consistent date (gold "May 2023" vs prediction "May 2023" or "8 May 2023" → true); mark false only if the date actually differs.
 - Mark false when the prediction contradicts the gold fact, omits it, gives a wrong name/date/number, or says it does not know.`
 
+const judgeMem0AlignedSystemPrompt = `You grade a predicted answer against a gold answer for a question about a conversation. Output STRICT JSON only: {"correct": true|false}.
+
+Judge recalled knowledge by semantic meaning rather than exact phrasing. Mark "correct": true under these rules:
+- Give partial credit when the prediction includes at least one correct item from a gold list. Mark false only when it includes none of the gold items.
+- Treat synonyms and paraphrases of the same concept as correct.
+- Do not penalize extra details or greater specificity when the prediction still includes the gold answer's core fact.
+- Treat dates within 14 days of each other as correct: count the day gap and mark the date wrong ONLY when that gap is greater than 14 days (e.g. "1 June" vs "12 June" is 11 days apart -> correct; "1 June" vs "20 June" is 19 days apart -> wrong). Treat durations within 50% as correct, and a relative date as correct when it fits the same time window.
+- Accept semantic overlap on the same topic and core idea. For emotions about the same event, accept answers with the same emotional valence.
+- When the prediction identifies the same named entity, person, character, or concept, accept the same referent even when its descriptive details differ.
+- Focus on facts rather than wording; small differences in phrasing, scope, or specificity do not make a recalled fact wrong.
+
+Mark "correct": false only when the prediction has zero correct gold items or addresses a completely different topic.`
+
+func judgeSystemPromptFor(mode string) string {
+	if mode == "mem0-aligned" {
+		return judgeMem0AlignedSystemPrompt
+	}
+	return judgeSystemPrompt
+}
+
 func buildJudgePrompt(question, gold, predicted string) string {
 	return fmt.Sprintf("QUESTION: %s\n\nGOLD ANSWER: %s\n\nPREDICTED ANSWER: %s\n\nReturn the JSON verdict now.", question, gold, predicted)
 }
