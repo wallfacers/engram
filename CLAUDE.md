@@ -118,6 +118,10 @@ Implementation is often delegated to an external agent while this session review
 - Ideas/design/troubleshooting: explore freely. Major changes (new engine capability, new adapter surface, algorithm change) run `superpowers:brainstorming` first, then the spec-kit chain (`specify → plan → tasks → analyze → implement`).
 - Unclear requirements/scope/approach → ask first, never guess.
 
+### Literature / Paper Research — MUST go through alphaXiv MCP (hard rule)
+- Any academic-paper / prior-art / literature lookup (benchmark methodology, competing memory systems, agent-memory training, eval-reliability sources, the paper direction) **MUST** use the **alphaXiv MCP tools** (`mcp__alphaxiv__discover_papers` / `get_paper_content` / `answer_pdf_queries` / `read_files_from_github_repository`, etc.). **Do NOT use `WebSearch` for papers — it is unreliable/inaccurate for this and the maintainer has rejected it.** Cite real papers from alphaXiv, never memory alone.
+- Scope note: alphaXiv covers CS/math/physics/stats/EE (arXiv), **not** biomedical/life-science venues. If a needed source is genuinely outside arXiv, STOP and surface that to the maintainer rather than silently falling back to web search.
+
 ### Preferred Workflow (maintainer's standing habit)
 - Default sequence for any substantive feature: **brainstorm first (`superpowers:brainstorming`, TDD-minded — nail the failing-test/verification shape while designing), THEN the SDD chain (`specify → plan → tasks → analyze → implement`)**. Brainstorm converges the design + the free/cost gates; SDD formalizes it. Don't jump straight to `specify` for non-trivial work — the brainstorm comes first.
 
