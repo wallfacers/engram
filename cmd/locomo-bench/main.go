@@ -18,10 +18,12 @@
 // Credentials come from the environment only and are never logged or written to
 // run artifacts:
 //
-//	LOCOMO_API_KEY   (required) answer + judge model key
+//	LOCOMO_API_KEY   (required) answer-side key; judge fallback key
 //	LOCOMO_PROVIDER  (default anthropic; set "openai" for OpenAI-chat endpoints)
 //	LOCOMO_BASE_URL  (default https://api.deepseek.com/anthropic)
-//	LOCOMO_MODEL     (default deepseek-v4-pro)     answer + judge model
+//	LOCOMO_MODEL     (default deepseek-v4-pro)     answer-side model
+//	JUDGE_PROVIDER / JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL
+//	                 (optional; each falls back independently to LOCOMO_*)
 //	EXTRACT_MODEL    (default = LOCOMO_MODEL)      extraction model (a fast,
 //	                 non-reasoning model here cuts wall-clock and cost markedly)
 //	EMBED_API_KEY / EMBED_BASE_URL / EMBED_MODEL  (hybrid arm embedding client)
@@ -87,6 +89,8 @@ type options struct {
 	forceAnswer          bool
 	temporalAnswerPrompt bool
 	judgeMem0Aligned     bool
+	answerModel          string
+	judgeModel           string
 	rerank               bool
 	pcic                 bool
 	oracle               bool
@@ -239,10 +243,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	model := envOr("LOCOMO_MODEL", "deepseek-v4-pro")
+	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	extractModel := envOr("EXTRACT_MODEL", model)
+	judgeConfig := resolveJudgeConfig(os.Getenv)
+	opt.answerModel = model
+	opt.judgeModel = judgeConfig.Model
 	if opt.estimate {
-		return printEstimate(convs, opt, prices, model, extractModel)
+		return printEstimate(convs, opt, prices, model, extractModel, judgeConfig.Model)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if sampledConversations > 0 {
@@ -302,20 +309,21 @@ func run() error {
 			return err
 		}
 	}
-	// One provider; a global semaphore caps concurrent in-flight LLM calls so
-	// many conversations/questions run in parallel without exceeding the rate
-	// limit. Every LLM call (extraction, answer, judge) passes through it.
+	// A global semaphore caps concurrent in-flight LLM calls so many
+	// conversations/questions run in parallel without exceeding the rate limit.
+	// Answer-side calls share prov; judge calls use judgeProv so the two endpoint
+	// configurations can be changed independently.
 	// Provider protocol is selectable so the harness can target either an
 	// Anthropic-messages endpoint (default) or an OpenAI-chat-completions one
 	// (LOCOMO_PROVIDER=openai). Both satisfy provider.Provider identically.
-	var prov provider.Provider
-	switch strings.ToLower(envOr("LOCOMO_PROVIDER", "anthropic")) {
-	case "openai":
-		prov = openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true})
-	case "anthropic", "":
-		prov = anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: opt.maxTokens})
-	default:
-		return fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
+	prov, err := buildBenchProvider(answerProvider, apiKey, baseURL, opt.maxTokens, "LOCOMO_PROVIDER")
+	if err != nil {
+		return err
+	}
+	judgeProv, err := buildBenchProvider(judgeConfig.Provider, judgeConfig.APIKey, judgeConfig.BaseURL, opt.maxTokens, "JUDGE_PROVIDER")
+	if err != nil {
+		return err
 	}
 	sem := make(chan struct{}, opt.concurrency)
 	ledger := newCostLedger(prices)
@@ -325,7 +333,7 @@ func run() error {
 	answerUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
 	filterCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "filter", recordUsage)))
 	rewriteCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "rewrite", recordUsage)))
-	judgeUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "judge", recordUsage))
+	judgeUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage))
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
 
 	// The embedding client is shared across conversations (safe for concurrent
@@ -338,7 +346,8 @@ func run() error {
 	}
 
 	logger.Info("starting", "conversations", len(convs), "arms", arms, "concurrency", opt.concurrency,
-		"model", model, "extract_model", extractModel, "top_k", opt.topK)
+		"model", model, "extract_model", extractModel, "judge_base_url_host", baseURLHost(judgeConfig.BaseURL),
+		"judge_model", judgeConfig.Model, "top_k", opt.topK)
 
 	ctx := context.Background()
 	storeDir := opt.storeDir
@@ -448,7 +457,7 @@ func run() error {
 			return fmt.Errorf("write paired.json: %w", err)
 		}
 	}
-	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel)
+	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel, judgeConfig.Model)
 	if err := writeCost(filepath.Join(opt.runDir, "cost.json"), ledger.Report()); err != nil {
 		return fmt.Errorf("write cost.json: %w", err)
 	}
@@ -583,6 +592,17 @@ func buildAnnotateProvider(apiKey, baseURL string, maxTokens int) (provider.Prov
 		return anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: maxTokens}), nil
 	default:
 		return nil, fmt.Errorf("LOCOMO_PROVIDER must be anthropic or openai, got %q", os.Getenv("LOCOMO_PROVIDER"))
+	}
+}
+
+func buildBenchProvider(providerName, apiKey, baseURL string, maxTokens int, envName string) (provider.Provider, error) {
+	switch strings.ToLower(providerName) {
+	case "openai":
+		return openai.New(openai.Options{APIKey: apiKey, BaseURL: baseURL, IncludeUsage: true}), nil
+	case "anthropic", "":
+		return anthropic.New(anthropic.Options{APIKey: apiKey, BaseURL: baseURL, DefaultMaxTokens: maxTokens}), nil
+	default:
+		return nil, fmt.Errorf("%s must be anthropic or openai, got %q", envName, providerName)
 	}
 }
 
@@ -1023,6 +1043,9 @@ func answerRegimeFingerprint(opt options) string {
 	}
 	if opt.judgeMem0Aligned {
 		fingerprint += ";judge=mem0-aligned"
+	}
+	if opt.answerModel != "" && opt.judgeModel != "" && opt.answerModel != opt.judgeModel {
+		fingerprint += ";judge_model=" + opt.judgeModel
 	}
 	return fingerprint
 }
@@ -1756,13 +1779,16 @@ func estimateRole(prices priceTable, model string, calls, inTokens, outTokens in
 	return role
 }
 
-func estimateReport(convs []conversation, opt options, prices priceTable, model, extractModel string) costReport {
+func estimateReport(convs []conversation, opt options, prices priceTable, model, extractModel, judgeModel string) costReport {
+	if judgeModel == "" {
+		judgeModel = model
+	}
 	plan := buildCallPlan(convs, opt)
 	report := costReport{ByRole: map[string]*roleCost{
 		"extract": estimateRole(prices, extractModel, plan.ExtractionCalls, plan.ExtractionCalls*estimateExtractIn, plan.ExtractionCalls*estimateExtractOut),
 		"answer":  estimateRole(prices, model, plan.AnswerCalls, plan.AnswerInTokens, plan.AnswerOutTokens),
 		"filter":  estimateRole(prices, model, plan.FilterCalls, plan.FilterInTokens, plan.FilterOutTokens),
-		"judge":   estimateRole(prices, model, plan.JudgeCalls, plan.JudgeInTokens, plan.JudgeOutTokens),
+		"judge":   estimateRole(prices, judgeModel, plan.JudgeCalls, plan.JudgeInTokens, plan.JudgeOutTokens),
 		"embed":   {},
 	}}
 	for _, role := range report.ByRole {
@@ -1774,17 +1800,20 @@ func estimateReport(convs []conversation, opt options, prices priceTable, model,
 	if _, ok := prices.Lookup(extractModel); !ok && extractModel != model {
 		report.UnpricedModels = append(report.UnpricedModels, extractModel)
 	}
+	if _, ok := prices.Lookup(judgeModel); !ok && judgeModel != model && judgeModel != extractModel {
+		report.UnpricedModels = append(report.UnpricedModels, judgeModel)
+	}
 	sort.Strings(report.UnpricedModels)
 	return report
 }
 
-func estimateDatasetCost(convs []conversation, opt options, prices priceTable, model, extractModel string) float64 {
-	return estimateReport(convs, opt, prices, model, extractModel).EstimatedUSD
+func estimateDatasetCost(convs []conversation, opt options, prices priceTable, model, extractModel, judgeModel string) float64 {
+	return estimateReport(convs, opt, prices, model, extractModel, judgeModel).EstimatedUSD
 }
 
-func printEstimate(convs []conversation, opt options, prices priceTable, model, extractModel string) error {
+func printEstimate(convs []conversation, opt options, prices priceTable, model, extractModel, judgeModel string) error {
 	plan := buildCallPlan(convs, opt)
-	report := estimateReport(convs, opt, prices, model, extractModel)
+	report := estimateReport(convs, opt, prices, model, extractModel, judgeModel)
 	fmt.Printf("estimate: dataset=%s repeats=%d questions=%d extract_calls=%d estimated_usd=%.6f\n",
 		opt.datasetFormat, opt.repeats, plan.Questions, plan.ExtractionCalls, report.EstimatedUSD)
 	for _, modelName := range report.UnpricedModels {

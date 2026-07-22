@@ -51,7 +51,10 @@ go build ./cmd/engram-mcp && ./engram-mcp --data-dir ~/.engram/memory
 go run ./cmd/locomo-bench --data <locomo.json> --run-dir ./.locomo-run --retrieval both
 #   env: LOCOMO_API_KEY/BASE_URL/MODEL, LOCOMO_PROVIDER(anthropic|openai), EXTRACT_MODEL,
 #        EMBED_BASE_URL/MODEL/API_KEY/RERANK_MODEL. run-dir + dataset are gitignored.
+#   judge endpoint split: JUDGE_PROVIDER/BASE_URL/MODEL/API_KEY (fall back to LOCOMO_* if empty).
 ```
+
+**Remote eval box (near-free answer/extract model)** — full-scale eval runs its answer+extract model on a **rented cloud GPU** (vllm, OpenAI-compatible) so the run is near-free (only tiny judge tokens paid). Runbook + what-changes-on-restart: [docs/remote-eval-box.md](docs/remote-eval-box.md). Non-negotiables: (1) **省钱 — 空闲必停**, it's metered; never leave it idle. (2) Its **SSH host/port/password rotate every restart** and vllm may need re-launching — credentials are supplied live by the maintainer and go **only** through env/tunnel, **never** into a tracked file, log, or tool response. (3) The box is eval infra only; the engine stays local-first/offline and never depends on it.
 
 ## Constitution — the five non-negotiables
 

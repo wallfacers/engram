@@ -101,16 +101,16 @@ func TestJudgeMem0AlignedMatchesGolden(t *testing.T) {
 	if os.Getenv("LOCOMO_JUDGE_GOLDEN") != "1" {
 		t.Skip("set LOCOMO_JUDGE_GOLDEN=1 to run the endpoint-backed judge golden cases")
 	}
-	apiKey, baseURL, model := os.Getenv("LOCOMO_API_KEY"), os.Getenv("LOCOMO_BASE_URL"), os.Getenv("LOCOMO_MODEL")
-	if apiKey == "" || baseURL == "" || model == "" {
-		t.Skip("LOCOMO_API_KEY, LOCOMO_BASE_URL, and LOCOMO_MODEL are required for judge golden cases")
+	judgeConfig := resolveJudgeConfig(os.Getenv)
+	if judgeConfig.APIKey == "" || judgeConfig.BaseURL == "" || judgeConfig.Model == "" {
+		t.Skip("JUDGE_API_KEY, JUDGE_BASE_URL, and JUDGE_MODEL (or corresponding LOCOMO_* fallbacks) are required for judge golden cases")
 	}
 
-	prov, err := buildAnnotateProvider(apiKey, baseURL, 1024)
+	prov, err := buildBenchProvider(judgeConfig.Provider, judgeConfig.APIKey, judgeConfig.BaseURL, 1024, "JUDGE_PROVIDER")
 	if err != nil {
 		t.Fatalf("build judge provider: %v", err)
 	}
-	judgeCall := newModelCaller(prov, model, 1024)
+	judgeCall := newModelCaller(prov, judgeConfig.Model, 1024)
 	cases := loadJudgeGoldenCases(t)
 	ctx := context.Background()
 	// The relay judge model is transiently flaky (empty bodies, GOAWAY/EOF). Retry

@@ -139,7 +139,7 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	report := estimateReport([]conversation{conv}, opt, priceTable{
 		"answer-model":  {In: 1, Out: 2},
 		"extract-model": {In: 3, Out: 4},
-	}, "answer-model", "extract-model")
+	}, "answer-model", "extract-model", "answer-model")
 	if report.ByRole["answer"].Calls != plan.AnswerCalls || report.ByRole["extract"].Calls != plan.ExtractionCalls {
 		t.Fatalf("report roles = %+v, plan = %+v", report.ByRole, plan)
 	}
@@ -219,9 +219,27 @@ func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
 		t.Fatalf("tplan call plan = %+v, want unchanged paired plan %+v", got, want)
 	}
 	prices := priceTable{"answer": {In: 1, Out: 2}, "extract": {In: 3, Out: 4}}
-	got, want := estimateReport(convs, tplan, prices, "answer", "extract"), estimateReport(convs, baseline, prices, "answer", "extract")
+	got, want := estimateReport(convs, tplan, prices, "answer", "extract", "answer"), estimateReport(convs, baseline, prices, "answer", "extract", "answer")
 	if !reflect.DeepEqual(got.ByRole, want.ByRole) || math.Abs(got.EstimatedUSD-want.EstimatedUSD) > 1e-12 {
 		t.Fatalf("tplan estimate = %+v, want unchanged paired estimate %+v", got, want)
+	}
+}
+
+func TestEstimateReportPricesJudgeWithJudgeModel(t *testing.T) {
+	convs := []conversation{{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "where", Answer: []byte(`"Oslo"`), Category: 4},
+	}}}
+	prices := priceTable{
+		"answer-model": {In: 1, Out: 2},
+		"judge-model":  {In: 10, Out: 20},
+	}
+	report := estimateReport(convs, options{}, prices, "answer-model", "answer-model", "judge-model")
+	want := tokenUSD(prices["judge-model"], estimateJudgeIn, estimateJudgeOut)
+	if report.ByRole["judge"].USD != want {
+		t.Fatalf("judge estimate = %.12f, want %.12f", report.ByRole["judge"].USD, want)
+	}
+	if report.ByRole["judge"].USD == tokenUSD(prices["answer-model"], estimateJudgeIn, estimateJudgeOut) {
+		t.Fatal("judge estimate used answer model pricing")
 	}
 }
 
