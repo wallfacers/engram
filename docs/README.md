@@ -17,6 +17,8 @@
 | [locomo-score-levers.md](./locomo-score-levers.md) | 活跃 | LoCoMo 跑分杠杆实验台账(008 US1-US4 verdict + 新参考点) | 杠杆 verdict 正本 |
 | [temporal-t4-design.md](./temporal-t4-design.md) | 活跃 | temporal 57 错题归因 + T-4 第4路时间融合 contract-first 设计 | temporal 诊断/T-4 正本;工程 GO / 出货 NO-GO |
 | [locomo-single-multihop-failure-diagnosis.md](./locomo-single-multihop-failure-diagnosis.md) | 活跃 | single-hop 112 / multi-hop 40 错题归因(检索排序为主,multi-hop 非推理瓶颈) | single/multi-hop 诊断正本;29 道口径题须与能力错误分开 |
+| [saas-habit-memory-design.md](./saas-habit-memory-design.md) | 活跃(设计稿) | SaaS「用户操作习惯记忆」MVP 产品/技术设计(事件摄入·习惯抽取·条件召回·车机走查) | SaaS 方向设计正本;新能力全标未立项 |
+| [paper-outline-eval-reliability.md](./paper-outline-eval-reliability.md) | 活跃(骨架) | 论文骨架:长期对话记忆评测可靠性审计(噪声分解/选择偏差/coverage≠answer) | 论文线正本;证据分级 + 必补实验门 |
 | [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
 | [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
 | [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |
