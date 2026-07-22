@@ -1560,7 +1560,9 @@ func buildBenchEmbeddingClient(logger *slog.Logger, usage func(inputTokens, outp
 		logger.Warn("hybrid arm: embedding client unavailable; semantic signal disabled (degrades to BM25+entity)")
 		return nil
 	}
-	return c
+	// Absorb transient sidecar faults (connection reset / timeout) so eval
+	// retrieval stays honestly three-signal; see retryingEmbedder.
+	return newRetryingEmbedder(c, 3, 200*time.Millisecond, logger)
 }
 
 // buildBenchReranker builds the rerank client from EMBED_RERANK_MODEL (empty =

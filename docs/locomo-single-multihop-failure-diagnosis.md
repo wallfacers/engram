@@ -55,6 +55,14 @@ single-hop 和 multi-hop 错题：
 10 次 timeout。由于日志并发输出且没有 question ID，不能把这些退化精确归因到某道题，
 但它是本轮检索排序结果的重要运行级干扰因素。
 
+> ✅ **已修复(2026-07-23,bench 侧)**:根因 = sidecar 并发下瞬断 + 引擎按宪法 V
+> 静默降级(`retriever.go:754`,生产正确)+ `embedding.HTTPClient` 无重试,一次抖动
+> 即整题丢 semantic 路。修法为 adapter-only:`cmd/locomo-bench/embed_retry.go` 的
+> `retryingEmbedder` 包装器(3 次尝试、200ms 倍增退避、context 取消即停、
+> retried/exhausted 计数落日志),接线于 `buildBenchEmbeddingClient`,引擎零改。
+> 后续端到端跑应确认 `embed retries exhausted` 为 0;sidecar 服务端并发配置是
+> 运维侧另一半。
+
 ## Single-hop
 
 ### 失败类型分布
@@ -317,6 +325,8 @@ single-hop 和 multi-hop 错题：
 这说明剩余错误对上下文排序高度敏感，但当前 rerank 是高翻转、低净收益，不能直接作为
 修法采纳。应先稳定本地 embedding 查询，并把逐题 retrieval trace 持久化，之后再针对
 竞争事实、跨 session 多样性和事件覆盖做可归因优化。
+（embedding 查询稳定化已落地：bench 侧 retry 包装器，见「证据边界」修复注；
+逐题 retrieval trace 由 009 US1 归因 trace 承接。）
 
 ### 2. 抽取侧：补齐图像 caption
 
