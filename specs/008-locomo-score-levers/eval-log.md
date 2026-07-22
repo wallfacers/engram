@@ -172,3 +172,38 @@ Overall session recall 95.420% → 97.799%（**+2.378pp**）。
 **必带限定**：此为 **coverage/turn@k 召回**增益，**非端到端答题正确率**——是充分性未证的必要条件；
 真实答题增益需 US4 授权后端到端跑（默认预算 top-k 30，`hybrid` vs `hybrid+rerank`）才能声明。
 reranker 保持**默认关 / opt-in**（宪法 V）；本轮**未声明或替换任何 LoCoMo baseline**。
+
+## US4: 端到端答题 A/B —— reranker coverage 是否兑现（决胜）
+
+- **Date**: 2026-07-22 16:02-16:18 +08:00，`hybrid` vs `hybrid+rerank` 各单次端到端。
+- **栈**: 答题/抽取本地 vllm `Qwen/Qwen3.6-35B-A3B-FP8`（直连 127.0.0.1:8000，**不走任何中转站**）；
+  query embed + rerank 本地 sidecar（bge-small 384d + bge-reranker-v2-m3，隧道 127.0.0.1:8011）；
+  判题 `deepseek-v4-flash` mem0-aligned（api.deepseek.com 直连）。复用 007 cov-store，零重抽取。
+- **预算**: 默认 `--top-k 30 --chunk-quota 12`，全量 1540 题。成本 `actual_usd=0`（answer/embed 本地免费，judge 3080 calls 微付费未计价）。
+
+### 端到端答题正确率（mem0-aligned judge, 全量 1540）
+
+| 类别 | hybrid | hybrid+rerank | Δ | n | rerank害/救/净 |
+|---|---:|---:|---:|---:|---:|
+| multi-hop | 85.82% | 86.52% | +0.71pp | 282 | 13/15/**+2** |
+| open-domain | 56.25% | 58.33% | +2.08pp | 96 | 4/6/**+2** |
+| single-hop | 86.68% | 87.16% | +0.48pp | 841 | 32/36/**+4** |
+| **temporal** | **82.24%** | **79.44%** | **−2.80pp** | 321 | 30/21/**−9** |
+| **OVERALL** | **83.70%** | **83.64%** | **−0.06pp** | 1540 | 79/78/**−1** |
+
+配对：flips b(hybrid对→rerank错)=79 / c=78；**McNemar p=1.0，verdict=within-noise**。
+
+**SC-006/007 NO-GO（决定性）**：**+15.457pp 的 turn@k coverage 增益端到端答题零转化（−0.06pp，p=1.0）。**
+机制清楚：cross-encoder 按**单轮语义相关性**重排，helps multi-hop/open-domain/single-hop 共 +8，
+但把 **temporal 砸 −9**（时间序上下文被相关性挤掉，破坏时序推理链）。**coverage≠answer 的教科书案例**——
+正是宪法 IV 评测门要拦的"召回涨了但答题没涨"。
+
+**结论**：
+1. **本地 reranker 不作为出货默认/推荐涨分杠杆**（端到端 net 负）。仅保留为**诊断/类目条件**实验：
+   对**非-temporal**类它净 +8，一个"temporal 绕过 reranker"的类目感知变体值得单列实验（自带闸），但非本轮结论。
+2. **新诚实参考点（无 reranker）**：engram 端到端 **overall 83.70%**（mem0-aligned judge，本地 Qwen 栈，top-k30）。
+   这是 008 交付的真实基线，取代旧的 luna/strict-judge 50.7% 伪影。vs **MemOS 88.83（gap ~5.1pp）/ Mem0 92.5（gap ~8.8pp）**。
+3. **差距地图（拉平方向）**：open-domain **56.2%** 最弱且 coverage 加满也几乎不动（54→56）→ **答题/推理/判题问题，非检索**；
+   temporal 82.2% 次弱且脆（reranker 会害）；multi-hop 85.8% / single-hop 86.7% 已接近 MemOS 级。
+   下一步涨分应打 **open-domain + temporal + single-hop 精度**，**不是**堆检索召回。
+- 引擎零改（`git diff` 空）；reranker 默认关；未把此 83.70% 声明为团队 leaderboard 数（本地 10-conv locomo10，单次，honest-scale）。

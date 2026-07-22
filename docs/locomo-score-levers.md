@@ -10,11 +10,26 @@
 
 固定栈:答题/抽取 = 本地 vllm `Qwen/Qwen3.6-35B-A3B-FP8`;embedding = 本地 fastembed;judge = `deepseek-v4-flash`(mem0-aligned)。所有 sidecar 纯本地、无云依赖。引擎零改(`git diff -- memory embedding provider store internal` 全空)。
 
-| 杠杆 | 层 | 判据 | 结果 | Δ overall turn@k |
-|---|---|---|---|---:|
-| **US1 本地 reranker** `bge-reranker-v2-m3` | retrieval | ≥ +4pp | ✅ **PASS(旗舰,大幅)** | **+15.457pp** |
-| **US3 大 embedder** `bge-large-en-v1.5` 1024d | embedding | large−small 正 | ✅ **PASS(候选/备胎)** | **+3.793pp** |
-| **US2 open-domain 五步提示** | answer | open-domain↑ 无回归 | ❌ **NO-GO** | −2.1pp(cat-3, p=0.774) |
+| 杠杆 | 层 | 免费 coverage 闸 | **端到端答题(决胜)** |
+|---|---|---|---|
+| **US1 本地 reranker** `bge-reranker-v2-m3` | retrieval | ✅ +15.457pp turn@k | ❌ **NO-GO −0.06pp(p=1.0)**——coverage 幻觉 |
+| **US3 大 embedder** `bge-large-en-v1.5` 1024d | embedding | ✅ +3.793pp turn@k | 未端到端验(候选/备胎;coverage 幻觉风险同 US1) |
+| **US2 open-domain 五步提示** | answer | — | ❌ NO-GO −2.1pp(cat-3, p=0.774) |
+
+> **008 决定性教训(US4)**:coverage/turn@k 增益**不等于**答题增益。US1 reranker 拿 +15.457pp 召回,端到端答题 **−0.06pp(McNemar p=1.0, within-noise)**——它 helps 3 类 +8 但把 **temporal 砸 −9**(cross-encoder 按单轮相关性重排,挤掉时序上下文)。**以后杠杆一律以端到端答题分为准,coverage 只作诊断,不作 verdict。**
+
+### ⭐ 新诚实参考点(US4,无 reranker)
+
+engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, top-k30, 全量 1540)。取代旧 luna/strict-judge 50.7% 伪影。
+
+| 类别 | 正确率 | n | 差距诊断 |
+|---|---:|---:|---|
+| single-hop | 86.68% | 841 | 已接近 MemOS 级;大 n 有杠杆 |
+| multi-hop | 85.82% | 282 | 已接近 MemOS 级 |
+| **temporal** | **82.24%** | 321 | 次弱,脆(reranker 会害);时序推理 |
+| **open-domain** | **56.25%** | 96 | **最弱**,coverage 加满也不动(54→56)→答题/推理/判题问题,非检索 |
+
+**vs 目标**:MemOS 88.83(gap ~5.1pp)/ Mem0 92.5(gap ~8.8pp)。**拉平方向 = open-domain + temporal + single-hop 精度,不是堆检索召回。**
 
 ### US1 — 本地 reranker(旗舰,决胜杠杆)
 
