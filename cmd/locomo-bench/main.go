@@ -110,6 +110,11 @@ type options struct {
 	catTopK              map[int]int
 	catQuota             map[int]int
 	coverageOnly         bool
+	attributionTrace     bool
+	joinResults          string
+	embedProbe           bool
+	outrankCap           int
+	widePool             int
 }
 
 func main() {
@@ -165,6 +170,11 @@ func run() error {
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
 	flag.BoolVar(&opt.coverageOnly, "coverage-only", false, "retrieval-only bake-off: grade every arm on exact-turn / session evidence recall and write coverage.json, making NO answer or judge LLM call (needs --chunks for turn recall)")
+	flag.BoolVar(&opt.attributionTrace, "attribution-trace", false, "retrieval-only per-question attribution trace (requires a persisted store)")
+	flag.StringVar(&opt.joinResults, "join-results", "", "archived results JSONL to join by (conv,q) for correctness quadrants")
+	flag.BoolVar(&opt.embedProbe, "embed-probe", false, "with --attribution-trace, probe query embedding determinism")
+	flag.IntVar(&opt.outrankCap, "outrank-cap", 5, "maximum non-gold hits to record before the first gold hit")
+	flag.IntVar(&opt.widePool, "wide-pool", 0, "candidate pool size for gold_in_pool (0 = max(300, top-k*6))")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -238,6 +248,13 @@ func run() error {
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		sampledConversations = opt.maxConvs
 		convs = convs[:opt.maxConvs]
+	}
+	if opt.attributionTrace {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if sampledConversations > 0 {
+			logger.Info("sampling conversations", "limit", sampledConversations)
+		}
+		return runAttributionCLI(context.Background(), opt, convs, arms, logger)
 	}
 	prices, err := parsePriceTable(os.Getenv("LOCOMO_PRICE_TABLE"))
 	if err != nil {
