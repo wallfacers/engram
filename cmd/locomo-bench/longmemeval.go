@@ -223,9 +223,9 @@ func lmeMessageText(raw json.RawMessage) string {
 	return ""
 }
 
-func loadBenchmarkDataset(path, format string) ([]conversation, error) {
+func loadBenchmarkDataset(path, format string, includeCaptions bool) ([]conversation, error) {
 	if format == "locomo" {
-		return loadDataset(path)
+		return loadDataset(path, includeCaptions)
 	}
 	items, err := loadLongMemEval(path)
 	if err != nil {

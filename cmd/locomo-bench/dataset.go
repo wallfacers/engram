@@ -64,8 +64,10 @@ type conversation struct {
 	QA       []locomoQA
 }
 
-// loadDataset reads and parses the LoCoMo JSON file.
-func loadDataset(path string) ([]conversation, error) {
+// loadDataset reads and parses the LoCoMo JSON file. includeCaptions folds
+// each turn's blip_caption into its text (and keeps image-only turns); false
+// preserves the historical text-only ingestion byte-for-byte.
+func loadDataset(path string, includeCaptions bool) ([]conversation, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied benchmark path
 	if err != nil {
 		return nil, fmt.Errorf("read dataset: %w", err)
@@ -76,7 +78,7 @@ func loadDataset(path string) ([]conversation, error) {
 	}
 	convs := make([]conversation, 0, len(items))
 	for i, it := range items {
-		sessions, err := parseConversation(it.Conversation)
+		sessions, err := parseConversation(it.Conversation, includeCaptions)
 		if err != nil {
 			return nil, fmt.Errorf("conversation %d: %w", i, err)
 		}
@@ -95,8 +97,11 @@ func questionID(conv, question int) string {
 }
 
 // parseConversation extracts the session_N / session_N_date_time fields from the
-// dynamic conversation object.
-func parseConversation(raw json.RawMessage) ([]session, error) {
+// dynamic conversation object. With includeCaptions, a turn's blip_caption (the
+// dataset's description of a shared photo) is folded into the turn text so
+// image-borne facts reach extraction and verbatim chunks; image-only turns are
+// then kept instead of dropped. Off = historical behavior, byte-for-byte.
+func parseConversation(raw json.RawMessage, includeCaptions bool) ([]session, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -127,19 +132,30 @@ func parseConversation(raw json.RawMessage) ([]session, error) {
 			continue // session_1_date_time already handled; skip other shapes
 		}
 		var turns []struct {
-			Speaker string `json:"speaker"`
-			Text    string `json:"text"`
-			DiaID   string `json:"dia_id"`
+			Speaker     string `json:"speaker"`
+			Text        string `json:"text"`
+			DiaID       string `json:"dia_id"`
+			BlipCaption string `json:"blip_caption"`
 		}
 		if err := json.Unmarshal(val, &turns); err != nil {
 			continue
 		}
 		s := ensureSession(byIndex, idx)
 		for _, tt := range turns {
-			if strings.TrimSpace(tt.Text) == "" {
+			text := tt.Text
+			if includeCaptions {
+				if caption := strings.TrimSpace(tt.BlipCaption); caption != "" {
+					if strings.TrimSpace(text) == "" {
+						text = "[shares a photo: " + caption + "]"
+					} else {
+						text = text + " [shares a photo: " + caption + "]"
+					}
+				}
+			}
+			if strings.TrimSpace(text) == "" {
 				continue
 			}
-			s.Turns = append(s.Turns, turn{Speaker: tt.Speaker, Text: tt.Text, DiaID: tt.DiaID})
+			s.Turns = append(s.Turns, turn{Speaker: tt.Speaker, Text: text, DiaID: tt.DiaID})
 		}
 	}
 

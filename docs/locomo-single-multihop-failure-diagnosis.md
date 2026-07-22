@@ -333,6 +333,13 @@ single-hop 和 multi-hop 错题：
 single-hop 中至少 14 道主因错误来自图像细节完全没有进入 memory；另有多道 IDK 也只
 缺图像粒度。杯子、海报、食物、画作、照片内容等题形成了高度确定、可批量处理的失败簇。
 
+> 🔧 **机制已落地,收益未声明(2026-07-23)**:`--image-captions` flag(默认关,
+> adapter-only,引擎零改)——解析层把每 turn 的 `blip_caption` 折进文本
+> (`[shares a photo: …]`),抽取与 verbatim chunk 两条摄入路自动受益;关闭时逐字节
+> 等旧行为。locomo10 实测 1226/5882 turn(20.8%)带 caption。**生效需重建抽取店 +
+> 端到端 A/B(宪法 IV)才可声明分数**;排序约束:须在 009 归因(原始 008 store)
+> 之后再建 caption 店,避免污染同源基线。
+
 ### 3. 评测侧：修复 gold、evidence 与 judge
 
 两类共有 29/152 道错题属于 gold、实体绑定、等价答案或计数去重口径问题，占目标错题

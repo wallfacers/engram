@@ -87,6 +87,7 @@ type options struct {
 	abstainHard          bool
 	abstainSoft          bool
 	forceAnswer          bool
+	imageCaptions        bool
 	temporalAnswerPrompt bool
 	judgeMem0Aligned     bool
 	answerModel          string
@@ -154,6 +155,7 @@ func run() error {
 	flag.Float64Var(&opt.supersededPenalty, "superseded-penalty", 0.3, "retrieval score multiplier for superseded entries [0,1]; only applies when --conflict-resolution is on")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
+	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.judgeMem0Aligned, "judge-mem0-aligned", false, "use the Mem0-aligned lenient judge rules")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
@@ -240,7 +242,7 @@ func run() error {
 		opt.concurrency = 1
 	}
 
-	convs, err := loadBenchmarkDataset(opt.dataPath, opt.datasetFormat)
+	convs, err := loadBenchmarkDataset(opt.dataPath, opt.datasetFormat, opt.imageCaptions)
 	if err != nil {
 		return err
 	}

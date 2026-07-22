@@ -205,7 +205,7 @@ func TestAttributionCLIUsesPersistedStoreWithoutAnswerOrJudgeCredentials(t *test
 	if err := os.WriteFile(datasetPath, []byte(dataset), 0o644); err != nil {
 		t.Fatalf("write dataset fixture: %v", err)
 	}
-	convs, err := loadDataset(datasetPath)
+	convs, err := loadDataset(datasetPath, false)
 	if err != nil {
 		t.Fatalf("load dataset fixture: %v", err)
 	}
