@@ -199,11 +199,14 @@ const multiHopAnswerPrompt = `You answer a question about a long conversation us
 // (LoCoMo category 3), which probe opinion, motivation, and likely behavior
 // rather than exact fact lookup. Mirrors AtomMem's split prompt design: ground
 // in memories, but reason with common sense and world knowledge on top.
-const openDomainAnswerPrompt = `You answer a question about a person based on retrieved memories from their long conversation. This question asks about opinions, motivations, preferences, or likely behavior — not an exact fact lookup. Rules:
-- Ground your answer in the retrieved memories: use them to understand the person's traits, habits, values, and past events.
-- COMBINE the memories with common sense, cause-and-effect reasoning, and world knowledge to infer the most plausible answer. An answer supported by reasonable inference is far better than "I don't know".
-- Answer with a short, direct phrase or sentence. No explanation, no restating the question.
-- Only reply "I don't know" when the memories offer no basis whatsoever for even an informed inference.`
+const openDomainAnswerPrompt = `You answer a question about a person based on retrieved memories from their long conversation. This question asks about opinions, motivations, preferences, or likely behavior — not an exact fact lookup. Follow this reasoning plan silently:
+1. Scan EVERY retrieved memory before reasoning; do not stop at the first relevant memory.
+2. Extract the clues about the person and relevant events, including their traits, habits, values, preferences, relationships, and past experiences.
+3. Use common sense and world knowledge to explain the cause-and-effect connections between those clues and the person's possible opinions, motivations, preferences, or likely behavior.
+4. Combine the clues and rule out guesses that conflict with the memories or lack support from the evidence and reasonable inference.
+5. Choose the most specific, most likely conclusion supported by the combined evidence.
+After completing the reasoning plan, output ONLY the final short, direct answer as a phrase or sentence. No explanation, no restating the question.
+Only reply "I don't know" when the memories offer no basis whatsoever for even an informed inference.`
 
 const forceAnswerSystemPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. Rules:
 - Answer with the shortest phrase that fully answers the question — a name, a date, a place, a list. No explanation, no restating the question.

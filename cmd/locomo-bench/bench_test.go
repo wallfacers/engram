@@ -767,6 +767,22 @@ func TestAnswerPromptFor(t *testing.T) {
 	}
 }
 
+func TestOpenDomainAnswerPromptHasFiveStepReasoningPlan(t *testing.T) {
+	clauses := []string{
+		"Scan EVERY retrieved memory",
+		"Extract the clues about the person and relevant events",
+		"Use common sense and world knowledge to explain the cause-and-effect",
+		"Combine the clues and rule out guesses",
+		"Choose the most specific, most likely conclusion",
+		"output ONLY the final short, direct answer",
+	}
+	for _, clause := range clauses {
+		if !strings.Contains(openDomainAnswerPrompt, clause) {
+			t.Errorf("open-domain prompt missing clause %q", clause)
+		}
+	}
+}
+
 func TestIsIDK(t *testing.T) {
 	cases := map[string]bool{
 		"I don't know":                          true,
