@@ -9,6 +9,8 @@
 > change `memory-hybrid-retrieval-locomo`**(不在当前 spec-kit `specs/` 树内),
 > 结论摘要见 CLAUDE.md 记忆子系统一节。本文记录在此基础上的两项战略评估与决策。
 
+> ⚠️ **演进提醒(2026-07-22,post 007/008)**:本文数字(~74.7)与"不做云 SaaS"判断已被更新——判题口径对齐后真实水位 **83.70%**(差距对 MemOS ~5pp),且 SaaS 方向收窄为**垂直「设备/应用用户习惯记忆」**重新打开。最新能力认知与方向以 [capability-and-product-north-star.md](./capability-and-product-north-star.md) 为准;本文以下保留为**技术 backlog 正本 + 原始决策记录**。
+
 ## 决策一:产品方向 —— 不做云 SaaS,全力做本地开源记忆产品
 
 ### 评估结论
@@ -248,3 +250,57 @@ FlyVec 2101.06887、Fly-CL 2510.16877。
   **"<5pp 改进可能在单跑噪声以内"论点的一手案例**;
 - 三篇独立生物隐喻收敛到"图+时间+强度",可作为"方向共识已成、评测可靠性
   才是真问题"的引子。一份调研两份产出。
+
+## 附三:答题侧短板 backlog + force-answer 口径发现(2026-07-22,基于 83.70% 实测错题归因)
+
+> 基线锚 = 008 US4 端到端 **overall 83.70%**([locomo-score-levers.md](./locomo-score-levers.md))。附二是**检索/引擎侧**生物启发 backlog;本附是**答题侧(纯 adapter 可立刻做)+ 错题实读诊断**。诚实纪律:verdict 一律端到端 A/B(coverage 仅诊断,US4 教训);judge 宽松牌已打完(83.70% 已用 mem0-aligned partial-credit judge),不再靠"对齐口径"涨分。
+
+### ⭐ 头号发现:83.70% 是 `force_answer=false` 下拿的(自设限)
+
+`regime.json` 实证:该 run **允许拒答(IDK)**,而 Mem0/OmniMemEval 口径**强制作答、无 IDK**。engram 在**比竞品更严的口径**下拿 83.70%。IDK 损失集中在 open-domain:
+
+| 类别 | IDK 率 | IDK-且-错 / 本类错题 |
+|---|---:|---:|
+| **open-domain** | **18.75%** | 16/42 = **38%** |
+| temporal | 4.4% | 14/57 = 25% |
+| single-hop | 3.4% | 26/… |
+| multi-hop | 4.3% | — |
+
+**⇒ #1 零成本杠杆 = 全类 `--force-answer` on(引擎零改,flag 已在 `main.go:151`)**,一发同攻 open-domain 19% + temporal 4.4% 弃答,是向竞品口径靠拢的白捡分。**须单独 commit 声明"口径对齐非算法涨点"(宪法 IV)。**
+
+### open-domain 56.2% 错题实读诊断(42 条全读,三病因叠加)
+
+- **A 自设限弃答(16/42=38%,最大最便宜桶)**:可推理题被 IDK 挡掉(如"How old is Jolene→≤30 since in school"被弃答)→ **force-answer 直接攻**。
+- **B 开放 gold 只给一个任意答案(~10)**:模型答"另一个同样对的"(career gold"park ranger" vs pred"veterinarian")→ **OD-2 多候选输出**(输出 2–3 个最具体候选,judge partial-credit 天然吃)。**非检索、非 judge——固有口径摩擦,不可清零。**
+- **C 反向推理弱(~7)**:真答题模型弱点(lonely gold"yes" vs pred"No")→ **OD-3 抽取保留情感/评价软线索**(现抽取只留 concrete fact,把软信号蒸馏没了)。US2 CoT 深度已证伪,别再堆步数。
+- **D/E 事实检索错 + 粒度(~8)**。
+
+### 答题侧 backlog(纯 adapter,可立刻 A/B,引擎零改)
+
+| ID | 杠杆 | 类别 | 机制 |
+|---|---|---|---|
+| **OD-1 / T-1 / S-2a** | **force-answer on**(#1) | 全类 | 回收自设限弃答,对齐竞品口径 |
+| **OD-2** | open-domain 多候选(2–3 具体答案)输出契约 | open-domain | 提高命中 gold 概率;**anti-放水:仅 cat-3,不污染列举题** |
+| **T-2** | temporal 区间/时长显式算术契约("列两端 event_date→算差") | temporal | 治"how long/before-after"不计算 |
+| **T-3** | temporal 候选去歧(按 event_date 排序编号呈现) | temporal | 治"多候选选错日期" |
+| **OD-4** | cat-3 提高 verbatim-chunk 配额↑/fact↓ | open-domain | 给更多软线索做常识推理 |
+| **S-1/S-3** | single-hop 111 错题归因(诊断) + 粒度修正 prompt | single-hop | 大 n(每 +1pp=+8.4 题)扫尾 |
+
+### 引擎级 backlog(须 contract-first + 宪法 IV 评测门 + 单独 commit)
+
+| ID | 杠杆 | 对应附二 |
+|---|---|---|
+| **OD-3** | 抽取保留评价性/情感/间接线索(open-domain 软信道) | — |
+| **T-4** | `event_date`→时间范围 + T_score 进 RRF 第 4 路(检索侧时间窗) | 附二短板2 P0 |
+| **supersedes 链** | 信念修订双向指针(当前 vs 历史状态),治 knowledge-update temporal | 附二短板3 P1 + [freshness 文档](./memory-freshness-and-retrieval-policy.md) |
+| **写入门** | D-MEM 式去噪写入,提 single-hop/整体信噪比 | 附二短板3 P1 |
+
+### Mem0/MemOS vs engram(读上游源码核对,synthius §6)
+
+- **engram 架构已等于或强于**:三路 RRF **并集**候选 > Mem0 **semantic-only 候选池**(`main.py:1636`,BM25/entity 只加分不召回);engram OSS temporal(TemporalScore/ParseTemporalIntent 已在)> **Mem0 OSS 的 `reference_date` 直接 raise ValueError**(时序打分仅托管平台有)。
+- **Mem0 92.5 靠托管私有优化,不完全可比**;**MemOS 88.83 全本地 = 真正可比标杆,证明本地天花板 ≥88**,engram 差距是质量非架构。
+- 可移植纯客户端增量只剩:**supersedes 链、实体图游走、检索侧时间窗、答题多候选输出**。不可追:Mem0 托管优化、云 reranker(死规则)。
+
+### 执行顺序建议
+
+**先答题侧收割(纯 adapter,零引擎风险)**:force-answer A/B → 据 flip 定 OD-2/T-2/T-3 → 再引擎级(OD-3/T-4/supersedes)。**force-answer 是白捡的第一发。**

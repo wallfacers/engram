@@ -12,7 +12,9 @@
 
 | 文档 | 状态 | 目标 | 正本/关联 |
 |---|---|---|---|
-| [memory-strategy.md](./memory-strategy.md) | 活跃 | 产品方向 + 论文线 + 涨点 backlog(生物启发检索 P0/P1/P2) | **战略正本**;竞品/单论文文档均回链至此 |
+| [capability-and-product-north-star.md](./capability-and-product-north-star.md) | 活跃 | **北极星总纲**:能力认知 + 诚实水位(83.70%)+ 拉平/论文/SaaS 习惯记忆方向 | 一处看全;技术 backlog 链回 memory-strategy |
+| [memory-strategy.md](./memory-strategy.md) | 活跃 | 产品方向 + 论文线 + 涨点 backlog(生物启发检索 P0/P1/P2) | **技术/战略 backlog 正本**;数字/SaaS 演进见北极星总纲 |
+| [locomo-score-levers.md](./locomo-score-levers.md) | 活跃 | LoCoMo 跑分杠杆实验台账(008 US1-US4 verdict + 新参考点) | 杠杆 verdict 正本 |
 | [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
 | [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
 | [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |
