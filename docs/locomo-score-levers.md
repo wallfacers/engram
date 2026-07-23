@@ -111,5 +111,7 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 - **与 008 reranker 决定性不同**:reranker coverage +15pp 但端到端 NO-GO(幻觉);bge-large coverage +3.79pp **真转化**成答题 +1.42pp。**这是首个已转化的召回赢**。
 - **可移植/合规**:bge-large 开源权重、离线可跑(fastembed CPU / vllm),**非付费云 rerank**,不碰死规则;符合 Constitution I/V。可作默认 embedder 升级路径候选。
 - **口径**:85.45% 是可比数(force-answer + mem0-aligned,同竞品口径)→ 对 MemOS 88.83 的 gap 从 ~4.6pp 收窄到 **~3.4pp**。
-- **诚实 caveat(未过硬因果闸)**:(1) bge-large 店是**今天全新抽取**、bge-small 是旧 cov-store → +1.42pp **混了重抽取方差**,非 bit-identical 纯 embedder 隔离,真实纯因果可能 <1.42pp;(2) **单跑 temp=1.0 非确定**,+22 题含噪声(控制组只偏基线 0.2pp,噪声不大但仍需 repeats 坐实)。**出货前须**:同抽取 bit-identical 对照 + repeats≥3。
+**repeats=3 坐实(答题噪声带)**:bge-large `OVERALL mean=85.4%, ci95=[84.9%, 85.9%]`(single-hop [87.7,89.9] / multi-hop [84.5,90.6] / temporal [77.8,86.0] / open-domain [50.3,71.2],后者 n=96 带宽)。bge-small 两锚点 **84.03%(今天 fresh 控制)+ 84.22%(记录基线)均 ~84.1%,落在 bge-large 95% CI 下界 84.9% 之外** → **+1.3pp 扛过了 temp=1.0 答题非确定,是真信号非噪声**。
+
+- **诚实 caveat(剩一道硬闸未过)**:bge-large 店是**今天全新抽取**、bge-small 是旧 cov-store → +1.3pp **仍混重抽取方差**,非 bit-identical 纯 embedder 隔离。缓解论证:**per-类增益画像与 US3 coverage 画像吻合**(open-domain +4.2↔coverage +5.4、multi-hop +2.1↔+4.8),指向增益由 embedder 驱动而非抽取运气。**完全隔离**需同抽取的 bge-small 对照(受阻于 fresh 建店抽取瓶颈 ~45min + 单线程 sidecar 嵌入,本轮未跑;留作出货前最后一闸)。
 - **本轮元教训**:先前 59%→70% 全是**漏 `--judge-mem0-aligned`**(+ chunk-quota 0)的配置伪影,与 embedder 无关;控制自检(cov-store 复现 84%)是把伪影和真信号分开的唯一手段。踩坑全表见 reproduction runbook。
