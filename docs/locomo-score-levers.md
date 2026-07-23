@@ -74,3 +74,23 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 - **US4**:US1 已过闸 → 端到端默认预算(top-k 30)重跑 `hybrid` vs `hybrid+rerank`,声明新参考点 + false→true flip 抽查;reranker 保持默认关。US1+US3 联合收益尚未验证。
 - 细节正本:[`specs/008-locomo-score-levers/eval-log.md`](../specs/008-locomo-score-levers/eval-log.md);对标目标见 [`competitive-benchmarks.md`](./competitive-benchmarks.md)。
+
+---
+
+## Feature 009 — 归因门控(attribution,2026-07-23)
+
+固定栈同 008(embedding 换 box vllm bge-large 1024d)。引擎零改(全在 `cmd/locomo-bench/` adapter)。逐条正本:[`specs/009-retrieval-attribution-gate/eval-log.md`](../specs/009-retrieval-attribution-gate/eval-log.md)。
+
+**US1 逐题检索归因 trace**:retrieval-only 把错题切四象限(Q1 对 / Q2 答题侧 / Q3 排序靶心 / Q4 抽取侧),零答题成本。首版有两 adapter bug(`outranked_by` 结构性恒空;`covers_gold` 对 fact 命中失明→Q3=94.7% 伪影),修复后(fact 感知覆盖 + wide-pool outranked,commit 7c8f194)Q3→58.4%、Q1→34.8%、SC-002 outranked 非空 100%。fact↔turn 用词法内容匹配桥接(fact 只有 session 级溯源),`--fact-coverage-tau` 默认 0.8(偏严,已知软限制)。
+
+### ⭐ 决定性诊断:瓶颈是**深层召回**,不是 top-K 排序
+
+修复后可信证据显示:真 US2 靶心(Q3 且答错)的 gold 在宽池里**中位 rank 71–90、无一 ≤30**、70/156 在 100+;outranked_by 信号弥散(时间锚 19% / 近重 5%,**无单一机制主导**)。
+
+- **US2 排序机制 = STOP(NO-GO)**:tuning-free 重排(score-aware RRF / MMR / 实体·时间锚)**救不动 rank-90 的 gold**——它们重排 top 候选,而 gold 根本没进候选前列。这不是排序问题。
+- 与 008「reranker coverage +15pp 但端到端 NO-GO」、[US2 open-domain 提示证伪]「短板在检索覆盖非答题深度」**三处独立印证同一结论**。
+- **后续拿分方向 = 召回/检索深度**,非排序精修:更强 embedder、混合信号召回扩召、chunk 粒度/抽取覆盖。**不是** cross-encoder 重排(死规则:云/付费 rerank 禁用;本地 reranker 已证 coverage 幻觉)。
+
+### 口径 gotcha(归因专有)
+
+- **SC-004 确定性依赖嵌入后端**:vllm-GPU 查询嵌入非确定(`embed_probe` unstable,bit_identical 0.875)→ trace byte 级不可复现(差异在 rrf_score 尾数);但**象限分布两跑完全相同、0/1540 换象限**,结论可复现。要 byte 一致须用确定性 CPU 嵌入器(fastembed)。覆盖判定本身纯词法确定。
