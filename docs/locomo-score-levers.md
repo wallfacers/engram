@@ -94,3 +94,22 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 ### 口径 gotcha(归因专有)
 
 - **SC-004 确定性依赖嵌入后端**:vllm-GPU 查询嵌入非确定(`embed_probe` unstable,bit_identical 0.875)→ trace byte 级不可复现(差异在 rrf_score 尾数);但**象限分布两跑完全相同、0/1540 换象限**,结论可复现。要 byte 一致须用确定性 CPU 嵌入器(fastembed)。覆盖判定本身纯词法确定。
+
+### ⭐ bge-large 端到端 = GO 候选(008 US3 coverage 赢**已转化**为答题分,2026-07-23)
+
+009 诊断说「后续方向 = 更强 embedder」。这轮把 008 US3 的 bge-large 从 coverage 候选**推到端到端答题验证**——可复现流程/踩坑正本见 [`locomo-e2e-eval-reproduction.md`](./locomo-e2e-eval-reproduction.md)。
+
+栈:box vllm Qwen 答题 + deepseek-v4-flash **mem0-aligned** judge + `--chunks --top-k 30 --chunk-quota 12 --force-answer`。
+
+| store / embedder | overall | Δ |
+|---|---|---|
+| bge-small @ `007-us2/cov-store`(控制/自检) | **84.03%**(1294/1540) | 复现记录基线 84.22%(±0.2pp)→ 管线验证 ✓ |
+| **bge-large @ 全新 q12 店** | **85.45%**(1316/1540) | **+1.42pp / 净 +22 题** |
+
+分类:single-hop +1.7 · multi-hop +2.1 · temporal −0.6 · **open-domain +4.2**(3/4 类涨,含最难的两类)。
+
+- **与 008 reranker 决定性不同**:reranker coverage +15pp 但端到端 NO-GO(幻觉);bge-large coverage +3.79pp **真转化**成答题 +1.42pp。**这是首个已转化的召回赢**。
+- **可移植/合规**:bge-large 开源权重、离线可跑(fastembed CPU / vllm),**非付费云 rerank**,不碰死规则;符合 Constitution I/V。可作默认 embedder 升级路径候选。
+- **口径**:85.45% 是可比数(force-answer + mem0-aligned,同竞品口径)→ 对 MemOS 88.83 的 gap 从 ~4.6pp 收窄到 **~3.4pp**。
+- **诚实 caveat(未过硬因果闸)**:(1) bge-large 店是**今天全新抽取**、bge-small 是旧 cov-store → +1.42pp **混了重抽取方差**,非 bit-identical 纯 embedder 隔离,真实纯因果可能 <1.42pp;(2) **单跑 temp=1.0 非确定**,+22 题含噪声(控制组只偏基线 0.2pp,噪声不大但仍需 repeats 坐实)。**出货前须**:同抽取 bit-identical 对照 + repeats≥3。
+- **本轮元教训**:先前 59%→70% 全是**漏 `--judge-mem0-aligned`**(+ chunk-quota 0)的配置伪影,与 embedder 无关;控制自检(cov-store 复现 84%)是把伪影和真信号分开的唯一手段。踩坑全表见 reproduction runbook。
