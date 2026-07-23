@@ -161,3 +161,28 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 - **机制**:无差别把 ~2800 条 opinion 灌进同一 RRF 池 → 靶心 open-domain 边际得益被 n=96 方差淹没,而全局稀释把 single-hop/temporal 各拖 −0.9。**category-blind 覆盖扩张适得其反**。
 - **要救**得靠 **category-conditional 检索**(只对 open-domain 题浮现 opinion 条目)——新机制,非现成 flag,留作 future work。判分口径合法(deepseek mem0-aligned,unpriced 含 deepseek-v4-flash)。产物 `.locomo-run/009-full-C-opinion` + `.locomo-run/009-opinion-store`(store 已被 opinion 污染,非正本;bge-large 正本仍是 `009-bge-chunks-store`)。
 - **教训**:open-domain 短板**不是**靠加抽取覆盖能便宜拿的;[[008-us2-opendomain-verdict]] 说「短板在检索覆盖非答题深度」——但覆盖得**精准定向**,粗放翻倍反伤全局。
+
+### ~ cluster-sweep = INCONCLUSIVE(+0.4pp 落噪声带,配对对照证伪表观增益,2026-07-23)
+
+`--cluster-sweep`(一跳实体簇扩展,检索层,预算封顶 1.5×,无 per-question LLM)叠 cat-top-k。**先犯错后纠正的教科书案例**:
+
+- **对旧 B_full 比**:sweep 86.5% vs 旧 B_full 86.0%,表观 +0.5pp,且 multi-hop「+1.6」、temporal「+1.4」——看着像 GO。
+- **配对新鲜对照(B2ctrl,同批 cat-top-k 无 sweep,repeats=3)戳穿**:B2ctrl 86.1% {85.6,86.2,86.4} vs sweep 86.5% {86.3,86.3,86.9} = **真 Δ +0.4pp,CI 重叠 [85.0,87.1]∩[85.7,87.3],run-level 重叠(sweep min 86.3 < ctrl max 86.4)**。
+- **表观 multi-hop +1.6 是幻觉**:B2ctrl multi-hop **91.8% = sweep 91.8%**(完全相同)——旧 B_full 的 90.2 只是 temp=1.0 低抽;cat-top-k 已把 multi-hop 拉满,sweep 加不动。temporal/single-hop 各 +0.8(一致正倾但重叠),open-domain −2.0(n=96 噪声,探测跑却 +2.1)。
+- **判定:非干净 GO。** +0.4pp 不可分离于答题噪声;要坐实需 repeats≥8 缩 CI 或配对 McNemar。**元教训:必须对新鲜同批控制比,不能对隔批 baseline 比**——隔批比会把答题噪声漂移误报成机制增益(这正是 [[locomo-answer-nondeterministic]] 警告的)。产物 `.locomo-run/009-full-{E-sweep3,B2-ctrl}`。
+
+---
+
+## 杠杆总账(2026-07-23 收口)
+
+box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:
+
+| 杠杆 | 判定 | Δ overall | 机制 |
+|---|---|---|---|
+| bge-large embedder | **GO**(shipped) | +1.3pp | 更强嵌入,召回转化 |
+| cat-top-k `1=150` | **GO**(shipped) | +0.9pp | 多跳扩检索预算,run-level 干净分离 |
+| opinion-pass | NO-GO | −0.6pp | 粗放覆盖污染全局 precision |
+| filter-pool | 不可测/成本差 | — | LLM-per-question 大 context 压垮 box vllm |
+| cluster-sweep | INCONCLUSIVE | +0.4(噪声内) | 实体簇扩展,配对对照证伪表观增益 |
+
+**净出货:bge-large + cat-top-k → ~86.0%**(vs 原 bge-small baseline 84.0,**+2.0pp**),对 MemOS 88.83 gap 收到 **~2.8pp**。**便宜 flag 杠杆空间基本采尽**——cat-top-k 是本轮唯一新的干净赢。剩余 gap(尤其 open-domain 64%)需**引擎新机制**(category-conditional 检索:只对 open-domain 浮现 opinion/软性记忆),按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
