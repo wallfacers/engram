@@ -123,6 +123,79 @@ func (r *Retriever) Search(ctx context.Context, query string, k int) ([]Result, 
 	return results, err
 }
 
+// SearchMulti runs each subquery through the existing hybrid retrieval path
+// and fuses the resulting ranked lists with RRF-of-RRF. It does not decompose
+// queries or invoke a query-time LLM.
+//
+// After trimming blanks and exact-deduplicating, zero subqueries return nil and
+// one subquery delegates directly to SearchWithDiagnostics for byte-identical
+// Search parity. With multiple subqueries, Result.Score is the RRF-of-RRF score
+// and is not comparable to a single-query Search score.
+func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int) ([]Result, error) {
+	normalized := make([]string, 0, len(subqueries))
+	seen := make(map[string]struct{}, len(subqueries))
+	for _, subquery := range subqueries {
+		subquery = strings.TrimSpace(subquery)
+		if subquery == "" {
+			continue
+		}
+		if _, ok := seen[subquery]; ok {
+			continue
+		}
+		seen[subquery] = struct{}{}
+		normalized = append(normalized, subquery)
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	if len(normalized) == 1 {
+		results, _, err := r.SearchWithDiagnostics(ctx, normalized[0], k)
+		return results, err
+	}
+	if k <= 0 {
+		k = 8
+	}
+
+	depth := k * candidateMultiplier
+	rankings := make([]map[string]int, 0, len(normalized))
+	clusterSweep := make(map[string]bool)
+	for _, subquery := range normalized {
+		results, _, err := r.SearchWithDiagnostics(ctx, subquery, depth)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, len(results))
+		for i, result := range results {
+			names[i] = result.Name
+			clusterSweep[result.Name] = clusterSweep[result.Name] || result.ClusterSweep
+		}
+		rankings = append(rankings, ranksFromOrder(names))
+	}
+
+	fused := fuseRRF(rankings...)
+	if len(fused) > k {
+		fused = fused[:k]
+	}
+	out := make([]Result, 0, len(fused))
+	for _, score := range fused {
+		entry, err := r.entries.GetByName(ctx, score.Key)
+		if err != nil {
+			continue
+		}
+		out = append(out, Result{
+			Name:            entry.Name,
+			Trigger:         entry.Trigger,
+			Content:         entry.Content,
+			EventDate:       entry.EventDate,
+			CreatedAt:       entry.CreatedAt,
+			SourceSessionID: entry.SourceSessionID,
+			ClusterSweep:    clusterSweep[score.Key],
+			Score:           score.Score,
+		})
+	}
+	return out, nil
+}
+
 // SearchWithDiagnostics returns Search's results with optional cluster-sweep
 // candidate counts. The zero diagnostic means no sweep candidate set was used.
 func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k int) ([]Result, SearchDiagnostics, error) {
