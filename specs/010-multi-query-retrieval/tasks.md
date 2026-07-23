@@ -4,6 +4,13 @@
 
 > 傻瓜式执行:确切签名/CLI/schema/判定门在 [contracts/](./contracts/) 已冻结,照抄。产物落 gitignored `.locomo-run/010-*/`。凭据只走 env/隧道绝不落文件。WSL2 长跑 setsid 分离。**全局硬门**:US2 期间引擎 `git diff --name-only -- memory embedding provider store internal` 必空;死规则——禁云/付费 reranker;**最终 top-k=30 不涨 + answer-context 不涨**(提质硬约束,涨即加量判负)。TDD:先写失败测试再实现。US1(engine)与 US2(adapter)**分属不同 commit**。
 
+> **实施进度(2026-07-23,3 个 Codex 并行 + 本会话评审/集成收口)**
+> - ✅ **US1 引擎 `SearchMulti`**(commit `d5d315e`)——merged master。深度 `D=k*candidateMultiplier`、len==1 退化保真、复用 rrfK=60;parity/融合/退化 4 测试真断言(非空转)。
+> - ✅ **US2 分解 `decomposeQuery`**(commit `5daa31e`)——merged。复用 `runner.go` 已有 `modelCaller`,4 种退化 + 正常路径全测。
+> - ✅ **US2 接线 `--multi-query`/`--recall-diagnostic`/context_parity**(commit `53f9b27`)——merged。top-k=30 硬拦、multi 臂候选深度 `questionSearchK` 逐字复刻单臂 `widePool=max(topK*6,300)`(决胜门唯一变量=分解,不被深度污染)。
+> - ✅ **门① 纯 Go 契约 PASS**:集成态 `go build/test/vet ./...` 全绿;engine/adapter 提交边界分离。
+> - ⏸ **门② 离线召回诊断 / 门③ 端到端配对 McNemar**:**待 box**(vllm 8000 答题 + 8001 bge-large 嵌入;凭据每次重启轮换)。门②先跑(near-free),gold 不升 top-30 即诚实 NO-GO 省门③钱。
+
 ---
 
 ## Phase 1: Setup(共享前置)
