@@ -36,7 +36,7 @@
 ### 实现(memory/retriever.go)
 
 - [ ] T008 [US1] 实现 `SearchMulti(ctx, subqueries []string, k int) ([]Result, error)`:①规范化 `subqueries`(`TrimSpace` 每个、丢空串、精确去重);②`len==0`→`nil`;③`len==1`→**短路 `SearchWithDiagnostics(ctx, sub, k)` 返回其 `[]Result`**(逐字节 parity,research D1)
-- [ ] T009 [US1] 实现 `len>1` 融合路径(research D3):每子查询串行 `SearchWithDiagnostics(ctx, sub_i, k)` 取有序 name 序列 `L_i`(深度=内部候选池,非扩最终 k)→ `ranksFromOrder(L_i)` → `fuseRRF(ranks...)` → 截断 top-k → 逐条 `GetByName` 装 `[]Result`;`Result.Score` = RRF-of-RRF 分(契约明示不与单查询可比)
+- [ ] T009 [US1] 实现 `len>1` 融合路径(research D2/D3):每子查询串行 **`SearchWithDiagnostics(ctx, sub_i, D)`,`D = k*candidateMultiplier`**(⚠️ 必须传 `D` 非 `k`,否则截断到 30、gold 在 31–D 名被丢)取有序 name 序列 `L_i` → `ranksFromOrder(L_i)` → `fuseRRF(ranks...)` → **截断最终 top-k** → 逐条 `GetByName` 装 `[]Result`;`Result.Score` = RRF-of-RRF 分(契约明示不与单查询可比)
 - [ ] T010 [US1] 让 T004–T007 全绿:`CGO_ENABLED=0 go test -count=1 ./memory -run 'TestSearchMulti'`
 
 ### 验收(对应 SC)

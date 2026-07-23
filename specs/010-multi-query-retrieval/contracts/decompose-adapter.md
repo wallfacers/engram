@@ -14,6 +14,7 @@ locomo-bench \
 
 - `--multi-query`:开分解 → 用答题 LLM 把 question 分解成 ≤N 子查询 → 调 `Retriever.SearchMulti`。**缺省(不带此 flag)= 现基线单查询,逐字节不变。**
 - `--mq-max-subqueries`:N 上限(默认 4,adapter 侧策略上限;引擎不硬编码)。
+- `--recall-diagnostic`:门② 专用 retrieval-only 模式——single vs multi 跑目标题、输出 gold rank / coverage@30 delta,**MUST NOT** 初始化答题/judge caller(near-free);产出仅诊断,不作 verdict。
 - 其余 flag 复用 canonical recipe 语义,不改含义。**两臂唯一变量 = 是否分解。**
 
 ## 行为契约

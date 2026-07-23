@@ -26,7 +26,7 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 
 1. **退化保真(SC-001)**:`SearchMulti(ctx, []string{q}, k)` 结果集(顺序 + 每字段含 `Score`)与 `Search(ctx, q, k)` 逐字节相同。实现路径 = 规范化后 `len==1` 短路 `SearchWithDiagnostics`,不进二级融合。
 2. **融合语义(SC-002)**:`len>1` 时——
-   - 每子查询 `sub_i` 跑 `SearchWithDiagnostics(ctx, sub_i, k)`,取其有序 `[]Result` 的 name 序列为 `L_i`(深度来自引擎既有内部候选池 `k*candidateMultiplier`,非扩最终 k)。
+   - 每子查询 `sub_i` 跑 **`SearchWithDiagnostics(ctx, sub_i, D)`,`D = k*candidateMultiplier`**(必须传 `D` 非 `k`——否则内部截断到 30、gold 在 31–D 名被丢,见 research D2),取其有序 `[]Result` 的 name 序列为 `L_i`;深度 `D` 是内部融合候选宇宙,非扩最终 k。
    - `ranks_i = ranksFromOrder(L_i)`(1-based)。
    - `fused = fuseRRF(ranks_1, …, ranks_N)`,`Score(d)=Σ_i 1/(60+rank_i(d))`(未命中该 `L_i` 记 0)。
    - `fused` 截断 top-k,逐条 `GetByName` 装 `[]Result`(与 `Search` 同一装配)。
