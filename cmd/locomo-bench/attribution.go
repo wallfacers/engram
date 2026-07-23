@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
@@ -26,6 +28,10 @@ const (
 	attributionCorrectSource   = "008-us4-e2e/results-hybrid.jsonl"
 	defaultAttributionWidePool = 300
 	defaultEmbedProbeQueries   = 32
+	// defaultFactCoverageTau is the directional-containment threshold: a fact
+	// hit covers a gold turn when >=τ of the fact's unique content words appear
+	// in the gold turn text (session-gated). Deterministic, no embeddings.
+	defaultFactCoverageTau = 0.8
 )
 
 // AttributionTrace is the retrieval-only attribution record for one question.
@@ -38,8 +44,15 @@ type AttributionTrace struct {
 	GoldTurns     []string       `json:"gold_turns"`
 	Retrieved     []RetrievedHit `json:"retrieved"`
 	GoldInPool    bool           `json:"gold_in_pool"`
-	GoldRank      int            `json:"gold_rank"`
-	OutrankedBy   []RetrievedHit `json:"outranked_by"`
+	// GoldRankTopK is the 1-indexed rank of the first gold-covering hit within
+	// the narrow top-K the answerer actually consumed; -1 when absent. Drives
+	// quadrant classification (was gold in front of the answerer?).
+	GoldRankTopK int `json:"gold_rank_topk"`
+	// GoldRankPool is the 1-indexed rank of the first gold-covering hit within
+	// the wide diagnostic pool; -1 when absent. Drives outranked_by (which
+	// non-gold hits sit above gold when we look wider than top-K).
+	GoldRankPool int            `json:"gold_rank_pool"`
+	OutrankedBy  []RetrievedHit `json:"outranked_by"`
 	Quadrant      string         `json:"quadrant"`
 	Correct       *bool          `json:"correct,omitempty"`
 	CorrectSource string         `json:"correct_source,omitempty"`
@@ -67,40 +80,41 @@ type QuadrantDistribution struct {
 	TotalGradeable   int    `json:"total_gradeable"`
 }
 
-func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHits []memory.Result, chunkTurns map[string][]string, topK, outrankCap int, correct *bool) AttributionTrace {
+func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHits []memory.Result, chunkTurns map[string][]string, goldTurnText map[string]string, topK, outrankCap int, tau float64, correct *bool) AttributionTrace {
 	goldTurns := parsedGoldTurns(qa.Evidence)
-	goldSet := make(map[string]struct{}, len(goldTurns))
-	for _, turnID := range goldTurns {
-		goldSet[turnID] = struct{}{}
-	}
 
+	// Narrow top-K: what the answerer actually consumed → gold_rank_topk.
 	retrieved := make([]RetrievedHit, 0, len(hits))
-	goldRank := -1
+	goldRankTopK := -1
 	for index, hit := range hits {
-		mapped := mappedGoldTurns(hit, chunkTurns, goldTurns, goldSet)
+		mapped := hitMappedGoldTurns(hit, chunkTurns, goldTurnText, goldTurns, tau)
 		item := newRetrievedHit(hit, index+1, mapped)
 		retrieved = append(retrieved, item)
-		if goldRank < 0 && item.CoversGold {
-			goldRank = item.Rank
+		if goldRankTopK < 0 && item.CoversGold {
+			goldRankTopK = item.Rank
 		}
 	}
 
-	goldInPool := len(coveredGoldTurns(wideHits, chunkTurns, goldSet)) > 0
-	if goldRank > 0 {
-		goldInPool = true
-	}
+	// Wide pool: gold's true rank when we look past top-K → gold_rank_pool,
+	// and the non-gold hits sitting above it → outranked_by.
+	goldRankPool := -1
 	outRankedBy := make([]RetrievedHit, 0)
-	if goldRank > 0 && outrankCap > 0 {
-		for _, hit := range retrieved[:goldRank-1] {
-			if hit.CoversGold {
-				continue
-			}
-			outRankedBy = append(outRankedBy, hit)
-			if len(outRankedBy) == outrankCap {
-				break
-			}
+	for index, hit := range wideHits {
+		mapped := hitMappedGoldTurns(hit, chunkTurns, goldTurnText, goldTurns, tau)
+		if len(mapped) > 0 {
+			goldRankPool = index + 1
+			break
+		}
+		if outrankCap > 0 && len(outRankedBy) < outrankCap {
+			outRankedBy = append(outRankedBy, newRetrievedHit(hit, index+1, nil))
 		}
 	}
+	if goldRankPool < 0 {
+		// Gold never surfaced in the pool: the accumulated leaders outrank
+		// nothing, so report no competitors rather than a pool prefix.
+		outRankedBy = outRankedBy[:0]
+	}
+	goldInPool := goldRankPool > 0
 
 	trace := AttributionTrace{
 		Conv:         convID,
@@ -111,9 +125,10 @@ func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHit
 		GoldTurns:    goldTurns,
 		Retrieved:    retrieved,
 		GoldInPool:   goldInPool,
-		GoldRank:     goldRank,
+		GoldRankTopK: goldRankTopK,
+		GoldRankPool: goldRankPool,
 		OutrankedBy:  outRankedBy,
-		Quadrant:     classifyAttribution(len(goldTurns) > 0, goldInPool, goldRank, topK, correct),
+		Quadrant:     classifyAttribution(len(goldTurns) > 0, goldInPool, goldRankTopK, topK, correct),
 	}
 	if correct != nil {
 		value := *correct
@@ -138,15 +153,135 @@ func parsedGoldTurns(evidence []string) []string {
 	return turns
 }
 
-func mappedGoldTurns(hit memory.Result, chunkTurns map[string][]string, goldTurns []string, goldSet map[string]struct{}) []string {
-	covered := coveredGoldTurns([]memory.Result{hit}, chunkTurns, goldSet)
-	mapped := make([]string, 0, len(covered))
-	for _, turnID := range goldTurns {
-		if _, ok := covered[turnID]; ok {
-			mapped = append(mapped, turnID)
+// hitMappedGoldTurns reports which gold turns a single hit covers, taking the
+// path that matches the hit's provenance:
+//   - chunk hits (present in chunkTurns) keep exact turn-id overlap — chunks
+//     carry real DiaIDs, so coverage is turn-precise.
+//   - fact hits carry only session-level provenance, so they map via
+//     factCoversGoldTurn: session-gated directional lexical containment.
+//
+// The two never collide: probeChunkTurns keys only chunk-named entries, so a
+// fact name is never in chunkTurns and takes the fact path.
+func hitMappedGoldTurns(hit memory.Result, chunkTurns map[string][]string, goldTurnText map[string]string, goldTurns []string, tau float64) []string {
+	mapped := make([]string, 0, len(goldTurns))
+	if turns, isChunk := chunkTurns[hit.Name]; isChunk {
+		turnSet := make(map[string]struct{}, len(turns))
+		for _, t := range turns {
+			turnSet[t] = struct{}{}
+		}
+		for _, gold := range goldTurns {
+			if _, ok := turnSet[gold]; ok {
+				mapped = append(mapped, gold)
+			}
+		}
+		return mapped
+	}
+	for _, gold := range goldTurns {
+		if factCoversGoldTurn(hit.Content, hit.SourceSessionID, goldTurnText[gold], goldTurnSession(gold), tau) {
+			mapped = append(mapped, gold)
 		}
 	}
 	return mapped
+}
+
+// factCoversGoldTurn reports whether a fact hit covers one gold turn via
+// session-gated directional containment: the fact's source session must match
+// the gold turn's session, and >=τ of the fact's unique content words must
+// appear in the gold turn text. A fact is extracted from its source turn, so
+// its content words should reappear there; the session gate rejects same-word
+// coincidences across sessions. Deterministic (lexical only) so reruns stay
+// byte-identical (SC-004) even when query embeddings are unstable.
+func factCoversGoldTurn(factContent, factSessionID, goldTurnText string, goldSession int, tau float64) bool {
+	if goldSession < 0 || factSessionNumber(factSessionID) != goldSession {
+		return false
+	}
+	factWords := contentWordSet(factContent)
+	if len(factWords) == 0 {
+		return false
+	}
+	turnWords := contentWordSet(goldTurnText)
+	if len(turnWords) == 0 {
+		return false
+	}
+	present := 0
+	for word := range factWords {
+		if _, ok := turnWords[word]; ok {
+			present++
+		}
+	}
+	return float64(present)/float64(len(factWords)) >= tau
+}
+
+// goldTurnSession extracts the session number from a "D<session>:<dialog>" gold
+// turn id; -1 when unparseable.
+func goldTurnSession(turnID string) int {
+	inner := strings.TrimPrefix(turnID, "D")
+	sep := strings.IndexByte(inner, ':')
+	if sep <= 0 {
+		return -1
+	}
+	session, err := strconv.Atoi(inner[:sep])
+	if err != nil {
+		return -1
+	}
+	return session
+}
+
+// factSessionNumber extracts the session number from a "conv<N>-sess<M>" source
+// session id; -1 when unparseable.
+func factSessionNumber(sessionID string) int {
+	idx := strings.LastIndex(sessionID, "sess")
+	if idx < 0 {
+		return -1
+	}
+	session, err := strconv.Atoi(sessionID[idx+len("sess"):])
+	if err != nil {
+		return -1
+	}
+	return session
+}
+
+// turnTextIndex maps each dialogue id (e.g. "D19:3") to its speaker-augmented
+// turn text — the reference corpus fact hits are matched against for gold
+// coverage. The speaker name is folded in because extraction resolves
+// first-person pronouns to the speaker ("I ..." → "Maria ..."), so the fact's
+// subject word is legitimately part of the turn's provenance even though the
+// raw first-person turn text never contains it.
+func turnTextIndex(conv conversation) map[string]string {
+	index := make(map[string]string)
+	for _, session := range conv.Sessions {
+		for _, t := range session.Turns {
+			if t.DiaID != "" {
+				index[t.DiaID] = t.Speaker + " " + t.Text
+			}
+		}
+	}
+	return index
+}
+
+// contentWordSet lowercases text, splits on non-alphanumeric runes, and drops
+// stopwords — the deterministic token basis for directional containment.
+func contentWordSet(text string) map[string]struct{} {
+	words := make(map[string]struct{})
+	for _, field := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if _, stop := attributionStopwords[field]; stop {
+			continue
+		}
+		words[field] = struct{}{}
+	}
+	return words
+}
+
+// attributionStopwords is a small fixed English stoplist. Kept frozen so
+// coverage stays deterministic and reproducible across runs.
+var attributionStopwords = map[string]struct{}{
+	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "been": {},
+	"but": {}, "by": {}, "for": {}, "from": {}, "had": {}, "has": {}, "have": {}, "he": {},
+	"her": {}, "his": {}, "in": {}, "is": {}, "it": {}, "its": {}, "of": {}, "on": {},
+	"or": {}, "she": {}, "that": {}, "the": {}, "their": {}, "them": {}, "they": {},
+	"this": {}, "to": {}, "was": {}, "were": {}, "will": {}, "with": {},
 }
 
 func newRetrievedHit(hit memory.Result, rank int, mappedGoldTurns []string) RetrievedHit {
@@ -259,6 +394,7 @@ func runAttributionCLI(ctx context.Context, opt options, convs []conversation, a
 		}
 		armOpt := optionsForRun(opt, arm, false)
 		retriever := runtime.retrievers[arm]
+		goldTurnText := turnTextIndex(conv)
 		for _, selected := range selectQuestions(conv, opt) {
 			qa := selected.QA
 			topK, quota := armOpt.retrievalFor(qa.Category)
@@ -274,7 +410,7 @@ func runAttributionCLI(ctx context.Context, opt options, convs []conversation, a
 				return fmt.Errorf("attribution wide retrieve conv=%d question=%d: %w", conv.ID, selected.Index, err)
 			}
 			correct := joined[resultKey{Conv: conv.ID, Q: selected.Index}]
-			traces = append(traces, buildAttributionTrace(conv.ID, selected.Index, qa, hits, wideHits, runtime.chunkTurns, topK, opt.outrankCap, correct))
+			traces = append(traces, buildAttributionTrace(conv.ID, selected.Index, qa, hits, wideHits, runtime.chunkTurns, goldTurnText, topK, opt.outrankCap, opt.factCoverageTau, correct))
 			if opt.embedProbe && len(probeQueries) < defaultEmbedProbeQueries {
 				probeQueries = append(probeQueries, qa.Question)
 			}

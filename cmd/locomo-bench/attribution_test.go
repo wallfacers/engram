@@ -35,9 +35,12 @@ func TestAttributionTraceGoldenRankOutrankersAndCorrectness(t *testing.T) {
 	}
 
 	correct := true
-	trace := buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, 4, 2, &correct)
-	if trace.GoldRank != 4 {
-		t.Fatalf("gold_rank = %d, want 4", trace.GoldRank)
+	trace := buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, defaultFactCoverageTau, &correct)
+	if trace.GoldRankTopK != 4 {
+		t.Fatalf("gold_rank_topk = %d, want 4", trace.GoldRankTopK)
+	}
+	if trace.GoldRankPool != 4 {
+		t.Fatalf("gold_rank_pool = %d, want 4", trace.GoldRankPool)
 	}
 	if !trace.GoldInPool {
 		t.Fatal("gold_in_pool = false, want true")
@@ -54,7 +57,7 @@ func TestAttributionTraceGoldenRankOutrankersAndCorrectness(t *testing.T) {
 	}
 
 	correct = false
-	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, 4, 2, &correct)
+	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, defaultFactCoverageTau, &correct)
 	if trace.Quadrant != quadrantAnswerSide {
 		t.Fatalf("quadrant with correct=false = %q, want %q", trace.Quadrant, quadrantAnswerSide)
 	}
@@ -143,7 +146,7 @@ func TestAttributionCorrectnessJoinAndMissingJoinFallback(t *testing.T) {
 	if got := classifyAttribution(true, true, 1, 3, nil); got != quadrantRetrievalOnly {
 		t.Fatalf("missing join quadrant = %q, want %q", got, quadrantRetrievalOnly)
 	}
-	trace := buildAttributionTrace(2, 111, locomoQA{Evidence: []string{"D3:14"}}, nil, nil, nil, 3, 5, nil)
+	trace := buildAttributionTrace(2, 111, locomoQA{Evidence: []string{"D3:14"}}, nil, nil, nil, nil, 3, 5, defaultFactCoverageTau, nil)
 	raw, err := json.Marshal(trace)
 	if err != nil {
 		t.Fatalf("marshal retrieval-only trace: %v", err)
@@ -160,9 +163,80 @@ func TestAttributionGoldOnlyInWidePoolTargetsUS2(t *testing.T) {
 	chunkTurns := map[string][]string{"chunk-wide-gold": {"D2:8"}}
 	wrong := false
 
-	trace := buildAttributionTrace(0, 0, qa, topHits, wideHits, chunkTurns, 2, 5, &wrong)
-	if !trace.GoldInPool || trace.GoldRank != -1 || trace.Quadrant != quadrantUS2Target {
-		t.Fatalf("wide-pool trace = %+v, want gold_in_pool=true gold_rank=-1 quadrant=%q", trace, quadrantUS2Target)
+	trace := buildAttributionTrace(0, 0, qa, topHits, wideHits, chunkTurns, nil, 2, 5, defaultFactCoverageTau, &wrong)
+	if !trace.GoldInPool || trace.GoldRankTopK != -1 || trace.GoldRankPool != 3 || trace.Quadrant != quadrantUS2Target {
+		t.Fatalf("wide-pool trace = %+v, want gold_in_pool=true gold_rank_topk=-1 gold_rank_pool=3 quadrant=%q", trace, quadrantUS2Target)
+	}
+	// Root-cause A fix: Q3 must now surface the competitors that outrank gold
+	// in the wide pool (previously structurally empty).
+	gotOutrankers := []string{}
+	for _, hit := range trace.OutrankedBy {
+		gotOutrankers = append(gotOutrankers, hit.Name)
+	}
+	if want := []string{"competitor-a", "competitor-b"}; !reflect.DeepEqual(gotOutrankers, want) {
+		t.Fatalf("Q3 outranked_by = %v, want %v (must be non-empty)", gotOutrankers, want)
+	}
+}
+
+// TestAttributionFactHitCoversGoldViaContentMatch exercises the fact path
+// (root-cause B): fact hits carry only session-level provenance, so coverage
+// is session-gated directional lexical containment, not turn-id overlap.
+func TestAttributionFactHitCoversGoldViaContentMatch(t *testing.T) {
+	// The real conv2/q111 shape: the answer fact is retrieved but, being a
+	// fact (not a chunk), was invisible to the old chunkTurns mapping.
+	qa := locomoQA{Evidence: []string{"D19:3"}, Category: 1, CategoryName: "single_hop"}
+	hits := []memory.Result{
+		{Name: "maria-does-aerial-yoga-pz8hf9p4", Content: "Maria does aerial yoga.", SourceSessionID: "conv2-sess7", Score: 0.031},
+		{Name: "maria-is-trying-kundalini-yoga-e4dkfkmb", Content: "Maria is trying kundalini yoga.", SourceSessionID: "conv2-sess19", Score: 0.024},
+	}
+	// Speaker-augmented turn text, as turnTextIndex produces: the first-person
+	// turn "Yeah, I am trying kundalini yoga..." prefixed with speaker "Maria",
+	// so the fact's resolved subject ("Maria") is matchable.
+	goldTurnText := map[string]string{"D19:3": "Maria Yeah, I am trying kundalini yoga these days, it is really calming."}
+	correct := true
+
+	trace := buildAttributionTrace(2, 111, qa, hits, hits, nil, goldTurnText, 5, 5, defaultFactCoverageTau, &correct)
+	if trace.GoldRankTopK != 2 {
+		t.Fatalf("gold_rank_topk = %d, want 2 (kundalini fact at rank 2 covers gold)", trace.GoldRankTopK)
+	}
+	if trace.Quadrant != quadrantOK {
+		t.Fatalf("quadrant = %q, want %q (answer fact retrieved in top-k)", trace.Quadrant, quadrantOK)
+	}
+	if !reflect.DeepEqual(trace.Retrieved[1].MappedGoldTurns, []string{"D19:3"}) {
+		t.Fatalf("kundalini mapped_gold_turns = %v, want [D19:3]", trace.Retrieved[1].MappedGoldTurns)
+	}
+	if trace.Retrieved[0].CoversGold {
+		t.Fatal("aerial-yoga fact (wrong session, no content overlap) must not cover gold")
+	}
+}
+
+// TestFactCoversGoldTurnSessionGateAndTau nails the two failure modes the fact
+// path must reject: cross-session coincidence, and sub-threshold overlap.
+func TestFactCoversGoldTurnSessionGateAndTau(t *testing.T) {
+	// Speaker-augmented turn; content words: {maria, practicing, kundalini,
+	// yoga, every, morning, calming}.
+	turn := "Maria practicing kundalini yoga every morning calming"
+	tests := []struct {
+		name    string
+		content string
+		session string
+		tau     float64
+		want    bool
+	}{
+		{name: "covers: all 4 content words present, session matches", content: "Maria kundalini yoga calming.", session: "conv2-sess19", tau: 0.8, want: true},
+		{name: "rejects: session mismatch", content: "Maria kundalini yoga calming.", session: "conv2-sess7", tau: 0.8, want: false},
+		{name: "rejects: below tau (only 'yoga' of 4 overlaps)", content: "underwater basket weaving yoga", session: "conv2-sess19", tau: 0.8, want: false},
+		{name: "tau boundary: 4/5 present passes at 0.80", content: "kundalini yoga every morning zzznope", session: "conv2-sess19", tau: 0.8, want: true},
+		{name: "tau boundary: 4/5 fails at 0.81", content: "kundalini yoga every morning zzznope", session: "conv2-sess19", tau: 0.81, want: false},
+		{name: "empty content never covers", content: "", session: "conv2-sess19", tau: 0.8, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := factCoversGoldTurn(tt.content, tt.session, turn, goldTurnSession("D19:3"), tt.tau)
+			if got != tt.want {
+				t.Fatalf("factCoversGoldTurn(%q, %q, tau=%.2f) = %v, want %v", tt.content, tt.session, tt.tau, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -262,7 +336,7 @@ func TestAttributionCLIUsesPersistedStoreWithoutAnswerOrJudgeCredentials(t *test
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(traceRaw))), &trace); err != nil {
 		t.Fatalf("parse trace.jsonl: %v", err)
 	}
-	if trace.Conv != 0 || trace.Q != 0 || trace.GoldRank < 1 || trace.Correct == nil || !*trace.Correct || trace.Quadrant != quadrantOK {
+	if trace.Conv != 0 || trace.Q != 0 || trace.GoldRankTopK < 1 || trace.Correct == nil || !*trace.Correct || trace.Quadrant != quadrantOK {
 		t.Fatalf("trace = %+v, want joined q1 attribution with a gold hit", trace)
 	}
 

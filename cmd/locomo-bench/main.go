@@ -116,6 +116,7 @@ type options struct {
 	embedProbe           bool
 	outrankCap           int
 	widePool             int
+	factCoverageTau      float64
 }
 
 func main() {
@@ -177,6 +178,7 @@ func run() error {
 	flag.BoolVar(&opt.embedProbe, "embed-probe", false, "with --attribution-trace, probe query embedding determinism")
 	flag.IntVar(&opt.outrankCap, "outrank-cap", 5, "maximum non-gold hits to record before the first gold hit")
 	flag.IntVar(&opt.widePool, "wide-pool", 0, "candidate pool size for gold_in_pool (0 = max(300, top-k*6))")
+	flag.Float64Var(&opt.factCoverageTau, "fact-coverage-tau", defaultFactCoverageTau, "attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}

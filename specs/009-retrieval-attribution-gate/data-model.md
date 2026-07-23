@@ -11,9 +11,10 @@
 | `gold_evidence` | []string | gold 证据原始 `D<session>:<turn>` | `qa.Evidence` |
 | `gold_turns` | []string | 解析后 gold turn id 集合 | `evidenceReferences` |
 | `retrieved` | []RetrievedHit | 有序 top-N 命中(见下) | `SearchWithDiagnostics` |
-| `gold_in_pool` | bool | 宽候选池内是否存在 gold-covering hit | widePool 检索 + `chunkTurns` |
-| `gold_rank` | int | 最靠前 gold-covering hit 的 1-indexed 名次;无=-1 | 计算 |
-| `outranked_by` | []RetrievedHit | 排在 gold_rank 之前的非 gold hit(截前 M=5) | 计算 |
+| `gold_in_pool` | bool | 宽候选池内是否存在 gold-covering hit(= `gold_rank_pool>0`) | widePool 检索 + 覆盖判定 |
+| `gold_rank_topk` | int | 最靠前 gold-covering hit 在**答题器消费的 narrow top-K** 里的 1-indexed 名次;无=-1。**仅驱动象限分类** | 计算 |
+| `gold_rank_pool` | int | 最靠前 gold-covering hit 在**宽诊断池**里的 1-indexed 名次;无=-1。**驱动 outranked_by** | 计算 |
+| `outranked_by` | []RetrievedHit | 宽池中排在 `gold_rank_pool` 之前的非 gold hit(截前 M=`--outrank-cap`,默认5) | 计算 |
 | `quadrant` | string | `q1_ok`/`q2_answer_side`/`q3_us2_target`/`q4_extraction_side`/`gold_unresolved` | join correct |
 | `correct` | bool | 该题答对与否(join 来源标注) | 008 `results-hybrid.jsonl` |
 | `correct_source` | string | 固定 `"008-us4-e2e/results-hybrid.jsonl"`(诚实标注单次观测) | 常量 |
@@ -25,11 +26,13 @@
 | `name` | string | entry name |
 | `rank` | int | 1-indexed fused 名次 |
 | `rrf_score` | float64 | = `Result.Score`(融合分) |
-| `covers_gold` | bool | `chunkTurns[name] ∩ gold_turns ≠ ∅` |
+| `covers_gold` | bool | 双路径:**chunk 命中** `chunkTurns[name] ∩ gold_turns ≠ ∅`(turn 级);**fact 命中** session 门 + 方向包含(fact.source_session == gold turn 的 session **且** fact 实义词 ≥τ 比例出现在 speaker 增强的 gold turn 文本中,τ=`--fact-coverage-tau` 默认0.8;词法确定性,无 embedding) |
 | `mapped_gold_turns` | []string | 命中的 gold turn id(可空) |
 | `per_signal_ranks` | map[string]int | **US2 才填**(sem/kw/entity);US1 阶段省略(引擎未暴露) |
 
-**校验规则**:`quadrant` 五值互斥且穷尽;`gold_rank=-1 ⟺ 无 gold-covering hit 在 top-N`;`gold_unresolved` 题不进四象限分母(edge case)。
+**校验规则**:`quadrant` 五值互斥且穷尽;`gold_rank_topk=-1 ⟺ 无 gold-covering hit 在答题器 top-K`;`gold_in_pool ⟺ gold_rank_pool>0`;`gold_unresolved` 题不进四象限分母(edge case)。
+
+> **fact↔turn 桥接说明**:引擎真实检索单位是 fact,fact 只有 session 级溯源(无 turn 级),而 gold 是 turn 级。故 fact 命中的 gold 覆盖用**确定性词法内容匹配**桥接(不用 embedding,守 SC-004 逐字节重跑一致)。speaker 名并入 gold turn 文本,因抽取把第一人称解析成 speaker 名。已知软限制:tense/同义改写会造成漏判(偏保守方向,不灌水);τ 可调,重跑后按象限合理性微调并记 `eval-log.md`。
 
 ## QuadrantDistribution(US1,聚合 → 分布表)
 
