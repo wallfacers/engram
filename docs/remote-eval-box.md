@@ -18,6 +18,29 @@
 
 **持久盘通常保留**(AutoDL 系 `/root/autodl-tmp` 多为持久卷)→ 模型权重、启动脚本一般**还在**,但**进程不在**。所以标准动作 = 「SSH 进去 → 重跑 `serve-final.sh` → 等冷启动 → 本地重建隧道」。若持久盘也没了,则需重新下模型(见下)。
 
+### ⚠️ AutoDL 共享 GPU:关机→再开可能**跨区迁移**(每次 GPU 任务前必须重新确认环境)
+
+AutoDL 的 GPU 是**共享**的。停机(停止计费)后再启动时,**若原区该型号 GPU 资源已被占满,实例会被迁移到别的区重新拉起**——这会换实例名(`autodl-container-*`)、换 SSH host/port/密码,而且**基础系统盘是全新的**(`/root` 下 `go`/`python`/`vllm`/仓库都不在,只有 `/root/autodl-tmp` 持久盘跟着迁),vllm 进程当然也不在。
+
+**硬规:每次要做 GPU 相关的事(起 vllm / 跑评测 / 建隧道)之前,都必须重新做一遍环境确认**,不能假设"上次是好的这次就好"。最少核查:
+
+1. `nvidia-smi` —— GPU 型号/显存对得上、空载;
+2. `/root/autodl-tmp/` 持久盘还在,`serve-final.sh` / `model/` / `venv/` 都在;
+3. `curl -s localhost:8000/v1/models` —— vllm **没在跑就重拉** `serve-final.sh`;
+4. 系统盘上要用的工具(`go` 等)若迁移后消失,需现装或改走"本地跑 bench、只隧道打 box 端点"的形态。
+
+迁移是**常态不是异常**;把"确认环境"当成每次 GPU 任务的第 0 步。
+
+### 评测产物的持久化落点:私有 HF dataset(迁移/换机不丢)
+
+系统盘迁移即蒸发、持久盘也不保证跨账号/跨环境可达。**可重建成本高的评测产物**(已构建的 store、join 结果等)统一持久化到一个**私有 HF dataset**,任何新环境 `hf download` 秒拉回:
+
+- **Repo**:`wallfacers/engram-locomo-artifacts`(dataset,**private**)
+- **已存**:`008-embed-large-store/conv0..9.db`(bge-large-en-v1.5 **1024d** store)、`008-us4-e2e/results-hybrid.jsonl`(join,1540 行)
+- **拉取**:`hf download wallfacers/engram-locomo-artifacts --repo-type dataset --local-dir <目标目录>`
+- **推送**(新产物):`hf`/`huggingface_hub` 已配置本地 token(`~/.cache/huggingface/token`,mode 600,非 git 追踪);`upload_folder(repo_id=..., repo_type="dataset", folder_path=...)`。
+- **纪律**:token 只走 `~/.cache/huggingface/token` 这类家目录凭据文件,**绝不进仓库/日志/工具响应**。dataset 保持 private——store 含 LoCoMo 派生事实,不公开转载。只放"可重建但重建贵"的评测产物;engram 本体的持久 SQLite store 仍在本地 local-first,HF 只是评测侧备份。
+
 ## 稳定不变的东西(脚本里写死,不用问维护者)
 
 - **启动脚本**:`/root/autodl-tmp/serve-final.sh`
