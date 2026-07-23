@@ -144,3 +144,20 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 - **可叠加**:这是叠在 bge-large 之上的第二个召回杠杆。bge-large + cat-top-k 合计 vs 原 bge-small 基线 ≈ **+2.0pp**(84.0 → 86.0)。对 MemOS 88.83 的 gap 收到 **~2.8pp**。
 - **诚实 scale caveat**:multi-hop 题的 answer-context 从 ~3678 涨到 ~8759 tokens(2.4×);全集平均 3614→4546(+26%,因 cat-1 占 ~18%)。计费答题器上是真成本;box 上近免费。tuning-free(150 是「给足多 session 证据」的直觉值,未网格搜索,可能非最优)。
 - **产物**:`.locomo-run/009-cat1-{A-tk30,B-tk150}`(隔离)+ `.locomo-run/009-full-{A-base,B-cattopk}`(整体成对),regime.json 均 `judge=mem0-aligned;judge_model=deepseek-v4-flash`,cost.json `unpriced_models` 含 deepseek-v4-flash(judge 真跑)。
+
+### ✗ opinion-pass 抽取覆盖 = NO-GO(净负,coverage 污染 precision,2026-07-23)
+
+想攻最大短板 open-domain(64.6%)。`--opinion-pass` 在复用主抽取基础上补跑一遍聚焦 opinions/preferences/traits 的 ADD-only 抽取(每 conv +243~354 条,全库 ~2800 条,约翻倍 fact 数),嵌入走 bge-large。栈叠 cat-top-k,整体 repeats=3,对照 = B_full(base+cat-top-k)。
+
+| category | B_full 对照 | opinion-pass+cat-top-k | Δ |
+|---|---|---|---|
+| **OVERALL** | **86.0% [85.0,87.0]** | **85.4% [85.1,85.8]** | **−0.6pp 净负** |
+| open-domain(靶心) | 64.6% | 65.6% [49.9,81.4] | +1.0(**n=96 三跑 68.8/69.8/58.3 = 纯噪声,增益幻觉**) |
+| single-hop | 88.7% | 87.8% | **−0.9(污染)** |
+| temporal | 81.7% | 80.8% | **−0.9(污染)** |
+| multi-hop | 90.2% | 90.5% | +0.3(噪声) |
+
+- **run-level 反向完全分离**:opinion `{85.3,85.5,85.5}` **严格低于** B_full `{85.6,86.2,86.4}`(max opinion 85.5 < min B_full 85.6)→ 净负是真信号非噪声。
+- **机制**:无差别把 ~2800 条 opinion 灌进同一 RRF 池 → 靶心 open-domain 边际得益被 n=96 方差淹没,而全局稀释把 single-hop/temporal 各拖 −0.9。**category-blind 覆盖扩张适得其反**。
+- **要救**得靠 **category-conditional 检索**(只对 open-domain 题浮现 opinion 条目)——新机制,非现成 flag,留作 future work。判分口径合法(deepseek mem0-aligned,unpriced 含 deepseek-v4-flash)。产物 `.locomo-run/009-full-C-opinion` + `.locomo-run/009-opinion-store`(store 已被 opinion 污染,非正本;bge-large 正本仍是 `009-bge-chunks-store`)。
+- **教训**:open-domain 短板**不是**靠加抽取覆盖能便宜拿的;[[008-us2-opendomain-verdict]] 说「短板在检索覆盖非答题深度」——但覆盖得**精准定向**,粗放翻倍反伤全局。
