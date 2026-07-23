@@ -66,6 +66,9 @@ type options struct {
 	noIDKRetry           bool
 	budgetBaseline       float64
 	retrieval            string
+	multiQuery           bool
+	mqMaxSubqueries      int
+	recallDiagnostic     bool
 	maxConvs             int
 	maxQuestions         int
 	onlyCategory         int
@@ -117,6 +120,7 @@ type options struct {
 	outrankCap           int
 	widePool             int
 	factCoverageTau      float64
+	contextParity        *contextParityJournal
 }
 
 func main() {
@@ -137,6 +141,9 @@ func run() error {
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
 	flag.Float64Var(&opt.budgetBaseline, "budget-baseline", 0, "calibrated answer context token baseline for the 1.5x budget gate")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
+	flag.BoolVar(&opt.multiQuery, "multi-query", false, "decompose each question and retrieve with SearchMulti")
+	flag.IntVar(&opt.mqMaxSubqueries, "mq-max-subqueries", 4, "maximum subqueries produced for multi-query retrieval")
+	flag.BoolVar(&opt.recallDiagnostic, "recall-diagnostic", false, "retrieval-only single-vs-multi gold-rank and coverage@30 diagnostic")
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
 	flag.IntVar(&opt.onlyCategory, "only-category", 0, "evaluate only this question category (0 = all)")
@@ -212,12 +219,26 @@ func run() error {
 	if opt.repeats < 1 {
 		return fmt.Errorf("--repeats must be at least 1")
 	}
+	if (opt.multiQuery || opt.recallDiagnostic) && opt.mqMaxSubqueries < 1 {
+		return fmt.Errorf("--mq-max-subqueries must be at least 1")
+	}
+	if opt.recallDiagnostic {
+		if opt.estimate || opt.attributionTrace || opt.coverageOnly || opt.abstainProbe || opt.pcicAnnotate {
+			return fmt.Errorf("--recall-diagnostic cannot be combined with estimate, attribution, coverage-only, abstain-probe, or pcic-annotate modes")
+		}
+	}
+	if opt.multiQuery && !opt.recallDiagnostic && (opt.estimate || opt.attributionTrace || opt.coverageOnly || opt.abstainProbe || opt.pcicAnnotate) {
+		return fmt.Errorf("--multi-query is supported only by answer/judge runs; use --recall-diagnostic for retrieval-only comparison")
+	}
 	if opt.datasetFormat != "locomo" && opt.datasetFormat != "longmemeval" {
 		return fmt.Errorf("--dataset-format must be locomo or longmemeval, got %q", opt.datasetFormat)
 	}
 	arms, err := armsFor(opt.retrieval)
 	if err != nil {
 		return err
+	}
+	if opt.multiQuery && !opt.recallDiagnostic && len(arms) != 1 {
+		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
 	}
 	for _, arm := range arms {
 		if err := validatePromptModes(optionsForArm(opt, arm)); err != nil {
@@ -237,6 +258,27 @@ func run() error {
 	if opt.catQuota, err = parseCatOverrides(opt.catQuotaSpec); err != nil {
 		return fmt.Errorf("--cat-chunk-quota: %w", err)
 	}
+	if opt.multiQuery {
+		if opt.topK != multiQueryFinalTopK {
+			return fmt.Errorf("--multi-query requires --top-k %d to preserve context parity", multiQueryFinalTopK)
+		}
+		for category, topK := range opt.catTopK {
+			if topK != multiQueryFinalTopK {
+				return fmt.Errorf("--multi-query requires category %d top-k to remain %d, got %d", category, multiQueryFinalTopK, topK)
+			}
+		}
+		if opt.filterPool > 0 {
+			return fmt.Errorf("--filter-pool is not allowed with --multi-query because SearchMulti's final budget must remain %d", multiQueryFinalTopK)
+		}
+		if opt.chunkQuota > multiQueryFinalTopK {
+			return fmt.Errorf("--multi-query requires --chunk-quota at most %d", multiQueryFinalTopK)
+		}
+		for category, quota := range opt.catQuota {
+			if quota > multiQueryFinalTopK {
+				return fmt.Errorf("--multi-query requires category %d chunk quota at most %d, got %d", category, multiQueryFinalTopK, quota)
+			}
+		}
+	}
 	if opt.abstainGate, err = parseAbstainGate(opt.abstainGateSpec); err != nil {
 		return err
 	}
@@ -252,6 +294,13 @@ func run() error {
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		sampledConversations = opt.maxConvs
 		convs = convs[:opt.maxConvs]
+	}
+	if opt.recallDiagnostic {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if sampledConversations > 0 {
+			logger.Info("sampling conversations", "limit", sampledConversations)
+		}
+		return runRecallDiagnosticCLI(context.Background(), opt, convs, arms, logger)
 	}
 	if opt.attributionTrace {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -426,13 +475,26 @@ func run() error {
 		if err := os.MkdirAll(repeatOpt.runDir, 0o755); err != nil {
 			return fmt.Errorf("create repeat run dir: %w", err)
 		}
+		parity, err := openContextParityJournal(repeatOpt.runDir)
+		if err != nil {
+			return err
+		}
+		repeatOpt.contextParity = parity
 		states := make([]*armState, 0, len(arms))
 		for _, name := range arms {
 			j, err := openJournal(repeatOpt.runDir, name)
 			if err != nil {
+				_ = parity.Close()
 				return err
 			}
 			states = append(states, &armState{name: name, agg: newAggregator(), journal: j})
+		}
+		if err := validateContextParityResume(repeatOpt, convs, states); err != nil {
+			for _, state := range states {
+				state.journal.Close()
+			}
+			_ = parity.Close()
+			return err
 		}
 		var wg sync.WaitGroup
 		for ci := range convs {
@@ -453,6 +515,9 @@ func run() error {
 		for _, state := range states {
 			state.journal.Close()
 			report(state, repeatOpt)
+		}
+		if err := parity.Close(); err != nil {
+			return err
 		}
 		if len(states) == 2 {
 			reportDelta(states[0], states[1])
@@ -1017,6 +1082,9 @@ func retrievalFingerprint(opt options) string {
 	if opt.conflictResolution {
 		fingerprint += fmt.Sprintf(";conflict_resolution=true;superseded_penalty=%.3f", opt.supersededPenalty)
 	}
+	if opt.multiQuery {
+		fingerprint += ";" + multiQueryRecipeFingerprint(opt)
+	}
 	return fingerprint
 }
 
@@ -1039,6 +1107,9 @@ func checkRunDirRegime(opt options) error {
 	// Arm suffixes can override answer-regime mechanisms per arm (e.g.
 	// +abstain), so the arm layout is part of the pinned regime too.
 	regime := answerRegimeFingerprint(opt) + ";retrieval=" + opt.retrieval
+	if opt.multiQuery {
+		regime += ";" + retrievalFingerprint(opt)
+	}
 	path := filepath.Join(opt.runDir, "regime.json")
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -1113,23 +1184,45 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 
 	var qwg sync.WaitGroup
 	selected := selectQuestions(conv, opt)
+	var parityState *armState
+	if len(states) > 0 {
+		// The frozen parity schema identifies the query arm, not the retrieval
+		// backend. Multi-query runs require one backend; legacy multi-backend runs
+		// record their final configured state ("both" ends in hybrid).
+		parityState = states[len(states)-1]
+	}
 	for _, selectedQuestion := range selected {
 		qi, qa := selectedQuestion.Index, selectedQuestion.QA
 		key := resultKey{Conv: conv.ID, Q: qi}
 		for _, s := range states {
+			armOpt := optionsForRun(opt, s.name, len(states) > 1)
 			if prev, ok := s.journal.lookup(key); ok {
 				s.agg.add(qa.Category, prev.Correct) // resume: reuse recorded result
 				continue
 			}
 			qwg.Add(1)
-			go func(s *armState, qa locomoQA, key resultKey, armOpt options) {
+			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
 				var abstainRuntime *abstainRuntimeContext
 				if armOpt.abstainHard || armOpt.abstainSoft {
 					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
 				}
-				correct, predicted, usage, sweepUsed, evidence := answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, abstainRuntime, logger)
+				correct, predicted, usage, sweepUsed, evidence, retrievalMeta := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, abstainRuntime, logger)
+				if writeParity && armOpt.contextParity != nil {
+					if err := armOpt.contextParity.Write(contextParityRecord{
+						Conv:                key.Conv,
+						Q:                   key.Q,
+						Category:            qa.Category,
+						Arm:                 multiQueryArm(armOpt.multiQuery),
+						FinalTopK:           retrievalMeta.finalTopK,
+						AnswerContextTokens: usage.InputTokens,
+						SubqueryCount:       retrievalMeta.subqueryCount,
+					}); err != nil {
+						logger.Error("write context parity failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+				}
 				s.agg.add(qa.Category, correct)
 				s.journal.write(result{
 					Conv:                key.Conv,
@@ -1153,7 +1246,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					SweepOverBudget:     sweepOverBudget(armOpt, sweepUsed, usage),
 					EvidenceDiagnostics: evidence,
 				})
-			}(s, qa, key, optionsForRun(opt, s.name, len(states) > 1))
+			}(s, qa, key, armOpt, s == parityState)
 		}
 	}
 	qwg.Wait()
@@ -1297,11 +1390,16 @@ func abstainDecisionForHits(ctx context.Context, abstain *abstainRuntimeContext,
 }
 
 func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
+	correct, predicted, usage, sweepUsed, evidence, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, abstain, logger)
+	return correct, predicted, usage, sweepUsed, evidence
+}
+
+func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, searchDiagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, qa.Question, topK, quota, opt)
+	hits, searchDiagnostics, retrievalMeta, err := retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
-		return false, "", provider.Usage{}, false, nil
+		return false, "", provider.Usage{}, false, nil, retrievalMeta
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
@@ -1316,7 +1414,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retrie
 	}
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
+		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns), retrievalMeta
 	}
 
 	if !hardGated && isIDK(predicted) && !opt.noIDKRetry {
@@ -1338,14 +1436,19 @@ func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retrie
 			sweepUsed = sweepUsed || retryDiagnostics.SweepUsed || hasClusterSweepHit(retryHits)
 		}
 	}
+	if hardGated {
+		retrievalMeta.finalTopK = 0
+	} else {
+		retrievalMeta.finalTopK = len(answerHits)
+	}
 	evidence := newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns)
 
 	verdict, _, err := judgeCall(ctx, judgeSystemPromptFor(opt.judgeAlignmentMode()), buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
-		return false, predicted, usage, sweepUsed, evidence
+		return false, predicted, usage, sweepUsed, evidence, retrievalMeta
 	}
-	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed, evidence
+	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed, evidence, retrievalMeta
 }
 
 // adversarialGold is the judge-facing gold for category-5 questions. They have
@@ -1430,19 +1533,12 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 	if err != nil || len(more) == 0 {
 		return "", false
 	}
-	seen := make(map[string]struct{}, len(first))
-	union := make([]memory.Result, 0, len(first)+len(more))
-	for _, h := range first {
-		seen[h.Name] = struct{}{}
-		union = append(union, h)
-	}
-	fresh := 0
-	for _, h := range more {
-		if _, dup := seen[h.Name]; dup {
-			continue
-		}
-		union = append(union, h)
-		fresh++
+	var union []memory.Result
+	var fresh int
+	if opt.multiQuery {
+		union, fresh = unionMultiRetryResults(first, more, topK, quota)
+	} else {
+		union, fresh = unionRetryResults(first, more, 0)
 	}
 	if fresh == 0 {
 		return "", false
@@ -1473,19 +1569,12 @@ func retryWithRewriteUsageDiagnostics(ctx context.Context, retriever *memory.Ret
 	if err != nil || len(more) == 0 {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}
-	seen := make(map[string]struct{}, len(first))
-	union := make([]memory.Result, 0, len(first)+len(more))
-	for _, h := range first {
-		seen[h.Name] = struct{}{}
-		union = append(union, h)
-	}
-	fresh := 0
-	for _, h := range more {
-		if _, dup := seen[h.Name]; dup {
-			continue
-		}
-		union = append(union, h)
-		fresh++
+	var union []memory.Result
+	var fresh int
+	if opt.multiQuery {
+		union, fresh = unionMultiRetryResults(first, more, topK, quota)
+	} else {
+		union, fresh = unionRetryResults(first, more, 0)
 	}
 	if fresh == 0 {
 		return "", provider.Usage{}, nil, diagnostics, false
@@ -1517,6 +1606,13 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, opt.selector)
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, nil, diagnostics, false
+	}
+	if opt.multiQuery {
+		if quota > 0 {
+			hits = applyChunkQuota(hits, topK, quota)
+		} else {
+			hits = hits[:topK]
+		}
 	}
 	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
 	if err != nil || isIDK(retry) {
