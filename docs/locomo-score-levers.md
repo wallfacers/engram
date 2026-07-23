@@ -177,12 +177,16 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:
 
-| 杠杆 | 判定 | Δ overall | 机制 |
-|---|---|---|---|
-| bge-large embedder | **GO**(shipped) | +1.3pp | 更强嵌入,召回转化 |
-| cat-top-k `1=150` | **GO**(shipped) | +0.9pp | 多跳扩检索预算,run-level 干净分离 |
-| opinion-pass | NO-GO | −0.6pp | 粗放覆盖污染全局 precision |
-| filter-pool | 不可测/成本差 | — | LLM-per-question 大 context 压垮 box vllm |
-| cluster-sweep | INCONCLUSIVE | +0.4(噪声内) | 实体簇扩展,配对对照证伪表观增益 |
+| 杠杆 | 判定 | Δ overall | 类型 | 机制 |
+|---|---|---|---|---|
+| bge-large embedder | **GO**(shipped) | +1.3pp | **提质** ✓ | 同 top-k,向量更强 → 召回转化 |
+| cat-top-k `1=150` | 有效但**非首选/不设默认** | +0.9pp | **加量** ✗ | 多跳扩检索预算(context 2.4× 税) |
+| opinion-pass | NO-GO | −0.6pp | 加量 | 粗放覆盖污染全局 precision |
+| filter-pool | 不可测/成本差 | — | 加量 | LLM-per-question 大 context 压垮 box vllm |
+| cluster-sweep | INCONCLUSIVE | +0.4(噪声内) | 加量 | 实体簇扩展,配对对照证伪表观增益 |
 
-**净出货:bge-large + cat-top-k → ~86.0%**(vs 原 bge-small baseline 84.0,**+2.0pp**),对 MemOS 88.83 gap 收到 **~2.8pp**。**便宜 flag 杠杆空间基本采尽**——cat-top-k 是本轮唯一新的干净赢。剩余 gap(尤其 open-domain 64%)需**引擎新机制**(category-conditional 检索:只对 open-domain 浮现 opinion/软性记忆),按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
+**杠杆哲学(maintainer 定调,2026-07-23)**:只认**提质**的赢(同预算/同 top-k 下把对的证据捞得更准,如 bge-large),**反感加量**(撑 top-k / 扩池 / 喂更多 context —— 分是真的但拿成本税换,不可移植,换个部署就塌)。产品是设备/应用习惯记忆,集成方无限 context 预算不存在。**据此 cat-top-k 从「头条 GO」降级为 optional/非默认**;本表所有「加量」型即便涨分也不进默认栈。
+
+**净出货(提质路线):bge-large → +1.3pp(~85.4%)**,是唯一符合哲学的干净赢。cat-top-k 作为 optional 旋钮保留(多跳 enumeration 需多 session 证据时可开),非默认。
+
+**下一步 = 提质型深召回**:让 gold 在**不加量**下从 rank 71-90 升进 top-30 —— query 分解(多跳题拆子查询各自精检)/ HyDE(闭合 query↔fact 语义差)/ 更好的 fact 写入表示。剩余 gap(open-domain 64%)同理走「精准浮现」非「粗放灌入」。按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
