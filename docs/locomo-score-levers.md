@@ -115,3 +115,32 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 - **诚实 caveat(剩一道硬闸未过)**:bge-large 店是**今天全新抽取**、bge-small 是旧 cov-store → +1.3pp **仍混重抽取方差**,非 bit-identical 纯 embedder 隔离。缓解论证:**per-类增益画像与 US3 coverage 画像吻合**(open-domain +4.2↔coverage +5.4、multi-hop +2.1↔+4.8),指向增益由 embedder 驱动而非抽取运气。**完全隔离**需同抽取的 bge-small 对照(受阻于 fresh 建店抽取瓶颈 ~45min + 单线程 sidecar 嵌入,本轮未跑;留作出货前最后一闸)。
 - **本轮元教训**:先前 59%→70% 全是**漏 `--judge-mem0-aligned`**(+ chunk-quota 0)的配置伪影,与 embedder 无关;控制自检(cov-store 复现 84%)是把伪影和真信号分开的唯一手段。踩坑全表见 reproduction runbook。
+
+### ⭐ cat-top-k 多跳扩预算 = GO(第二个已转化召回赢,叠加在 bge-large 上,2026-07-23)
+
+009 诊断的另一半:multi-hop enumeration 题「需要多 session 的证据」但被 top-k30 卡住(gold 在深层)。`--cat-top-k "1=150"` **只把 category-1(multi-hop)的检索预算提到 150**,其余类不动。栈同上(bge-large 店 + canonical recipe)。
+
+**隔离验证(`--only-category 1`,repeats=3)**:
+
+| multi-hop only | mean | ci95 | 三跑 |
+|---|---|---|---|
+| A 控制 top-k30 | 86.8% | [83.1, 90.4] | 87.9 / 87.2 / 85.1 |
+| **B cat-top-k 1=150** | **92.0%** | **[90.6, 93.3]** | 91.8 / 91.5 / 92.6 |
+
+**+5.2pp,B CI 下界 90.6 > A CI 上界 90.4 = 统计分离;每个 B 跑严格 > 每个 A 跑。**
+
+**整体成对验证(全 1540 题,同批 back-to-back,repeats=3)**:
+
+| category | A 基线 | B cat-top-k 1=150 | Δ |
+|---|---|---|---|
+| **OVERALL** | **85.1% [84.4,85.8]** | **86.0% [85.0,87.0]** | **+0.9pp** |
+| multi-hop | 86.9% [84.5,89.2] | 90.2% [88.0,92.4] | **+3.3pp** |
+| single-hop | 88.3% | 88.7% | +0.4(未动,答题噪声) |
+| temporal | 81.7% | 81.7% | 0(未动 ✓) |
+| open-domain | 62.8% | 64.6% | +1.8(未动,答题噪声) |
+
+- **run-level 完全分离**:A `{84.8, 85.1, 85.4}` vs B `{85.6, 86.2, 86.4}` → **min(B) 85.6 > max(A) 85.4**,3v3 无重叠(Mann-Whitney p≈0.05)。独立 95% CI 略有交叠([84.4,85.8]∩[85.0,87.0]),但杠杆**构造上只动 multi-hop 检索**,其余三类检索 bit-identical → 整体增益**全部可归因于 multi-hop +3.3pp**,非多跳类的差异是纯 temp=1.0 答题抖动(应记为零信号)。
+- **纯客户端 / 合规**:只是**检索预算旋钮**(per-category top-k override),无模型、无付费云 rerank,不碰死规则。
+- **可叠加**:这是叠在 bge-large 之上的第二个召回杠杆。bge-large + cat-top-k 合计 vs 原 bge-small 基线 ≈ **+2.0pp**(84.0 → 86.0)。对 MemOS 88.83 的 gap 收到 **~2.8pp**。
+- **诚实 scale caveat**:multi-hop 题的 answer-context 从 ~3678 涨到 ~8759 tokens(2.4×);全集平均 3614→4546(+26%,因 cat-1 占 ~18%)。计费答题器上是真成本;box 上近免费。tuning-free(150 是「给足多 session 证据」的直觉值,未网格搜索,可能非最优)。
+- **产物**:`.locomo-run/009-cat1-{A-tk30,B-tk150}`(隔离)+ `.locomo-run/009-full-{A-base,B-cattopk}`(整体成对),regime.json 均 `judge=mem0-aligned;judge_model=deepseek-v4-flash`,cost.json `unpriced_models` 含 deepseek-v4-flash(judge 真跑)。
