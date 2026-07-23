@@ -9,7 +9,8 @@
 > - ✅ **US2 分解 `decomposeQuery`**(commit `5daa31e`)——merged。复用 `runner.go` 已有 `modelCaller`,4 种退化 + 正常路径全测。
 > - ✅ **US2 接线 `--multi-query`/`--recall-diagnostic`/context_parity**(commit `53f9b27`)——merged。top-k=30 硬拦、multi 臂候选深度 `questionSearchK` 逐字复刻单臂 `widePool=max(topK*6,300)`(决胜门唯一变量=分解,不被深度污染)。
 > - ✅ **门① 纯 Go 契约 PASS**:集成态 `go build/test/vet ./...` 全绿;engine/adapter 提交边界分离。
-> - ⏸ **门② 离线召回诊断 / 门③ 端到端配对 McNemar**:**待 box**(vllm 8000 答题 + 8001 bge-large 嵌入;凭据每次重启轮换)。门②先跑(near-free),gold 不升 top-30 即诚实 NO-GO 省门③钱。
+> - ✗ **门② 离线召回诊断 = NO-GO 止损**(2026-07-24):multi-hop(cat 1,n=282)single vs multi —— gold 进 top-30 **entered 2 / left 10(净 −8)**、coverage@30 delta +0.0004(实质零)、mean gold rank 17.96→18.78(后移)。三信号一致:分解伤召回,不提质。**门③ 未启动**(省答题窗口),诚实 NO-GO。`SearchMulti` 引擎机制保留、`--multi-query`/`--recall-diagnostic` 默认关诊断。收口见 `docs/locomo-score-levers.md` Feature 010。产物 `.locomo-run/010-recall/`。
+> - ⛔ **门③ 端到端配对 McNemar**:门②止损跳过,未跑。
 
 ---
 

@@ -34,8 +34,9 @@ CGO_ENABLED=0 go test ./cmd/locomo-bench -run 'TestDecompose' -count=1
 # 复用 009 固化 bge-large chunks store(HF 009-bge-chunks-store);retrieval-only,不调答题
 setsid bash -c 'go run ./cmd/locomo-bench --data <locomo.json> \
   --run-dir .locomo-run/010-recall --store-dir <009-store> \
-  --chunks --top-k 30 --retrieval hybrid --multi-query --only-category 2 \
-  --recall-diagnostic >recall.log 2>&1; echo $? >recall.exit' </dev/null >/dev/null 2>&1 & disown
+  --chunks --top-k 30 --retrieval hybrid --multi-query --mq-max-subqueries 4 \
+  --only-category 1 --recall-diagnostic >recall.log 2>&1; echo $? >recall.exit' </dev/null >/dev/null 2>&1 & disown
+# ⚠️ 目标类 multi-hop = --only-category 1(dataset.go categoryLabel:1=multi-hop,2=temporal,4=single-hop)
 [ -f recall.exit ] && echo "exit=$(cat recall.exit)" || tail -1 recall.log
 ```
 

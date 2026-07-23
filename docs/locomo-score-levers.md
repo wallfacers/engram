@@ -173,6 +173,28 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 ---
 
+## Feature 010 — 多查询检索(提质型深召回,2026-07-24)
+
+009 收口预言「下一步 = query 分解让 gold 不加量升进 top-30」。010 把这枪做实并**在门②近免费处止损证伪**:引擎新增 `SearchMulti`(每子查询各跑三信号 hybrid → 复用 RRF k=60 做 RRF-of-RRF 融合,`len==1` 退化保真、纯 Go/offline、无 query-时 LLM),adapter 用答题 LLM 把多跳题拆 ≤4 子查询喂入。逐条正本:[`specs/010-multi-query-retrieval/`](../specs/010-multi-query-retrieval/)。
+
+### ✗ query 分解 + RRF-of-RRF = NO-GO(门②离线召回诊断即证伪,未耗门③答题窗口,2026-07-24)
+
+固化店 `009-bge-chunks-store`(bge-large 1024d + chunks)上,对 multi-hop(category **1**,n=282)跑 single vs multi 召回诊断(retrieval-only,不调答题/judge):
+
+| 指标 | single | multi(分解) | 判定 |
+|---|---|---|---|
+| gold 进 top-30 变动 | — | **entered 2 / left 10** | **净 −8 题掉出**,分解伤召回 |
+| coverage@30 | 0.031 | 0.031 | delta **+0.0004**(实质零) |
+| mean gold rank(top-30 口径) | 17.96 | 18.78 | 后移 **+0.82 名**(变差) |
+
+- **三信号方向一致 → 分解在 multi-hop 上没提质,反轻微伤召回**。严格按止损门跳过门③(省下答题窗口的钱),NO-GO。
+- **机制**:009 已证 gold 在宽池里中位 rank 71–90——它对**每个子查询同样是弱命中**。RRF-of-RRF 要顶起一个 doc,需它在多个子列表里都出现**且靠前**;gold 在各子列表都深埋,`1/(60+rank)` 贡献都极小,融合顶不动。分解反把「对多个子查询都中等命中」的噪声 doc 顶进 top-30,**挤出** gold(解释 left=10)。即「垃圾进垃圾出」:分解改变了池的构成,没改变 gold 的**向量可发现性**。
+- **与 008 reranker / 009 cluster-sweep 同族的诚实处理**:引擎 `SearchMulti` 作为纯 Go 融合机制保留(退化保真、可移植、default 未接入任何默认路径);adapter `--multi-query`/`--recall-diagnostic` 保留为**默认关诊断能力**。
+- **符号勘误(给未来避坑)**:`recall_diagnostic.json` 的 `*_delta` 口径 = `single − multi`(`multiquery.go:538/553`),故 `mean_gold_rank_at_30_delta` **负值 = multi 排名后移 = 变差**,与直觉相反;判定以无歧义的 `gold_entered/left_top_30` 主信号为准。
+- **止损纪律兑现**:门② retrieval-only 近免费,三信号一致即断,门③(1540×3 答题 + judge)未启动;box 跑完即关机停计费。产物 `.locomo-run/010-recall/`。
+
+---
+
 ## 杠杆总账(2026-07-23 收口)
 
 box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:
@@ -184,9 +206,10 @@ box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned jud
 | opinion-pass | NO-GO | −0.6pp | 加量 | 粗放覆盖污染全局 precision |
 | filter-pool | 不可测/成本差 | — | 加量 | LLM-per-question 大 context 压垮 box vllm |
 | cluster-sweep | INCONCLUSIVE | +0.4(噪声内) | 加量 | 实体簇扩展,配对对照证伪表观增益 |
+| query 分解 + RRF-of-RRF | **NO-GO**(门②止损) | —(召回即伤:top-30 净 −8) | 提质(意图) | 多跳拆子查询融合;gold 各子查询均弱命中,顶不动反挤出 |
 
 **杠杆哲学(maintainer 定调,2026-07-23)**:只认**提质**的赢(同预算/同 top-k 下把对的证据捞得更准,如 bge-large),**反感加量**(撑 top-k / 扩池 / 喂更多 context —— 分是真的但拿成本税换,不可移植,换个部署就塌)。产品是设备/应用习惯记忆,集成方无限 context 预算不存在。**据此 cat-top-k 从「头条 GO」降级为 optional/非默认**;本表所有「加量」型即便涨分也不进默认栈。
 
 **净出货(提质路线):bge-large → +1.3pp(~85.4%)**,是唯一符合哲学的干净赢。cat-top-k 作为 optional 旋钮保留(多跳 enumeration 需多 session 证据时可开),非默认。
 
-**下一步 = 提质型深召回**:让 gold 在**不加量**下从 rank 71-90 升进 top-30 —— query 分解(多跳题拆子查询各自精检)/ HyDE(闭合 query↔fact 语义差)/ 更好的 fact 写入表示。剩余 gap(open-domain 64%)同理走「精准浮现」非「粗放灌入」。按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
+**下一步 = 提质型深召回(方向经 010 收窄到写入侧)**:让 gold 在**不加量**下从 rank 71-90 升进 top-30。~~query 分解~~ **已被 010 门②证伪**——query 侧再拆分也顶不动一个各子查询都弱命中的 gold,瓶颈是 gold fact 的**向量可发现性(写入侧表示)**,非 query 侧改写。故剩余候选是**更好的 fact 写入表示**(抽取粒度 / propositional 改写 / 写入即嵌入更贴检索意图);HyDE 属 query 侧,受同一「gold 表示弱」上限约束,优先级降后。剩余 gap(open-domain 64%)同理走「精准浮现」非「粗放灌入」。按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
