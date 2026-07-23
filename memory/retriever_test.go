@@ -271,6 +271,232 @@ func containsResult(results []memory.Result, name string) bool {
 	return false
 }
 
+func TestSearchMulti_SingleQueryParity(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedRetrievalCorpus(t)
+	r := memory.NewRetriever(es, vs, nil)
+
+	for _, query := range []string{
+		"Python scripting",
+		"Sweden moved",
+		"black coffee morning",
+		"favorite language",
+	} {
+		t.Run(query, func(t *testing.T) {
+			want, err := r.Search(ctx, query, 3)
+			if err != nil {
+				t.Fatalf("Search(%q): %v", query, err)
+			}
+			got, err := r.SearchMulti(ctx, []string{query}, 3)
+			if err != nil {
+				t.Fatalf("SearchMulti(%q): %v", query, err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("single-query result differs from Search:\n got: %#v\nwant: %#v", got, want)
+			}
+		})
+	}
+}
+
+type searchMultiFusionFixture struct {
+	retriever     *memory.Retriever
+	originalQuery string
+	subqueries    []string
+	gold          string
+	singleHit     string
+}
+
+func seedSearchMultiFusionFixture(t *testing.T, goldSubqueryScore float32) searchMultiFusionFixture {
+	t.Helper()
+	ctx := context.Background()
+	es, vs := newStores(t)
+	const (
+		model          = "search-multi-fixture"
+		originalQuery  = "orchid horizon"
+		firstSubquery  = "cobalt nebula"
+		secondSubquery = "saffron lattice"
+		gold           = "gold-doc"
+		singleHit      = "a-single-hit"
+	)
+	client := &vectorFakeClient{model: model, vectors: map[string][]float32{
+		originalQuery:  {1, 0, 0, 0},
+		firstSubquery:  {0, 1, 0, 0},
+		secondSubquery: {0, 0, 1, 0},
+	}}
+	serial := 0
+	add := func(name string, vector []float32) {
+		t.Helper()
+		serial++
+		content := fmt.Sprintf("Synthetic fixture record %02d.", serial)
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: content, CharCount: len(content)}); err != nil {
+			t.Fatalf("upsert %s: %v", name, err)
+		}
+		if err := vs.Put(ctx, name, model, vector, time.Unix(int64(serial), 0)); err != nil {
+			t.Fatalf("put vector %s: %v", name, err)
+		}
+	}
+	unitVector := func(original, first, second float32) []float32 {
+		residual := 1 - float64(original*original+first*first+second*second)
+		if residual < 0 {
+			t.Fatalf("invalid fixture vector (%v, %v, %v)", original, first, second)
+		}
+		return []float32{original, first, second, float32(math.Sqrt(residual))}
+	}
+
+	// Each subquery's top 20 contains its own 19 specialists plus gold, while
+	// every specialist is outside the other list.
+	for i := 0; i < 19; i++ {
+		name := fmt.Sprintf("m-first-%02d", i)
+		original, score := float32(0), float32(0.5-0.02*float32(i))
+		if i == 0 {
+			name, original, score = singleHit, 0.5, 0.75
+		} else if i == 1 {
+			score = 0.7
+		}
+		add(name, unitVector(original, score, 0))
+	}
+	for i := 0; i < 19; i++ {
+		name := fmt.Sprintf("z-second-%02d", i)
+		original, score := float32(0), float32(0.5-0.02*float32(i))
+		if i == 0 {
+			original, score = 0.4, 0.75
+		} else if i == 1 {
+			score = 0.7
+		}
+		add(name, unitVector(original, 0, score))
+	}
+	add(gold, unitVector(0.2, goldSubqueryScore, goldSubqueryScore))
+
+	return searchMultiFusionFixture{
+		retriever:     memory.NewRetriever(es, vs, client),
+		originalQuery: originalQuery,
+		subqueries:    []string{firstSubquery, secondSubquery},
+		gold:          gold,
+		singleHit:     singleHit,
+	}
+}
+
+func TestSearchMulti_FusionLiftsCoHit(t *testing.T) {
+	ctx := context.Background()
+	fixture := seedSearchMultiFusionFixture(t, 0.1)
+	const k = 2
+
+	baseline, err := fixture.retriever.Search(ctx, fixture.originalQuery, k)
+	if err != nil {
+		t.Fatalf("single-query search: %v", err)
+	}
+	if containsResult(baseline, fixture.gold) {
+		t.Fatalf("invalid fixture: gold must rank below top-%d, got %+v", k, baseline)
+	}
+	for _, subquery := range fixture.subqueries {
+		shallow, err := fixture.retriever.Search(ctx, subquery, k)
+		if err != nil {
+			t.Fatalf("shallow subquery search %q: %v", subquery, err)
+		}
+		if containsResult(shallow, fixture.gold) {
+			t.Fatalf("invalid fixture: gold must require depth beyond top-%d for %q: %+v", k, subquery, shallow)
+		}
+	}
+
+	got, err := fixture.retriever.SearchMulti(ctx, fixture.subqueries, k)
+	if err != nil {
+		t.Fatalf("SearchMulti: %v", err)
+	}
+	if !containsResult(got, fixture.gold) {
+		t.Fatalf("co-hit gold was not lifted into top-%d: %+v", k, got)
+	}
+	wantNames := []string{fixture.gold, fixture.singleHit}
+	gotNames := []string{got[0].Name, got[1].Name}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("fused order = %v, want %v", gotNames, wantNames)
+	}
+	if wantScore := 2.0 / (60.0 + 20.0); math.Abs(got[0].Score-wantScore) > 1e-12 {
+		t.Fatalf("deep co-hit score = %.16f, want %.16f", got[0].Score, wantScore)
+	}
+
+	// Multi-query assembly preserves post-processing provenance from any list
+	// in which a final candidate appeared.
+	sweepEntries, sweepVectors := seedClusterSweepCorpus(t, 3)
+	sweepRetriever := memory.NewRetrieverWithOptions(sweepEntries, sweepVectors, nil, nil, memory.RetrieverOptions{ClusterSweep: true})
+	swept, err := sweepRetriever.SearchMulti(ctx, []string{"What things did root do?", "root"}, 2)
+	if err != nil {
+		t.Fatalf("cluster-sweep SearchMulti: %v", err)
+	}
+	if len(swept) == 0 || !swept[0].ClusterSweep {
+		t.Fatalf("cluster-sweep provenance lost during fusion: %+v", swept)
+	}
+}
+
+func TestSearchMulti_CoHitOutranksSingleHit(t *testing.T) {
+	ctx := context.Background()
+	fixture := seedSearchMultiFusionFixture(t, 0.6)
+
+	got, err := fixture.retriever.SearchMulti(ctx, fixture.subqueries, 2)
+	if err != nil {
+		t.Fatalf("SearchMulti: %v", err)
+	}
+	goldRank, singleRank := rankOf(got, fixture.gold), rankOf(got, fixture.singleHit)
+	if goldRank < 0 || singleRank < 0 {
+		t.Fatalf("expected co-hit and single-hit documents in result: %+v", got)
+	}
+	if goldRank >= singleRank {
+		t.Fatalf("co-hit rank %d must outrank nearby single-hit rank %d: %+v", goldRank, singleRank, got)
+	}
+	wantNames := []string{fixture.gold, fixture.singleHit}
+	gotNames := []string{got[0].Name, got[1].Name}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("fused order = %v, want %v", gotNames, wantNames)
+	}
+	wantScores := []float64{2.0 / (60.0 + 3.0), 1.0 / (60.0 + 1.0)}
+	for i, want := range wantScores {
+		if math.Abs(got[i].Score-want) > 1e-12 {
+			t.Fatalf("fused score[%d] = %.16f, want %.16f", i, got[i].Score, want)
+		}
+	}
+}
+
+func TestSearchMulti_Degenerate(t *testing.T) {
+	ctx := context.Background()
+	es, vs := seedRetrievalCorpus(t)
+	r := memory.NewRetriever(es, vs, nil)
+
+	got, err := r.SearchMulti(ctx, []string{}, 3)
+	if err != nil {
+		t.Fatalf("empty SearchMulti: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("empty SearchMulti = %#v, want nil", got)
+	}
+
+	want, err := r.Search(ctx, "Python scripting", 3)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	got, err = r.SearchMulti(ctx, []string{"", "  Python scripting  ", "\t", "Python scripting"}, 3)
+	if err != nil {
+		t.Fatalf("blank/duplicate SearchMulti: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("blank/duplicate normalization differs:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	const emptyQuery = "no matching tokens anywhere"
+	empty, err := r.Search(ctx, emptyQuery, 3)
+	if err != nil {
+		t.Fatalf("empty fixture query: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("invalid fixture: empty query returned %+v", empty)
+	}
+	got, err = r.SearchMulti(ctx, []string{emptyQuery, "Python scripting"}, 3)
+	if err != nil {
+		t.Fatalf("empty-signal SearchMulti: %v", err)
+	}
+	if !containsResult(got, "python-pref") {
+		t.Fatalf("empty subquery suppressed healthy results: %+v", got)
+	}
+}
+
 func TestRetriever_RerankReorders(t *testing.T) {
 	ctx := context.Background()
 	es, vs := seedRetrievalCorpus(t)
