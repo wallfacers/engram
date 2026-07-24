@@ -216,6 +216,29 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 ---
 
+## Feature 012 — 写入侧 Doc2Query 伪查询影子向量(提质型深召回,2026-07-24)
+
+**动机**:承 011 把写入侧收窄——011 的 `#alias` 影子用**已有短概念标签**,证伪于「短标签不比 fact 原文多提供可发现性」。012 换弹药:为每条 fact 用答题 LLM 生成 **2-3 条伪查询**(「这条 fact 能回答的问题」),嵌成 `#query` 影子向量,检索时 `max(text_cosine, alias_cosine, query_cosine)` 归并回源。文献锚:Doc2Query++(2510.09557)证 **dense bi-encoder 只在 dual-index max-pool 下**从 query-gen 获益(naive append 伤 dense),且 dense 偏好**LLM 拟人问句** > 关键词式扩展(正解释 011 alias 失败)。闭合「陈述↔问句」嵌入不对称。**无 α、无付费 reranker、不扩 top-k、不加 context**。检索器源码零改(011 的 content-agnostic max-pool 复用,`resolveShadow` 加认 `#query` 后缀即生效)。
+
+### ✓ 门① 纯 Go 契约 = PASS;✗ 门② 分层召回诊断 = NO-GO(止损,未耗门③答题窗口,2026-07-24)
+
+- **门①全绿**:US1 引擎(migration v5 `memory_fact_queries` + `PutFactQueries/FactQueries` + `#query` 影子嵌入 + `queryEmbedText` verbatim join + max-pool 归并)6 测试;US2 adapter(解耦 `--doc2query-build` 一次性预建 + 两店隔离 + baseline 剥离/treatment 保留 + `gold_has_query` 分层 + extractNever 守零抽取 + 固定温度 0.2 非零防 omitempty + 300-fact 溢出覆盖)14 测试。引擎/adapter 分属两 commit(`cebf866` / `294ca0d`),`git diff -- memory embedding provider store internal` 空。build 产物 **2755 facts / 8250 queries(avg 3/fact)**。
+- **门② 配对分层召回诊断(retrieval-only,box bge-large 8001,near-free)** —— 主判据「gold 有 query」子层 gold 净升 top-30(`entered>left` 且 mean rank 前移)**且** coverage@30 Δ>0(`delta=treatment−baseline`,rank 负=前移=变好):
+
+| 目标类 gold_has_query 子层 | n | entered/left | rank@30 Δ | full-pool rank Δ | coverage@30 Δ | 全局 full-pool rank Δ |
+|---|---|---|---|---|---|---|
+| multi-hop(cat1) | 207 | 0 / 0 | +0.227(变差) | +0.792(变差) | **0.00000** | +2.673(变差) |
+| open-domain(cat3) | 51 | **2 / 0** | −0.627(变好) | +0.745(变差) | **0.00000** | +3.837(变差) |
+
+- **两类均触发止损门**:multi-hop 零移动 + rank 后移(两条件全败);open-domain 有 2 gold 进 top-30 且 rank@30 前移 −0.627(**微正信号,略强于 011 的 entered=0**),但 **coverage@30 Δ 恒 0**——进 top-30 的 fact 对应 gold turn 已被其他检索项覆盖,**无新增 turn 覆盖 = 端到端无预期增益**(coverage 是端到端必要条件),coverage 条件败 → **NO-GO,不启动门③**。
+- **机制(为何零到微负,与 011 同族)**:max-pool 只抬不降,但**对 207/282、51/96 条「有 query」的非 gold fact 同样抬分**,gold 相对位置几乎不变(cat3 +2 entered 属噪声级),全局 full-pool rank 反因对称抬噪后移 +2.67~3.84。伪查询虽是「拟人问句」(Doc2Query++ 说的 dense 偏好型),仍未给 gold 带来**超过原文的判别性可发现性**——**gold 埋在 rank 71-90 是向量空间的深层问题,写入侧影子表示(概念标签 011 / 伪查询 012)都改变不了池的构成而非 gold 的可发现性**。
+- **决定性收敛**:**两次独立的写入侧表示尝试(011 alias 短标签、012 doc2query 拟人问句)在门②同点 NO-GO**——加上 010 query 侧分解证伪,**「靠改写/影子表示把 gold 顶进 top-30」方向三向证伪**。瓶颈不在表示的措辞,在 dense 单塔对 multi-hop/open-domain gold 的**深层召回上限**。剩余真杠杆回到**检索侧结构**(实体图遍历 / 检索侧时间窗,strategy 文档 P0),非写入侧再换弹药。
+- **诚实 caveat**:box-GPU 查询嵌入非确定([[locomo-answer-nondeterministic]] 同族,009 SC-004),rank 尾数有抖动;但 `entered/left` 与 `coverage@30 Δ=0` 主信号鲁棒(跨类一致)。
+- **同族诚实处理**:引擎 `#query` dual-index 归并作为纯 Go、退化保真、可移植的**新增能力保留**(无 `memory_fact_queries` 行的店逐字节零改);adapter `--doc2query off|baseline|treatment` + `--doc2query-build` 保留为**默认关能力**。均不进默认栈、不报为赢。US3(抽取流水线内生成 `queries`)**取消实现**——门③未过,无 shipped 路径。
+- **止损纪律兑现**:门② near-free 即断,门③未启动;box 跑完即停、隧道拆、凭据清。产物 `.locomo-run/012-recall-cat1/`、`.locomo-run/012-recall-cat3/`、预建店 `.locomo-run/012-build/doc2query-store`。
+
+---
+
 ## 杠杆总账(2026-07-23 收口)
 
 box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:
@@ -228,9 +251,11 @@ box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned jud
 | filter-pool | 不可测/成本差 | — | 加量 | LLM-per-question 大 context 压垮 box vllm |
 | cluster-sweep | INCONCLUSIVE | +0.4(噪声内) | 加量 | 实体簇扩展,配对对照证伪表观增益 |
 | query 分解 + RRF-of-RRF | **NO-GO**(门②止损) | —(召回即伤:top-30 净 −8) | 提质(意图) | 多跳拆子查询融合;gold 各子查询均弱命中,顶不动反挤出 |
+| alias 影子(011,写入侧) | **NO-GO**(门②止损) | —(子层不前移,coverage Δ=0) | 提质(意图) | 短概念标签不比原文多可发现性,对称抬噪 |
+| doc2query `#query` 影子(012,写入侧) | **NO-GO**(门②止损) | —(cat3 +2 entered 但 coverage Δ=0) | 提质(意图) | 拟人伪查询同样不给 gold 超原文判别性,gold 深埋是向量上限 |
 
 **杠杆哲学(maintainer 定调,2026-07-23)**:只认**提质**的赢(同预算/同 top-k 下把对的证据捞得更准,如 bge-large),**反感加量**(撑 top-k / 扩池 / 喂更多 context —— 分是真的但拿成本税换,不可移植,换个部署就塌)。产品是设备/应用习惯记忆,集成方无限 context 预算不存在。**据此 cat-top-k 从「头条 GO」降级为 optional/非默认**;本表所有「加量」型即便涨分也不进默认栈。
 
 **净出货(提质路线):bge-large → +1.3pp(~85.4%)**,是唯一符合哲学的干净赢。cat-top-k 作为 optional 旋钮保留(多跳 enumeration 需多 session 证据时可开),非默认。
 
-**下一步 = 提质型深召回(方向经 010 收窄到写入侧)**:让 gold 在**不加量**下从 rank 71-90 升进 top-30。~~query 分解~~ **已被 010 门②证伪**——query 侧再拆分也顶不动一个各子查询都弱命中的 gold,瓶颈是 gold fact 的**向量可发现性(写入侧表示)**,非 query 侧改写。故剩余候选是**更好的 fact 写入表示**(抽取粒度 / propositional 改写 / 写入即嵌入更贴检索意图);HyDE 属 query 侧,受同一「gold 表示弱」上限约束,优先级降后。剩余 gap(open-domain 64%)同理走「精准浮现」非「粗放灌入」。按 maintainer workflow 走 brainstorm→SDD,非继续 box 上试 flag。
+**下一步 = 转向检索侧结构(写入侧表示/query 改写三向证伪后,2026-07-24 收口)**:让 gold 在**不加量**下从 rank 71-90 升进 top-30 的努力,现已三向证伪——**010 query 侧分解**(顶不动各子查询都弱命中的 gold)、**011 alias 短标签影子**、**012 doc2query 拟人问句影子**(两者门②同点 NO-GO:影子对称抬噪、不给 gold 超原文的判别性)。**结论:瓶颈不在 query 措辞、也不在 fact 影子表示,而在 dense 单塔对 multi-hop/open-domain gold 的深层召回上限——这是「顶一个已经埋在 rank 71-90 的 gold」这一问题本身对无监督 dense 检索的天花板。** 剩余真杠杆离开「表示改写」这条线,回到 **strategy 文档的检索侧结构 P0**:① 实体图遍历(`memory_entities` 平表→可 1-hop 走边,直击 multi-hop,EcphoryRAG/HippoRAG2)、② 检索侧时间窗(`event_date`→范围 + T_score,MemOS MemReader 式,直击 temporal)。这些是**结构性新机制**(engine contract-first + 宪法 IV 门),非 box 上试 flag;open-domain 短板同理走 category-conditional「精准浮现」。按 maintainer workflow 走 brainstorm→SDD。**注**:提质型的写入/query-侧影子表示这条便宜线已探尽,不再投。

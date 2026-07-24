@@ -77,28 +77,28 @@
 
 ### 门②:分层召回诊断（near-free,retrieval-only,box bge-large 8001)
 
-- [ ] T026 [US2] 门② multi-hop(cat1):EMBED 走 box bge-large 8001 隧道,setsid 分离两臂(baseline→treatment,共用 run-dir 生成配对分层 delta),`--recall-diagnostic --only-category 1 --top-k 30`。产物 `.locomo-run/012-recall/`。**判据(契约 A3)**:gold 子层净升 top-30 且 coverage@30 delta>0 才进门③;否则 NO-GO 止损。
-- [ ] T027 [US2] 门② open-domain(cat3):同 T026 换 `--only-category 3`,产物 `.locomo-run/012-recall-cat3/`。任一目标类无信号即整体 NO-GO 倾向(与 011 同判)。
-- [ ] T028 [US2] **止损决策点**:若门② 两目标类子层均不前移/coverage@30 delta≤0(复现 011 对称抬噪)→ 记 NO-GO,**跳过 T029-T031**,直接 T032 收口;box 跑完即停机验 GPU 0 MiB、拆隧道、清凭据。
+- [x] T026 [US2] 门② multi-hop(cat1):完成。gold_has_query 子层 n=207,entered/left=0/0,rank@30 Δ=+0.227(变差),coverage@30 Δ=0.00000。产物 `.locomo-run/012-recall-cat1/`。
+- [x] T027 [US2] 门② open-domain(cat3):完成。gold_has_query 子层 n=51,entered/left=2/0,rank@30 Δ=−0.627(微前移),coverage@30 Δ=0.00000。产物 `.locomo-run/012-recall-cat3/`。
+- [x] T028 [US2] **止损决策点 = NO-GO**:两目标类 coverage@30 Δ 恒 0(cat3 有 2 gold 进 top-30 但无新增 turn 覆盖 = 端到端无预期增益),严格触发止损门 → **跳过 T029-T031**,直接 T032 收口。box 已停(GPU 0 MiB)、隧道拆、凭据清。
 
 ### 门③:端到端配对 McNemar（box,repeats=3,唯一变量=`#query` 影子)——仅门② GO 才跑
 
-- [ ] T029 [US2] 两臂 canonical recipe 逐字一致只差 `--doc2query baseline|treatment`(契约 A4,四 flag 缺一作废),`--repeats 3 --concurrency 40`,EMBED 走 box bge-large,setsid 分离。产物 `.locomo-run/012-e2e-{base,shadow}/`。
-- [ ] T030 [US2] 配对 McNemar + context-parity:验 `final_top_k=30` 恒等、treatment `answer_context_tokens` 不显著>baseline(SC-004);目标类 above-noise + 非目标类不回退(SC-006)。
-- [ ] T031 [US2] box 跑完即停机:`nvidia-smi` 验 GPU 0 MiB、拆隧道、清凭据(`.boxpw`/askpass)。
+- [~] T029 [US2] **SKIPPED（门② NO-GO)**——未启动,省 1540×3 答题 + judge 窗口。
+- [~] T030 [US2] **SKIPPED（门② NO-GO)**。
+- [x] T031 [US2] box 收尾:vllm 已杀、`nvidia-smi` GPU 0 MiB、隧道拆、askpass 清(凭据仅存活于 env,从未落盘)。
 
 ### 收口（对应 SC-005/006/007)
 
-- [ ] T032 [US2] 结论(GO/NO-GO + 子层/全局 delta、p 值、context 对比、coverage 诊断)写入 `docs/locomo-score-levers.md` 台账 Feature 012;越不过保留 `--doc2query` 默认关(与 008/010/011 同族)。更新本 tasks 进度横幅。**单独 commit(adapter)**,`git diff -- memory…` 空。
+- [x] T032 [US2] 结论(门① PASS / 门② NO-GO + 子层/全局 delta + coverage 诊断 + 三向证伪收敛)已写入 `docs/locomo-score-levers.md` 台账 Feature 012;`--doc2query` 保留默认关(与 008/010/011 同族)。**单独 commit(adapter)`294ca0d`**,`git diff -- memory…` 空。
 
-**Checkpoint**:US2 独立交付——三道门判定完成,诚实 GO/NO-GO。
+**Checkpoint**:US2 独立交付完成——门① PASS、门② NO-GO(止损)、门③ 未启动。诚实 NO-GO。
 
 ---
 
-## Phase 5: User Story 3 — shipped 写入路径（P3 · DEFERRED · 仅门③ GO 后才做）
+## Phase 5: User Story 3 — shipped 写入路径（P3 · **CANCELLED**·门② NO-GO)
 
-> **前置门**:仅当 US2 门③ 判 GO 才启动本 Phase。门② 或门③ NO-GO 则本 Phase 不做,`#query` 引擎能力作纯 Go/退化保真/可移植能力保留(默认惰性)。
+> **前置门未过**:US3 仅当 US2 门③ GO 才启动。门② NO-GO(2026-07-24)→ **本 Phase 取消实现**。`#query` 引擎能力作纯 Go/退化保真/可移植能力保留(默认惰性,无 `memory_fact_queries` 行的店逐字节零改)。
 
-- [ ] T033 [US3] 在 `memory/prompt/memory_extraction.go` 抽取 prompt 增 `"queries":["...","..."]` 字段(每 fact 2-3 问句,零额外 LLM 调用);`extractedFact` 加 `Queries []string`。
-- [ ] T034 [US3] 在 `memory/pipeline/pipeline.go storeFact`:有非空 queries 时 `PutFactQueries` + `Enqueue(QueryShadowName(name))`,置于 config 开关后(default-off)。
-- [ ] T035 [US3] TDD + 回归:pipeline 单测断言 queries 存入 + 影子 enqueue;`CGO_ENABLED=0 go test ./memory/pipeline`;声明新 baseline + rationale(Constitution IV)。**单独 commit(engine shipped)**。
+- [~] T033 [US3] **CANCELLED（门② NO-GO)**——抽取 prompt 不接 `"queries"` 字段。
+- [~] T034 [US3] **CANCELLED（门② NO-GO)**——pipeline 不接 shipped 写入路径。
+- [~] T035 [US3] **CANCELLED（门② NO-GO)**——无新 baseline 声明。
