@@ -8,11 +8,11 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 确认前置:009 固化 bge-large chunks store 路径可用(HF `009-bge-chunks-store` 或本地缓存)、LoCoMo dataset 可读;记录到 `.locomo-run/012-doc2query/preflight.txt`(不含凭据)。核对 `.gitignore` 已忽略 `.locomo-run/`。
+- [x] T001 确认前置:009 固化 bge-large chunks store 路径可用(HF `009-bge-chunks-store` 或本地缓存)、LoCoMo dataset 可读;记录到 `.locomo-run/012-doc2query/preflight.txt`(不含凭据)。核对 `.gitignore` 已忽略 `.locomo-run/`。
 
 ## Phase 2: Foundational（复用面核对）
 
-- [ ] T002 [P] 复用性核对:确认 `memory/retriever.go:821 vectorRankContext` 的 max-pool 归并**内容无关**(经 `resolveShadow` 折叠任意影子)、`memory/embedder.go` 的 `embedOne`/`resolveShadow`/`Backfill`/`Enqueue`、`memory/entrystore.go:476 PutAliases`(仿写模板)、`store/migrations.go migrationsByVersion`(现 v4)可直接扩展,不改其它语义。
+- [x] T002 [P] 复用性核对:确认 `memory/retriever.go:821 vectorRankContext` 的 max-pool 归并**内容无关**(经 `resolveShadow` 折叠任意影子)、`memory/embedder.go` 的 `embedOne`/`resolveShadow`/`Backfill`/`Enqueue`、`memory/entrystore.go:476 PutAliases`(仿写模板)、`store/migrations.go migrationsByVersion`(现 v4)可直接扩展,不改其它语义。
 
 **Checkpoint**:确认后 US1 可安全接线,零 011 语义改动、零新可调权重。
 
@@ -26,36 +26,36 @@
 
 ### Migration（先 store 层）
 
-- [ ] T003 [US1] 在 `store/migrations_test.go` 写 `TestMigrationV5FactQueries`:全新库迁移后 `memory_fact_queries` 存在、`schema_version` MAX=5、v1-v4 未改;Down 可回滚(先失败)。
-- [ ] T004 [US1] 运行 `CGO_ENABLED=0 go test ./store -run TestMigrationV5 -v` 验证失败(表不存在)。
-- [ ] T005 [US1] 在 `store/migrations.go` 加 `v5FactQueries`/`v5FactQueriesDown`(契约 S1 逐字),`migrationsByVersion` 末尾追加 `{Version:5,...}`;运行 T004 命令转绿。
-- [ ] T006 [US1] 提交点内联:`CGO_ENABLED=0 go build ./... && go test ./store -count=1` 全绿。
+- [x] T003 [US1] 在 `store/migrations_test.go` 写 `TestMigrationV5FactQueries`:全新库迁移后 `memory_fact_queries` 存在、`schema_version` MAX=5、v1-v4 未改;Down 可回滚(先失败)。
+- [x] T004 [US1] 运行 `CGO_ENABLED=0 go test ./store -run TestMigrationV5 -v` 验证失败(表不存在)。
+- [x] T005 [US1] 在 `store/migrations.go` 加 `v5FactQueries`/`v5FactQueriesDown`(契约 S1 逐字),`migrationsByVersion` 末尾追加 `{Version:5,...}`;运行 T004 命令转绿。
+- [x] T006 [US1] 提交点内联:`CGO_ENABLED=0 go build ./... && go test ./store -count=1` 全绿。
 
 ### EntryStore 访问器
 
-- [ ] T007 [P] [US1] 在 `memory/entrystore_test.go` 写 `TestPutFactQueries`:Put→FactQueries 往返、去重(大小写/空白归一)、覆盖(重复 Put 替换)、`FactQueryEntryNames` 只列有 query 的 fact(先失败)。
-- [ ] T008 [US1] 在 `memory/entrystore.go` 加 `PutFactQueries`/`FactQueries`/`FactQueryEntryNames`(契约 S2,逐字仿 `PutAliases` 的事务+去重);运行 `CGO_ENABLED=0 go test ./memory -run 'TestPutFactQueries' -v` 转绿。
+- [x] T007 [P] [US1] 在 `memory/entrystore_test.go` 写 `TestPutFactQueries`:Put→FactQueries 往返、去重(大小写/空白归一)、覆盖(重复 Put 替换)、`FactQueryEntryNames` 只列有 query 的 fact(先失败)。
+- [x] T008 [US1] 在 `memory/entrystore.go` 加 `PutFactQueries`/`FactQueries`/`FactQueryEntryNames`(契约 S2,逐字仿 `PutAliases` 的事务+去重);运行 `CGO_ENABLED=0 go test ./memory -run 'TestPutFactQueries' -v` 转绿。
 
 ### TDD:引擎影子（先写失败测试)
 
-- [ ] T009 [P] [US1] 在 `memory/query_shadow_test.go`(新建,package memory_test)写 `TestQueryShadow_EmbedOneBranch`:`Enqueue(QueryShadowName(fact))`→embedOne 查 `FactQueries`、原样 join(不丢词)、`Put` 影子向量;空 queries→no-op;非影子 name 逐字节不变(先失败)。
-- [ ] T010 [P] [US1] 写 `TestQueryShadow_NoQueriesParity`:无 `memory_fact_queries` 行的 fact + 所有 chunk semantic 相似度与最终排序逐字节等于现状(`!hasShadows` 快路径)(先失败/实现后仍绿)。
-- [ ] T011 [P] [US1] 写 `TestQueryShadow_MergeLiftsSource`:构造 gold fact 的 text 向量对 query 弱命中、其 `#query` 影子强命中,断言 max-pool 归并后源 fact semantic 排名升入结果(先失败)。
-- [ ] T012 [P] [US1] 写 `TestQueryShadow_DedupSingleVote` + `TestQueryShadow_ShadowNameNeverLeaks`:同源 text+`#query` 双命中→结果一条、semantic 一票;任何 `#query` 影子命中→结果只含源 fact name(先失败)。
-- [ ] T013 [P] [US1] 写 `TestQueryShadow_Degenerate` + `TestQueryShadow_CoexistWithAlias`:client nil / 孤儿影子 / 空 queries→不 panic、降级;一 fact 同时有 alias+query 两影子→都折回源、max-pool 取最优、结果一票(先失败)。
+- [x] T009 [P] [US1] 在 `memory/query_shadow_test.go`(新建,package memory_test)写 `TestQueryShadow_EmbedOneBranch`:`Enqueue(QueryShadowName(fact))`→embedOne 查 `FactQueries`、原样 join(不丢词)、`Put` 影子向量;空 queries→no-op;非影子 name 逐字节不变(先失败)。
+- [x] T010 [P] [US1] 写 `TestQueryShadow_NoQueriesParity`:无 `memory_fact_queries` 行的 fact + 所有 chunk semantic 相似度与最终排序逐字节等于现状(`!hasShadows` 快路径)(先失败/实现后仍绿)。
+- [x] T011 [P] [US1] 写 `TestQueryShadow_MergeLiftsSource`:构造 gold fact 的 text 向量对 query 弱命中、其 `#query` 影子强命中,断言 max-pool 归并后源 fact semantic 排名升入结果(先失败)。
+- [x] T012 [P] [US1] 写 `TestQueryShadow_DedupSingleVote` + `TestQueryShadow_ShadowNameNeverLeaks`:同源 text+`#query` 双命中→结果一条、semantic 一票;任何 `#query` 影子命中→结果只含源 fact name(先失败)。
+- [x] T013 [P] [US1] 写 `TestQueryShadow_Degenerate` + `TestQueryShadow_CoexistWithAlias`:client nil / 孤儿影子 / 空 queries→不 panic、降级;一 fact 同时有 alias+query 两影子→都折回源、max-pool 取最优、结果一票(先失败)。
 
 ### 实现（memory/,engine 增量)
 
-- [ ] T014 [US1] 在 `memory/embedder.go` 加 `queryShadowSuffix`/`QueryShadowName`/`resolveQueryShadow`(契约 S3);**泛化 `resolveShadow`** 为「识别任一影子后缀」(先 query 再 alias);加 `queryEmbedText(queries)`=原样 join(无丢词滤器)。
-- [ ] T015 [US1] 在 `embedOne` 于 `#alias` 分支**之前**插入 `#query` 分支(契约 S3):影子 name→strip 源→`FactQueries`→`queryEmbedText`→`Embed`→`vectors.Put`;非影子逐字节不变。
-- [ ] T016 [US1] 加 `QueryShadowNames(ctx)`(`FactQueryEntryNames`→`#query`);`Backfill` 纳入缺失 `#query` 影子(与 `AliasShadowNames` 并列)。
-- [ ] T017 [US1] 确认 `memory/retriever.go` **源码零改**即通过 T011/T012(泛化后的 `resolveShadow` 自动折叠 `#query`);若 T011/T012 未过,只允许在 retriever 内改经 `resolveShadow` 的判定,不引入 α/新权重。
-- [ ] T018 [US1] 让 T009–T013 全绿:`CGO_ENABLED=0 go test -count=1 ./memory -run 'TestQueryShadow'`。
+- [x] T014 [US1] 在 `memory/embedder.go` 加 `queryShadowSuffix`/`QueryShadowName`/`resolveQueryShadow`(契约 S3);**泛化 `resolveShadow`** 为「识别任一影子后缀」(先 query 再 alias);加 `queryEmbedText(queries)`=原样 join(无丢词滤器)。
+- [x] T015 [US1] 在 `embedOne` 于 `#alias` 分支**之前**插入 `#query` 分支(契约 S3):影子 name→strip 源→`FactQueries`→`queryEmbedText`→`Embed`→`vectors.Put`;非影子逐字节不变。
+- [x] T016 [US1] 加 `QueryShadowNames(ctx)`(`FactQueryEntryNames`→`#query`);`Backfill` 纳入缺失 `#query` 影子(与 `AliasShadowNames` 并列)。
+- [x] T017 [US1] 确认 `memory/retriever.go` **源码零改**即通过 T011/T012(泛化后的 `resolveShadow` 自动折叠 `#query`);若 T011/T012 未过,只允许在 retriever 内改经 `resolveShadow` 的判定,不引入 α/新权重。
+- [x] T018 [US1] 让 T009–T013 全绿:`CGO_ENABLED=0 go test -count=1 ./memory -run 'TestQueryShadow'`。
 
 ### 验收（对应 SC)
 
-- [ ] T019 [US1] 全引擎回归(退化保真不破 parity golden):`CGO_ENABLED=0 go test -count=1 ./store ./memory ./memory/pipeline` + `CGO_ENABLED=0 go build ./...` 全绿(SC-003)。**M2 核查**:确认 `#query` 影子只被 semantic 归并消费——`Backfill`/export/snapshot/curation 遍历向量遇 `#query` 须 resolve/跳过,不当真 entry。
-- [ ] T020 [US1] 验 SC-001(无 query 行 + chunk semantic 逐字节 parity)/ SC-002(归并升排名+去重+影子不泄漏,确定性可复算)/ SC-003(CGO 关无云 reranker、检索无 query-时 LLM、无 α、migration v5 独立 tx、v1-v4 未改);`git diff --name-only` 仅 `store/`+`memory/`。
+- [x] T019 [US1] 全引擎回归(退化保真不破 parity golden):`CGO_ENABLED=0 go test -count=1 ./store ./memory ./memory/pipeline` + `CGO_ENABLED=0 go build ./...` 全绿(SC-003)。**M2 核查**:确认 `#query` 影子只被 semantic 归并消费——`Backfill`/export/snapshot/curation 遍历向量遇 `#query` 须 resolve/跳过,不当真 entry。
+- [x] T020 [US1] 验 SC-001(无 query 行 + chunk semantic 逐字节 parity)/ SC-002(归并升排名+去重+影子不泄漏,确定性可复算)/ SC-003(CGO 关无云 reranker、检索无 query-时 LLM、无 α、migration v5 独立 tx、v1-v4 未改);`git diff --name-only` 仅 `store/`+`memory/`。
 
 **Checkpoint**:US1 独立交付——纯 Go `#query` 影子 + inert-by-default。**单独 commit(engine)**,消息注明退化保真 + max-pool 无 α + retriever 源码零改复用 011。
 

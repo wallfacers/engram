@@ -12,14 +12,22 @@
 - `treatment`：同复制 + backfill + **保留** `#query` 影子。
 - canonical 店**从不被打开为运行店**（方案 A）。校验：拒绝 `--doc2query != off` 与 `--multi-query`/`--top-k != 30` 并用（守提质硬约束）。
 
-## A2. Backfill（doc2query over stored passages，不重抽取）
+## A2. Backfill 解耦为一次性 `--doc2query-build`（关键架构）
 
-对运行店内每条 fact（`FactSource=="extraction"` 且无 `memory_fact_queries` 行者）：
-1. LLM 调用（答题/抽取模型，OpenAI-compatible）生成 **2-3** 个「该 fact 能回答的问句」。
-2. `entries.PutFactQueries(ctx, name, queries)`。
-3. `embedder.Enqueue(memory.QueryShadowName(name))`（treatment）；baseline 跳过嵌入并剥离。
-- 提示词冻结见 A5；温度固定、失败该 fact 跳过（不阻断）。
-- backfill 产物 `doc2query_backfill_<arm>.jsonl`（name→queries，无凭据）。
+**LLM 生成问句不能在 diagnostic/e2e 时做**（那里 caller=`extractNever`，任何 LLM 调用即报错，守零抽取）。故把它解耦成一次性预建步，与两臂检索分离——与「009 店建一次后复用」同构：
+
+```
+--doc2query-build --store-dir <009-canonical> --run-dir <B>
+```
+1. 复制 `<009-canonical>` → `<B>/doc2query-store`（reuse 011 `copyStoreDir`，canonical 只读）。
+2. 对每个 conv 店内每条 fact（`FactSource=="extraction"` 且无 `memory_fact_queries` 行）：LLM（答题/抽取模型，`LOCOMO_*` env）生成 **2-3** 问句（提示词 A5，温度固定，解析失败/空→跳过不阻断）→ `entries.PutFactQueries`。
+3. `embedder.Backfill(ctx)` 让 `QueryShadowNames` 把 `#query` 影子嵌出（EMBED 走 box bge-large 8001）。
+4. 产物 `doc2query_backfill.jsonl`（name→queries，无凭据）。**付费一次**。
+
+**两臂都以 `<B>/doc2query-store` 为 `--store-dir`**（不是 canonical 009）：
+- `baseline`：复制到 `<run-dir>/doc2query-store` 后 `enforceDoc2QueryStoreMode` 剥离 `%#query` 向量（assert 0）。`memory_fact_queries` 行留存不影响检索。
+- `treatment`：复制后保留 `#query` 向量（assert >0）。
+- 两臂唯一检索差异 = `#query` 向量；`<B>/doc2query-store` 与 canonical 009 均从不被写为运行店。
 
 ## A3. 门② 分层召回诊断（near-free，retrieval-only）
 
