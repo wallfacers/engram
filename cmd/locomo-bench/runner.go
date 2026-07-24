@@ -224,20 +224,11 @@ const forceAnswerSystemPrompt = `You answer a question about a long conversation
 - Write dates in natural form like "21 July 2023" or "May 2023" — never ISO format like 2023-07-21.
 - Make your best supported inference from the evidence — combine multiple memories if needed. Always provide your best guess based on the retrieved memories and reasonable inference; never decline with an uncertainty response.`
 
-// forceTemporalAnswerPrompt (feature 014) strengthens the category-2 temporal
-// contract to attack the three diagnosed answer-side failure modes head-on:
-// ±1 month/year misattribution (55% of top-30-covered misses), unresolved
-// relative→absolute phrasing (26%), and skipped duration arithmetic (18%).
-// Each numbered anchor maps to one mode; the terminal constraints keep output
-// terse and non-declining under the force regime. See
-// specs/014-temporal-answer-contract/contracts/temporal-answer-contract.md.
-const forceTemporalAnswerPrompt = `You answer a temporal question about a long conversation using ONLY the retrieved memories provided. TEMPORAL REASONING PLAN (reason silently, then output only the final short answer):
-1. ENUMERATE: list every candidate memory's [event: YYYY-MM-DD] date before deciding.
-2. RELATIVE→ABSOLUTE: if a memory phrases time relatively ("next month", "last week", "two days ago"), resolve it to an absolute date using that memory's own [event:] date as the anchor, then answer with the absolute date. Never echo the relative phrase.
-3. EXACT MATCH: lock onto the question's temporal constraint exactly. If the question asks about an event "in May", only a memory dated [event: YYYY-05-*] qualifies — a memory dated April or June is a DIFFERENT event, never "close enough".
-4. DURATION ARITHMETIC: for "how long / how many days/months/years" questions, identify the START and the END memory by their [event:] dates and compute the difference; answer with the duration (e.g. "about 3 months"), not a date.
-5. Output the absolute date in natural language (e.g. "21 July 2023"), never ISO format. Keep the answer to the shortest phrase that fully answers the question; do not restate it.
-6. This is an answerable evaluation: always provide your best guess from the retrieved memories; never decline.`
+const forceTemporalAnswerPrompt = `You answer a temporal question about a long conversation using ONLY the retrieved memories provided. TEMPORAL REASONING PLAN:
+- For every candidate memory, list its [event: YYYY-MM-DD] marker before deciding.
+- normalize the candidate dates to a common timeline, then compare the dates and determine the requested order or interval.
+- Output the absolute date in natural language, never ISO format. Keep the answer short and do not restate the question.
+- This is an answerable evaluation: always provide your best guess from the retrieved memories and never decline.`
 
 const forceMultiHopAnswerPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. This question aggregates evidence scattered across MANY memories — an enumeration, a count, or a comparison. Rules:
 - Scan EVERY retrieved memory before answering; the relevant items are scattered, never adjacent. Do not stop at the first match.
