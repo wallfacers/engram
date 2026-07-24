@@ -54,7 +54,7 @@ final short answer):
 
 ## C4: e2e 门契约(US2)
 
-- 命令形态:canonical recipe + `--cat-top-k 1=150` + `--repeats 3`,三臂 base/old-tplan/new-tplan,box 全本地栈,固化 store。
+- 命令形态:canonical recipe(`--top-k 30`,**无 cat-top-k**)+ `--repeats 3`,三臂 base/old-tplan/new-tplan,box 全本地栈,固化 store。基线是干净 top-k 30 bge-large(维护者规范:默认 30,cat-top-k 这类"大力出奇迹"只作后续无奈之举,不进默认门)。
 - 通过条件(SC-001):`new-tplan` vs `base` category-2 配对 McNemar 显著抬 **且** overall 不回退。
 - 归因(SC-004):报告 `new-tplan` vs `old-tplan` 差分。
 - 纪律(SC-005):干净复跑基线(冷启动首臂丢弃);跑完核 `regime.json` 四要素。

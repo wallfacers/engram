@@ -19,7 +19,7 @@ CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench -run TemporalContract
 
 ## US2 验证(box 三臂 e2e 门)—— GO/NO-GO 决策
 
-一次 run 三臂,canonical recipe + `--cat-top-k 1=150` + `--repeats 3`。**WSL2 长任务用 setsid detach + 文件轮询**(隧道打包进脚本内,见 013 gotcha)。
+一次 run 三臂,canonical recipe(`--top-k 30`,**无 cat-top-k**)+ `--repeats 3`。**WSL2 长任务用 setsid detach + 文件轮询**(隧道打包进脚本内,见 013 gotcha)。
 
 ```bash
 # 每臂公共:
@@ -27,7 +27,7 @@ CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench -run TemporalContract
 #   export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=BAAI/bge-large-en-v1.5 EMBED_API_KEY=local-eval
 #   STORE=.locomo-run/009-bge-chunks-store ; DATA=testdata/locomo/locomo10.json
 # 公共 flag:--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned
-#           --retrieval hybrid --cat-top-k 1=150 --repeats 3 --concurrency 48
+#           --retrieval hybrid --repeats 3 --concurrency 48   (无 cat-top-k:默认 30)
 
 # base     (冷首臂 warm-up 丢弃后复跑做干净锚)：<公共>                        (无 --temporal-answer-prompt)
 # old-tplan：<公共> --temporal-answer-prompt   (旧契约常量：git stash 算法改 / 临时旧常量)

@@ -24,7 +24,7 @@
 | `old-tplan` | `--temporal-answer-prompt` + 旧常量 | 旧弱契约 | 归因锚 |
 | `new-tplan` | `--temporal-answer-prompt` + 新常量 | 强化契约 | 处理臂 |
 
-- **公共配置**:canonical recipe(`--chunks --chunk-quota 12 --force-answer --judge-mem0-aligned --retrieval hybrid --top-k 30`)+ `--cat-top-k 1=150` + `--repeats 3`,box 全本地栈,固化 store `009-bge-chunks-store`。
+- **公共配置**:canonical recipe(`--chunks --chunk-quota 12 --force-answer --judge-mem0-aligned --retrieval hybrid --top-k 30`)+ `--repeats 3`,**无 cat-top-k**(默认 top-k 30 干净基线),box 全本地栈,固化 store `009-bge-chunks-store`。
 - **产物**:每臂 category-2(n=321)逐题正误 + overall。
 
 ## Entity: 配对判据 (paired verdict)

@@ -48,7 +48,7 @@
 **Independent Test**: 三臂 category-2 逐题正误产出,配对 McNemar 可算。
 
 - [ ] T009 [US2] 起 box 全本地栈:answer/extract vllm(:8000)+ bge-large vllm(:8001,离线 env),建隧道 `-L 8000 -L 8001`,`/v1/models` 双端点就绪校验(见 docs/locomo-e2e-eval-reproduction.md §1)。
-- [ ] T010 [US2] 写 e2e 三臂脚本到 session scratchpad(**非仓库**):公共 canonical recipe(`--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned --retrieval hybrid --cat-top-k 1=150 --repeats 3 --concurrency 48`,store `.locomo-run/009-bge-chunks-store`);三臂 = base(无开关)/ old-tplan(`--temporal-answer-prompt` + 临时还原旧常量)/ new-tplan(`--temporal-answer-prompt` + 新常量)。**冷启动纪律**:先跑一个 warm-up 臂丢弃,或把 base 复跑一次做干净锚。WSL2 setsid detach + 文件轮询,隧道打包进脚本内。
+- [ ] T010 [US2] 写 e2e 三臂脚本到 session scratchpad(**非仓库**):公共 canonical recipe(`--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned --retrieval hybrid --repeats 3 --concurrency 48`,**无 cat-top-k**——维护者规范:默认 top-k 30,不上 150,cat-top-k 只作后续无奈之举;store `.locomo-run/009-bge-chunks-store`);三臂 = base(无开关)/ old-tplan(`--temporal-answer-prompt` + 临时还原旧常量)/ new-tplan(`--temporal-answer-prompt` + 新常量)。**冷启动纪律**:先跑一个 warm-up 臂丢弃,或把 base 复跑一次做干净锚。WSL2 setsid detach + 文件轮询,隧道打包进脚本内。
 - [ ] T011 [US2] 跑三臂;跑完对每个 run-dir `cat regime.json` 核四要素(`force_answer=true`/`judge=mem0-aligned`/`judge_model=deepseek-v4-flash`)。
 - [ ] T012 [US2] 判定:抽三臂 category-2(n=321)逐题正误(3 rep 多数投票)+ overall;配对 McNemar `new-tplan` vs **干净复跑 base**(不对冷首臂)→ SC-001(GO 需显著抬 + overall 不回退);`new-tplan` vs `old-tplan` 差分 → SC-004 归因。
 - [ ] T013 [US2] 落 verdict(GO/NO-GO + 归因)到 `docs/locomo-score-levers.md` 新增「Feature 014 答题侧时序推理契约」段 + lever ledger 行;**与算法改分开提交**(Constitution IV attribution)。

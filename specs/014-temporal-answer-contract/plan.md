@@ -12,7 +12,7 @@
 
 **Language/Version**: Go 1.25.0(no CGO,纯 Go)
 
-**Primary Dependencies**: 无新增。复用 `cmd/locomo-bench` 现有:`answerPromptForRegime`(prompt 路由)、`--temporal-answer-prompt` flag、`--cat-top-k`、McNemar 配对统计(`stats.go`)、box 全本地栈(answer/extract vllm Qwen + embedder vllm bge-large + judge deepseek)。
+**Primary Dependencies**: 无新增。复用 `cmd/locomo-bench` 现有:`answerPromptForRegime`(prompt 路由)、`--temporal-answer-prompt` flag、McNemar 配对统计(`stats.go`)、box 全本地栈(answer/extract vllm Qwen + embedder vllm bge-large + judge deepseek)。基线用默认 `--top-k 30`,**不带 cat-top-k**(维护者规范:默认 30,cat-top-k 只作后续无奈之举)。
 
 **Storage**: N/A(答题契约是常量文本;e2e 产物落 gitignored `.locomo-run/`)。
 

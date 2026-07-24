@@ -34,7 +34,7 @@
 
 ## R3: 三臂 e2e 门设计与归因
 
-**Decision**: 一次 box run 三臂 × repeats=3,canonical recipe + `--cat-top-k 1=150`:
+**Decision**: 一次 box run 三臂 × repeats=3,canonical recipe(`--top-k 30`,**无 cat-top-k**):
 - `base`:不带 `--temporal-answer-prompt`(cat-2 走 `forceAnswerSystemPrompt`)。
 - `old-tplan`:带开关 + 旧契约常量。
 - `new-tplan`:带开关 + 新强化常量。
@@ -43,7 +43,7 @@
 
 **Rationale**:
 - `old-tplan` 归因锚区分"强化本身涨"vs"打开任意 temporal 契约就涨"——避免把开关效应误报成契约设计的功劳(与 013「先诊断避免建错方向」同源纪律)。
-- `--cat-top-k 1=150` 锚定现 ship 候选栈(bge-large + cattopk ~86%),使 verdict 相对**当前最强基线**而非裸 bge-large,避免叠加口径漂移。
+- 基线是干净 top-k 30 bge-large(~85.4%),**不带 cat-top-k**。维护者规范:默认 top-k 30,cat-top-k 这类"大力出奇迹"只作后续无奈之举,不进默认门(同样资源消耗更多)。temporal 契约是纯提质型,须在干净基线上证涨,不靠加量锚高基线。注:cat-top-k 是 category-1 专属,对 category-2 配对差分本就无影响(抵消),撤掉不改变 temporal 判定,只把 overall 参考点落回裸 bge-large。
 
 **Alternatives rejected**:
 - 只跑 base vs new-tplan 两臂:省一臂但丢归因,无法回答"是不是措辞强化在起作用"。
