@@ -380,6 +380,9 @@ func contextParityArm(opt options) string {
 	if aliasShadowEnabled(opt) {
 		return opt.aliasShadow
 	}
+	if doc2queryEnabled(opt) {
+		return opt.doc2query
+	}
 	return multiQueryArm(opt.multiQuery)
 }
 

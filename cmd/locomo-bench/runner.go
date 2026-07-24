@@ -78,9 +78,14 @@ func failoverModelCaller(callers ...modelCaller) modelCaller {
 	}
 }
 
-// newModelCaller wraps a provider.Provider into a modelCaller.
-func newModelCaller(p provider.Provider, model string, maxTokens int) modelCaller {
-	return newModelCallerWithUsage(p, model, maxTokens, "", nil)
+// newModelCaller wraps a provider.Provider into a modelCaller. Callers that
+// need a reproducible generation temperature may provide one optional value.
+func newModelCaller(p provider.Provider, model string, maxTokens int, temperature ...float64) modelCaller {
+	fixedTemperature := 0.0
+	if len(temperature) > 0 {
+		fixedTemperature = temperature[0]
+	}
+	return modelCallerFromUsage(newUsageModelCaller(p, model, maxTokens, fixedTemperature, "", nil))
 }
 
 // newModelCallerWithUsage is the accounting-aware provider adapter. Provider
@@ -92,11 +97,16 @@ func newModelCallerWithUsage(p provider.Provider, model string, maxTokens int, r
 }
 
 func newUsageModelCallerWithUsage(p provider.Provider, model string, maxTokens int, role string, record func(role, model string, usage provider.Usage)) usageModelCaller {
+	return newUsageModelCaller(p, model, maxTokens, 0, role, record)
+}
+
+func newUsageModelCaller(p provider.Provider, model string, maxTokens int, temperature float64, role string, record func(role, model string, usage provider.Usage)) usageModelCaller {
 	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
 		req := provider.Request{
-			Model:     model,
-			System:    system,
-			MaxTokens: maxTokens,
+			Model:       model,
+			System:      system,
+			MaxTokens:   maxTokens,
+			Temperature: temperature,
 			Messages: []provider.Message{{
 				Role:    provider.RoleUser,
 				Content: []provider.ContentBlock{{Type: provider.BlockText, Text: user}},

@@ -61,6 +61,9 @@ type options struct {
 	storeDir             string
 	aliasShadow          string
 	aliasShadowPrepared  bool
+	doc2query            string
+	doc2queryPrepared    bool
+	doc2queryBuild       bool
 	datasetFormat        string
 	compareSpec          string
 	repeats              int
@@ -182,6 +185,8 @@ func run() error {
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
 	flag.StringVar(&opt.aliasShadow, "alias-shadow", aliasShadowOff, "alias shadow arm: off | baseline | treatment")
+	flag.StringVar(&opt.doc2query, "doc2query", doc2queryOff, "doc2query pseudo-query shadow arm: off | baseline | treatment (store-dir must be a --doc2query-build store)")
+	flag.BoolVar(&opt.doc2queryBuild, "doc2query-build", false, "one-time: copy canonical store, LLM-generate pseudo-queries, embed #query shadows into <run-dir>/doc2query-store")
 	flag.BoolVar(&opt.coverageOnly, "coverage-only", false, "retrieval-only bake-off: grade every arm on exact-turn / session evidence recall and write coverage.json, making NO answer or judge LLM call (needs --chunks for turn recall)")
 	flag.BoolVar(&opt.attributionTrace, "attribution-trace", false, "retrieval-only per-question attribution trace (requires a persisted store)")
 	flag.StringVar(&opt.joinResults, "join-results", "", "archived results JSONL to join by (conv,q) for correctness quadrants")
@@ -222,7 +227,7 @@ func run() error {
 	if opt.repeats < 1 {
 		return fmt.Errorf("--repeats must be at least 1")
 	}
-	if (opt.multiQuery || (opt.recallDiagnostic && !aliasShadowEnabled(opt))) && opt.mqMaxSubqueries < 1 {
+	if (opt.multiQuery || (opt.recallDiagnostic && !aliasShadowEnabled(opt) && !doc2queryEnabled(opt))) && opt.mqMaxSubqueries < 1 {
 		return fmt.Errorf("--mq-max-subqueries must be at least 1")
 	}
 	if opt.recallDiagnostic {
@@ -264,6 +269,9 @@ func run() error {
 	if err := validateAliasShadowOptions(opt); err != nil {
 		return err
 	}
+	if err := validateDoc2QueryOptions(opt); err != nil {
+		return err
+	}
 	if opt.multiQuery {
 		if opt.topK != multiQueryFinalTopK {
 			return fmt.Errorf("--multi-query requires --top-k %d to preserve context parity", multiQueryFinalTopK)
@@ -302,6 +310,24 @@ func run() error {
 		convs = convs[:opt.maxConvs]
 	}
 	if err := prepareAliasShadowStore(&opt); err != nil {
+		return err
+	}
+	if opt.doc2queryBuild {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		apiKey := os.Getenv("LOCOMO_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("LOCOMO_API_KEY is required for --doc2query-build (never passed as a flag so it stays out of process listings)")
+		}
+		genModel := envOr("EXTRACT_MODEL", envOr("LOCOMO_MODEL", defaultLoCoMoModel))
+		prov, err := buildBenchProvider(envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider), apiKey, envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic"), opt.maxTokens, "LOCOMO_PROVIDER")
+		if err != nil {
+			return err
+		}
+		genCall := gate(make(chan struct{}, opt.concurrency), newModelCaller(prov, genModel, opt.maxTokens, doc2queryTemperature))
+		embClient := buildBenchEmbeddingClient(logger, nil)
+		return runDoc2QueryBuild(context.Background(), opt, convs, genCall, embClient, logger)
+	}
+	if err := prepareDoc2QueryStore(&opt); err != nil {
 		return err
 	}
 	if opt.recallDiagnostic {
@@ -927,6 +953,9 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	if aliasShadowEnabled(opt) && !opt.aliasShadowPrepared {
 		return nil, fmt.Errorf("alias-shadow runtime requires a prepared run-local store copy; refusing to open %s", opt.storeDir)
 	}
+	if doc2queryEnabled(opt) && !opt.doc2queryPrepared {
+		return nil, fmt.Errorf("doc2query runtime requires a prepared run-local store copy; refusing to open %s", opt.storeDir)
+	}
 	dsn := ":memory:"
 	if opt.storeDir != "" {
 		if err := os.MkdirAll(opt.storeDir, 0o755); err != nil {
@@ -970,6 +999,9 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	} else {
 		if aliasShadowEnabled(opt) {
 			return nil, fmt.Errorf("alias-shadow requires a prebuilt persisted store for conversation %d; refusing to call extraction", conv.ID)
+		}
+		if doc2queryEnabled(opt) {
+			return nil, fmt.Errorf("doc2query requires a prebuilt persisted store for conversation %d; refusing to call extraction", conv.ID)
 		}
 		for _, s := range conv.Sessions {
 			msgs := make([]pipeline.Message, 0, len(s.Turns))
@@ -1041,6 +1073,17 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			return nil, err
 		}
 		logger.Info("alias-shadow store prepared", "conversation", conv.ID, "arm", opt.aliasShadow, "shadow_vectors", count)
+	}
+	if doc2queryEnabled(opt) {
+		model := ""
+		if embClient != nil {
+			model = embClient.Model()
+		}
+		count, err := enforceDoc2QueryStoreMode(ctx, st.DB(), opt.doc2query, model)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("doc2query store prepared", "conversation", conv.ID, "arm", opt.doc2query, "shadow_vectors", count)
 	}
 
 	// One retriever per arm over the same store. Only the hybrid arm gets the
@@ -1244,6 +1287,11 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					if err := validateAliasShadowContextParity(armOpt, record); err != nil {
 						armOpt.contextParity.Fail(err)
 						logger.Error("alias-shadow context parity failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					if err := validateDoc2QueryContextParity(armOpt, record); err != nil {
+						armOpt.contextParity.Fail(err)
+						logger.Error("doc2query context parity failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
 						return
 					}
 					if err := armOpt.contextParity.Write(record); err != nil {

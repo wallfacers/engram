@@ -447,6 +447,11 @@ func runRecallDiagnosticCLI(ctx context.Context, opt options, convs []conversati
 			return err
 		}
 	}
+	if doc2queryEnabled(opt) && !opt.doc2queryPrepared {
+		if err := prepareDoc2QueryStore(&opt); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create recall diagnostic run dir: %w", err)
 	}
@@ -456,6 +461,13 @@ func runRecallDiagnosticCLI(ctx context.Context, opt options, convs []conversati
 			embClient = buildBenchEmbeddingClient(logger, nil)
 		}
 		return runAliasShadowRecallDiagnosticWithClient(ctx, opt, convs, arms, embClient, logger)
+	}
+	if doc2queryEnabled(opt) {
+		var embClient embedding.Client
+		if armBackend(arms[0]) == "hybrid" {
+			embClient = buildBenchEmbeddingClient(logger, nil)
+		}
+		return runDoc2QueryRecallDiagnosticWithClient(ctx, opt, convs, arms, embClient, logger)
 	}
 
 	apiKey := os.Getenv("LOCOMO_API_KEY")
@@ -632,6 +644,9 @@ func validateRecallDiagnosticOptions(opt options, arms []string) error {
 	}
 	if aliasShadowEnabled(opt) && armBackend(arms[0]) != "hybrid" {
 		return fmt.Errorf("--recall-diagnostic with --alias-shadow requires the hybrid retrieval backend")
+	}
+	if doc2queryEnabled(opt) && armBackend(arms[0]) != "hybrid" {
+		return fmt.Errorf("--recall-diagnostic with --doc2query requires the hybrid retrieval backend")
 	}
 	if opt.topK != multiQueryFinalTopK {
 		return fmt.Errorf("--recall-diagnostic is fixed at --top-k %d", multiQueryFinalTopK)
