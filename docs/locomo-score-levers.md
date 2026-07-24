@@ -239,6 +239,29 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 ---
 
+## Feature 013 — 检索侧时间窗召回臂(把 temporal 从后处理乘子升级为 RRF 第4路,2026-07-24)
+
+strategy 文档检索侧结构 P0 之②。假设:temporal 82.24% 卡在召回侧——`applyTemporal` 是**融合后软乘子**,只作用于已被语义/关键词门控的池,够不着深埋 gold;拟建**独立时间窗召回臂**(`NamesByEventWindow` 按 event_date 范围拉取 → RRF 平权第4路)把深埋 temporal gold 抬进 top-K。纪律:先跑**免费四层召回诊断门(US1)**证瓶颈在召回侧,GO 才建引擎机制。逐条正本:[`specs/013-temporal-window-recall/`](../specs/013-temporal-window-recall/)。
+
+### ✓ 门① US1 契约 = PASS(引擎零改、20 断言绿);✗ 门① 四层召回诊断 = NO-GO(cause=**解析器**,止损,未建 US2/US3,2026-07-24)
+
+`--temporal-diagnostic`(适配器 only、引擎零改、零答题/judge/抽取 token、box bge-large 重嵌 query、`--chunks --top-k 30 --chunk-quota 12`)在 `009-bge-chunks-store` 上跑 temporal 类 n=321:
+
+| 层 | 度量 | 值 | 判据 |
+|----|------|-----|------|
+| **L0 parse_coverage** | temporal query 解析出时间窗占比 | **0.196(63/321)** | **← 首个失败层**(<0.50) |
+| L1 event_date_coverage | gold 事实带 event 日期占比 | 0.773(126/163) | ✓ 健康 |
+| L2 buried_ratio | gold 深埋 top-30 外占比 | 0.140(45/321),rank_pool **p50=64 p90=155** | ✓ 确深埋 |
+| L3 oracle_lift@30 | 纯 event∈window 臂抬起的深埋 gold | 0.333(**6/18** buried facts) | ✓ 有天花板但基数极小 |
+
+- **决定性归因 = query 侧时间解析器,不是召回臂**:`ParseTemporalIntent` 只对 **19.6%** 的 temporal query 解析出时间窗。臂由"有时间意图"门控 → **对 80% 的 temporal 题永不点火**。即便建了臂,其可及集 = 63/321 题,其中仅 **18** 条 gold 深埋、oracle 上界只抬 **6** 条——端到端是舍入误差。**严格触发止损门(L0 败)→ NO-GO,不建 US2 召回臂、不启动 US3 box 配对答题**(省 1540×3 答题+judge 窗口)。
+- **反常识但重要 — 召回臂前提在「窗解析成功时」结构成立**:L1(77% 事实有 event_date)+ L2(gold 深埋 p50 rank 64)+ L3(oracle 抬 33% 深埋)三层健康,说明"按时间窗拉深埋 gold"这条机制**本身没错**——它只是被一个鲜少点火的解析器卡死。**教训:temporal 的真杠杆在上游 query 侧时间理解(为何 80% temporal 题解析不出窗),不在下游召回臂**。免费门在写一行引擎机制前锁定了这一点——正是它的设计目的(不重蹈 008「先建后验」覆辙)。
+- **与写入侧三向证伪(010/011/012)的关系**:那三个证伪的是"表示改写顶不动深召回";013 证伪的是"检索侧时间窗召回臂的**排序前提(点火率)不成立**"。两类 NO-GO 不同因,但同指向一个诚实事实:**LoCoMo temporal 短板的可及杠杆在 query 侧解析覆盖,不在 fact 侧表示、也不在 event_date 召回结构**。
+- **保留能力**:适配器 `--temporal-diagnostic` 作为可复用的免费诊断保留(引擎零改);引擎侧 US2 召回臂**取消实现**(门①未过,无 shipped 前提)。既有 `ParseTemporalIntent`/`applyTemporal` 不动。
+- **止损纪律兑现**:门① near-free 即断,US2/US3 未启动;产物 `.locomo-run/013-temporal-diag/`(`temporal_diagnostic.json` + 321 行 questions jsonl)。box 隧道跑完即拆(bundled setsid 编排:`ssh -f -N` 在无 tty 的 setsid 子进程里 askpass 才触发;沙箱会杀裸持久隧道,故把隧道+诊断打包进一个 detached 脚本存活到跑完)。**box vllm teardown 遇 SSH 会话层 255(疑短时多次连接限流/机器启停),GPU 归零待维护者侧核**。
+
+---
+
 ## 杠杆总账(2026-07-23 收口)
 
 box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:
@@ -253,9 +276,12 @@ box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned jud
 | query 分解 + RRF-of-RRF | **NO-GO**(门②止损) | —(召回即伤:top-30 净 −8) | 提质(意图) | 多跳拆子查询融合;gold 各子查询均弱命中,顶不动反挤出 |
 | alias 影子(011,写入侧) | **NO-GO**(门②止损) | —(子层不前移,coverage Δ=0) | 提质(意图) | 短概念标签不比原文多可发现性,对称抬噪 |
 | doc2query `#query` 影子(012,写入侧) | **NO-GO**(门②止损) | —(cat3 +2 entered 但 coverage Δ=0) | 提质(意图) | 拟人伪查询同样不给 gold 超原文判别性,gold 深埋是向量上限 |
+| 检索侧时间窗召回臂(013) | **NO-GO**(门①止损,cause=解析器) | —(臂对 80% temporal 题不点火) | 结构(检索侧) | `ParseTemporalIntent` 只解析出 19.6% temporal 题的窗;臂前提在窗成立时结构 OK(L1-3 健康)但被解析器门控;真杠杆在上游 query 侧时间解析覆盖 |
 
 **杠杆哲学(maintainer 定调,2026-07-23)**:只认**提质**的赢(同预算/同 top-k 下把对的证据捞得更准,如 bge-large),**反感加量**(撑 top-k / 扩池 / 喂更多 context —— 分是真的但拿成本税换,不可移植,换个部署就塌)。产品是设备/应用习惯记忆,集成方无限 context 预算不存在。**据此 cat-top-k 从「头条 GO」降级为 optional/非默认**;本表所有「加量」型即便涨分也不进默认栈。
 
 **净出货(提质路线):bge-large → +1.3pp(~85.4%)**,是唯一符合哲学的干净赢。cat-top-k 作为 optional 旋钮保留(多跳 enumeration 需多 session 证据时可开),非默认。
 
 **下一步 = 转向检索侧结构(写入侧表示/query 改写三向证伪后,2026-07-24 收口)**:让 gold 在**不加量**下从 rank 71-90 升进 top-30 的努力,现已三向证伪——**010 query 侧分解**(顶不动各子查询都弱命中的 gold)、**011 alias 短标签影子**、**012 doc2query 拟人问句影子**(两者门②同点 NO-GO:影子对称抬噪、不给 gold 超原文的判别性)。**结论:瓶颈不在 query 措辞、也不在 fact 影子表示,而在 dense 单塔对 multi-hop/open-domain gold 的深层召回上限——这是「顶一个已经埋在 rank 71-90 的 gold」这一问题本身对无监督 dense 检索的天花板。** 剩余真杠杆离开「表示改写」这条线,回到 **strategy 文档的检索侧结构 P0**:① 实体图遍历(`memory_entities` 平表→可 1-hop 走边,直击 multi-hop,EcphoryRAG/HippoRAG2)、② 检索侧时间窗(`event_date`→范围 + T_score,MemOS MemReader 式,直击 temporal)。这些是**结构性新机制**(engine contract-first + 宪法 IV 门),非 box 上试 flag;open-domain 短板同理走 category-conditional「精准浮现」。按 maintainer workflow 走 brainstorm→SDD。**注**:提质型的写入/query-侧影子表示这条便宜线已探尽,不再投。
+
+**更新(013 收口,2026-07-24)**:检索侧结构 P0 之② **检索侧时间窗** 已经门①免费诊断证伪其**这一版形态**(event_date 召回臂)——不是机制错,是**点火率错**:`ParseTemporalIntent` 只解析出 19.6% temporal 题的时间窗,臂对 80% 的题永不点火(L1-3 前提在窗成立时全健康)。**⇒ temporal 的真杠杆前移到 query 侧时间解析覆盖**(为何 80% temporal 题解析不出窗;含相对/隐式/多锚时间表达),这是一个**独立的 query-理解 feature**,不是 event_date 召回结构。检索侧时间窗召回臂**留待解析覆盖上去之后再评估**(届时 L1-3 已证其天花板)。**⇒ 当前唯一未验的检索侧结构 P0 = ① 实体图遍历(直击 multi-hop)**;temporal 改走"解析覆盖优先"。

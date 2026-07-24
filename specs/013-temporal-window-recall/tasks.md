@@ -48,11 +48,13 @@
 
 ### Gate (run diagnostic)
 
-- [ ] T008 [US1] 在固化 bge-large store 上跑 `--temporal-diagnostic`(box bge-large @8001 或本地);记录四层数值与 GO/NO-GO。**若 NO-GO**:把病因归属落 tracked `docs/locomo-score-levers.md` 的 Feature 013 段收口,写 memory verdict 指针,**止损结束 feature**(不进 Phase 4)。**若 GO**:记录 Layer 3 `oracle_lift@30` 作为 US2 机制天花板基准,进 Phase 4。
+- [x] T008 [US1] 跑门(box bge-large @8001,`009-bge-chunks-store`,n=321)。**NO-GO(cause=解析器)**:L0 parse_coverage **0.196(63/321)** < 0.50 首层败;L1 event_date_coverage 0.773 ✓、L2 buried_ratio 0.140(rank_pool p50=64 p90=155)✓、L3 oracle_lift@30 0.333(6/18)✓。归因:召回臂被只点火 19.6% 的 `ParseTemporalIntent` 门控,对 80% temporal 题永不点火,端到端天花板 ≈ 抬 6 条 gold(舍入误差)。**止损:不进 Phase 4/5**。verdict 落 `docs/locomo-score-levers.md` Feature 013。产物 `.locomo-run/013-temporal-diag/`。
 
-**Checkpoint US1**: 诊断可跑、四层表产出、判定明确、引擎零改。GO 才继续。
+**Checkpoint US1**: ✅ 诊断可跑、四层表产出、判定明确(NO-GO/解析器)、引擎零改。**门未过 → feature 在此止损收口。**
 
 ---
+
+> **⛔ Phase 4/5 CANCELLED（门① NO-GO，2026-07-24）**：US1 诊断 cause=解析器,召回臂前提(点火率)不成立。T009–T018 **未实现**。temporal 真杠杆前移到 query 侧时间解析覆盖(独立 feature),event_date 召回臂留待解析覆盖上去后再评估。
 
 ## Phase 4: User Story 2 — 时间窗召回臂进 RRF 第4路 (P2)【条件于 US1 GO】
 
