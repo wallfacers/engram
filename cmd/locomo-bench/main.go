@@ -119,6 +119,7 @@ type options struct {
 	catTopK              map[int]int
 	catQuota             map[int]int
 	coverageOnly         bool
+	temporalDiagnostic   bool
 	attributionTrace     bool
 	joinResults          string
 	embedProbe           bool
@@ -188,6 +189,7 @@ func run() error {
 	flag.StringVar(&opt.doc2query, "doc2query", doc2queryOff, "doc2query pseudo-query shadow arm: off | baseline | treatment (store-dir must be a --doc2query-build store)")
 	flag.BoolVar(&opt.doc2queryBuild, "doc2query-build", false, "one-time: copy canonical store, LLM-generate pseudo-queries, embed #query shadows into <run-dir>/doc2query-store")
 	flag.BoolVar(&opt.coverageOnly, "coverage-only", false, "retrieval-only bake-off: grade every arm on exact-turn / session evidence recall and write coverage.json, making NO answer or judge LLM call (needs --chunks for turn recall)")
+	flag.BoolVar(&opt.temporalDiagnostic, "temporal-diagnostic", false, "retrieval-only four-layer temporal recall diagnostic over temporal-category questions (feature 013 US1; needs --store-dir + --data; makes NO answer/judge/extraction LLM call)")
 	flag.BoolVar(&opt.attributionTrace, "attribution-trace", false, "retrieval-only per-question attribution trace (requires a persisted store)")
 	flag.StringVar(&opt.joinResults, "join-results", "", "archived results JSONL to join by (conv,q) for correctness quadrants")
 	flag.BoolVar(&opt.embedProbe, "embed-probe", false, "with --attribution-trace, probe query embedding determinism")
@@ -329,6 +331,26 @@ func run() error {
 	}
 	if err := prepareDoc2QueryStore(&opt); err != nil {
 		return err
+	}
+	if opt.temporalDiagnostic {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if strings.TrimSpace(opt.storeDir) == "" {
+			return fmt.Errorf("--temporal-diagnostic requires --store-dir (the prebuilt bge-large store)")
+		}
+		if strings.TrimSpace(opt.runDir) == "" {
+			return fmt.Errorf("--temporal-diagnostic requires --run-dir")
+		}
+		if sampledConversations > 0 {
+			logger.Info("sampling conversations", "limit", sampledConversations)
+		}
+		// Retrieval-only: build only the embedding client (never an answer/judge
+		// caller). The extractNever guard inside runTemporalDiagnostic asserts
+		// extraction is never called.
+		var embClient embedding.Client
+		if hasArm(arms, "hybrid") {
+			embClient = buildBenchEmbeddingClient(logger, nil)
+		}
+		return runTemporalDiagnostic(context.Background(), opt, convs, embClient, logger)
 	}
 	if opt.recallDiagnostic {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
