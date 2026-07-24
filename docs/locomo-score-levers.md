@@ -404,3 +404,19 @@ temporal 分诊(上文)证明"先切答题侧/召回侧再选杠杆"是唯一不
 - **single-hop 召回侧 38% 的 gold 埋深 p50=142**——与 multi-hop/open-domain gold 深埋同一堵墙(dense 单塔深召回上限,010/011/012 三向证伪的对象),便宜杠杆同样够不着,不另立方向。
 - **open-domain 近半错题(48%)是召回侧且埋更深(p50=186)**——坐实 opinion-pass NO-GO 时的判断:证据(观点/偏好类)在池深处,粗放扩覆盖救不了,要救得走 **category-conditional 精准浮现**(结构性新机制)。答题侧 17 题多为真推理难题(如 "Would Caroline be considered religious?" GOLD "Somewhat" → PRED "No"),prompt 类杠杆在 temporal 上已两连败,不优先。
 - **⚠ 教训前置**:014 证明"看着合理的答题 prompt 强化"端到端可以是负贡献。single-hop 答题侧 58 题在动手前必须先完成**失败模式逐题分类量化**(粒度/主体/去歧/judge 边界各占多少),且任何契约改动过同样的配对 McNemar 门,不再凭眼验样例直接上杠杆。
+
+### single-hop 答题侧 58 题逐题分类(2026-07-25,单标注者全量眼验 3-rep 预测)
+
+| 失败模式 | n | 占比 | 典型样例 |
+|---|---:|---:|---|
+| **A 去歧挑错**(同人物/话题的另一条真事实,非题目所锚) | **28** | **48%** | 问 Oct 13 分享的画 → 答了另一幅;问 December deal → 答了 beverage endorsement(gold: outdoor gear) |
+| **B 粒度过粗**(细节在上下文却答成上位概念) | 11 | 19% | gold "purple"(rank 1!)→ 答 "bright and bold";gold "a cup with a dog face" → 答 "pots" |
+| **C 答错主体/方面**(问 X 的反应答了 Y 的状态) | 5 | 9% | 问 Melanie 的 reaction → 答孩子们 enjoyed it |
+| **D 假性"未提及"/人物归属错** | 6 | 10% | gold 在 top-30 却答 "no mention";Tim 的事安到 John 头上 |
+| **F 相对时间粒度**(gold 相对表达,答绝对年份/回显 session 日期) | 4 | 7% | gold "when she was 10" → 答 "2003";gold "at an early age" → 答 session 日期 |
+| **E judge/gold 边界**(答案 arguably 对) | 3 | 5% | 问 pets → 答蛇的名字 "Susie and Seraphim"(gold "snakes") |
+| 其他/乱码 | 1 | 2% | — |
+
+- **主结论:A+B = 39/58(67%)是同一族——答题模型在 gold 已在 30 项上下文(常在 rank≤20)时的细粒度选择/细节保持失败**,与 temporal 的 ±1 误归属同构。该族的 prompt 契约杠杆已在 temporal 上**两连败**(014 强化版显著更差、旧简版 ns),对 single-hop 复刻 prompt 契约先验极低,**不作为下一杠杆**。
+- **可下手的诚实方向(按性价比)**:① **答题模型强度归因诊断**(近免费):把这 58 题原上下文喂给更强答题模型(如 deepseek-v4-pro)看翻转率——若大量翻转,说明剩余 gap 相当部分是 harness 答题模型上限(竞品用更强 answerer 的可比性问题),不是 engram 检索/记忆问题;这直接改变"还有多少 gap 值得追"的判断。② **D 族(10%)指向抽取侧人物归属/caption 保真**,是引擎质量的真信号但量小。③ E+F(12%)是 judge/gold 口径,不值得单独追。
+- 分类清单(逐题 qid)与原始 58 题全文:HF `014b-oldtplan-confirm/` + 本地 scratchpad `sh58-classification.md`(单标注者判断,存档供复核)。
