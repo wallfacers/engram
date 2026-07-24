@@ -420,3 +420,24 @@ temporal 分诊(上文)证明"先切答题侧/召回侧再选杠杆"是唯一不
 - **主结论:A+B = 39/58(67%)是同一族——答题模型在 gold 已在 30 项上下文(常在 rank≤20)时的细粒度选择/细节保持失败**,与 temporal 的 ±1 误归属同构。该族的 prompt 契约杠杆已在 temporal 上**两连败**(014 强化版显著更差、旧简版 ns),对 single-hop 复刻 prompt 契约先验极低,**不作为下一杠杆**。
 - **可下手的诚实方向(按性价比)**:① **答题模型强度归因诊断**(近免费):把这 58 题原上下文喂给更强答题模型(如 deepseek-v4-pro)看翻转率——若大量翻转,说明剩余 gap 相当部分是 harness 答题模型上限(竞品用更强 answerer 的可比性问题),不是 engram 检索/记忆问题;这直接改变"还有多少 gap 值得追"的判断。② **D 族(10%)指向抽取侧人物归属/caption 保真**,是引擎质量的真信号但量小。③ E+F(12%)是 judge/gold 口径,不值得单独追。
 - 分类清单(逐题 qid)与原始 58 题全文:HF `014b-oldtplan-confirm/` + 本地 scratchpad `sh58-classification.md`(单标注者判断,存档供复核)。
+
+### ⭐ 答题模型强度归因诊断:58 题换 deepseek-v4-pro 重答 = **43% 翻转**(2026-07-25)
+
+方法:精确复刻 harness 答题路径(trace 的 top-30 名单 × 店内容重建 `buildAnswerPrompt`、同 `forceAnswerSystemPrompt`、同 mem0-aligned judge deepseek-v4-flash),只把答题模型 Qwen3.6-35B → **deepseek-v4-pro**,3-rep 多数投票。约 ¥1 级成本。
+
+| 失败模式 | 翻转 | 解读 |
+|---|---:|---|
+| A 去歧挑错 | **15/28 (54%)** | 半数是答题模型上限,强模型能选对 |
+| C 答错主体 | **4/5 (80%)** | 几乎全是答题模型上限 |
+| B 粒度过粗 | **2/11 (18%)** | 强模型也答不出——细节不在文字上下文里 |
+| D 假性未提及 | 3/6 | 混合 |
+| F 相对时间 | **0/4 (0%)** | gold 相对表达 vs 绝对回答,模型无关 |
+| **合计** | **25/58 (43.1%)** | |
+
+**caption 缺口量化**(gold 词面在 blip_caption vs 对话 text,免费离线):未翻转 33 题中 **12 题 gold 只在图片 caption 里**——店里根本没有这条证据(`--image-captions` 默认关,caption 从未进抽取输入),这些是**伪"答题侧"**(实为 ingestion 覆盖缺口)。扩展到全量 220 道错题:**caption-borne 共 18 题(single-hop 17 + multi-hop 1)= 全救回也只值 ~1.2pp overall 天花板**(temporal/open-domain 为 0——它们的 NEITHER 高是 gold 聚合/推断型,词面法对其低估,诚实 caveat)。
+
+**三个结论(改变 gap 叙事)**:
+1. **single-hop 答题侧的最大块(43%)是 harness 答题模型上限,不是 engram 检索/记忆缺陷**。25 题 ≈ +1.6pp overall 当量。若 temporal 答题侧 38 题同率翻转,答题模型上限的总当量可能到 +2~3pp——**对 MemOS(gap ~3.4pp)的差距可能有一半左右是答题模型可比性伪影**(竞品用 gpt-4o-mini 级 answerer)。坐实需扩测其他类答题侧错题(近免费)。
+2. **`--image-captions`(现成 adapter flag,默认关)是真覆盖杠杆但天花板 ~1.2pp**:换抽取输入 → 需重建店 + 完整 e2e 门(宪法 IV),排优先级时按 ≤+1pp 预期。
+3. F/E 族(judge/gold 口径,~12%)不值得追;B 族剩余 = caption 缺口为主。
+产物:scratchpad `answerer_probe.py` + `answerer-probe-results.json`(推 HF `014b-oldtplan-confirm/singlehop-triage/`)。
