@@ -441,3 +441,20 @@ temporal 分诊(上文)证明"先切答题侧/召回侧再选杠杆"是唯一不
 2. **`--image-captions`(现成 adapter flag,默认关)是真覆盖杠杆但天花板 ~1.2pp**:换抽取输入 → 需重建店 + 完整 e2e 门(宪法 IV),排优先级时按 ≤+1pp 预期。
 3. F/E 族(judge/gold 口径,~12%)不值得追;B 族剩余 = caption 缺口为主。
 产物:scratchpad `answerer_probe.py` + `answerer-probe-results.json`(推 HF `014b-oldtplan-confirm/singlehop-triage/`)。
+
+### ⭐ 答题模型上限总当量(全类扩测 + 反向探针,2026-07-25)
+
+同方法扩到全部四类:正向 = 各类答题侧错题**全集**(gold_rank_topk≤30 且 A-base 3-rep 多数错)换 v4-pro;反向 = 各类**答对**题分层抽样 40,测 v4-pro 反把对题答错的率。~¥2。
+
+| 类 | 正向翻正(实测全集) | 反向翻错(40/类抽样) |
+|---|---:|---:|
+| temporal | **27/41 (66%)** | 1/40 (2.5%) |
+| multi-hop | 13/28 (46%) | 0/40 (0%) |
+| single-hop | 25/58 (43%) | 1/40 (2.5%) |
+| open-domain | 6/17 (35%) | **5/40 (12.5%)** |
+
+- **净当量:+71 −33(反向外推)= +38 题 ≈ +2.5pp overall ⇒ answerer-parity 预期 ≈ 87.9%**(区间 ~87.3–88.4,反向抽样二项误差),对 MemOS 88.83 **差距基本抹平但可能仍略低**。
+- **temporal 答题侧 66% 翻正是最强信号**:此前"答题侧时序推理契约"两连败的根因大概率是 **Qwen3.6-35B 执行不动那种细粒度契约**,不是契约方向错——强模型不用契约就答对了。014 收口结论(prompt 杠杆已死)不变,但归因修正为"answerer 能力上限"。
+- **open-domain 反向 12.5% 翻错**:主观/推断题上强模型答得"不一样"而非更好,n=96 小类,judge 边界性强——answerer 升级救不动 open-domain(与 008 US2、opinion-pass 结论一致)。
+- **gap 叙事定论**:对 MemOS 的 ~3.4pp 差距,**~2.5pp(约七成)是 harness answerer 可比性伪影**;引擎侧真剩余 ≈ 1pp 级(caption 缺口 ~1.2pp 天花板与之量级吻合)。**对 Mem0 92.5 的差距即便 parity 后仍有 ~4.6pp,那部分才是真功课**。
+- 产物:scratchpad `answerer_probe2.py` + `answerer-probe2-results.json`(推 HF 同目录)。确证性 full parity run(1540×3,~¥30-80)可把 87.9% 预估变实测,属 diagnostic、不进默认栈、不改诚实参考点 85.4%。
