@@ -277,6 +277,7 @@ box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned jud
 | alias 影子(011,写入侧) | **NO-GO**(门②止损) | —(子层不前移,coverage Δ=0) | 提质(意图) | 短概念标签不比原文多可发现性,对称抬噪 |
 | doc2query `#query` 影子(012,写入侧) | **NO-GO**(门②止损) | —(cat3 +2 entered 但 coverage Δ=0) | 提质(意图) | 拟人伪查询同样不给 gold 超原文判别性,gold 深埋是向量上限 |
 | 检索侧时间窗召回臂(013) | **NO-GO**(门①止损,cause=解析器) | —(臂对 80% temporal 题不点火) | 结构(检索侧) | `ParseTemporalIntent` 只解析出 19.6% temporal 题的窗;臂前提在窗成立时结构 OK(L1-3 健康)但被解析器门控;真杠杆在上游 query 侧时间解析覆盖 |
+| 实体图遍历 assoc(014,003 遗产已建) | **NO-GO**(免费诊断 PASS→e2e 证伪) | alone 净≈0(配对 −29 ns);叠 cattopk −1.15pp(配对 −53 χ²5.1) | 结构(检索侧) | 图游走第4路 cov@30 +2.6pp/深层正交救回/零 coverage 伤害,但答分不转化(008 铁律)——救 gold 的同时注入实体共现干扰候选;不替代 cattopk、叠加反伤 |
 
 **杠杆哲学(maintainer 定调,2026-07-23)**:只认**提质**的赢(同预算/同 top-k 下把对的证据捞得更准,如 bge-large),**反感加量**(撑 top-k / 扩池 / 喂更多 context —— 分是真的但拿成本税换,不可移植,换个部署就塌)。产品是设备/应用习惯记忆,集成方无限 context 预算不存在。**据此 cat-top-k 从「头条 GO」降级为 optional/非默认**;本表所有「加量」型即便涨分也不进默认栈。
 
@@ -304,3 +305,32 @@ temporal 多数投票 acc **82.9%**,答错 **55/321**。切分:
 - **答题侧 38 题失败模式**(眼验 + 关键词量化):**±1 月/年 误归属/精度去歧 21(55%)**(检索到邻近事件贴错日期,如"Jon in Rome"GOLD June/PRED May)· **相对表达未解析成绝对 10(26%)**("next month"/"last year"/"the week before X"被回显而非按会话锚解析)· **时长/区间算术 7(18%)**("how long / how many months"类端点在上下文里但没相减,PRED 回显区间或"not specified")。
 - **⇒ temporal 下一个真杠杆 = 答题侧时序推理契约(纯 client-side / 零成本 / 提质型)**,优先级高于 013 指的 query 侧解析覆盖:① 相对→绝对日期解析(针对会话 date 锚,不回显相对短语)· ② 时长/区间算术契约(识别两端点相减输出 duration)· ③ 按 date 对齐候选去歧(压 ±1 月/年 误归属,最大但最杂)。均为答题 prompt/answer-contract 改,非引擎检索改。
 - **纪律**:又一次"先诊断后建"避免建错方向——013 差点把力气全押 query 侧解析覆盖(召回侧),补上答对错口径后真金在答题侧。产物 `.locomo-run/013-temporal-diag/` 复用,无新 box 消耗。
+
+---
+
+## 实体图遍历 assoc(检索侧结构 P0 之①)— 免费诊断 PASS → e2e **NO-GO**(2026-07-24)
+
+检索侧结构 P0 之①「实体图遍历(直击 multi-hop)」的了断。**重大定性**:该引擎机制**早已存在**——feature 003 Strike 1「实体平表→联想图」已建 `memory/graph.go`(`memory_entity_edges` co 共现边 + IDF 种子 2-hop `WalkEntityGraph`)+ `associativeRanks`(游走候选→原 query 向量 cosine 重排 → RRF 第4路)+ `--assoc --assoc-depth 2` flag,**default-off、从未端到端验过**。边表已填(153 条 co/conv,无 syn)。**不是待建,是待验**——再建即重复引擎、违反适配器红线。
+
+### ✓ 免费召回诊断 = PASS(强信号)
+
+`--attribution-trace` 同 store(009-bge-chunks-store,bge-large,canonical `--chunks --top-k 30 --chunk-quota 12`)跑 assoc 开/关两遍,retrieval-only、零答题 token。assoc 作 RRF 第4路 **全类抬 cov@30、零附带伤害(dropped=0)**:multi-hop +1.8%(抬5)、temporal +4.7%(抬15)、single +2.4%(抬20)、ALL +2.6%(抬40/跌0)。且被抬的是**深层/正交救回**(gold 从 base pool_rank 43-126、甚至不在池 rank=-1 → 直接进 top rank 1-18),这是 doc2query/alias/reranker 都动不了的——assoc 用**正交轴(实体共现图)**够到 dense 单塔埋在 rank 57-126 的 gold。诊断判 GO,值得上 e2e。
+
+### ✗ e2e 配对 = NO-GO(coverage 没转化 + 叠加反伤)
+
+box 全本地栈、canonical recipe、repeats=3,五臂同 store 配对:
+
+| arm | overall | reps | 类型 |
+|---|---|---|---|
+| base(**冷启动首臂**) | 82.92% | [83.05,83.44,82.27] | ⚠ 异常低 |
+| **base2(复跑,可靠)** | **85.17%** | [84.48,85.13,85.91] | bge-large 基线(吻合历史 85.45) |
+| assoc | 84.55% | [84.74,84.61,84.29] | 提质 |
+| cattopk | 85.80% | [85.84,85.65,85.91] | 加量 |
+| stack(assoc+cattopk) | 84.66% | [84.55,84.42,85.0] | — |
+
+配对 McNemar:**assoc vs base2 = net −29(χ²1.6 ns)→ 不胜基线,无增益**;**stack vs cattopk = net −53(χ²5.1 显著)→ assoc 叠 cattopk 反伤**;cattopk vs base2 = +29(χ²2.2,吻合历史 +0.6~0.9pp)。
+
+- **决定性归因**:强 coverage 信号(+2.6pp cov@30、深层正交救回、零 coverage 伤害)**没转化成答分**——**又一次 008 铁律**(coverage≠答分,同 008 US1 reranker coverage +15pp→e2e NO-GO)。机制层面:图游走第4路在救回深埋 gold 的同时,注入"与 query 实体共现但非 gold"的干扰候选挤占融合 top-30;alone 净≈0,叠在 cattopk 上净负 −1.15pp。**你期望的「assoc 提质替代 cattopk 加量」证伪**——cattopk 严格更强(85.80 vs 84.55)且独家抬 temporal(+3.7pp),assoc 对 temporal/open-domain 纹丝不动。
+- **⚠ 方法论 gotcha(重要,险酿假 GO)**:同配置 base(82.92)vs base2(85.17)差 **2.25pp**——**答题模型冷启后第一个臂被系统性压低 ~2pp**(vllm 刚起、KV cache 冷/共卡竞争)。若信首臂冷 base,assoc 表观 +1.62pp(配对 +75 χ²9.6)会被误判为 GO;是**复跑 base2 重基线**救回。**规程:box 冷启后首个臂作 warm-up 丢弃或必复跑基线**,否则冷启动惩罚会伪装成 treatment 效应。详见 [`locomo-e2e-eval-reproduction.md` §踩坑](./locomo-e2e-eval-reproduction.md)。
+- **保留能力**:`--assoc` 引擎路径不动(留 default-off,003 遗产);诊断产物 `.locomo-run/014-assoc-diag/`(trace-base/assoc.jsonl + coverage-summary + e2e-verdict)。引擎零改(全程适配器+诊断,`git diff -- memory embedding provider store internal` 空)。
+- **⇒ 检索侧结构 P0 收口**:① 实体图遍历 e2e 证伪(coverage 不转化)· ② 检索侧时间窗 013 证伪(解析器点火率)。**两个 P0 结构杠杆均 NO-GO**。temporal 剩余真杠杆在**答题侧时序推理契约**(见上「temporal 瓶颈分诊」),非检索侧结构。

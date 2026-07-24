@@ -87,6 +87,7 @@ EMBED_BASE_URL=http://127.0.0.1:7999/v1 EMBED_MODEL=bge-small-en-v1.5 ... \
 | 7 | 用 `--store-dir` 复用店，但 context 仍低 / 分数不对 | 复用了**错的店**：facts-only（无 verbatim chunk）或维度不匹配的店 | 复用前核店：`sqlite3 conv0.db` 看 `memory_entries` 是否含长 chunk、`memory_embeddings` 维度是否与当前 EMBED 一致 |
 | 8 | 用 heredoc 在一条命令里同时「建脚本 + 启动」，命令中途被 tool 超时 SIGTERM（exit 144），脚本没写全，后续 setsid 静默失败（无 log） | 长命令被打断留下半截/缺失的脚本文件；`setsid ... >/dev/null` 把错误也吞了 | **run 脚本用 Write 工具单独落盘**，`bash -n` 校验存在后再 `setsid` 启动；WSL2 长任务一律 detach + 文件轮询（[CLAUDE.md 长任务规则](../CLAUDE.md)） |
 | 9 | SC-004 逐字节复现失败 | vllm-GPU 查询嵌入非确定（`embed_probe` unstable，bit_identical≈0.875）→ rrf_score 尾数抖 | 要 bit-identical 换 **fastembed CPU** 嵌入；GPU 嵌入不影响分数结论（象限分布两跑一致） |
+| 10 | **冷启动首臂系统性偏低 ~2pp**（多臂配对时首个 arm 被压低，险酿假 GO） | vllm 刚 launch 后立刻跑的第一个 arm，KV cache 冷/共卡 embed 竞争/服务未热 → 同配置比之后复跑低 ~2.25pp（实测 base 82.92% vs 同配置 base2 85.17%，2026-07-24 assoc 014 评测）。若拿冷首臂当基线,任何 treatment 都会凭空 +2pp 显著 | **box 冷启后第一个 arm 作 warm-up 丢弃,或必复跑一次基线 arm 做锚**；多臂配对信「同会话复跑的干净基线」,不信首臂;paired McNemar 也要对干净基线,不对冷首臂 |
 
 ## 5. 「基线到底用的什么」怎么反查
 
