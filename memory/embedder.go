@@ -15,6 +15,7 @@ import (
 const DefaultEmbedBuffer = 256
 
 const aliasShadowSuffix = "#alias"
+const queryShadowSuffix = "#query"
 
 func aliasShadowName(factName string) string {
 	return factName + aliasShadowSuffix
@@ -25,11 +26,41 @@ func AliasShadowName(factName string) string {
 	return aliasShadowName(factName)
 }
 
-func resolveShadow(name string) (source string, isShadow bool) {
+func queryShadowName(factName string) string {
+	return factName + queryShadowSuffix
+}
+
+// QueryShadowName returns the vector-row name reserved for a fact's doc2query
+// pseudo-queries (feature 012).
+func QueryShadowName(factName string) string {
+	return queryShadowName(factName)
+}
+
+// resolveAliasShadow reports whether name is a #alias shadow and its source fact.
+func resolveAliasShadow(name string) (source string, isShadow bool) {
 	if !strings.HasSuffix(name, aliasShadowSuffix) {
 		return name, false
 	}
 	return strings.TrimSuffix(name, aliasShadowSuffix), true
+}
+
+// resolveQueryShadow reports whether name is a #query shadow and its source fact.
+func resolveQueryShadow(name string) (source string, isShadow bool) {
+	if !strings.HasSuffix(name, queryShadowSuffix) {
+		return name, false
+	}
+	return strings.TrimSuffix(name, queryShadowSuffix), true
+}
+
+// resolveShadow reports whether name is any shadow vector (alias or query) and
+// its source fact. The retriever's max-pool merge is content-agnostic and folds
+// every recognized shadow back onto its source, so adding a new shadow kind only
+// requires teaching this resolver its suffix.
+func resolveShadow(name string) (source string, isShadow bool) {
+	if source, isShadow := resolveQueryShadow(name); isShadow {
+		return source, true
+	}
+	return resolveAliasShadow(name)
 }
 
 // Embedder is the write-behind path that keeps memory_embeddings populated
@@ -86,7 +117,28 @@ func (e *Embedder) drain() {
 // embedOne fetches, embeds, and stores the vector for one entry. A deleted entry
 // (ErrNotFound) is a silent skip.
 func (e *Embedder) embedOne(ctx context.Context, name string) error {
-	if source, isShadow := resolveShadow(name); isShadow {
+	if source, isShadow := resolveQueryShadow(name); isShadow {
+		if _, err := e.entries.GetByName(ctx, source); err != nil {
+			return nil //nolint:nilerr // source gone before we embedded its queries
+		}
+		queries, err := e.entries.FactQueries(ctx, source)
+		if err != nil {
+			return err
+		}
+		text := queryEmbedText(queries)
+		if text == "" {
+			return nil
+		}
+		vecs, err := e.client.Embed(ctx, []string{text})
+		if err != nil {
+			return err
+		}
+		if len(vecs) != 1 {
+			return nil
+		}
+		return e.vectors.Put(ctx, name, e.client.Model(), vecs[0], time.Now())
+	}
+	if source, isShadow := resolveAliasShadow(name); isShadow {
 		entry, err := e.entries.GetByName(ctx, source)
 		if err != nil {
 			return nil //nolint:nilerr // source gone before we embedded its aliases
@@ -156,6 +208,20 @@ func aliasEmbedText(content string, aliases []string) string {
 	return strings.Join(filtered, "\n")
 }
 
+// queryEmbedText is the text embedded for a fact's #query shadow: the pseudo-
+// queries joined verbatim. Unlike aliasEmbedText it does NOT drop content-word
+// overlap — a doc2query question is meant to share the fact's entity words; that
+// overlap is the query↔statement bridge we want, not noise to filter.
+func queryEmbedText(queries []string) string {
+	filtered := make([]string, 0, len(queries))
+	for _, q := range queries {
+		if strings.TrimSpace(q) != "" {
+			filtered = append(filtered, q)
+		}
+	}
+	return strings.Join(filtered, "\n")
+}
+
 // embedText is the text handed to the embedding model for an entry. Trigger +
 // content captures both the recall cue and the fact body.
 func embedText(e *Entry) string {
@@ -195,10 +261,15 @@ func (e *Embedder) Backfill(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	shadowNames, err := e.AliasShadowNames(ctx)
+	aliasShadows, err := e.AliasShadowNames(ctx)
 	if err != nil {
 		return err
 	}
+	queryShadows, err := e.QueryShadowNames(ctx)
+	if err != nil {
+		return err
+	}
+	shadowNames := append(aliasShadows, queryShadows...)
 	if len(shadowNames) > 0 {
 		stored, err := e.vectors.LoadAllForModel(ctx, e.client.Model())
 		if err != nil {
@@ -242,6 +313,23 @@ func (e *Embedder) AliasShadowNames(ctx context.Context) ([]string, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("memory: read alias shadow names: %w", err)
+	}
+	return names, nil
+}
+
+// QueryShadowNames returns every #query shadow vector row implied by the
+// doc2query pseudo-query index (feature 012), in deterministic source-name order.
+func (e *Embedder) QueryShadowNames(ctx context.Context) ([]string, error) {
+	if e == nil {
+		return nil, nil
+	}
+	sources, err := e.entries.FactQueryEntryNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(sources))
+	for _, source := range sources {
+		names = append(names, queryShadowName(source))
 	}
 	return names, nil
 }

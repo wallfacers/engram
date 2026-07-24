@@ -562,3 +562,57 @@ func TestPutEntitiesReplaces(t *testing.T) {
 		t.Fatalf("expected only norway to match after replace, got %d", counts["a"])
 	}
 }
+
+// TestPutFactQueries covers the doc2query pseudo-query accessors (feature 012):
+// round-trip, case/whitespace-insensitive dedup, replace-on-rewrite, and that
+// FactQueryEntryNames lists only facts with >=1 query.
+func TestPutFactQueries(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newEntryStore(t)
+
+	if err := es.Upsert(ctx, &memory.Entry{Name: "fact-a", Content: "Jon lost his banking job on 2023-01-19."}); err != nil {
+		t.Fatalf("upsert fact-a: %v", err)
+	}
+	if err := es.Upsert(ctx, &memory.Entry{Name: "fact-b", Content: "Gina moved to Berlin."}); err != nil {
+		t.Fatalf("upsert fact-b: %v", err)
+	}
+
+	// Dedup: "  When did Jon lose his job? " and "when did jon lose his job?"
+	// collapse to one; blanks dropped.
+	if err := es.PutFactQueries(ctx, "fact-a", []string{
+		"  When did Jon   lose his job? ",
+		"when did jon lose his job?",
+		"",
+		"Who lost a banking job?",
+	}); err != nil {
+		t.Fatalf("put queries fact-a: %v", err)
+	}
+	got, err := es.FactQueries(ctx, "fact-a")
+	if err != nil {
+		t.Fatalf("get queries fact-a: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 deduped queries, got %d: %v", len(got), got)
+	}
+
+	// Rewrite replaces the prior set (not append).
+	if err := es.PutFactQueries(ctx, "fact-a", []string{"What happened to Jon?"}); err != nil {
+		t.Fatalf("rewrite queries fact-a: %v", err)
+	}
+	got, err = es.FactQueries(ctx, "fact-a")
+	if err != nil {
+		t.Fatalf("re-get queries fact-a: %v", err)
+	}
+	if len(got) != 1 || got[0] != "What happened to Jon?" {
+		t.Fatalf("rewrite must replace, got %v", got)
+	}
+
+	// FactQueryEntryNames lists only facts with queries (fact-b has none).
+	names, err := es.FactQueryEntryNames(ctx)
+	if err != nil {
+		t.Fatalf("entry names: %v", err)
+	}
+	if len(names) != 1 || names[0] != "fact-a" {
+		t.Fatalf("expected only fact-a to have queries, got %v", names)
+	}
+}

@@ -505,6 +505,88 @@ func (s *EntryStore) PutAliases(ctx context.Context, name string, aliases []stri
 	return nil
 }
 
+// PutFactQueries replaces the doc2query pseudo-queries for a fact (feature 012
+// shadow source). Whitespace is collapsed and blank/case-insensitive duplicates
+// are dropped, mirroring PutAliases.
+func (s *EntryStore) PutFactQueries(ctx context.Context, name string, queries []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("memory: put fact queries begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM memory_fact_queries WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: clear fact queries %q: %w", name, err)
+	}
+	seen := make(map[string]struct{}, len(queries))
+	for _, raw := range queries {
+		query := strings.Join(strings.Fields(raw), " ")
+		if query == "" {
+			continue
+		}
+		key := strings.ToLower(query)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO memory_fact_queries(entry_name, query) VALUES (?,?)`, name, query); err != nil {
+			return fmt.Errorf("memory: insert fact query %q/%q: %w", name, query, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: put fact queries commit: %w", err)
+	}
+	return nil
+}
+
+// FactQueries returns a fact's stored pseudo-queries, ordered by query text.
+func (s *EntryStore) FactQueries(ctx context.Context, name string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT query FROM memory_fact_queries WHERE entry_name = ? ORDER BY query`, name)
+	if err != nil {
+		return nil, fmt.Errorf("memory: fact queries %q: %w", name, err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var queries []string
+	for rows.Next() {
+		var query string
+		if err := rows.Scan(&query); err != nil {
+			return nil, fmt.Errorf("memory: scan fact query %q: %w", name, err)
+		}
+		queries = append(queries, query)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: read fact queries %q: %w", name, err)
+	}
+	return queries, nil
+}
+
+// FactQueryEntryNames returns the distinct entry names that have at least one
+// pseudo-query, ordered by name. Used to enumerate #query shadow vectors.
+func (s *EntryStore) FactQueryEntryNames(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT entry_name FROM memory_fact_queries ORDER BY entry_name`)
+	if err != nil {
+		return nil, fmt.Errorf("memory: fact query entry names: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("memory: scan fact query entry name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: read fact query entry names: %w", err)
+	}
+	return names, nil
+}
+
 // EntityMatchCounts returns, for the given normalized entity tokens, a map from
 // entry name to the number of distinct query tokens that entry matches. Entries
 // with zero matches are absent. Used to build the entity retrieval signal.

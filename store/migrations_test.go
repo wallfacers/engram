@@ -28,8 +28,8 @@ func TestMigration_IdempotentRerun(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 4 {
-		t.Errorf("expected version 4 after first open, got %d", version)
+	if version != 5 {
+		t.Errorf("expected version 5 after first open, got %d", version)
 	}
 	s.Close()
 
@@ -96,8 +96,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected migration v4, got v%d", version)
+	if version != 5 {
+		t.Fatalf("expected migration v5, got v%d", version)
 	}
 
 	db := s.DB()
@@ -137,6 +137,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	// Apply the v4/v3 Down contracts, then reopen so normal migration logic
 	// upgrades the same v2 database back to v4.
 	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS memory_fact_queries`,
+		`DELETE FROM schema_version WHERE version = 5`,
 		`DROP INDEX IF EXISTS idx_memory_entries_event_end`,
 		`DROP INDEX IF EXISTS idx_memory_entries_event_start`,
 		`DELETE FROM schema_version WHERE version = 4`,
@@ -169,8 +171,57 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read upgraded schema version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected migration v4 after round trip, got v%d", version)
+	if version != 5 {
+		t.Fatalf("expected migration v5 after round trip, got v%d", version)
+	}
+}
+
+func TestMigration_V5FactQueries(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	db := s.DB()
+
+	var version int
+	if err := db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != 5 {
+		t.Fatalf("expected migration v5, got v%d", version)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_fact_queries'`).Scan(&count); err != nil {
+		t.Fatalf("check memory_fact_queries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("memory_fact_queries table missing")
+	}
+
+	// Composite PK (entry_name, query): same fact + distinct queries coexist;
+	// duplicate (entry_name, query) is ignored.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO memory_fact_queries(entry_name, query) VALUES ('alpha','when did it happen?')`); err != nil {
+		t.Fatalf("insert query: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO memory_fact_queries(entry_name, query) VALUES ('alpha','who did it?')`); err != nil {
+		t.Fatalf("insert second query: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO memory_fact_queries(entry_name, query) VALUES ('alpha','when did it happen?')`); err != nil {
+		t.Fatalf("insert dup query: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM memory_fact_queries WHERE entry_name = 'alpha'`).Scan(&count); err != nil {
+		t.Fatalf("count queries: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 distinct queries for alpha, got %d", count)
 	}
 }
 

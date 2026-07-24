@@ -191,6 +191,23 @@ var v4TemporalIndexesDown = []string{
 	`DROP INDEX IF EXISTS idx_memory_entries_event_start`,
 }
 
+// v5FactQueries adds the doc2query pseudo-query side table (feature 012). Each
+// row is one LLM-generated question a fact answers; the embedder turns a fact's
+// queries into a "<name>#query" shadow vector that the retriever max-pools back
+// onto the source fact. Kept out of the FTS-mirrored base table and separate
+// from memory_event_aliases (011) so the two shadow sources stay independent.
+var v5FactQueries = []string{
+	`CREATE TABLE IF NOT EXISTS memory_fact_queries (
+		entry_name TEXT NOT NULL,
+		query      TEXT NOT NULL,
+		PRIMARY KEY (entry_name, query)
+	)`,
+}
+
+var v5FactQueriesDown = []string{
+	`DROP TABLE IF EXISTS memory_fact_queries`,
+}
+
 // migrationsByVersion is the ordered list of all migrations. Each entry is
 // applied inside its own transaction; schema_version is bumped per step.
 var migrationsByVersion = []Migration{
@@ -198,6 +215,7 @@ var migrationsByVersion = []Migration{
 	{Version: 2, Up: v2MemoryHybrid, Down: v2MemoryHybridDown},
 	{Version: 3, Up: v3BioRetrieval, Down: v3BioRetrievalDown},
 	{Version: 4, Up: v4TemporalIndexes, Down: v4TemporalIndexesDown},
+	{Version: 5, Up: v5FactQueries, Down: v5FactQueriesDown},
 }
 
 func (s *Store) migrate(ctx context.Context) error {
