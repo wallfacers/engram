@@ -363,3 +363,14 @@ box 全本地栈、canonical recipe、repeats=3,五臂同 store 配对:
 - **旧简单契约(old-tplan)是唯一正苗头,但未坐实**:仅"list 每条 [event:] 日期 / normalize / compare / never decline"的原有弱契约(**从没被评测过**,canonical recipe 默认不带 `--temporal-answer-prompt`)temporal **+2.5pp**、overall 中性。零新代码(只是打开现有 flag)。但 **McNemar ns(p~0.24,单 run n=321)** → 够不上 GO 门。**记 backlog:后续多-rep(5-8 rep 或多 seed)专测 old-tplan vs base2 temporal,看 +2.5pp 能否跨显著门**;若显著即零成本 GO。
 - **处置**:强化常量 + 四锚单测已 `git revert`(还原 `forceTemporalAnswerPrompt` 为旧契约);引擎全程零改(纯适配器)。SDD 正本 `specs/014-temporal-answer-contract/`;`--temporal-answer-prompt` 开关 + old-tplan-baseline.md 保留供 backlog 确认。
 - **方法论兑现**:冷启动纪律再次生效——base 冷首臂 0.8565 vs base2 0.8643(−0.78pp),主门用 base2 不用冷首臂。
+
+### backlog:old-tplan 显著性确认 recipe(下次 box 空档跑,~45-60min)
+
+目标:把 old-tplan(打开现有 `--temporal-answer-prompt` = 旧简单契约)的 temporal +2.5pp 从"趋势(p~0.24)"推过显著门,或证伪。零新代码——只是启用现有 flag。
+
+- **两臂,各 repeats=8**(或多 seed),同 store `009-bge-chunks-store`,canonical recipe,**干净 top-k 30 无 cat-top-k**:
+  - `old-tplan`:`--temporal-answer-prompt`(当前 HEAD 的 `forceTemporalAnswerPrompt` 已 revert 回旧契约,直接用当前 binary 即可,无需还原)。
+  - `base2`:同 recipe 不带 `--temporal-answer-prompt`。
+- **纪律**:box 冷启后先跑一个 warm-up 臂丢弃(或复跑 base 做锚);paired McNemar 只对干净复跑基线(踩坑#10)。
+- **判据**:temporal(n=321)3+rep 多数投票配对 McNemar,net 需 χ²>3.841(约 net≥±14 @ n=36 discordant)才显著;并核 overall 不回退。显著且 overall 不降 = **零成本 GO**(启用现有 flag 即出货);仍 ns = old-tplan 收口 inconclusive。
+- **注意**:answer temp=1.0 非确定,单 run 观测有抖动;8-rep 多数投票是为压这抖动、非声明确定性差分([[locomo-answer-nondeterministic]] 精神)。
