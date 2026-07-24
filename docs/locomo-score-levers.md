@@ -285,3 +285,22 @@ box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned jud
 **下一步 = 转向检索侧结构(写入侧表示/query 改写三向证伪后,2026-07-24 收口)**:让 gold 在**不加量**下从 rank 71-90 升进 top-30 的努力,现已三向证伪——**010 query 侧分解**(顶不动各子查询都弱命中的 gold)、**011 alias 短标签影子**、**012 doc2query 拟人问句影子**(两者门②同点 NO-GO:影子对称抬噪、不给 gold 超原文的判别性)。**结论:瓶颈不在 query 措辞、也不在 fact 影子表示,而在 dense 单塔对 multi-hop/open-domain gold 的深层召回上限——这是「顶一个已经埋在 rank 71-90 的 gold」这一问题本身对无监督 dense 检索的天花板。** 剩余真杠杆离开「表示改写」这条线,回到 **strategy 文档的检索侧结构 P0**:① 实体图遍历(`memory_entities` 平表→可 1-hop 走边,直击 multi-hop,EcphoryRAG/HippoRAG2)、② 检索侧时间窗(`event_date`→范围 + T_score,MemOS MemReader 式,直击 temporal)。这些是**结构性新机制**(engine contract-first + 宪法 IV 门),非 box 上试 flag;open-domain 短板同理走 category-conditional「精准浮现」。按 maintainer workflow 走 brainstorm→SDD。**注**:提质型的写入/query-侧影子表示这条便宜线已探尽,不再投。
 
 **更新(013 收口,2026-07-24)**:检索侧结构 P0 之② **检索侧时间窗** 已经门①免费诊断证伪其**这一版形态**(event_date 召回臂)——不是机制错,是**点火率错**:`ParseTemporalIntent` 只解析出 19.6% temporal 题的时间窗,臂对 80% 的题永不点火(L1-3 前提在窗成立时全健康)。**⇒ temporal 的真杠杆前移到 query 侧时间解析覆盖**(为何 80% temporal 题解析不出窗;含相对/隐式/多锚时间表达),这是一个**独立的 query-理解 feature**,不是 event_date 召回结构。检索侧时间窗召回臂**留待解析覆盖上去之后再评估**(届时 L1-3 已证其天花板)。**⇒ 当前唯一未验的检索侧结构 P0 = ① 实体图遍历(直击 multi-hop)**;temporal 改走"解析覆盖优先"。
+
+---
+
+## temporal 瓶颈分诊 — 答错子集 gold-in-topK 切分(近免费,离线 join,2026-07-24)
+
+013 的四层诊断只看 `parse_coverage`,遂把 temporal 真杠杆推向 query 侧解析覆盖(召回侧)。但那是对**全体** temporal 题的召回视角,没并入**答对错**。本诊断补上这一刀:纯离线 join **013 诊断的每题 gold-rank**(`temporal_diagnostic_questions.jsonl`,bge-large `--chunks --top-k 30 --chunk-quota 12`,gold_rank≤30 = gold 确在答题 30 项上下文内)× **009-full-B-cattopk 全量跑的每题正误**(cat-top-k 不影响 temporal,均值 0.817 与 base 同;3 rep 多数投票)。零 token、零 box、零引擎改。
+
+temporal 多数投票 acc **82.9%**,答错 **55/321**。切分:
+
+| 子集 | n | gold 在 top-30 答题上下文 | gold 埋 top-30 外 |
+|---|---|---|---|
+| **答错(rate<0.5)** | 55 | **38(69.1%)= 答题侧** | 17(30.9%)= 召回侧 |
+| 三 rep 全错(0/3) | 34 | 20(58.8%) | 14(41.2%) |
+| 答对(rate≥0.5) | 266 | 238(89.5%) | 28(10.5%) |
+
+- **主瓶颈 = 答题侧(gold 已喂进却答错),不是召回侧**。这**反转** 013 的初步指向:query 侧解析覆盖(召回侧)在 answered-wrong 口径下最多只能救 **8/55**(召回侧 17 题里现解析器能点火的),约 1.5% temporal——舍入级;而 38/55 是 gold 明明在 30 项答题上下文里、模型时序推理/去歧错。
+- **答题侧 38 题失败模式**(眼验 + 关键词量化):**±1 月/年 误归属/精度去歧 21(55%)**(检索到邻近事件贴错日期,如"Jon in Rome"GOLD June/PRED May)· **相对表达未解析成绝对 10(26%)**("next month"/"last year"/"the week before X"被回显而非按会话锚解析)· **时长/区间算术 7(18%)**("how long / how many months"类端点在上下文里但没相减,PRED 回显区间或"not specified")。
+- **⇒ temporal 下一个真杠杆 = 答题侧时序推理契约(纯 client-side / 零成本 / 提质型)**,优先级高于 013 指的 query 侧解析覆盖:① 相对→绝对日期解析(针对会话 date 锚,不回显相对短语)· ② 时长/区间算术契约(识别两端点相减输出 duration)· ③ 按 date 对齐候选去歧(压 ±1 月/年 误归属,最大但最杂)。均为答题 prompt/answer-contract 改,非引擎检索改。
+- **纪律**:又一次"先诊断后建"避免建错方向——013 差点把力气全押 query 侧解析覆盖(召回侧),补上答对错口径后真金在答题侧。产物 `.locomo-run/013-temporal-diag/` 复用,无新 box 消耗。
