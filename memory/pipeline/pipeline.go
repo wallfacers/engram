@@ -183,6 +183,12 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		}
 	}
 	p.embedder.Enqueue(entry.Name) // nil-safe
+	for _, alias := range f.Aliases {
+		if strings.TrimSpace(alias) != "" {
+			p.embedder.Enqueue(memory.AliasShadowName(entry.Name)) // nil-safe
+			break
+		}
+	}
 	return true
 }
 

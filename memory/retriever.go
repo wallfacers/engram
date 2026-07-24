@@ -838,7 +838,61 @@ func (r *Retriever) vectorRankContext(ctx context.Context, query string, limit i
 	if len(candidates) == 0 {
 		return vectorRankContext{}
 	}
-	scored := embedding.TopKCosine(vecs[0], candidates, limit)
+	hasShadows := false
+	shadowSources := make([]string, 0)
+	seenSources := make(map[string]struct{})
+	for name := range candidates {
+		source, isShadow := resolveShadow(name)
+		if !isShadow {
+			continue
+		}
+		hasShadows = true
+		if _, seen := seenSources[source]; !seen {
+			seenSources[source] = struct{}{}
+			shadowSources = append(shadowSources, source)
+		}
+	}
+	if !hasShadows {
+		scored := embedding.TopKCosine(vecs[0], candidates, limit)
+		names := make([]string, len(scored))
+		for i, s := range scored {
+			names[i] = s.Key
+		}
+		return vectorRankContext{ranks: ranksFromOrder(names), query: vecs[0], stored: candidates}
+	}
+
+	sources, err := r.entries.EntriesByName(ctx, shadowSources)
+	if err != nil {
+		slog.Warn("memory: semantic signal degraded", "stage", "shadow_source_load", "err", err)
+		sources = nil
+	}
+	pooled := make(map[string]float64, len(candidates))
+	for name, candidate := range candidates {
+		source, isShadow := resolveShadow(name)
+		if isShadow {
+			if _, exists := sources[source]; !exists {
+				continue
+			}
+			name = source
+		}
+		score := embedding.Cosine(vecs[0], candidate)
+		if previous, exists := pooled[name]; !exists || score > previous {
+			pooled[name] = score
+		}
+	}
+	scored := make([]embedding.Scored, 0, len(pooled))
+	for name, score := range pooled {
+		scored = append(scored, embedding.Scored{Key: name, Score: score})
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].Score != scored[j].Score {
+			return scored[i].Score > scored[j].Score
+		}
+		return scored[i].Key < scored[j].Key
+	})
+	if limit > 0 && len(scored) > limit {
+		scored = scored[:limit]
+	}
 	names := make([]string, len(scored))
 	for i, s := range scored {
 		names[i] = s.Key
