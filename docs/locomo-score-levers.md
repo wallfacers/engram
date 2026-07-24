@@ -195,6 +195,27 @@ engram 端到端 **overall 83.70%**(mem0-aligned judge, 本地 Qwen3.6-35B 栈, 
 
 ---
 
+## Feature 011 — 写入侧 dual-index alias 影子向量(提质型深召回,2026-07-24)
+
+**动机**:承 010 把提质方向收窄到**写入侧**——瓶颈是 gold fact 的**向量可发现性**。fact 抽取的 `aliases`(概念锚点,009 店 conv0 52% 的 fact 有)已免费产出、已落库,却从不参与嵌入。本枪让有 alias 的 fact 产一条 `#alias` 影子向量(aliases 合并嵌入),检索时 semantic 命中后 **max-pool 归并回源 fact**(取 `max(text_cosine, alias_cosine)`,不双重计票),再进现有 RRF(k=60)。文献锚:doc2query(1904.08375)/ Doc2Query++(2510.09557)证 dual-index max-pool 是 dense 正解、单向量 append 会稀释 bge-large。**无 α、无付费 reranker、不扩 top-k、不加 context**。
+
+### ✓ 门① 纯 Go 契约 = PASS;✗ 门② 分层召回诊断 = NO-GO(止损,未耗门③答题窗口,2026-07-24)
+
+- **门①(US1 引擎 + US2 adapter)全绿**:US1 max-pool 归并 + 退化保真(无 alias/chunk/text 向量逐字节不变、`!hasShadows` 快路径)6 测试;US2 方案 A 两店隔离(canonical 10 db 全程 0 影子未污染、baseline 剥离=0、treatment>0、抽取 calls=0)9 测试。引擎/adapter 分属两 commit(`3184272` / `00229a4`),`git diff -- memory embedding provider store internal` 空。
+- **门② 配对分层召回诊断(retrieval-only,box bge-large 8001,near-free)** —— 主判据「gold 有 alias」子层 gold 是否净升 top-30(`rank_delta=treatment−baseline`,负=前移=变好):
+
+| 目标类 | 子层 n | 子层 rank_delta | 子层 entered/left | coverage@30 Δ | 全局 rank_delta |
+|---|---|---|---|---|---|
+| multi-hop(cat1) | 123 | **+0.057**(未前移) | 1 / 0(噪声级) | **0** | +0.505(变差) |
+| open-domain(cat3) | 25 | **+0.72**(变差) | 0 / 0 | **0** | +1.41,净 **−1** 掉出 |
+
+- **两个目标类子层均未净升 top-30**(mean rank 不前移、coverage@30 delta 恒 0),严格触发止损门 → **NO-GO,不启动门③**(省 box 1540×3 答题 + judge 窗口)。
+- **机制(为何零到微负)**:max-pool 只会抬一个 fact 的 semantic 分不会降,但它**对非 gold 的有 alias fact 同样抬分**,把 gold 相对挤下去 → 净效应零到微负。coverage@30 delta 恒 0 = 没有任何 gold 跨越 top-30 边界。**短概念标签(`painting`/`self-acceptance`)不比 fact 原文多提供可发现性,且对称地抬噪声**——这正坐实 spec 预标注的「52% 覆盖 + 短标签天花板」。
+- **与 008 reranker / 010 分解同族的诚实处理**:引擎 dual-index 归并作为纯 Go、退化保真、可移植的**新增能力保留**(离线默认对无 alias 店零改);adapter `--alias-shadow off|baseline|treatment` 保留为**默认关能力**。均不进默认栈、不报为赢。
+- **止损纪律兑现**:门② near-free 即断,门③未启动;box bge-large 跑完即停(GPU 0 MiB)、隧道拆、凭据清。产物 `.locomo-run/011-recall/`(multi-hop)、`.locomo-run/011-recall-cat3/`(open-domain)。
+
+---
+
 ## 杠杆总账(2026-07-23 收口)
 
 box vllm 全本地栈(Qwen 答题 + bge-large 嵌入 + deepseek mem0-aligned judge)、canonical recipe、repeats=3 下,叠加式探完一轮:

@@ -69,19 +69,19 @@
 ### 门② 分层召回诊断(NEAR-FREE,retrieval-only,仅诊断不作 verdict)
 
 - [x] T020 [US2] 扩展 `--recall-diagnostic` 支持 alias-shadow 两臂(retrieval-only,**断言不初始化 decomposition/答题/judge caller**):同 query single 检索,按 `gold_has_alias` 分层输出 gold rank/coverage@30 delta 到 `.locomo-run/011-recall/`;rank delta 为 treatment-baseline(负=改善),coverage delta 为 treatment-baseline(正=改善)
-- [ ] T021 [US2] 跑门②(setsid 分离,quickstart 命令,目标类 open-domain=cat3 + multi-hop=cat1),确认**「gold 有 alias」子层** gold 从 rank>30 升进 top-30 / coverage@30 ↑;**记为诊断,不单独作 GO 依据**(SC-005/FR-011);子层不升即 NO-GO 止损、不跑门③
+- [x] T021 [US2] 跑门②(setsid 分离,quickstart 命令,目标类 open-domain=cat3 + multi-hop=cat1),确认**「gold 有 alias」子层** gold 从 rank>30 升进 top-30 / coverage@30 ↑;**记为诊断,不单独作 GO 依据**(SC-005/FR-011);子层不升即 NO-GO 止损、不跑门③
 
 ### 门③ 端到端决胜(BOX 窗口,repeats=3,配对 McNemar)
 
-- [ ] T022 [US2] ⚠️ **提质前置校验**:确认两臂 `final_top_k=30` 恒等、canonical recipe 一致、唯一变量=alias 影子向量;box vllm Qwen 栈(隧道)+ box bge-large 8001 嵌入 + deepseek mem0-aligned judge env 就绪(不落凭据)
-- [ ] T023 [US2] 跑 baseline 臂(setsid,repeats=3,`--alias-shadow baseline`):`.locomo-run/011-e2e-base`(quickstart 命令)
-- [ ] T024 [US2] 跑 treatment 臂(setsid,repeats=3,同批同栈,`--alias-shadow treatment`):`.locomo-run/011-e2e-shadow`
-- [ ] T025 [US2] 配对 McNemar + context-parity 判定:①目标类 above-noise ↑ ②overall 及任一非目标类不显著回退 ③treatment `answer_context_tokens` 不显著 > baseline ④`final_top_k` 两臂恒等=30(SC-004/006)。四者全满足 → GO;否则 NO-GO
+- [~] T022 [US2] ⚠️ **提质前置校验**:确认两臂 `final_top_k=30` 恒等、canonical recipe 一致、唯一变量=alias 影子向量;box vllm Qwen 栈(隧道)+ box bge-large 8001 嵌入 + deepseek mem0-aligned judge env 就绪(不落凭据)
+- [~] T023 [US2] 跑 baseline 臂(setsid,repeats=3,`--alias-shadow baseline`):`.locomo-run/011-e2e-base`(quickstart 命令)
+- [~] T024 [US2] 跑 treatment 臂(setsid,repeats=3,同批同栈,`--alias-shadow treatment`):`.locomo-run/011-e2e-shadow`
+- [~] T025 [US2] 配对 McNemar + context-parity 判定:①目标类 above-noise ↑ ②overall 及任一非目标类不显著回退 ③treatment `answer_context_tokens` 不显著 > baseline ④`final_top_k` 两臂恒等=30(SC-004/006)。四者全满足 → GO;否则 NO-GO
 
 ### 收口(对应 SC-006 判定诚实)
 
-- [ ] T026 [US2] 把结论(GO/NO-GO + 子层/全局 delta + p 值 + context 对比 + coverage 诊断)写入 `docs/locomo-score-levers.md` 杠杆台账 Feature 011;对比反证基线(008 reranker −0.06/p=1.0、009 cluster-sweep +0.4、010 分解 NO-GO)——不加 context 拿到目标类转化才算提质赢
-- [ ] T027 [US2] NO-GO 情形:保留 `--alias-shadow` 为默认关能力,如实记录(与 008 reranker / 010 分解同样处理);GO 情形:记录为提质赢候选 + 复现 recipe。**adapter 改动单独 commit(与 US1 engine 分离,FR-014)**
+- [x] T026 [US2] 把结论(GO/NO-GO + 子层/全局 delta + p 值 + context 对比 + coverage 诊断)写入 `docs/locomo-score-levers.md` 杠杆台账 Feature 011;对比反证基线(008 reranker −0.06/p=1.0、009 cluster-sweep +0.4、010 分解 NO-GO)——不加 context 拿到目标类转化才算提质赢
+- [x] T027 [US2] NO-GO 情形:保留 `--alias-shadow` 为默认关能力,如实记录(与 008 reranker / 010 分解同样处理);GO 情形:记录为提质赢候选 + 复现 recipe。**adapter 改动单独 commit(与 US1 engine 分离,FR-014)**
 
 **Checkpoint**:US2 判定完成——GO 则提质赢入账,NO-GO 则诚实保留能力;引擎全程零改,提交分离。
 
