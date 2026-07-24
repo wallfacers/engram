@@ -28,19 +28,19 @@
 
 ### US1 — 引擎（`memory/`，独立 commit）
 
-- **migration v3**：新表 `memory_fact_queries(entry_name TEXT, query TEXT, ...)`。伪查询存这里，**不**塞进 `memory_event_aliases`——保护 011 shipped 的 alias 语义，不动已发布迁移。
+- **migration v5**（现有已到 v4）：新表 `memory_fact_queries(entry_name TEXT, query TEXT, PRIMARY KEY(entry_name, query))`。伪查询存这里，**不**塞进 `memory_event_aliases`——保护 011 shipped 的 alias 语义，不动已发布迁移。
 - **新 `#query` 影子**：embedder 为有伪查询的 fact 产一条 `<name>#query` 影子向量，内容=该 fact 全部伪查询**原样 join 嵌入**。**不**走 `aliasEmbedText` 的「与 content 重叠即丢词」滤器——查询要保留 content 词（问句本就和 fact 共享实体词，这正是我们要的信号）。
-- **retriever max-pool**：折回源 fact 时 `score = max(text_cosine, query_cosine)`（复用 011 的 fold-shadow-to-source + 去重单票路径），进现有 RRF k=60。**无 α**——守 011 无调参先例 + 宪法 tuning-free；赢要赢在机制不在调参旋钮。
-- **退化保真**：无伪查询的 fact 逐字节不变；`!hasShadows` 快路径保 parity golden；默认店（无 `memory_fact_queries` 行）零改。
+- **retriever 源码零改（关键复用）**：011 的 `vectorRankContext`(retriever.go:821) max-pool 归并**已是内容无关的**——对任何 `resolveShadow` 识别的影子折回源 fact 取 `max`、去重单票、进 RRF k=60。**只需把 `#query` 后缀加进 `resolveShadow`（embedder.go）**，retriever 自动 max-pool `max(text_cosine, alias_cosine, query_cosine)`，源码不动。**无 α**——守 011 无调参先例 + 宪法 tuning-free。
+- **inert-by-default 退化保真**：无 `memory_fact_queries` 行的店 → 无 `#query` 影子 → `!hasShadows` 快路径逐字节不变，parity golden 不破。**US1 引擎能力常开但默认惰性**；伪查询的**写入**才是被 gate 的动作。
 
 ### US2 — 适配器（`cmd/locomo-bench/`，独立 commit）
 
 - **`--doc2query off|baseline|treatment` 臂**；**方案 A 两店隔离**（照搬 011）：两臂都把 009 canonical 店复制到各自 `<run-dir>/doc2query-store`，baseline 副本剥离 `#query` 影子（assert 0），treatment 保留；canonical 从不被写。
 - **伪查询来源 = 对 009 店已存 fact 做 LLM backfill**（doc2query over stored passages）：遍历 store 内 fact，LLM 生成 2-3 问句 → 写 `memory_fact_queries` → 嵌 `#query` 影子。**不重跑整段会话抽取**（省钱，且从自足 fact 句生成问句本就是 doc2query 的标准形态）。
 
-### shipped 写入路径（仅门②/③ GO 后才接线）
+### US3 — shipped 写入路径（独立 story，**仅门③ GO 后才做**）
 
-把伪查询生成**折进现有抽取 LLM 调用**：抽取 prompt 增 `"queries":[…]` 字段（每 fact 2-3 问句），pipeline 存入 `memory_fact_queries`。**零额外写入 LLM 调用**（只是更富的 JSON 输出）。默认关；仅当伪查询存在且特性开启才嵌 `#query` 影子。
+把伪查询生成**折进现有抽取 LLM 调用**：抽取 prompt 增 `"queries":[…]` 字段（每 fact 2-3 问句），`pipeline.storeFact` 存入 `memory_fact_queries` + `Enqueue(QueryShadowName)`。**零额外写入 LLM 调用**（只是更富的 JSON 输出）。**此 story 改的是默认写入行为，故 default-off（config 开关）且 deferred**——门③ 未 GO 前不接线，避免默认栈携带 query 影子。US1 引擎能力对无 query 行的店惰性零改，与此解耦。
 
 ## 4. 三道门（成本感知，止损纪律焊死）
 
@@ -56,7 +56,7 @@
 
 - **SC-001** 退化保真：无伪查询 fact + chunk semantic 逐字节等于现状；parity golden 不破。
 - **SC-002** max-pool 归并正确 + 去重单票 + `#query` 影子名不泄漏进结果；确定性单测（无 LLM）。
-- **SC-003** `CGO_ENABLED=0` 构建+测试通过；无云 reranker 依赖；无 α；migration v3 在独立 tx 内 bump schema_version。
+- **SC-003** `CGO_ENABLED=0` 构建+测试通过；无云 reranker 依赖；无 α；migration v5 在独立 tx 内 bump schema_version（不改已发布 v1-v4）。
 - **SC-004** 提质非加量：两臂 `final_top_k=30` 恒等，treatment `answer_context_tokens` 不显著 > baseline。
 - **SC-005** 分层召回（门②诊断）：目标类「gold」子层 gold 升进 top-30 / coverage@30 ↑。
 - **SC-006** 判定诚实：GO/NO-GO 由配对 McNemar 决定，超越 010/011 反证基线；门② NO-GO 即止损不耗门③。
