@@ -334,3 +334,32 @@ box 全本地栈、canonical recipe、repeats=3,五臂同 store 配对:
 - **⚠ 方法论 gotcha(重要,险酿假 GO)**:同配置 base(82.92)vs base2(85.17)差 **2.25pp**——**答题模型冷启后第一个臂被系统性压低 ~2pp**(vllm 刚起、KV cache 冷/共卡竞争)。若信首臂冷 base,assoc 表观 +1.62pp(配对 +75 χ²9.6)会被误判为 GO;是**复跑 base2 重基线**救回。**规程:box 冷启后首个臂作 warm-up 丢弃或必复跑基线**,否则冷启动惩罚会伪装成 treatment 效应。详见 [`locomo-e2e-eval-reproduction.md` §踩坑](./locomo-e2e-eval-reproduction.md)。
 - **保留能力**:`--assoc` 引擎路径不动(留 default-off,003 遗产);诊断产物 `.locomo-run/014-assoc-diag/`(trace-base/assoc.jsonl + coverage-summary + e2e-verdict)。引擎零改(全程适配器+诊断,`git diff -- memory embedding provider store internal` 空)。
 - **⇒ 检索侧结构 P0 收口**:① 实体图遍历 e2e 证伪(coverage 不转化)· ② 检索侧时间窗 013 证伪(解析器点火率)。**两个 P0 结构杠杆均 NO-GO**。temporal 剩余真杠杆在**答题侧时序推理契约**(见上「temporal 瓶颈分诊」),非检索侧结构。
+
+---
+
+## 答题侧时序推理契约(Feature 014)— 强化契约 e2e **NO-GO**(翻车),旧简单契约有正苗头未坐实(2026-07-24)
+
+「temporal 瓶颈分诊」把真杠杆指向答题侧后,SDD 014 强化 `cmd/locomo-bench` 的 `forceTemporalAnswerPrompt`(category-2 force+temporal 路径,`--temporal-answer-prompt` 开关触发)为压三诊断失败模式(±1 去歧 / 相对→绝对 / 时长相减)的**四锚重 CoT**。box 全本地栈四臂配对 e2e 判 **NO-GO**,且是反转性的。
+
+### 门:干净 top-k 30(无 cat-top-k)四臂配对
+
+维护者规范:默认 top-k 30,cat-top-k 这类"大力出奇迹"只作后续无奈之举,不进默认门(同资源更耗)。故基线是干净 bge-large top-k 30。四臂同 store（009-bge-chunks-store）、canonical recipe、repeats=3：
+
+| arm | overall(maj) | temporal(maj) | 说明 |
+|---|---|---|---|
+| base(冷启动首臂) | 0.8565 | 0.8287 | ⚠ 冷,漂移 −0.78pp |
+| **old-tplan(旧弱契约,从未评过)** | 0.8630 | **0.8629** | 归因锚 |
+| **new-tplan(强化四锚)** | 0.8558 | 0.8287 | 处理臂 |
+| base2(干净锚) | 0.8643 | 0.8380 | 配 new-tplan |
+
+配对 McNemar(temporal,n=321,3-rep 多数投票):
+- **主门 new-tplan vs base2:net −3,χ²0.085,ns → 无提升,FAIL**。overall 亦不高于 base2。
+- **归因 new-tplan vs old-tplan:net −11,χ²2.56(p≈0.11)→ 强化契约比它替换掉的旧简单契约更差**。
+- 参考 old-tplan vs base2:net +8,χ²1.36,**ns**(temporal +2.5pp 但不显著)。
+
+### 结论 + 教训
+
+- **强化契约 NO-GO(翻车)**:诊断对(答题侧有杠杆),但四锚重 CoT 是**负贡献**——"reason silently"重枚举 + "EXACT MATCH…DIFFERENT event…never close enough"的强硬去歧,让答题器**过度拒绝邻近候选/想太多**,temporal 掉到 base 以下。**又一次 008 铁律**:表观合理的 prompt 工程,端到端答分说了算。**"强化过头"**——比"什么都不加"和"旧简单契约"都差。
+- **旧简单契约(old-tplan)是唯一正苗头,但未坐实**:仅"list 每条 [event:] 日期 / normalize / compare / never decline"的原有弱契约(**从没被评测过**,canonical recipe 默认不带 `--temporal-answer-prompt`)temporal **+2.5pp**、overall 中性。零新代码(只是打开现有 flag)。但 **McNemar ns(p~0.24,单 run n=321)** → 够不上 GO 门。**记 backlog:后续多-rep(5-8 rep 或多 seed)专测 old-tplan vs base2 temporal,看 +2.5pp 能否跨显著门**;若显著即零成本 GO。
+- **处置**:强化常量 + 四锚单测已 `git revert`(还原 `forceTemporalAnswerPrompt` 为旧契约);引擎全程零改(纯适配器)。SDD 正本 `specs/014-temporal-answer-contract/`;`--temporal-answer-prompt` 开关 + old-tplan-baseline.md 保留供 backlog 确认。
+- **方法论兑现**:冷启动纪律再次生效——base 冷首臂 0.8565 vs base2 0.8643(−0.78pp),主门用 base2 不用冷首臂。

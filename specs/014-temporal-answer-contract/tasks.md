@@ -5,6 +5,8 @@
 
 **约定**:纯 `cmd/locomo-bench` adapter 改;引擎(`memory/ embedding/ provider/ store/ internal/`)零改。测试先行(TDD,spec US1 要求)。
 
+> **⚠ 收口状态(2026-07-24):强化契约 e2e NO-GO(翻车),已 revert。** US1 实现+TDD 曾落地(a788102)→ US2 box 四臂门判 new-tplan vs base2 temporal net −3 ns 无提升、且输给旧简单契约 → US1 常量+测试已 `git revert`(68f188a),还原旧契约。US3 走 NO-GO 路径(T015)。正向余留:打开现有 `--temporal-answer-prompt`(旧契约)temporal +2.5pp 但不显著,记 backlog 多-rep 确认。verdict 正本 docs/locomo-score-levers.md「Feature 014」。
+
 ---
 
 ## Phase 1: Setup
