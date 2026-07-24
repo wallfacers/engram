@@ -23,6 +23,7 @@
 | [paper-outline-eval-reliability.md](./paper-outline-eval-reliability.md) | 活跃(骨架) | 论文骨架:长期对话记忆评测可靠性审计(噪声分解/选择偏差/coverage≠answer) | 论文线正本;证据分级 + 必补实验门 |
 | [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
 | [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
+| [memos-inhouse-locomo-repro.md](./memos-inhouse-locomo-repro.md) | 待实现 | 用 MemOS 自家代码在 engram 同款栈(AutoDL box vllm qwen 答题 + deepseek-v4-flash 判题)复现 LoCoMo,剥离答题模型/judge regime 伪影 | 回填至 competitive-benchmarks §5④ |
 | [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |
 | [memory-freshness-and-retrieval-policy.md](./memory-freshness-and-retrieval-policy.md) | 待实现 | 记忆新鲜度/状态一致性/按需召回问题记录 | 须独立立项;**非当前能力** |
 | [synthius-mem-analysis.md](./synthius-mem-analysis.md) | 存档 | Synthius-Mem 抄什么/不抄什么 + 认知域文献核查 | P0 已落地 spec 006;backlog 正本在 memory-strategy 附二 |

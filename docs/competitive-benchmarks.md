@@ -102,7 +102,7 @@
 
 1. **judge 严格度对齐(§6,最高 EV)**——engram judge 无"部分给分"、无"日期 ±14 天容差",两家都有。对齐后可回收伪影那部分。属口径改动 → 宪法 IV 声明新基线、单独 commit。
 2. **答题 prompt 工程(免费真杠杆)**——Mem0 的 `ANSWER_GENERATION_PROMPT` 是 5 步推理(扫全部→实体校验→跨记忆合并→选最具体→时间锚定,`prompts.py:40-100`),engram 答题 prompt 简单得多。纯 prompt、可移植、过死规则。tplan 实验已证 prompt 是真杠杆。
-3. **答题模型强度**——MemOS 答题模型未 pin;若 leaderboard 用强模型而 engram 用 luna relay,是 regime 杠杆(非 engram 引擎)。
+3. **答题模型强度**——MemOS 答题模型未 pin;若 leaderboard 用强模型而 engram 用 luna relay,是 regime 杠杆(非 engram 引擎)。→ **剥离办法**:用 MemOS 自家代码在 engram 同款栈(本地 vllm qwen 答题 + deepseek-v4-flash 判题)复现 LoCoMo,任务记录见 [`memos-inhouse-locomo-repro.md`](./memos-inhouse-locomo-repro.md);跑完把"regime 伪影 vs 真机制差距"的分离数字回填本节。
 4. **检索/抽取质量**——以上剥离后剩余的,才是底层记忆抽取 + 检索质量的真差距,engram 的主战场。
 
 **⑤ 对抗题(cat-5)工作与 leaderboard 无关。** 既然 Mem0/MemOS 都排除 cat-5,006 拒答闸即便 GO 也不会改变 LoCoMo 榜位——它服务的是 Synthius 那种把 cat-5 计入的**不同口径**。这回头印证了:006 NO-GO 没有损失榜位,且没为一个"榜上不计分"的切片花冤枉钱。对抗题归为"Synthius 口径下的独立目标",不进 LoCoMo 主线。
