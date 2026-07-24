@@ -35,17 +35,23 @@ git diff --name-only -- memory embedding provider store internal   # 必空
 export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=bge-large-en-v1.5 EMBED_API_KEY=local-eval
 setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
   --store-dir <009-bge-chunks-store> --chunks --top-k 30 --retrieval hybrid \
-  --alias-shadow --only-category 1 --recall-diagnostic \
-  --run-dir .locomo-run/011-recall >recall.log 2>&1; echo $? >recall.exit' </dev/null >/dev/null 2>&1 & disown
-[ -f recall.exit ] && echo "exit=$(cat recall.exit)" || tail -1 recall.log
+  --alias-shadow baseline --only-category 1 --recall-diagnostic \
+  --run-dir .locomo-run/011-recall >recall-base.log 2>&1; echo $? >recall-base.exit' </dev/null >/dev/null 2>&1 & disown
+[ -f recall-base.exit ] && echo "exit=$(cat recall-base.exit)" || tail -1 recall-base.log
+# baseline exit=0 后再跑 treatment;两次共用 run-dir 以生成配对分层 delta
+setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+  --store-dir <009-bge-chunks-store> --chunks --top-k 30 --retrieval hybrid \
+  --alias-shadow treatment --only-category 1 --recall-diagnostic \
+  --run-dir .locomo-run/011-recall >recall-treatment.log 2>&1; echo $? >recall-treatment.exit' </dev/null >/dev/null 2>&1 & disown
+[ -f recall-treatment.exit ] && echo "exit=$(cat recall-treatment.exit)" || tail -1 recall-treatment.log
 # 判定:「gold 有 alias」子层 gold 净升 top-30(entered>left,mean rank 前移)才算有信号;否则 NO-GO 止损,不跑门③
 # 目标类:multi-hop=--only-category 1;open-domain=--only-category 3(dataset.go categoryLabel)
-# H1:--alias-shadow 下 treatment 对 009 店的**副本**补影子并检索副本,baseline 用**原店**(无影子);原店从不被写影子
+# 方案 A:两臂均复制 009 店到 <run-dir>/alias-store;baseline Backfill 后剥离影子,treatment 保留;canonical 从不被打开为运行店
 ```
 
 ### 门③ 端到端决胜(box 窗口,repeats=3,唯一变量=alias 影子向量)
-两臂 recipe 逐字一致,只差 `--alias-shadow`。canonical 四 flag 缺一作废。
-**H1 物理两店**:baseline 臂用 009 **原店**(无影子);treatment 臂(`--alias-shadow`)内部把原店**复制为副本**、对副本补影子、检索副本——原店从不被写影子(research D7),故两臂唯一变量=影子向量。
+两臂 recipe 逐字一致,只差 `--alias-shadow baseline|treatment`。canonical 四 flag 缺一作废。
+**方案 A 两店隔离**:baseline/treatment 都把 009 canonical 店复制到各自 `<run-dir>/alias-store`;baseline 副本在 Backfill 后剥离影子,treatment 副本保留影子。canonical 从不被写,两臂唯一变量=影子向量。
 ```bash
 source ~/.config/engram/locomo-vllm.env; source ~/.config/engram/judge.env
 export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=bge-large-en-v1.5 EMBED_API_KEY=local-eval
@@ -53,12 +59,14 @@ export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=bge-large-en-v1.5 EMB
 setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
   --store-dir <009-bge-chunks-store> --chunks --chunk-quota 12 --top-k 30 \
   --force-answer --judge-mem0-aligned --retrieval hybrid --concurrency 40 --repeats 3 \
+  --alias-shadow baseline \
   --run-dir .locomo-run/011-e2e-base >base.log 2>&1; echo $? >base.exit' </dev/null >/dev/null 2>&1 & disown
 # treatment 臂(+影子,其余逐字相同)
 setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
   --store-dir <009-bge-chunks-store> --chunks --chunk-quota 12 --top-k 30 \
   --force-answer --judge-mem0-aligned --retrieval hybrid --concurrency 40 --repeats 3 \
-  --alias-shadow --run-dir .locomo-run/011-e2e-shadow >shadow.log 2>&1; echo $? >shadow.exit' </dev/null >/dev/null 2>&1 & disown
+  --alias-shadow treatment \
+  --run-dir .locomo-run/011-e2e-shadow >shadow.log 2>&1; echo $? >shadow.exit' </dev/null >/dev/null 2>&1 & disown
 ```
 
 **验 SC**:

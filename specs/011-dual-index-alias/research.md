@@ -27,10 +27,10 @@
 - **Alternatives**: 用 trigger/触发器自动产影子 → 隐式、难测;不枚举仅靠 storeFact → 固化店(已抽取完)补不了影子。否决。
 - **M2 核查(承 analyze)**: 影子是「有向量、`memory_entries` 无 row」的半 entry,**只应被 `vectorRankContext` semantic 归并消费**。实现时 MUST 核查其它 `memory_embeddings` 消费者不把影子当真 entry:`Backfill.NamesMissingModel`(不因影子缺 entry row 反复 enqueue 失败)、export/snapshot(不导出影子为条目)、curation(不评审影子)。凡遍历向量后 `GetByName` 的路径,遇影子 name 须 resolve/跳过。
 
-## D7 — baseline/treatment 物理隔离(承 analyze H1)
+## D7 — baseline/treatment 物理隔离(承 analyze H1,维护者裁定方案 A)
 
-- **Decision**: 引擎 `vectorRankContext` 归并是**固有行为**(见 `#alias` 影子即 max-pool 归并),**不受 adapter flag 控制**(引擎不知道 `--alias-shadow`)。故 `--alias-shadow` 的语义 = treatment 臂**将目标店复制为副本、对副本 re-embed 补影子、检索用副本**;baseline 臂用**无影子的原店**。**原店绝不写影子。**
-- **Rationale**: 引擎/适配分离(宪法 II)——引擎不感知 adapter flag。两臂物理隔离(原店 vs 副本+影子)才保证 baseline 逐字节 parity(SC-001)、决胜门唯一变量 = 影子向量。若同店靠 flag 控归并,需让引擎感知 adapter flag(违 II)且 baseline 被影子污染。
+- **Decision**: 引擎 `vectorRankContext` 归并是**固有行为**(见 `#alias` 影子即 max-pool 归并),**不受 adapter flag 控制**(引擎不知道 `--alias-shadow`)。`--alias-shadow` 是 `off|baseline|treatment` enum;baseline/treatment 都先将 canonical 009 店复制到各自 `<run-dir>/alias-store`,再在副本上执行 US1 `Backfill`。baseline 随后剥离并断言 `#alias` 行为 0;treatment 断言 `#alias` 行 `>0`。**canonical 原店绝不作为运行店打开、绝不写影子。**
+- **Rationale**: US1 `Backfill` 已无条件补齐应有影子;若 baseline 直接打开 canonical,即使只想复用 text embedding,也会污染原店并破坏唯一变量。两臂采用相同“复制+Backfill”路径、只在 baseline 副本末尾剥离,才能保证 canonical 纯净且唯一变量确为影子行。
 - **Alternatives**: 同一物理店 + flag 控归并 → 违引擎/适配分离、污染 baseline,否决。
 
 ## D5 — 融合:max-pool + RRF,无 α

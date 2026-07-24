@@ -84,7 +84,7 @@
 
 **US2 — adapter re-embed + 三道门 gated(纯 adapter,引擎零改)**
 
-- **FR-009**: adapter(`cmd/locomo-bench`)MUST 提供对 009 固化店**只重嵌入不重抽取**产 alias 影子向量的编排(retrieval-only,不调抽取/答题 LLM);影子 MUST 只写入 009 店的**副本**(treatment 店)、**原店(baseline 用)绝不写影子**——物理两店隔离,保证 baseline 逐字节 parity 与决胜门唯一变量=影子向量;失败/缺向量退化为无该影子。
+- **FR-009**: adapter(`cmd/locomo-bench`)MUST 提供对 009 固化店**只重嵌入不重抽取**产 alias 影子向量的编排(retrieval-only,不调抽取/答题 LLM);baseline/treatment MUST 都在 canonical 店的 run-local 副本上 Backfill,baseline 副本随后剥离影子,treatment 副本保留;canonical MUST NOT 作为运行店打开/写入。两臂相同复制/重嵌入路径保证唯一变量=影子向量;失败/缺向量退化为无该影子。
 - **FR-010**: 端到端评测 MUST 保持最终 top-k=30、answer-context 与 baseline 同量级;`answer_context_tokens` MUST NOT 显著上升(提质证明——涨了即判加量 NO-GO)。
 - **FR-011**: 分层离线召回门 MUST 输出「gold 有 alias」子层与全局各自的 gold rank delta / coverage@30 delta,**无云/付费杠杆**;coverage 增益 MUST NOT 单独用作 GO 依据(仅诊断);「gold 有 alias」子层 gold 未净升 top-30 MUST 判 NO-GO 止损、不启动门③。
 - **FR-012**: 端到端决胜门 MUST 同机配对 baseline 店 vs treatment 店(唯一变量=alias 影子向量),box vllm Qwen 栈 + deepseek mem0-aligned judge + canonical recipe、repeats=3,算配对 McNemar;判 GO 须同时满足 **目标类 above-noise 提升 + overall 及任一非目标类不显著回退 + `answer_context_tokens` 不显著上升 + top-k=30 恒等**。

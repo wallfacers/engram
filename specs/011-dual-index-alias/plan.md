@@ -14,7 +14,7 @@
 
 **Primary Dependencies**: 引擎内部 —— `vectorRankContext`(semantic 主信号,归并注入点,`retriever.go:821`)、`VectorStore.LoadAllForModel`/`Put`、`embedding.TopKCosine`/`Cosine`、`embedOne`/`embedText`(`embedder.go:68-90`,影子写入注入点)、`memory_event_aliases`(已存,influx 源)、`pipeline.storeFact`/`PutAliases`(`pipeline.go`,enqueue 影子注入点)、`fuseRRF`/`ranksFromOrder`。US2 adapter 侧:`cmd/locomo-bench` 的 store 加载 + `buildAttributionTrace`/`evidenceRecallAt`(分层召回复用)+ McNemar/context-parity 设施。
 
-**Storage**: 复用 009 固化 SQLite store(HF `009-bge-chunks-store`,bge-large 1024d + chunks);retrieval-only 补影子向量,不重抽取。端到端产物写 gitignored `.locomo-run/011-*/`。**无 schema 变更**(`memory_embeddings` 复用,影子为独立 name row,`entry_name` PK 不变)。
+**Storage**: 复用 009 固化 SQLite store(HF `009-bge-chunks-store`,bge-large 1024d + chunks);baseline/treatment 均复制到 run-local `alias-store` 后只重嵌入不重抽取,baseline Backfill 后剥离影子,treatment 保留;canonical 不打开为运行店。端到端产物写 gitignored `.locomo-run/011-*/`。**无 schema 变更**(`memory_embeddings` 复用,影子为独立 name row,`entry_name` PK 不变)。
 
 **Testing**: `CGO_ENABLED=0 go test ./memory`;US1 parity golden(无 alias fact + chunk semantic 逐字节等于现状)+ 归并正确性 golden(alias 影子强命中经 max-pool 使源 fact 升排名、去重、影子 name 不泄漏,确定性 stub embedder 无 LLM)。US2:分层离线召回 delta(有 alias 子层 vs 全局,coverage 诊断)+ 端到端配对 McNemar 脚本。
 
@@ -69,9 +69,9 @@ memory/                          # US1 全部在此(engine 增量,单独 commit)
 └── *_test.go                    # 新:parity(无 alias/chunk 逐字节)+ 归并 golden(升排名/去重/影子不泄漏)+ 退化
 
 cmd/locomo-bench/                # US2 全部在此(adapter,引擎零改,提交分离)
-├── (新)reembed 编排            # 对 009 店枚举有 alias fact、enqueue 影子、等 embedder 落盘(retrieval-only)
+├── (新)reembed 编排            # 两臂复制 009 店并 Backfill;baseline 剥离影子,treatment 保留;canonical 不写
 ├── (新)分层召回诊断           # baseline vs treatment,按 gold fact 是否有 alias 分层,复用 attribution/coverage
-├── main.go                      # 新 flag:--alias-shadow(开影子写入+归并) / --recall-diagnostic 复用 / context-parity 记账
+├── main.go                      # 新 enum:--alias-shadow off|baseline|treatment / --recall-diagnostic 复用 / context-parity 记账
 └── (复用现有 store 加载 / journal / stats / McNemar 设施)
 
 .locomo-run/011-*/               # gitignored:分层召回 delta + 端到端配对产物 + context 对比

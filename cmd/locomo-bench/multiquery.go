@@ -319,7 +319,7 @@ func validateContextParityResume(opt options, convs []conversation, states []*ar
 	}
 	parityState := states[len(states)-1]
 	parityOpt := optionsForRun(opt, parityState.name, len(states) > 1)
-	arm := multiQueryArm(parityOpt.multiQuery)
+	arm := contextParityArm(parityOpt)
 	for _, conv := range convs {
 		for _, selected := range selectQuestions(conv, parityOpt) {
 			key := resultKey{Conv: conv.ID, Q: selected.Index}
@@ -363,6 +363,17 @@ func (j *contextParityJournal) Write(record contextParityRecord) error {
 	}
 	j.seen[record.key()] = struct{}{}
 	return nil
+}
+
+func (j *contextParityJournal) Fail(err error) {
+	if j == nil || err == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.err == nil {
+		j.err = err
+	}
 }
 
 func (j *contextParityJournal) Close() error {
@@ -431,8 +442,20 @@ func runRecallDiagnosticCLI(ctx context.Context, opt options, convs []conversati
 	if err := validateRecallDiagnosticOptions(opt, arms); err != nil {
 		return err
 	}
+	if aliasShadowEnabled(opt) && !opt.aliasShadowPrepared {
+		if err := prepareAliasShadowStore(&opt); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create recall diagnostic run dir: %w", err)
+	}
+	if aliasShadowEnabled(opt) {
+		var embClient embedding.Client
+		if armBackend(arms[0]) == "hybrid" {
+			embClient = buildBenchEmbeddingClient(logger, nil)
+		}
+		return runAliasShadowRecallDiagnosticWithClient(ctx, opt, convs, arms, embClient, logger)
 	}
 
 	apiKey := os.Getenv("LOCOMO_API_KEY")
@@ -606,6 +629,9 @@ func validateRecallDiagnosticOptions(opt options, arms []string) error {
 	}
 	if len(arms) != 1 {
 		return fmt.Errorf("--recall-diagnostic requires exactly one retrieval backend")
+	}
+	if aliasShadowEnabled(opt) && armBackend(arms[0]) != "hybrid" {
+		return fmt.Errorf("--recall-diagnostic with --alias-shadow requires the hybrid retrieval backend")
 	}
 	if opt.topK != multiQueryFinalTopK {
 		return fmt.Errorf("--recall-diagnostic is fixed at --top-k %d", multiQueryFinalTopK)

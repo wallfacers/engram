@@ -59,6 +59,8 @@ type options struct {
 	dataPath             string
 	runDir               string
 	storeDir             string
+	aliasShadow          string
+	aliasShadowPrepared  bool
 	datasetFormat        string
 	compareSpec          string
 	repeats              int
@@ -179,6 +181,7 @@ func run() error {
 	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
+	flag.StringVar(&opt.aliasShadow, "alias-shadow", aliasShadowOff, "alias shadow arm: off | baseline | treatment")
 	flag.BoolVar(&opt.coverageOnly, "coverage-only", false, "retrieval-only bake-off: grade every arm on exact-turn / session evidence recall and write coverage.json, making NO answer or judge LLM call (needs --chunks for turn recall)")
 	flag.BoolVar(&opt.attributionTrace, "attribution-trace", false, "retrieval-only per-question attribution trace (requires a persisted store)")
 	flag.StringVar(&opt.joinResults, "join-results", "", "archived results JSONL to join by (conv,q) for correctness quadrants")
@@ -219,7 +222,7 @@ func run() error {
 	if opt.repeats < 1 {
 		return fmt.Errorf("--repeats must be at least 1")
 	}
-	if (opt.multiQuery || opt.recallDiagnostic) && opt.mqMaxSubqueries < 1 {
+	if (opt.multiQuery || (opt.recallDiagnostic && !aliasShadowEnabled(opt))) && opt.mqMaxSubqueries < 1 {
 		return fmt.Errorf("--mq-max-subqueries must be at least 1")
 	}
 	if opt.recallDiagnostic {
@@ -258,6 +261,9 @@ func run() error {
 	if opt.catQuota, err = parseCatOverrides(opt.catQuotaSpec); err != nil {
 		return fmt.Errorf("--cat-chunk-quota: %w", err)
 	}
+	if err := validateAliasShadowOptions(opt); err != nil {
+		return err
+	}
 	if opt.multiQuery {
 		if opt.topK != multiQueryFinalTopK {
 			return fmt.Errorf("--multi-query requires --top-k %d to preserve context parity", multiQueryFinalTopK)
@@ -294,6 +300,9 @@ func run() error {
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		sampledConversations = opt.maxConvs
 		convs = convs[:opt.maxConvs]
+	}
+	if err := prepareAliasShadowStore(&opt); err != nil {
+		return err
 	}
 	if opt.recallDiagnostic {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -915,6 +924,9 @@ func (r *conversationRuntime) Close() {
 // buildConversationRuntime performs the one-time extraction, optional opinion
 // pass, chunk ingestion, and embedding backfill for one conversation.
 func buildConversationRuntime(ctx context.Context, opt options, conv conversation, extractCall pipeline.ModelCaller, embClient embedding.Client, arms []string, logger *slog.Logger) (*conversationRuntime, error) {
+	if aliasShadowEnabled(opt) && !opt.aliasShadowPrepared {
+		return nil, fmt.Errorf("alias-shadow runtime requires a prepared run-local store copy; refusing to open %s", opt.storeDir)
+	}
 	dsn := ":memory:"
 	if opt.storeDir != "" {
 		if err := os.MkdirAll(opt.storeDir, 0o755); err != nil {
@@ -956,6 +968,9 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 		logger.Info("reusing persisted extraction", "conversation", conv.ID, "facts", n)
 	} else {
+		if aliasShadowEnabled(opt) {
+			return nil, fmt.Errorf("alias-shadow requires a prebuilt persisted store for conversation %d; refusing to call extraction", conv.ID)
+		}
 		for _, s := range conv.Sessions {
 			msgs := make([]pipeline.Message, 0, len(s.Turns))
 			for _, tn := range s.Turns {
@@ -1020,6 +1035,13 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		logger.Warn("embedding backfill failed", "conversation", conv.ID, "err", err)
 	}
 	embedder.Close()
+	if aliasShadowEnabled(opt) {
+		count, err := enforceAliasShadowStoreMode(ctx, st.DB(), opt.aliasShadow)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("alias-shadow store prepared", "conversation", conv.ID, "arm", opt.aliasShadow, "shadow_vectors", count)
+	}
 
 	// One retriever per arm over the same store. Only the hybrid arm gets the
 	// semantic signal and the optional rerank stage; fts stays the pure legacy
@@ -1210,15 +1232,21 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 				}
 				correct, predicted, usage, sweepUsed, evidence, retrievalMeta := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, abstainRuntime, logger)
 				if writeParity && armOpt.contextParity != nil {
-					if err := armOpt.contextParity.Write(contextParityRecord{
+					record := contextParityRecord{
 						Conv:                key.Conv,
 						Q:                   key.Q,
 						Category:            qa.Category,
-						Arm:                 multiQueryArm(armOpt.multiQuery),
+						Arm:                 contextParityArm(armOpt),
 						FinalTopK:           retrievalMeta.finalTopK,
 						AnswerContextTokens: usage.InputTokens,
 						SubqueryCount:       retrievalMeta.subqueryCount,
-					}); err != nil {
+					}
+					if err := validateAliasShadowContextParity(armOpt, record); err != nil {
+						armOpt.contextParity.Fail(err)
+						logger.Error("alias-shadow context parity failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					if err := armOpt.contextParity.Write(record); err != nil {
 						logger.Error("write context parity failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
 						return
 					}

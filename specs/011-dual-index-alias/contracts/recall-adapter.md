@@ -4,14 +4,15 @@
 
 ## Flags
 
-- `--alias-shadow`:treatment 臂**将目标店复制为副本、对副本 re-embed 补影子向量、检索用副本**;缺省 = baseline 用**无影子的原店**、逐字节不变。**语义澄清(M1)**:此 flag 只控制「是否产影子副本并检索它」;检索归并是引擎**固有行为**(见 `#alias` 影子即 max-pool),由**店内是否有影子向量**触发,非 flag 直接开关。
+- `--alias-shadow` 是 enum string:`off|baseline|treatment`,默认 `off`。`baseline`/`treatment` 都把 `--store-dir` 下的 `conv*.db`(含存在的 `-wal`/`-shm`)复制到 `<run-dir>/alias-store/`,并把本次有效 store-dir 指向副本;区别仅是 Backfill 后 baseline 剥离 `#alias` 行、treatment 保留并断言存在。**语义澄清(M1)**:flag 只控制副本内影子行的评测臂状态;检索归并是引擎**固有行为**(见 `#alias` 影子即 max-pool),由店内是否有影子向量触发,非 flag 直接开关。
+- **Rationale**:US1 Backfill 无条件产影子,故 baseline 也需显式复制+剥离以保 canonical 纯净。
 - 复用 `--recall-diagnostic`(retrieval-only,不初始化答题/judge caller)+ `--only-category`。
-- `--alias-shadow` 与 `--multi-query` 互斥(避免与 010 变量混淆);要求 `--top-k 30`。
+- `baseline|treatment` 与 `--multi-query` 互斥(避免与 010 变量混淆),要求 `--top-k 30`,且必须提供 `--store-dir`(不能纯内存)。
 
 ## re-embed 编排(retrieval-only,物理两店隔离 — H1)
 
-- **原店绝不写影子**:treatment 臂先把目标 009 店**复制为副本**(`.locomo-run/011-*/shadow-store`),再对**副本**枚举 `AliasShadowNames`、`Enqueue` 影子、等 embedder 落盘;**不重抽取**(断言抽取 caller calls=0)。baseline 臂直接用**原店**(无影子)。
-- 两臂物理隔离(原店 vs 副本+影子)保证 baseline 逐字节 parity(SC-001)、决胜门唯一变量=影子向量(research D7)。
+- **canonical 绝不打开为运行店、绝不写影子**:两臂都先复制 009 店到各自 run-dir 的 `alias-store`;对副本跑现有 `Backfill`,且复用店 `countExtracted>0` 必须跳过抽取(断言抽取 caller calls=0)。
+- baseline 在 Backfill 后执行 `DELETE FROM memory_embeddings WHERE entry_name LIKE '%#alias'`,再断言 `COUNT(*) ... LIKE '%#alias' = 0`;treatment 断言对应 count `>0`。两臂因此拥有同样的本地复制/重嵌入路径,唯一变量是检索时副本内是否保留影子行。
 - 凭据(box bge-large 8001 嵌入)只走 env/隧道,绝不落盘。
 
 ## 门① 纯 Go 契约(FREE)
@@ -20,8 +21,9 @@
 
 ## 门② 分层召回诊断(NEAR-FREE,retrieval-only,仅诊断不作 verdict)
 
-- baseline(无影子)vs treatment(有影子),同 query single 检索,复用 `buildAttributionTrace`/`evidenceRecallAt`。
-- 输出**按 `gold_has_alias` 分层**:「gold 有 alias」子层 + 全局 各自的 `gold_entered/left_top_30`、`mean_gold_rank` delta、`coverage@30` delta → `.locomo-run/011-recall/`。
+- baseline(无影子)vs treatment(有影子)依次写入同一 run-dir,同 query 做 single 检索,复用 `buildAttributionTrace`/`evidenceRecallAt`;该模式不创建 query decomposition/答题/judge caller。
+- 用 attribution 的事实覆盖判定从全部已存 fact 得到 gold stored entry names,再查 `memory_event_aliases` 判 `gold_has_alias`;输出「gold 有 alias」子层 + 全局各自的 `gold_entered/left_top_30`、`mean_gold_rank` delta、`coverage@30` delta。臂级 JSONL 与配对报告落 `.locomo-run/011-recall/`。
+- **符号口径**:`rank_delta=treatment-baseline`(负=排名前移/改善);`coverage_delta=treatment-baseline`(正=改善)。
 - **止损判据**:「gold 有 alias」子层 gold **净升 top-30**(entered > left 且 mean rank 前移)才算机制有信号;否则 NO-GO,不启动门③。coverage 仅诊断(FR-011)。
 
 ## 门③ 端到端配对 McNemar(BOX 窗口,repeats=3)
