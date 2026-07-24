@@ -364,7 +364,21 @@ box 全本地栈、canonical recipe、repeats=3,五臂同 store 配对:
 - **处置**:强化常量 + 四锚单测已 `git revert`(还原 `forceTemporalAnswerPrompt` 为旧契约);引擎全程零改(纯适配器)。SDD 正本 `specs/014-temporal-answer-contract/`;`--temporal-answer-prompt` 开关 + old-tplan-baseline.md 保留供 backlog 确认。
 - **方法论兑现**:冷启动纪律再次生效——base 冷首臂 0.8565 vs base2 0.8643(−0.78pp),主门用 base2 不用冷首臂。
 
-### backlog:old-tplan 显著性确认 recipe(下次 box 空档跑,~45-60min)
+### ✗ backlog 兑现:old-tplan 8-rep 确认 = **ns,收口 inconclusive**(2026-07-25)
+
+按下方 recipe 原样执行(box 全本地栈,bench 直接跑在 box 上;店从 HF 拉回 box,`009-bge-chunks-store`;warm-up 1 rep 丢弃 → base2 8 reps → old-tplan 8 reps,`--only-category 2`,canonical recipe 干净 top-k 30):
+
+| 臂 | temporal maj acc(8-rep 多数投票) | per-rep 带 |
+|---|---:|---|
+| warm-up(丢弃) | 82.2% | 店温度核对 ✓ 落历史带 |
+| base2 | **85.36%** | 79.1–83.2% |
+| old-tplan | **86.29%**(+0.93pp) | 79.4–85.4% |
+
+- **配对 McNemar:b=18 / c=21,net +3,χ²=0.231(门 3.841)→ ns,FAIL。** 上轮四臂的 +2.5pp(net +8)是单 run 抖动的慷慨端;8-rep 多数投票把它压回 +0.93pp / net +3。
+- **处置:`--temporal-answer-prompt` 维持默认关,不出货。** temporal 答题侧 prompt 类杠杆(强化四锚版 + 旧简单版)至此**双双收口**——前者显著更差,后者 ns。temporal 剩余升级路径只剩确定性日期脚手架(Option B,TIMELINE 块),属新机制、需单独 SDD。
+- 口径注:regime 四要素两臂核验一致(仅差 `temporal_answer_prompt=true`);同店同批 back-to-back,检索跨臂逐字节一致。产物:HF `wallfacers/engram-locomo-artifacts` 下 `014b-oldtplan-confirm/`(三臂逐题 + 下节 trace)。judge=deepseek-v4-flash 官方端点。
+
+### backlog(已兑现,存档):old-tplan 显著性确认 recipe(下次 box 空档跑,~45-60min)
 
 目标:把 old-tplan(打开现有 `--temporal-answer-prompt` = 旧简单契约)的 temporal +2.5pp 从"趋势(p~0.24)"推过显著门,或证伪。零新代码——只是启用现有 flag。
 
@@ -374,3 +388,19 @@ box 全本地栈、canonical recipe、repeats=3,五臂同 store 配对:
 - **纪律**:box 冷启后先跑一个 warm-up 臂丢弃(或复跑 base 做锚);paired McNemar 只对干净复跑基线(踩坑#10)。
 - **判据**:temporal(n=321)3+rep 多数投票配对 McNemar,net 需 χ²>3.841(约 net≥±14 @ n=36 discordant)才显著;并核 overall 不回退。显著且 overall 不降 = **零成本 GO**(启用现有 flag 即出货);仍 ns = old-tplan 收口 inconclusive。
 - **注意**:answer temp=1.0 非确定,单 run 观测有抖动;8-rep 多数投票是为压这抖动、非声明确定性差分([[locomo-answer-nondeterministic]] 精神)。
+
+---
+
+## single-hop / open-domain 错题分诊 — 近免费 trace × 答对错 join(2026-07-25)
+
+temporal 分诊(上文)证明"先切答题侧/召回侧再选杠杆"是唯一不建错方向的办法。本轮把同一刀补到**从未逐题分诊过的 single-hop(最大错题绝对量)**与 open-domain。方法:box 上全量 `--attribution-trace`(retrieval-only,1540 题,0 答题/judge 调用,近免费)拿逐题 `gold_rank_topk/gold_rank_pool` × `009-full-A-base` 3-rep 多数投票逐题正误,离线 join。产物:HF `014b-oldtplan-confirm/014b-trace/`。
+
+| 类 | n | 错题(maj) | gold 在 top-30 答题上下文(答题侧) | gold 埋 top-30 外(召回侧) | 召回侧深度 |
+|---|---:|---:|---:|---:|---|
+| **single-hop** | 841 | 94 | **58(62%)** | 36(38%) | pool p50=142 p90=239,不在池仅 1 |
+| **open-domain** | 96 | 33 | 17(52%) | 16(48%) | pool p50=186 p90=232,不在池 2 |
+
+- **single-hop 主瓶颈也在答题侧(62%)**,与 temporal(69%)同构。答错样例眼验的失败模式:**答案粒度过粗**(GOLD "a cup with a dog face" → PRED "pots")、**答错主体/方面**(问 Melanie 的反应 → 答孩子们的感受)、**多候选挑错事件**(问 road trip 后放松方式,GOLD hike → PRED painting)。部分属 judge 边界(语义接近但表述偏),部分是真检索去歧/细节保持问题——**尚未逐题分类量化,是下一步的输入**。
+- **single-hop 召回侧 38% 的 gold 埋深 p50=142**——与 multi-hop/open-domain gold 深埋同一堵墙(dense 单塔深召回上限,010/011/012 三向证伪的对象),便宜杠杆同样够不着,不另立方向。
+- **open-domain 近半错题(48%)是召回侧且埋更深(p50=186)**——坐实 opinion-pass NO-GO 时的判断:证据(观点/偏好类)在池深处,粗放扩覆盖救不了,要救得走 **category-conditional 精准浮现**(结构性新机制)。答题侧 17 题多为真推理难题(如 "Would Caroline be considered religious?" GOLD "Somewhat" → PRED "No"),prompt 类杠杆在 temporal 上已两连败,不优先。
+- **⚠ 教训前置**:014 证明"看着合理的答题 prompt 强化"端到端可以是负贡献。single-hop 答题侧 58 题在动手前必须先完成**失败模式逐题分类量化**(粒度/主体/去歧/judge 边界各占多少),且任何契约改动过同样的配对 McNemar 门,不再凭眼验样例直接上杠杆。
