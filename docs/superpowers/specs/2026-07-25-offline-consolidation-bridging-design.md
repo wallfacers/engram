@@ -83,7 +83,8 @@ ingest ──抽取──► 原子 fact ──┬── curation：删/合并/�
 **桥接产物就是一条普通的 `memory_entries`。** 同构 ⇒ **检索侧零改动**，现有三路
 RRF 直接命中。任何「新 entry 类型」都要改检索器，是自找的耦合。
 
-血缘另立表（v3 migration，新增不改旧）：
+血缘另立表（**v6** migration，新增不改旧。v3/v4/v5 已分别被 003 bio-retrieval、
+013 temporal-indexes、012 fact-queries 占用——见 015 research.md R1）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS memory_bridges (
@@ -144,7 +145,7 @@ Auto-Dreamer 栽在「过度压缩丢局部细节」上，那种损失会直接�
 
 | 属性 | 做法 |
 |---|---|
-| 多实例安全 | 复用 `curation.Lease` + heartbeat，照 `Worker.RunPass` 模子 |
+| 多实例安全 | 复用 `curation.Lease` + heartbeat，照 `Worker.RunPass` 模子。**该 lease 是 `id=1` 的单例行锁，故固结与策展必然互斥、不能同时跑**——这正是想要的：存储层是单写连接（`SetMaxOpenConns(1)`），两个重后台 pass 并发只会互相阻塞。见 015 research.md R2 |
 | 幂等 | 候选对排序后作 `pair_key`，`memory_bridges` 唯一索引；重跑不重复合成 |
 | 可增量/可恢复 | 由幂等自动获得——pass 中断后重跑只补未做的 |
 | 预算上限 | per-pass max candidates，照 curation 的 `max_candidates_per_pass`。**SaaS 那天即租户配额旋钮** |
