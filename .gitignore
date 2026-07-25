@@ -31,6 +31,11 @@ testdata/parity/cache/
 # LoCoMo dataset (public, not redistributed via repo)
 /testdata/locomo/
 /.locomo-run/
+
+# LongMemEval dataset (public, not redistributed via repo). sample.json is a
+# hand-written schema fixture and stays tracked.
+/testdata/longmemeval/longmemeval_*.json
+/.longmemeval-run/
 pcic_meta*.json
 cov-pcic*
 ans-pcic*
