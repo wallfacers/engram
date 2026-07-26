@@ -355,3 +355,29 @@ func TestAttributionCLIUsesPersistedStoreWithoutAnswerOrJudgeCredentials(t *test
 		t.Fatalf("cost.json exists in retrieval-only run; answer machinery was not bypassed")
 	}
 }
+
+// TestValidateAttributionOptionsDatasetFormat pins which dataset formats the
+// retrieval-only attribution diagnostic accepts. It accepted locomo only
+// because LongMemEval carried no turn ids; feature 016 synthesizes
+// turn.DiaID = "D<session>:<turn>" for LongMemEval, which makes its evidence
+// isomorphic to LoCoMo's and lets buildAttributionTrace run unchanged.
+// The diagnostic is the load-bearing input for per-question coverage (T033),
+// so the gate must admit longmemeval and still reject anything else.
+func TestValidateAttributionOptionsDatasetFormat(t *testing.T) {
+	base := func(format string) options {
+		return options{
+			runDir:        t.TempDir(),
+			storeDir:      t.TempDir(),
+			datasetFormat: format,
+			topK:          30,
+		}
+	}
+	for _, format := range []string{"locomo", "longmemeval"} {
+		if err := validateAttributionOptions(base(format), []string{"hybrid"}); err != nil {
+			t.Fatalf("dataset-format %q must be accepted: %v", format, err)
+		}
+	}
+	if err := validateAttributionOptions(base("mystery"), []string{"hybrid"}); err == nil {
+		t.Fatal("unknown dataset-format must be rejected")
+	}
+}

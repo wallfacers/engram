@@ -444,8 +444,13 @@ func validateAttributionOptions(opt options, arms []string) error {
 	if opt.storeDir == "" {
 		return fmt.Errorf("--store-dir is required with --attribution-trace (retrieval-only mode never builds a store)")
 	}
-	if opt.datasetFormat != "locomo" {
-		return fmt.Errorf("--attribution-trace supports --dataset-format locomo only")
+	// LongMemEval is admitted because feature 016 synthesizes
+	// turn.DiaID = "D<session>:<turn>" during load, making its gold evidence
+	// isomorphic to LoCoMo's; parsedGoldTurns / hitMappedGoldTurns / chunkTurns
+	// then run unchanged. Everything downstream of the loader is already
+	// dataset-agnostic, so the gate only ever guarded the missing turn ids.
+	if opt.datasetFormat != "locomo" && opt.datasetFormat != "longmemeval" {
+		return fmt.Errorf("--attribution-trace supports --dataset-format locomo or longmemeval, got %q", opt.datasetFormat)
 	}
 	if len(arms) != 1 || (arms[0] != "fts" && arms[0] != "hybrid") {
 		return fmt.Errorf("--attribution-trace requires exactly one retrieval backend: fts or hybrid")
