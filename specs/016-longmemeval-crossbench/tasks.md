@@ -113,14 +113,14 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 - [ ] T027 [US3] 写分层抽样一次性脚本：按配额 multi-session 27 / temporal-reasoning 27 / knowledge-update 15 / single-session-user 14 / single-session-assistant 11 / single-session-preference 6 抽 100 题，固定种子（FR-013）
 - [ ] T028 [US3] 产出两个抽样产物：`longmemeval_s_subset100.json`（格式与源文件一致，可直接 `--data`）与 `subset100_question_ids.json`（含 seed、配额、id 列表）；两者 gitignore，归档 HF 私仓（FR-014）
 - [ ] T029 [US3] 验证抽样可复现：重复执行脚本两次，断言产出的 `question_id` 集合完全一致（SC-006）
-- [ ] T030 [US3] 建 S 臂库：对子集文件运行建库，store 目录与 ORACLE 分开；setsid detach（FR-011）
-- [ ] T031 [US3] 跑 G-向量门：对 S 臂 store 执行 T022 脚本，`total_missing` 必须为 0（FR-010）
-- [ ] T032 [US3] S 臂答题 + 判分 ×3：canonical 配方，`repeats=3` 抑制方差（FR-015）
-- [ ] T033 [US3] 产出逐题证据覆盖：对 S 臂运行只读归因/覆盖诊断，得到每题的精确证据覆盖率（FR-016）。**尺子裁定（评审修正）**：归因 trace 的 `retrieved[].mapped_gold_turns` 由 `attribution.go:165 hitMappedGoldTurns` 产生，它有两条分支 —— chunk 命中走 `chunkTurns` 精确轮次交集，**fact 命中走 `factCoversGoldTurn` 的会话门控词包含（tau）模糊配对**。而 `coverage.go:19 evidenceRecallAt`（G-尺子门与此前全部 LoCoMo 数字所用的尺子）**只认 chunk 血缘，fact 一律不计**。逐题覆盖率 MUST 按名字前缀 `chunk-c` 过滤后再算，否则一个特性内并存两把不可比的尺子，而本特性的全部目的就是跨 benchmark 比同一把尺子。LoCoMo 实测两者为 0.841（宽松）vs 0.808（严格）
-- [ ] T034 [US3] 分桶分账（**输入必须是 T033 的严格尺子覆盖率**）：按覆盖率分全覆盖 / 部分覆盖 / 零覆盖三桶，输出各桶题数、正确率、Wilson 区间；**任一桶 n < 20 标记 `judgeable:false`**（FR-016、FR-018、SC-007）
-- [ ] T035 [US3] 计算条件增益（全覆盖正确率 − 零覆盖正确率）、检索侧当量（零覆盖题数 × 条件增益）、答题侧当量（全覆盖仍答错的题数），输出 data-model §4.3 结构（FR-017）
-- [ ] T036 [US3] **判决**：读回 T003 登记的判据原文，校验其 SHA256 未变，逐字对照后给出「复现 / 证伪 / 无法判定」三选一；**不得四舍五入到任一侧，不得事后调整判据**（FR-019、SC-008）
-- [ ] T037 [US3] 计算 ORACLE vs S 同题配对的正确率对比作为上限锚，报告中**必须标注含干扰项密度混杂（约 24 倍稀释），只作上界不作因果**（FR-023）
+- [x] T030 [US3] 建 S 臂库：对子集文件运行建库，store 目录与 ORACLE 分开；setsid detach（FR-011）
+- [x] T031 [US3] 跑 G-向量门：对 S 臂 store 执行 T022 脚本，`total_missing` 必须为 0（FR-010）
+- [x] T032 [US3] S 臂答题 + 判分 ×3：canonical 配方，`repeats=3` 抑制方差（FR-015）
+- [x] T033 [US3] 产出逐题证据覆盖：对 S 臂运行只读归因/覆盖诊断，得到每题的精确证据覆盖率（FR-016）。**尺子裁定（评审修正）**：归因 trace 的 `retrieved[].mapped_gold_turns` 由 `attribution.go:165 hitMappedGoldTurns` 产生，它有两条分支 —— chunk 命中走 `chunkTurns` 精确轮次交集，**fact 命中走 `factCoversGoldTurn` 的会话门控词包含（tau）模糊配对**。而 `coverage.go:19 evidenceRecallAt`（G-尺子门与此前全部 LoCoMo 数字所用的尺子）**只认 chunk 血缘，fact 一律不计**。逐题覆盖率 MUST 按名字前缀 `chunk-c` 过滤后再算，否则一个特性内并存两把不可比的尺子，而本特性的全部目的就是跨 benchmark 比同一把尺子。LoCoMo 实测两者为 0.841（宽松）vs 0.808（严格）
+- [x] T034 [US3] 分桶分账（**输入必须是 T033 的严格尺子覆盖率**）：按覆盖率分全覆盖 / 部分覆盖 / 零覆盖三桶，输出各桶题数、正确率、Wilson 区间；**任一桶 n < 20 标记 `judgeable:false`**（FR-016、FR-018、SC-007）
+- [x] T035 [US3] 计算条件增益（全覆盖正确率 − 零覆盖正确率）、检索侧当量（零覆盖题数 × 条件增益）、答题侧当量（全覆盖仍答错的题数），输出 data-model §4.3 结构（FR-017）
+- [x] T036 [US3] **判决**：读回 T003 登记的判据原文，校验其 SHA256 未变，逐字对照后给出「复现 / 证伪 / 无法判定」三选一；**不得四舍五入到任一侧，不得事后调整判据**（FR-019、SC-008）
+- [x] T037 [US3] 计算 ORACLE vs S 同题配对的正确率对比作为上限锚，报告中**必须标注含干扰项密度混杂（约 24 倍稀释），只作上界不作因果**（FR-023）
 
 ---
 
@@ -129,7 +129,7 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 - [x] T038 引擎零改动硬验证：运行 `git diff --name-only -- memory embedding provider store internal`，断言输出为空（FR-025、SC-009）
 - [x] T039 全量回归：`CGO_ENABLED=0 go build ./...` 零错误 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿
 - [x] T040 LoCoMo 路径零行为变更核验：对 `--dataset-format locomo` 跑一次既有零调用探测（如 `--estimate`），确认输出与 T001 记录的基线一致
-- [ ] T041 写 `specs/016-longmemeval-crossbench/verdict.md`：数据集版本与子集规模明示（不得简称全量）、官方废弃旧版本的事实、两臂结果、分桶分账、最终判决、以及本次数字与第三方旧版数字不可直接对比的声明（FR-020、FR-021、FR-022）；并显式列出本次范围排除项（官方分题型判分口径 / 弃答子集 / longmemeval_m / V2 / 干预臂，FR-026）
+- [x] T041 写 `specs/016-longmemeval-crossbench/verdict.md`：数据集版本与子集规模明示（不得简称全量）、官方废弃旧版本的事实、两臂结果、分桶分账、最终判决、以及本次数字与第三方旧版数字不可直接对比的声明（FR-020、FR-021、FR-022）；并显式列出本次范围排除项（官方分题型判分口径 / 弃答子集 / longmemeval_m / V2 / 干预臂，FR-026）
 - [ ] T042 回填 `docs/paper-outline-eval-reliability.md` 的 RQ6 状态（SC-010）；**提交前先 `git status` 确认该文件无其他工作的未提交改动，有冲突则停下升级，不得覆盖**（FR-024）
 - [ ] T043 归档：脚本与原始产物推 HF 私仓；确认数据集、store、run 目录均未入库
 
