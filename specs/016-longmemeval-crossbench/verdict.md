@@ -80,6 +80,56 @@ embedding = 本地 bge-large-en-v1.5（1024d），抽取 = 隧道内 vllm。
 **G-尺子门 v2：通过。** canonical 配方下的 0.901 与其分题型分解按 v2 要求作为
 **发现**记录（见上表），不作为判据。
 
+## US2 · ORACLE 臂（全 500 题，零干扰项）
+
+**日期**: 2026-07-26 · **数据集**: `longmemeval_oracle.json`（500 题，官方 oracle 版）
+
+配方：`--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned
+--retrieval hybrid`。答题/抽取 = 租用 GPU 上的 vllm（`Qwen/Qwen3.6-35B-A3B-FP8`，
+关思考链）；embedding = 本地 `bge-large-en-v1.5`（1024d）；判分 = `deepseek-v4-flash`
+（与既有 LoCoMo 数字同 judge regime，刻意不引入第二个变量）。
+
+**G-向量门（T024）通过**：500 库 / 23,402 条目 / `missing=0`（另有 4,309 孤儿向量）。
+
+### 结果
+
+| 题型 | 正确率 | n | 精确证据覆盖率 |
+|---|---:|---:|---:|
+| single-session-user | 98.6% | 70 | 1.000 |
+| single-session-assistant | 92.9% | 56 | 1.000 |
+| knowledge-update | 80.8% | 78 | 0.931 |
+| multi-session | 70.7% | 133 | 0.918 |
+| temporal-reasoning | 64.7% | 133 | 0.920 |
+| single-session-preference | **60.0%** | 30 | 0.989 |
+| **OVERALL** | **76.4%**（382/500） | 500 | 0.945（n=479） |
+
+覆盖率的 n=479 = 500 − 21 道无证据题，与 FR-007 的排除规则精确吻合。
+正确率的分母是 500（无证据题仍有标准答案，答题侧照常评分）。
+
+### 实测用量（按 usage 插桩记录，不按牌价推算）
+
+| 角色 | 调用 | in tokens | out tokens |
+|---|---:|---:|---:|
+| answer | 501 | 1,533,080 | 3,208 |
+| judge | 500 | 55,546 | 65,712 |
+| extract | 23 | 52,663 | 22,301 |
+| embed | 953 | — | — |
+
+answer/extract/embed 全部零付费（本地 + 租用 GPU）；只有 judge 走付费口。
+答题上下文均值 3,060 token。
+
+### 一处值得记的形状
+
+`single-session-preference` 覆盖率 0.989、正确率却只有 60.0% —— **证据几乎全在手里，
+仍然答不对**。这是纯答题侧的失败形状。而这一型此前被 loader 直接硬报错拒收
+（G1），本次是它第一次产生任何数字。
+
+## US3 · S 臂
+
+**进行中** —— 分层抽样 100 题（配额 27/27/15/14/11/6，seed 20260726，
+两次运行 sha256 一致），49,556 条消息，4,789 次抽取。
+
 ## 最终判决（T036）
 
-**未执行** —— US2/US3 未启动。
+**未执行** —— 等待 US3 完成。判据锁定于 [criterion.txt](./criterion.txt)
+（SHA256 `2142f722…09ba`），**不得重新登记**。
