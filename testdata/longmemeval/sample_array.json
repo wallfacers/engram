@@ -1,0 +1,74 @@
+[
+  {
+    "question_id": "array-multi-session",
+    "question_type": "multi-session",
+    "question": "Which drink does the user prefer?",
+    "answer": "citrus tea",
+    "question_date": "2023-04-12 09:00",
+    "haystack_dates": [
+      "2023/04/10 (Mon) 17:50",
+      "2023/04/11 (Tue) 08:15"
+    ],
+    "haystack_session_ids": [
+      "fixture_session_1",
+      "fixture_session_2"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I prefer citrus tea.", "has_answer": true},
+        {"role": "assistant", "content": ""},
+        {"role": "assistant", "content": "I will remember your choice."}
+      ],
+      [
+        {"role": "user", "content": "I am planning breakfast."},
+        {"role": "assistant", "content": "Your preferred drink is citrus tea.", "has_answer": true}
+      ]
+    ],
+    "answer_session_ids": [
+      "fixture_session_1",
+      "fixture_session_2"
+    ]
+  },
+  {
+    "question_id": "array-preference",
+    "question_type": "single-session-preference",
+    "question": "What kind of workspace does the user favor?",
+    "answer": "a quiet workspace",
+    "question_date": "2023-05-03 10:00",
+    "haystack_dates": [
+      "2023/05/02 (Tue) 14:30"
+    ],
+    "haystack_session_ids": [
+      "fixture_preference_1"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I work best in a quiet workspace.", "has_answer": true},
+        {"role": "assistant", "content": "Understood."}
+      ]
+    ],
+    "answer_session_ids": [
+      "fixture_preference_1"
+    ]
+  },
+  {
+    "question_id": "array-no-evidence",
+    "question_type": "single-session-user",
+    "question": "What did the user organize?",
+    "answer": "a notebook",
+    "question_date": "2023-06-09 12:00",
+    "haystack_dates": [
+      "2023/06/08 (Thu) 09:20"
+    ],
+    "haystack_session_ids": [
+      "fixture_no_evidence_1"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I organized my notebook."},
+        {"role": "assistant", "content": "That should make it easier to use."}
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]
