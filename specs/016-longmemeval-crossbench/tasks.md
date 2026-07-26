@@ -53,30 +53,30 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 
 ### 测试先行（US1）
 
-- [ ] T004 [US1] 在 `testdata/longmemeval/sample_array.json` 手写真实形状夹具：数组套数组的 `haystack_sessions`、与之等长的 `haystack_dates` 与 `haystack_session_ids`、消息带 `has_answer`、含一道 `single-session-preference` 题、含一道无任何 `has_answer` 的题；**不得从数据集拷贝内容**（规避再分发）
-- [ ] T005 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：加载 `sample_array.json` 时 `single-session-preference` 题型可被接受（当前硬报错，FR-001）
-- [ ] T006 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：各会话的 `Date` 等于 `haystack_dates` 中同下标项且**互不相同**（当前全部塌缩为 `question_date`，FR-002）
-- [ ] T007 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：构造 `haystack_dates` 长度与 `haystack_sessions` 不一致的输入，断言 `loadLongMemEval` **返回错误**且不回落到任何默认日期（FR-003）
-- [ ] T008 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：每条写入的 turn 其 `DiaID` 形如 `D<会话序>:<消息序>`（两序号从 1 起），且能被 `evidenceReferencePattern` 匹配；被跳过的空消息不占用序号（FR-004）
-- [ ] T009 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：`has_answer:true` 的消息、且仅这些消息，其 `DiaID` 出现在该题 `Evidence` 中（FR-005）
-- [ ] T010 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：无任何 `has_answer` 的题其 `Evidence` 为空，且经 `evidenceRecallAt` 判定 `gradeable == false`（FR-007）
-- [ ] T011 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：构造 chunk 命中，断言 `evidenceRecallAt` 在合成证据上返回预期的 turn recall 与 session recall（验证证据同构后计量自动成立，research R2，FR-004）
-- [ ] T012 [US1] 确认既有 `TestLoadLongMemEvalSMapsAllQuestionTypes`（对象形式 `sample.json`）**保持通过**，不得删除或弱化 —— 它覆盖 `parseLongMemEvalSession` 的对象分支
+- [x] T004 [US1] 在 `testdata/longmemeval/sample_array.json` 手写真实形状夹具：数组套数组的 `haystack_sessions`、与之等长的 `haystack_dates` 与 `haystack_session_ids`、消息带 `has_answer`、含一道 `single-session-preference` 题、含一道无任何 `has_answer` 的题；**不得从数据集拷贝内容**（规避再分发）
+- [x] T005 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：加载 `sample_array.json` 时 `single-session-preference` 题型可被接受（当前硬报错，FR-001）
+- [x] T006 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：各会话的 `Date` 等于 `haystack_dates` 中同下标项且**互不相同**（当前全部塌缩为 `question_date`，FR-002）
+- [x] T007 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：构造 `haystack_dates` 长度与 `haystack_sessions` 不一致的输入，断言 `loadLongMemEval` **返回错误**且不回落到任何默认日期（FR-003）
+- [x] T008 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：每条写入的 turn 其 `DiaID` 形如 `D<会话序>:<消息序>`（两序号从 1 起），且能被 `evidenceReferencePattern` 匹配；被跳过的空消息不占用序号（FR-004）
+- [x] T009 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：`has_answer:true` 的消息、且仅这些消息，其 `DiaID` 出现在该题 `Evidence` 中（FR-005）
+- [x] T010 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：无任何 `has_answer` 的题其 `Evidence` 为空，且经 `evidenceRecallAt` 判定 `gradeable == false`（FR-007）
+- [x] T011 [US1] 在 `cmd/locomo-bench/longmemeval_test.go` 新增失败测试：构造 chunk 命中，断言 `evidenceRecallAt` 在合成证据上返回预期的 turn recall 与 session recall（验证证据同构后计量自动成立，research R2，FR-004）
+- [x] T012 [US1] 确认既有 `TestLoadLongMemEvalSMapsAllQuestionTypes`（对象形式 `sample.json`）**保持通过**，不得删除或弱化 —— 它覆盖 `parseLongMemEvalSession` 的对象分支
 
 ### 实现（US1）—— 全部落在同一文件，串行
 
-- [ ] T013 [US1] 在 `cmd/locomo-bench/longmemeval.go` 新增解析字段：`longMemEvalRecord.HaystackDates []string`(`haystack_dates`)、`longMemEvalRecord.HaystackSessionIDs []string`(`haystack_session_ids`)、`longMemEvalMessage.HasAnswer bool`(`has_answer`)；不改任何既有字段（FR-006）
-- [ ] T014 [US1] 在 `cmd/locomo-bench/longmemeval.go` 的 `longMemEvalTypes` 追加 `{12, "single-session-preference"}`（**复用** id 12，与既有 `preference` 并列为同义名，research R8，FR-001）
-- [ ] T015 [US1] 在 `cmd/locomo-bench/longmemeval.go` 改造 `parseLongMemEvalConversation` 与 `parseLongMemEvalSession`：按下标绑定 `haystack_dates`（长度不匹配返回错误）、为每条写入的 turn 合成 `DiaID`、由 `has_answer` 收集该题 `Evidence` 并经 `loadBenchmarkDataset` 写入 `locomoQA.Evidence`；对象形式分支的内嵌日期**优先**，保持既有行为（FR-002、FR-003、FR-004、FR-005、FR-007）
+- [x] T013 [US1] 在 `cmd/locomo-bench/longmemeval.go` 新增解析字段：`longMemEvalRecord.HaystackDates []string`(`haystack_dates`)、`longMemEvalRecord.HaystackSessionIDs []string`(`haystack_session_ids`)、`longMemEvalMessage.HasAnswer bool`(`has_answer`)；不改任何既有字段（FR-006）
+- [x] T014 [US1] 在 `cmd/locomo-bench/longmemeval.go` 的 `longMemEvalTypes` 追加 `{12, "single-session-preference"}`（**复用** id 12，与既有 `preference` 并列为同义名，research R8，FR-001）
+- [x] T015 [US1] 在 `cmd/locomo-bench/longmemeval.go` 改造 `parseLongMemEvalConversation` 与 `parseLongMemEvalSession`：按下标绑定 `haystack_dates`（长度不匹配返回错误）、为每条写入的 turn 合成 `DiaID`、由 `has_answer` 收集该题 `Evidence` 并经 `loadBenchmarkDataset` 写入 `locomoQA.Evidence`；对象形式分支的内嵌日期**优先**，保持既有行为（FR-002、FR-003、FR-004、FR-005、FR-007）
 - [x] T016 [US1] 将 `categoryLabel(12)` 的返回值由 `"preference"` 改为 `"single-session-preference"`（research R8：避免答题侧与覆盖侧两份产物对同一批题用不同名字）。**位置更正**：该函数在 `cmd/locomo-bench/dataset.go:207`，**不在 `main.go`** —— plan/contracts/tasks 三处原先都写错了文件名。类别 12 为 LongMemEval 专属（LoCoMo 用 1–5），故 LoCoMo 路径行为不变
-- [ ] T017 [US1] 运行 `CGO_ENABLED=0 go build ./...` 与 `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench/`，T005–T012 全部转绿
-- [ ] T018 [US1] 用真实数据集全量验证读取：对 `longmemeval_oracle.json` 与 `longmemeval_s_cleaned.json` 各跑一次零调用读取探测，断言 500/500 题成功加载、日期塌缩为单一值的题数为 0（SC-001、SC-002）
+- [x] T017 [US1] 运行 `CGO_ENABLED=0 go build ./...` 与 `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench/`，T005–T012 全部转绿
+- [x] T018 [US1] 用真实数据集全量验证读取：对 `longmemeval_oracle.json` 与 `longmemeval_s_cleaned.json` 各跑一次零调用读取探测，断言 500/500 题成功加载、日期塌缩为单一值的题数为 0（SC-001、SC-002）
 
 ### G-尺子门（US1）
 
 - [x] T019 [US1] 写一次性脚本切出 30 题 smoke 子集为 `<scratchpad>/oracle_smoke30.json`，脚本落 scratchpad 不入库（FR-008）。**选取规则（实测修正）**：oracle 文件**按题型排序**，「顺序取前 30」实际只覆盖 temporal-reasoning 一种题型、且 30 题全部有证据 —— G1（`single-session-preference` 首见于第 200 题，正是今天硬报错的题型）与 G4（无证据题首见于第 55 题）**一次都不会被触发**，尺子门会在两处缺口未受检的情况下亮绿灯。改为确定性覆盖抽取：按题型名排序，每型取前 4 道**有证据**题（24 道），再取文件序前 6 道**无证据**题，并集还原文件序。实测 = 30 题 / 6 型全覆盖 / 24 有证据 + 6 无证据 / 712 条消息（比顺序取的 819 条更省）
-- [ ] T020 [US1] 建 smoke 库：按 quickstart 的 setsid detach 纪律运行 `--dataset-format longmemeval --coverage-only`，embedding 走本地服务、抽取走小额付费口；**脚本必须插桩 usage 并记录实测成本，不得预先拍数**（FR-008）
-- [ ] T021 [US1] **G-尺子门判定（不过即停止）**：断言精确证据覆盖率 ≥ 0.95 且日志中答题模型调用数与判分模型调用数均为 0（FR-009、SC-003）。**覆盖率的分母是 24 道可评分题** —— 另 6 道无证据题按 FR-007 判为 `gradeable=false`，不进覆盖率统计；但它们**必须**被观察到确实走了该路径，这正是 T019 把它们放进 smoke 集的目的。**未达标 ⇒ 停止本特性，把实测值与结论写入 `specs/016-longmemeval-crossbench/verdict.md` 并终止，MUST NOT 进入 Phase 4**
+- [x] T020 [US1] 建 smoke 库：按 quickstart 的 setsid detach 纪律运行 `--dataset-format longmemeval --coverage-only`，embedding 走本地服务、抽取走小额付费口；**脚本必须插桩 usage 并记录实测成本，不得预先拍数**（FR-008）
+- [x] T021 [US1] **G-尺子门判定（不过即停止）**：断言精确证据覆盖率 ≥ 0.95 且日志中答题模型调用数与判分模型调用数均为 0（FR-009、SC-003）。**覆盖率的分母是 24 道可评分题** —— 另 6 道无证据题按 FR-007 判为 `gradeable=false`，不进覆盖率统计；但它们**必须**被观察到确实走了该路径，这正是 T019 把它们放进 smoke 集的目的。**未达标 ⇒ 停止本特性，把实测值与结论写入 `specs/016-longmemeval-crossbench/verdict.md` 并终止，MUST NOT 进入 Phase 4**
 
 **Checkpoint**: US1 完成即已交付价值 —— LongMemEval 从「读不进/无尺子」变为「可被诚实测量」，
 即使不做 US2/US3 也是可独立验收的增量。
@@ -92,11 +92,11 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 **⚠️ 依赖远程评测机排队** —— 该机当前由其他工作（MemOS 复现）占用。本阶段全部任务
 均需排队；**Phase 3 不得被本阶段的排队阻塞**。
 
-- [ ] T022 [US2] 写 G-向量门独立只读脚本 `<scratchpad>/check_vectors.py`：给定 store 目录与模型名，逐库比对 `count(memory_embeddings WHERE model=?)` 与应有行数，输出 data-model §4.2 的 JSON，`total_missing > 0` ⇒ `pass:false`。**不进 bench**（research R5：bench 内硬断言会把 `--retrieval fts` 这条本就无向量的合法路径变成错误）
-- [ ] T023 [US2] 建 ORACLE 库：对 `longmemeval_oracle.json` 全 500 题运行建库，store 目录与 S 臂**分开**（research R7）；setsid detach + 文件轮询（FR-011）
-- [ ] T024 [US2] 跑 G-向量门：对 ORACLE store 执行 T022 脚本，`total_missing` 必须为 0；不为 0 则重复建库直至补齐（Backfill 受有界队列限制，一趟补不完），并把每轮实测行数落盘（FR-010、SC-004）
-- [ ] T025 [US2] ORACLE 答题 + 判分：canonical 配方 `--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned --retrieval hybrid`，产出逐题结果与 `stats.json`、`cost.json`（FR-011）
-- [ ] T026 [US2] 汇总 ORACLE 总体正确率与 6 种题型分项正确率，断言结果覆盖全部 500 题、缺失为 0（FR-012、SC-005）
+- [x] T022 [US2] 写 G-向量门独立只读脚本 `<scratchpad>/check_vectors.py`：给定 store 目录与模型名，逐库比对 `count(memory_embeddings WHERE model=?)` 与应有行数，输出 data-model §4.2 的 JSON，`total_missing > 0` ⇒ `pass:false`。**不进 bench**（research R5：bench 内硬断言会把 `--retrieval fts` 这条本就无向量的合法路径变成错误）
+- [x] T023 [US2] 建 ORACLE 库：对 `longmemeval_oracle.json` 全 500 题运行建库，store 目录与 S 臂**分开**（research R7）；setsid detach + 文件轮询（FR-011）
+- [x] T024 [US2] 跑 G-向量门：对 ORACLE store 执行 T022 脚本，`total_missing` 必须为 0；不为 0 则重复建库直至补齐（Backfill 受有界队列限制，一趟补不完），并把每轮实测行数落盘（FR-010、SC-004）
+- [x] T025 [US2] ORACLE 答题 + 判分：canonical 配方 `--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned --retrieval hybrid`，产出逐题结果与 `stats.json`、`cost.json`（FR-011）
+- [x] T026 [US2] 汇总 ORACLE 总体正确率与 6 种题型分项正确率，断言结果覆盖全部 500 题、缺失为 0（FR-012、SC-005）
 
 **Checkpoint**: ORACLE 臂本身即一手数据（此前为空），可独立解读。
 
@@ -110,9 +110,9 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 
 **⚠️ 依赖远程评测机排队**，且为成本大头（≈8.4× LoCoMo 建库量）。
 
-- [ ] T027 [US3] 写分层抽样一次性脚本：按配额 multi-session 27 / temporal-reasoning 27 / knowledge-update 15 / single-session-user 14 / single-session-assistant 11 / single-session-preference 6 抽 100 题，固定种子（FR-013）
-- [ ] T028 [US3] 产出两个抽样产物：`longmemeval_s_subset100.json`（格式与源文件一致，可直接 `--data`）与 `subset100_question_ids.json`（含 seed、配额、id 列表）；两者 gitignore，归档 HF 私仓（FR-014）
-- [ ] T029 [US3] 验证抽样可复现：重复执行脚本两次，断言产出的 `question_id` 集合完全一致（SC-006）
+- [x] T027 [US3] 写分层抽样一次性脚本：按配额 multi-session 27 / temporal-reasoning 27 / knowledge-update 15 / single-session-user 14 / single-session-assistant 11 / single-session-preference 6 抽 100 题，固定种子（FR-013）
+- [x] T028 [US3] 产出两个抽样产物：`longmemeval_s_subset100.json`（格式与源文件一致，可直接 `--data`）与 `subset100_question_ids.json`（含 seed、配额、id 列表）；两者 gitignore，归档 HF 私仓（FR-014）
+- [x] T029 [US3] 验证抽样可复现：重复执行脚本两次，断言产出的 `question_id` 集合完全一致（SC-006）
 - [x] T030 [US3] 建 S 臂库：对子集文件运行建库，store 目录与 ORACLE 分开；setsid detach（FR-011）
 - [x] T031 [US3] 跑 G-向量门：对 S 臂 store 执行 T022 脚本，`total_missing` 必须为 0（FR-010）
 - [x] T032 [US3] S 臂答题 + 判分 ×3：canonical 配方，`repeats=3` 抑制方差（FR-015）
