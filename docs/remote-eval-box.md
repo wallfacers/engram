@@ -15,6 +15,19 @@
 >
 > **注意**:"SSH 连不上"只证明容器已 halt,**不等于**控制台已显示「已关机」/已停止计费。
 > 维护者回来后仍应到 AutoDL 控制台确认实例状态。若显示仍在运行,以控制台为准手动停止。
+>
+> ❌ **该招在跨区迁移后的实例上会失效**(2026-07-26 二次实测,RTX 6000D 迁移实例):
+> `/sbin/shutdown` **不存在**(只有 `/usr/bin/shutdown`,systemd 无 PID 1 故无效)、
+> `poweroff -f` / `halt` 发出后进程照常存活、`echo o > /proc/sysrq-trigger`
+> **Permission denied**。即容器内**没有任何可用的自停手段**。
+>
+> **可靠的降级动作**(必须做,能省掉 GPU 那部分):
+> ```bash
+> ssh -p $BOX_PORT root@$BOX_HOST 'pkill -f vllm'   # 显存归零,GPU 释放
+> ssh -p $BOX_PORT root@$BOX_HOST 'nvidia-smi --query-gpu=memory.used --format=csv,noheader'
+> ```
+> 然后**必须提醒维护者去 AutoDL 控制台手动停止实例**——容器活着就还在计费。
+> 无人值守的跑批**不能假定自己能关机**;计划里要写明"跑完后由维护者停机"。
 
 ## 每次重启后会变的东西(必须现场重新拿)
 
