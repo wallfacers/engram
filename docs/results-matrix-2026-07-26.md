@@ -10,6 +10,60 @@
 
 ---
 
+## 0. 三系统汇总
+
+### 表 A ── 同栈实测(**唯一可以直接比较的表**)
+
+同一台 box 的 **Qwen3.6-35B-A3B-FP8** 答题 + **bge-large-en-v1.5** 嵌入 +
+**同一 judge prompt / 同一 judge 模型**。竞品跑的是**其自家代码**,零改动。
+
+| 数据集 | n | **engram** | **MemOS** | **Mem0** | Δ(engram−MemOS) |
+|---|---:|---:|---:|---:|---:|
+| LoCoMo(cat 1-4) · judge=v4-flash | 1540 | **85.71%** 🔬 | **82.40%** 🔬 | — 未测 | **+3.31** |
+| LoCoMo(cat 1-4) · judge=v4-pro | 1540 | **83.77%** 🔬 | **80.26%** 🔬 | — 未测 | **+3.51** |
+| LongMemEval-S (cleaned) 抽样 | 100 | **80** 🔬 | — 未测 | — 未测 | — |
+
+🔬 = 本项目实测。**engram 在唯一做过同栈对跑的对手(MemOS)上领先 3.3–3.5pp,
+且该结论在两个 judge 下都成立。**
+
+### 表 B ── 各方最好成绩(**不可直接比较**,栈不同)
+
+| 数据集 | **engram** 🔬 | **MemOS** | **Mem0** |
+|---|---:|---:|---:|
+| LoCoMo | **89.03%**<br>(v4-pro 答题,3 跑多数,n=1540) | 88.83%<br>📣 自报 | **92.5**<br>📣 自报 |
+| LongMemEval | **85 / 100**<br>(v4-pro 答题,S-cleaned **抽样 100**) | 89.20<br>📣 自报 | **94.4**<br>📣 自报 |
+
+📣 = 厂商自报,**未经本项目复现**。
+
+> ❌ **表 B 的三列不能横向相减。** 已经实测到:
+> - 换答题模型(Qwen35B → v4-pro)值 **+3.3pp**(LoCoMo)/ **+5pp**(LongMemEval);
+> - 换判题模型(v4-flash → v4-pro)值 **−2~−3pp**;
+> - MemOS 自报 88.83,同栈复现只有 **82.40** —— **−6.43pp 全是 regime 伪影**。
+>
+> 也就是说,**表 B 里 6pp 以内的任何差距,都可以纯由答题/判题模型选择造出来。**
+> engram 的 89.03 高于 MemOS 自报的 88.83,**这不构成任何意义上的领先**。
+
+### Mem0 为什么只有自报数
+
+Mem0 2026-04 blog:LoCoMo 71.4 → **92.5**,LongMemEval 67.8 → **94.4**。但同一篇明写:
+
+> *"Scores reflect Mem0's managed platform, which includes proprietary optimizations
+> not available in the open-source SDK."*
+
+且检索预算是 **top_200**。因此:
+
+| 障碍 | 后果 |
+|---|---|
+| 托管平台 + 开源 SDK 不带的私有优化 | **无法同栈复现** —— 拿不到那个栈 |
+| `top_200` 检索预算 | 属"加量"杠杆,按本项目规范**即便涨分也不进默认栈** |
+| 其 `memory-benchmarks` 仓是空的 git submodule | 无法读源码核对口径 |
+
+**结论:对 Mem0 的真实差距 = 未知数。** MemOS 那套"剥离 regime 伪影"的手法
+**尚未对 Mem0 做过**,不能把 MemOS 的结论(自报分含 6.43pp 红利)套到 Mem0 头上——
+也同样不能假定 Mem0 的 92.5 是干净的。**在做同栈复现之前,不宣称任何相对位置。**
+
+---
+
 ## 1. 主表:数据集 × 答题模型
 
 判题固定 `deepseek-v4-flash` + mem0-aligned prompt;检索固定 canonical recipe
