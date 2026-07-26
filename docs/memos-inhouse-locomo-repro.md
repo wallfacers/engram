@@ -193,9 +193,13 @@ in 1,648,248 tok(cache 命中 1,187,456 = **72.0%**)、out 611,876 tok →
 `memos_parity_score.json`(分类别 + 成本)· `memos_judged_detail.json`(1540 题逐题,
 含 3 票 votes)· `memos_responses.json`(MemOS 原始答案 + `search_context`,7.1MB)·
 `judge_memos.py` / `judge_memos.log` · `run_locomo.sh` / `chain4.sh`(6 步管线驱动)·
-`sitecustomize.py`(§5.3 的 gpt2 tokenizer + usage 插桩)。**已核无凭据泄漏**
-(box 的 SSH host/port/password 只走 env,未落任何文件)。⚠️ **尚未推 HF** —— 该目录 gitignored,
-需归档到 HF 才跨机不失传。
+`sitecustomize.py`(§5.3 的 gpt2 tokenizer + usage 插桩)+ `MANIFEST.md`(结果/栈/边界/文件表)。
+**已核无凭据泄漏**(box 的 SSH host/port/password 只走 env,未落任何文件;上传前逐文件扫过
+硬编码 key / SSH / password / Bearer,零命中)。
+
+✅ **已归档 HF**(2026-07-26):私有集 `wallfacers/engram-locomo-artifacts` 下
+[`016-memos-parity/`](https://huggingface.co/datasets/wallfacers/engram-locomo-artifacts/tree/main/016-memos-parity),
+9 文件,已回读仓库列表核验。跨机可取。
 
 ### 6.5 下一步
 
@@ -204,4 +208,4 @@ in 1,648,248 tok(cache 命中 1,187,456 = **72.0%**)、out 611,876 tok →
 | 1 | 拉 HF `009-full-A-base` 逐题 pred,与 `memos_judged_detail.json` 做 1540 题 join + McNemar | **零 token** | 把 +3.31pp 从点估计升到配对显著 |
 | 2 | MemOS 补 2 次 answer rep(共 3 rep) | box GPU 时间 + ¥3.4 judge | 给 82.40 一条误差带,消掉诚实项 ①  |
 | 3 | 等上下文预算重跑(MemOS `top_k` 抬到喂满 ~3.2k tok,或 engram 降到 ~1k) | box GPU 时间 + judge | 剥离诚实项 ② 这个最大残留混淆 |
-| 4 | 产物推 HF | 零 | 防失传 |
+| ~~4~~ | ~~产物推 HF~~ | — | **✅ 已完成**(见 §6.4) |

@@ -707,8 +707,11 @@ in **3,309,949** tok(缓存命中 **66.7%**)、out **669,738** tok → **$0.3479
 
 产物:`.locomo-run/014c-flash-probe/`(`flash_probe.py` / `analyze.py` /
 `flash-probe-results.json`(304 题逐题,含 `pro_maj_correct` 配对列)/ `cost.json` / `run.log`;
-已从会话 scratchpad 持久化,凭据已核无泄漏)。⚠️ **尚未推 HF** —— 该目录 gitignored,
-仍需归档到 HF `014b-oldtplan-confirm/` 才跨机不失传。
+已从会话 scratchpad 持久化,凭据已核无泄漏)。
+✅ **已归档 HF**(2026-07-26):私有集 `wallfacers/engram-locomo-artifacts` 下
+[`014c-flash-probe/`](https://huggingface.co/datasets/wallfacers/engram-locomo-artifacts/tree/main/014c-flash-probe)
+(5 文件,已回读仓库列表核验)。**注**:归到平级的 `014c-flash-probe/` 而非原计划的
+`014b-oldtplan-confirm/` 子目录——它是独立一轮探针(answerer=flash),与 014b 三臂产物不同批。
 
 ---
 
