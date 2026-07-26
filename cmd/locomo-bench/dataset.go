@@ -28,6 +28,10 @@ type locomoQA struct {
 	QuestionType string          `json:"question_type,omitempty"`
 	CategoryName string          `json:"category_name,omitempty"`
 	Adversarial  bool            `json:"adversarial,omitempty"`
+	// QuestionDate is the moment the question is asked ("now"). LongMemEval
+	// supplies it per question; LoCoMo has no such field and leaves it empty,
+	// which suppresses the answer prompt's current-date anchor entirely.
+	QuestionDate string `json:"question_date,omitempty"`
 }
 
 // AnswerText renders the gold answer as a string regardless of JSON type.

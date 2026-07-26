@@ -17,6 +17,9 @@ type longMemEvalItem struct {
 	QuestionType string
 	Category     string
 	Adversarial  bool
+	// QuestionDate is the dataset's question_date: the "now" a relative
+	// temporal question is asked against.
+	QuestionDate string
 	Conversation conversation
 }
 
@@ -80,6 +83,7 @@ func loadLongMemEval(path string) ([]longMemEvalItem, error) {
 			QuestionType: questionType,
 			Category:     questionType,
 			Adversarial:  questionType == "abstention",
+			QuestionDate: strings.TrimSpace(record.QuestionDate),
 			Conversation: conversation,
 		})
 	}
@@ -278,6 +282,7 @@ func loadBenchmarkDataset(path, format string, includeCaptions bool) ([]conversa
 			QuestionType: item.QuestionType,
 			CategoryName: item.Category,
 			Adversarial:  item.Adversarial,
+			QuestionDate: item.QuestionDate,
 		}
 		item.Conversation.ID = i
 		item.Conversation.QA = []locomoQA{qa}

@@ -317,7 +317,7 @@ func TestSweepAnswerPromptGroupsMemoriesBySessionAndDate(t *testing.T) {
 		{Name: "early", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"},
 		{Name: "middle", Content: "middle event", EventDate: "2023-05-02", SourceSessionID: "conv0-sess1"},
 	}
-	got := buildSweepAnswerPrompt("What happened?", memories)
+	got := buildSweepAnswerPrompt("What happened?", memories, "")
 	want := "RETRIEVED MEMORIES:\n" +
 		"[session 1, 2023-05-01]\n" +
 		"1. [event: 2023-05-01] early event\n" +
@@ -929,5 +929,75 @@ func TestAnswerJournalStoresFinalAnswerUsage(t *testing.T) {
 	}
 	if items[0].RetrievalFlags != "assoc=false;assoc_depth=2" {
 		t.Fatalf("journal retrieval flags = %q", items[0].RetrievalFlags)
+	}
+}
+
+// TestAnswerPromptInjectsCurrentDate pins the fix for the LongMemEval
+// temporal-reasoning autopsy (2026-07-26): the answer context never told the
+// model what "now" was, so "how many days ago" questions were anchored on the
+// model's own notion of the present. Four wrong answers in the S-100 run
+// (1136 days / 192 weeks / 177 weeks / 45 months) each solve back to a "today"
+// inside 2026-07-22..2026-07-27 — the week the run happened, not the 2023
+// question date the dataset supplies.
+func TestAnswerPromptInjectsCurrentDate(t *testing.T) {
+	memories := []retrievedMemory{{Content: "rafting trip", EventDate: "2023-06-17"}}
+
+	got := buildAnswerPrompt("How many days ago did I go rafting?", memories, "2023/06/20 (Tue) 16:30")
+	want := "CURRENT DATE: 2023/06/20 (Tue) 16:30\n\n" +
+		"RETRIEVED MEMORIES:\n" +
+		"1. [event: 2023-06-17] rafting trip\n" +
+		"\nQUESTION: How many days ago did I go rafting?\n\nAnswer:"
+	if got != want {
+		t.Fatalf("dated prompt =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestAnswerPromptWithoutCurrentDateIsUnchanged is the LoCoMo invariant: LoCoMo
+// carries no question date, so the injected block must vanish entirely and the
+// prompt must stay byte-identical to the pre-fix shape. This is what lets the
+// LoCoMo 85.71% baseline stand without a re-run (Constitution IV).
+func TestAnswerPromptWithoutCurrentDateIsUnchanged(t *testing.T) {
+	memories := []retrievedMemory{{Content: "rafting trip", EventDate: "2023-06-17"}}
+
+	got := buildAnswerPrompt("What did I do?", memories, "")
+	want := "RETRIEVED MEMORIES:\n" +
+		"1. [event: 2023-06-17] rafting trip\n" +
+		"\nQUESTION: What did I do?\n\nAnswer:"
+	if got != want {
+		t.Fatalf("undated prompt =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "CURRENT DATE") {
+		t.Fatal("undated prompt must not mention CURRENT DATE")
+	}
+}
+
+// TestSweepAnswerPromptInjectsCurrentDate covers the second prompt builder; the
+// broad-sweep path must anchor time the same way the ordinary path does.
+func TestSweepAnswerPromptInjectsCurrentDate(t *testing.T) {
+	memories := []retrievedMemory{{Name: "a", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"}}
+
+	got := buildSweepAnswerPrompt("What happened?", memories, "2023/05/10 (Wed) 09:00")
+	if !strings.HasPrefix(got, "CURRENT DATE: 2023/05/10 (Wed) 09:00\n\nRETRIEVED MEMORIES:\n") {
+		t.Fatalf("sweep prompt missing current-date header: %q", got)
+	}
+}
+
+// TestRelativeTimeRuleOnlyWhenDated keeps the relative-time instruction paired
+// with the anchor. Without a CURRENT DATE the model has nothing to subtract
+// from, and forceAnswerSystemPrompt's existing "NEVER answer relative to
+// today's date" rule (written for LoCoMo's absolute "when" questions) must
+// stand unmodified.
+func TestRelativeTimeRuleOnlyWhenDated(t *testing.T) {
+	base := answerPromptForRegime(2, true, false, false)
+
+	if withCurrentDateRule(base, "") != base {
+		t.Fatal("undated system prompt must be unchanged")
+	}
+	dated := withCurrentDateRule(base, "2023/06/20 (Tue) 16:30")
+	if !strings.HasPrefix(dated, base) {
+		t.Fatal("dated system prompt must extend the base prompt, not replace it")
+	}
+	if !strings.Contains(dated, "CURRENT DATE") {
+		t.Fatal("dated system prompt must reference the CURRENT DATE anchor")
 	}
 }

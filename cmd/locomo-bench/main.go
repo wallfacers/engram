@@ -1501,12 +1501,12 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
-	prompt := answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt)
+	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
 	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)
 	}
-	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits), answerCall)
+	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate), answerCall)
 	if abstain != nil {
 		abstain.hardGated = hardGated
 	}
@@ -1641,7 +1641,7 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 	if fresh == 0 {
 		return "", false
 	}
-	retry, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union))
+	retry, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate))
 	if err != nil || isIDK(retry) {
 		return "", false
 	}
@@ -1677,7 +1677,7 @@ func retryWithRewriteUsageDiagnostics(ctx context.Context, retriever *memory.Ret
 	if fresh == 0 {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}
-	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union))
+	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate))
 	if err != nil || isIDK(retry) {
 		return "", usage, nil, diagnostics, false
 	}
@@ -1712,7 +1712,7 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 			hits = hits[:topK]
 		}
 	}
-	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits))
+	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate))
 	if err != nil || isIDK(retry) {
 		return "", usage, nil, diagnostics, false
 	}

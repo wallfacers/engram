@@ -322,8 +322,37 @@ func isIDK(predicted string) bool {
 		strings.Contains(p, "not mentioned") || strings.Contains(p, "no information")
 }
 
-func buildAnswerPrompt(question string, memories []retrievedMemory) string {
+// currentDateRule is appended to the answer system prompt ONLY when the dataset
+// supplies a question date. It overrides forceAnswerSystemPrompt's "NEVER answer
+// relative to today's date", which was written for LoCoMo's absolute "when did X
+// happen" questions and is exactly backwards for LongMemEval's relative
+// "how many days ago" family.
+const currentDateRule = `
+- The user message opens with "CURRENT DATE:" — that is NOW, the moment the question is being asked. When the question asks for a RELATIVE time ("how many days/weeks/months ago", "last weekend", "four weeks ago", "how long since"), compute it from CURRENT DATE minus the memory's [event: YYYY-MM-DD] marker, and answer with that interval, not with an absolute date. Use CURRENT DATE the same way to resolve relative references that select among candidate memories ("the past weekend" means the weekend immediately before CURRENT DATE). Never use your own notion of the present date; this rule overrides any instruction above about not answering relative to today.`
+
+// withCurrentDateRule pairs the relative-time instruction with the anchor it
+// needs. Empty date -> the prompt is returned unchanged, keeping the LoCoMo path
+// byte-identical.
+func withCurrentDateRule(systemPrompt, currentDate string) string {
+	if currentDate == "" {
+		return systemPrompt
+	}
+	return systemPrompt + currentDateRule
+}
+
+// writeCurrentDateHeader emits the "now" anchor ahead of the retrieved
+// memories. Without it the answering model has no way to evaluate a relative
+// time question and silently falls back on its own present date.
+func writeCurrentDateHeader(b *strings.Builder, currentDate string) {
+	if currentDate == "" {
+		return
+	}
+	fmt.Fprintf(b, "CURRENT DATE: %s\n\n", currentDate)
+}
+
+func buildAnswerPrompt(question string, memories []retrievedMemory, currentDate string) string {
 	var b strings.Builder
+	writeCurrentDateHeader(&b, currentDate)
 	b.WriteString("RETRIEVED MEMORIES:\n")
 	if len(memories) == 0 {
 		b.WriteString("(none)\n")
@@ -335,18 +364,18 @@ func buildAnswerPrompt(question string, memories []retrievedMemory) string {
 	return b.String()
 }
 
-func buildAnswerContextPrompt(question string, hits []memory.Result) string {
+func buildAnswerContextPrompt(question string, hits []memory.Result, currentDate string) string {
 	memories := toMemories(hits)
 	if hasClusterSweepHit(hits) {
-		return buildSweepAnswerPrompt(question, memories)
+		return buildSweepAnswerPrompt(question, memories, currentDate)
 	}
-	return buildAnswerPrompt(question, memories)
+	return buildAnswerPrompt(question, memories, currentDate)
 }
 
 // buildSweepAnswerPrompt groups broad-sweep hits by their source session so
 // the answering model can scan one conversation block at a time. The ordinary
 // buildAnswerPrompt path intentionally remains unchanged.
-func buildSweepAnswerPrompt(question string, memories []retrievedMemory) string {
+func buildSweepAnswerPrompt(question string, memories []retrievedMemory, currentDate string) string {
 	type sweepGroup struct {
 		id       string
 		session  string
@@ -393,6 +422,7 @@ func buildSweepAnswerPrompt(question string, memories []retrievedMemory) string 
 	})
 
 	var b strings.Builder
+	writeCurrentDateHeader(&b, currentDate)
 	b.WriteString("RETRIEVED MEMORIES:\n")
 	if len(memories) == 0 {
 		b.WriteString("(none)\n")
