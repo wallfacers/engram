@@ -26,8 +26,8 @@
 
 **Purpose**: 确认基线状态，登记判据
 
-- [ ] T001 确认工作树基线：运行 `git status --short` 与 `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench/`，记录当前全绿状态到会话 scratchpad；确认 `docs/locomo-score-levers.md` 与 `docs/paper-outline-eval-reliability.md` 的并发修改属于其他工作，本特性不触碰这两个文件
-- [ ] T002 确认数据就位：断言 `testdata/longmemeval/longmemeval_oracle.json` 与 `testdata/longmemeval/longmemeval_s_cleaned.json` 均为 500 题，且 `git check-ignore` 确认两者已被忽略
+- [x] T001 确认工作树基线：运行 `git status --short` 与 `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench/`，记录当前全绿状态到会话 scratchpad；确认 `docs/locomo-score-levers.md` 与 `docs/paper-outline-eval-reliability.md` 的并发修改属于其他工作，本特性不触碰这两个文件
+- [x] T002 确认数据就位：断言 `testdata/longmemeval/longmemeval_oracle.json` 与 `testdata/longmemeval/longmemeval_s_cleaned.json` 均为 500 题，且 `git check-ignore` 确认两者已被忽略
 
 ---
 
@@ -37,7 +37,7 @@
 
 **⚠️ CRITICAL**: T003 未完成前，不得执行任何产生正确率数字的任务
 
-- [ ] T003 在 `specs/016-longmemeval-crossbench/criterion-registered.md` 中登记判据原文（复现 = 条件增益 ∈ [20,50]pp 且检索侧当量 < 答题侧当量；证伪 = 条件增益 > 60pp 或检索侧当量 > 答题侧当量；其余 = 无法判定；任一桶 n<20 标记不可判），计算其 SHA256 并一并写入，随后 git commit —— 该文件在 P4 用于逐字比对（SC-008），**提交后不得修改**
+- [x] T003 判据原文单独落盘于 `specs/016-longmemeval-crossbench/criterion.txt`（避免同文件自引用导致哈希范围歧义），登记记录与 SHA256 写入 `specs/016-longmemeval-crossbench/criterion-registered.md`（复现 = 条件增益 ∈ [20,50]pp 且检索侧当量 < 答题侧当量；证伪 = 条件增益 > 60pp 或检索侧当量 > 答题侧当量；其余 = 无法判定；任一桶 n<20 标记不可判），计算其 SHA256 并一并写入，随后 git commit —— 该文件在 P4 用于逐字比对（SC-008），**提交后不得修改**
 
 ---
 
