@@ -124,10 +124,67 @@ answer/extract/embed 全部零付费（本地 + 租用 GPU）；只有 judge 走
 仍然答不对**。这是纯答题侧的失败形状。而这一型此前被 loader 直接硬报错拒收
 （G1），本次是它第一次产生任何数字。
 
+## 逐题覆盖的载体（T033）与一处自我更正
+
+T033 要求「对 S 臂运行只读归因诊断」拿到**逐题**证据覆盖率，但
+`--coverage-only` 只输出聚合值（`coverage.json` 无逐题记录），而
+`--attribution-trace` 被 `validateAttributionOptions` 硬拒 `locomo` 以外的
+dataset-format。该闸是 LongMemEval 尚无 turn id 时加的保守限制；016 已为其合成
+`turn.DiaID = "D<session>:<turn>"`，`buildAttributionTrace` / `parsedGoldTurns` /
+`hitMappedGoldTurns` 全链路本就与数据集无关。故放开该闸（测试先行，commit
+`e6b6755`），改动仅 `cmd/locomo-bench/attribution.go`，引擎零改动，LoCoMo
+`--estimate` 锚点不变。
+
+### 交叉验证：归因 trace 复现了已登记的门禁数字
+
+在 P1 的 30 题 smoke store 上跑归因，按 `chunk-c` 前缀过滤后逐题算严格覆盖率：
+
+| 题型 | 归因 trace（严格） | T021 `coverage.json` |
+|---|---:|---:|
+| knowledge-update | 1.0000 | 1.000 |
+| single-session-assistant | 1.0000 | 1.000 |
+| single-session-user | 1.0000 | 1.000 |
+| single-session-preference | 0.9167 | 0.917 |
+| temporal-reasoning | 0.7500 | 0.750 |
+| multi-session | 0.7417 | 0.742 |
+| **OVERALL** | **0.9014** | **0.901** |
+
+gradeable 24 / 无证据 6，与 T021 完全一致。**两条独立代码路径给出逐位相同的
+结果**，说明 T034 分桶所用的逐题覆盖率就是 0.901 那个数字的逐题分解，而非另一
+把尺子。
+
+同一 trace 用宽松尺子（含 fact 模糊配对）为 **0.9583** —— 比严格尺子高 5.7pp。
+LoCoMo 上的同一对照是 0.808 / 0.841。两个 benchmark 上宽松尺子都系统性偏高，
+印证 T033 裁定「必须过滤到 `chunk-c`」的必要性。
+
+### 更正
+
+`e6b6755` 的提交信息里有一句说过头了：它称 0.901 来自「答题臂从未走过的路径」。
+实际情况是——答题路径（`main.go:1293`，`traceSelection=false` 且无
+`--pcic`/`--oracle`）与归因路径（`attribution.go:401`）**都**传 nil 选择器；
+`--coverage-only`（`coverage.go:257`，`traceSelection=true`）确实恒得一个
+`pcicSelect` 选择器，但在无 DemandAtoms/Meta 时它退化为「按融合序取前 budget
+个」，与纯 quota 截断等价，故三者数值一致（上表即证据）。**「路径不同」成立，
+「数值因此不可比」不成立。** 判决据此仍用归因 trace，理由改为「它是唯一能给出
+逐题分解的载体」，而不是「coverage.json 的数字不可信」。
+
 ## US3 · S 臂
 
 **进行中** —— 分层抽样 100 题（配额 27/27/15/14/11/6，seed 20260726，
 两次运行 sha256 一致），49,556 条消息，4,789 次抽取。
+
+## Phase 6 前置核验（在 S 臂建库期间完成）
+
+| 任务 | 命令 | 结果 |
+|---|---|---|
+| T038 引擎零改动 | `git diff --name-only -- memory embedding provider store internal` | **空**（工作树与近 6 次提交均是） |
+| T039 全量回归 | `CGO_ENABLED=0 go build ./...` / `go test -count=1 ./...` | build exit 0；**14 包全绿，0 FAIL** |
+| T040 LoCoMo 零行为变更 | `--data testdata/locomo/locomo10.json --estimate` | `questions=1540 extract_calls=288`，**与 T001 锚点逐字相同** |
+| T036 判据完整性 | `sha256sum criterion.txt` | `2142f722…09ba`，**与登记值一致** |
+
+T040 是宪法 IV 的核心证据：016 只动 loader 的 LongMemEval 分支与归因门，LoCoMo
+路径的题目数与抽取调用数一字未变 ⇒ LoCoMo 85.71% 基线 invariant by
+construction，无需重跑。
 
 ## 最终判决（T036）
 
