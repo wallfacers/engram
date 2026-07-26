@@ -131,6 +131,8 @@ McNemar p=1.0。[E-008]
 | **E-PROTOCOL** | LoCoMo cat 1--4 共 1,540 题；OmniMemEval 与 engram 在分母/类别/聚合轴可对齐，但检索预算、answer 模型等仍不同；008 off 臂另有 force-answer 差异 | [`competitive-benchmarks.md` §§4,6](./competitive-benchmarks.md#4-口径核对结论2026-07-21读-omnimemeval-源码实证)、[`runner.go`](../cmd/locomo-bench/runner.go) | **B: 源码审计 + 当前 fingerprint**。应写“部分轴已对齐但完整系统分不可直接归因”，不能写成“所有协议轴都不同” |
 | **X-MEMOS / X-OMNI** | 本地一手来源审计记录旧版 `memos-0630` LoCoMo 73.31；当前 alphaXiv v4 论文 Table 3 报 MemOS-1031 75.80（统一 GPT-4o-mini）；当前官方仓库另报 LoCoMo 88.83、LongMemEval 89.20，OmniMemEval 仓库称覆盖 14 个商业记忆产品和 10 个数据集 | [`memory-strategy.md` MemOS 时间线](./memory-strategy.md#关键时间线8883-不是一次做到的)、[MemOS v4 论文](https://arxiv.org/abs/2507.03724)、[MemOS 官方仓库](https://github.com/MemTensor/MemOS)、[OmniMemEval 官方仓库](https://github.com/MemTensor/OmniMemEval) | **X: 外部一手来源 + 本地源码/版本审计**。当前 v4 论文不再以 73.31 为主表结果，也不包含 88.83/89.20；73.31 -> 75.80 -> 88.83 只能作为版本/regime 审计案例，不能作为噪声证据 |
 
+| **E-MEMOSPAR** | MemOS 自家代码跑 engram 同栈（同一 vllm Qwen3.6-35B-A3B-FP8 答题 + 同一 bge-large embedder + 同一 `judgeMem0AlignedSystemPrompt` × deepseek-v4-flash × 3 judge reps）= **82.40%**（1269/1540）；分类别 multi-hop 89.36 / temporal 82.55 / open-domain 59.38 / single-hop 82.64。对同口径 engram 85.71%，Δ = **engram +3.31pp**。对该系统自报 leaderboard 88.83，**落差 −6.43pp** | [`memos-inhouse-locomo-repro.md` §6](./memos-inhouse-locomo-repro.md) + `.locomo-run/016-memos-parity/`（含 1,540 题逐题 votes + MemOS 原始答案与 `search_context`） | **A-: 当前可复算一手数据，且是本文唯一的跨系统 apples-to-apples 测量**。硬边界三条：(1) MemOS 侧仅 **1 次答题** run（engram 侧是 3-rep 多数），无误差带；(2) **未做 1,540 题配对 McNemar**，只有两个独立点估计；(3) 两边各用自家默认检索预算，engram 实测喂 answerer 3,262 tok/次 vs MemOS ~1,059 tok/次（≈3 倍），**+3.31pp 中"上下文更多"的贡献未剥离**。⇒ 可声明"leaderboard 与同栈分之间存在 6.43pp 的 regime 落差"，**不可**声明"engram 记忆机制优于 MemOS" |
+
 `pp` 表示 percentage points。表中 `+/-` 仅为 ASCII 记法，不代表已经完成正式方差估计。
 
 ## 研究问题与可证伪假设
@@ -478,3 +480,84 @@ reproducibility 对口的 track。** 这是按[`memory-strategy.md` 决策二](.
 - **X-RANDOM**: Bjarnason et al., *On Randomness in Agentic Evals*, [arXiv:2602.07150](https://arxiv.org/abs/2602.07150).
 - **X-ECPHORY**: Liao, *EcphoryRAG: Re-imagining Knowledge-Graph RAG via Human Associative Memory*, [arXiv:2510.08958](https://arxiv.org/abs/2510.08958).
 - **X-FADE**: Wei et al., *FadeMem: Biologically-Inspired Forgetting for Efficient Agent Memory*, [arXiv:2601.18642](https://arxiv.org/abs/2601.18642).
+
+---
+
+## ⚠️ Prior-art 复核(2026-07-26,alphaXiv MCP)— 窗口正在关闭,建议改定位
+
+> **核验范围与诚实边界**:2026-07-26 经 alphaXiv MCP 四次检索。**全文级只读了两篇**
+> ([2605.19537] 摘要+引言+prefix-caching 消融表段落、[2606.06758] 摘要+引言+oracle 相关段落,
+> 均用检索定位而非通读);其余论文**只读了检索返回的摘要**,重叠度判断据此,终稿引用前必须补读全文。
+> 未使用 Web 搜索。
+
+### 结论:原大纲的多条主张已被 2026 年 4–7 月的工作占位
+
+| 本大纲主张 | 已有工作 | 重叠判定 |
+|---|---|---|
+| **冷启动惩罚**(同配置首臂低 2.25pp)作为新方差层 | **[X-BACKEND]** 后端选择单独可移动 benchmark 分数**最高 16.6pp**,归因 prefix caching / CUDA graphs / 自定义 kernel / 引擎默认 logit 处理;调查 200 引擎 + 35,000 篇论文证明推理栈罕被报告 | **机理已被占**。其 prefix-caching 消融量级 ±1pp 内,engram 的 2.25pp 更大且是**同后端内首臂时序效应**(它测的是跨后端)⇒ 只能作为"已知机理的新表现形式"+ 编排层规范,撑不起 headline |
+| **事前上限估计法**(证据覆盖条件分析 ⇒ 检索侧 +3.8pp 天花板) | **[X-4COND]** 四条件协议(no evidence / full context / retrieved / oracle-evidence)+ ONCU 估计器;**专设 §4.7 "Oracle Reference Is Not an Upper Bound"** | **被占且被反驳**。engram 法是 oracle-gap 家族的**廉价观察性近似**(零额外 run,但效度更弱),而该文正面论证这类参考不是保证上界 |
+| **RQ5 / H5 协议轴混淆**(answerer 强度 = 可比性伪影) | **[X-MEMDELTA]** "reported gains often mix changes in the memory method with changes in the **language model, embedding model**..." | **几乎同题,最危险的一篇**。终稿前必须通读并逐条比对 |
+| **C3 coverage→answer 失配** | **[X-NEOCOR]**("improvements in retrieval performance do not consistently translate")· **[X-SCALE]** · **[X-RAGSYS]** | 命题已被反复提出;engram 的多案例+统一机理仍有增量,但**不能作 headline** |
+| **009 四象限归因分层** | **[X-ENTCOLL]** 分层协议,归因 agent memory 的 retrieval lift | 同族 |
+| **008 reranker 负结果** | **[X-CONVMEM]** 标题即含 "a Negative Attribution Result",对话记忆 reranker | 同族 |
+| **H1 lost-in-the-middle 反例** | **[X-LOSTEVID]**(位置/上下文长度效应的复现研究)· **[X-PRIMACY]**(Lost at the End) | 已有人做复现与反例 |
+| **judge 可靠性** | 2026-04~07 至少 6 篇:[X-JUDGECHG] · [X-DARKCUR](51 votes)· [2606.19544] · [2606.13685] · [2606.26185] · [2604.11581] | **严重拥挤** |
+
+### 仍然独特的(检索未发现对应工作)
+
+1. **单系统的完整杠杆失败史 + 统一机理**。上述工作全是**单点**方法学贡献;没有人发过"在一个系统上
+   把能想到的杠杆逐个试穿(11+ 个)、每个带配对统计与机理归因、并归纳出一条共同失败机理"。
+   该机理——**新信号要么对称抬升全部候选(无区分度),要么区分度够但覆盖极少题**——第二次检索
+   (query expansion / discriminative power / dense retrieval ceiling)返回的全是 hard-negative
+   训练类工作,未命中对应表述。**这是可证伪的机理命题,不是又一个负结果。**
+2. **成本 / 止损维度,完全空白**。015 零成本门判死省下 28 项任务 + 一个引擎包 + 一次 migration;
+   013/011/012 均在写引擎代码前止损;015 那个"设计时拍 7.3pp、实测 0.32pp,差 **23 倍**"是
+   完整量化案例。"如何用近免费诊断在投入前杀死一个方向"未见对应论文。
+3. **C2 选择偏差**(best-of-run / 按类拼接的乐观偏差)。[X-MEMDELTA] 讲的是**混淆变量**,
+   不是**报告策略**的乐观偏差 ⇒ 可能仍独特,但 engram 原始归档已失,目前**是空的**。
+
+### 建议:改定位
+
+**原定位("长期对话记忆评测的可靠性审计")现在正面撞上 [X-MEMDELTA] + 6 篇 judge 可靠性 +
+[X-BACKEND],而 engram 在每一条上都不是第一个,还带 n=1 单系统硬伤。**
+
+建议改为**负结果 / 工程止损**方向,大意:*一个本地记忆引擎的完整杠杆消融史——十一个方向、
+一条共同失败机理,以及如何用近免费诊断在投入前杀死它们*。理由:
+
+- 把 n=1 从**缺陷**变成**设定**(经验报告本就是单系统的);
+- 唯一未被占的两块(统一失败机理、止损方法论)正好成为主体;
+- 上述论文从竞品变为引用与对话对象;
+- **不依赖 LongMemEval 才能成立**(有它是外部效度加分,而非硬门)。
+
+### 行动顺序(修订 P-EXP 优先级)
+
+1. **通读 [X-MEMDELTA] 全文并与本大纲逐条比对** —— 它是决定定位的关键变量,**先于任何新实验**;
+2. **修 judge 口径缺口** —— 无论哪个定位都是前置条件(带着已知未修的口径洞去审计他人协议,必被
+   reviewer 抓);详见 [`locomo-score-levers.md` 剩余未验方向盘点 #1](./locomo-score-levers.md);
+3. ~~**MemOS 同栈复现**~~ —— **✅ 已完成出分(2026-07-26),见 `E-MEMOSPAR`**
+   ([`memos-inhouse-locomo-repro.md §6`](./memos-inhouse-locomo-repro.md))。**结果强于预期**:
+   同栈后 MemOS **82.40%** vs 自报 leaderboard **88.83** = **−6.43pp 的 regime 落差被直接量化**,
+   且同口径下 engram(85.71%)反而领先 3.31pp。
+   → **对 [X-MEMDELTA] 的关系变了**:该文主张"报告的增益混入了 language model / embedding model
+   的变化",是**定性命题 + 其自家设定下的验证**;engram 现在有的是**在一个第三方竞品系统上、
+   用它自家代码、把这个混淆量化成 6.43pp 的一手测量**。这不再只是"对抗它的东西",而是
+   **可以直接引用它、并给它补一个独立复现点**的素材 —— n=2 + apples-to-apples 成立。
+   ⚠️ 但 `E-MEMOSPAR` 的三条硬边界(单 run 无误差带 / 无配对检验 / 上下文预算差 3 倍)
+   决定了它**目前只能支撑"leaderboard 分不可比"这一条主张**,支撑不了任何机制优劣声明。
+   要升到终稿主结果,须先做 repro §6.5 的动作 1(拉 HF 逐题 pred 做配对,**零 token**)与动作 3(等预算重跑)。
+4. **LongMemEval** —— 由硬门**降级为加分项**(已启动,commit 1fc86f8)。
+
+### 新增外部引用编号(待补读全文后定稿)
+
+- **X-BACKEND**: Pape, Evertz, Schönherr (CISPA), *The Silent Hyperparameter: Quantifying the Impact of Inference Backends on LLM Reproducibility*, [arXiv:2605.19537](https://arxiv.org/abs/2605.19537).
+- **X-4COND**: Xia, *A Four-Condition Diagnostic Protocol for Evidence Utilization in Long-Context and Retrieval-Augmented Language Models*, [arXiv:2606.06758](https://arxiv.org/abs/2606.06758).
+- **X-MEMDELTA**: *MemDelta: Controlled Baselines and Hidden Confounds in Agent Memory Evaluation*, [arXiv:2606.29914](https://arxiv.org/abs/2606.29914).
+- **X-ENTCOLL**: *Entity-Collision: A Stratified Protocol for Attributing Retrieval Lift in Agent Memory*, [arXiv:2605.29630](https://arxiv.org/abs/2605.29630).
+- **X-CONVMEM**: *ConvMemory: A Lightweight Learned Memory Reranker, a Negative Attribution Result, and a Research-Preview Conflict Editor*, [arXiv:2605.28062](https://arxiv.org/abs/2605.28062).
+- **X-SCALE**: *When Stored Evidence Stops Being Usable: Scale-Conditioned Evaluation of Agent Memory*, [arXiv:2605.07313](https://arxiv.org/abs/2605.07313).
+- **X-NEOCOR**: *NeocorRAG: Less Irrelevant Information, More Explicit Evidence, and More Effective Recall via Evidence Chains*, [arXiv:2604.27852](https://arxiv.org/abs/2604.27852).
+- **X-RAGSYS**: *A Systems-Level Analysis of Sensitivity, Robustness, and Stability in Retrieval-Augmented Generation*, [arXiv:2606.28337](https://arxiv.org/abs/2606.28337).
+- **X-LOSTEVID**: *Lost in the Evidence? Reproducing Document Position and Context Size Effects in RAG*, [arXiv:2605.27105](https://arxiv.org/abs/2605.27105).
+- **X-PRIMACY**: *Lost at the End: Primacy Bias in Multimodal Retrieval-Augmented Question Answering*, [arXiv:2606.16494](https://arxiv.org/abs/2606.16494).
+- **X-JUDGECHG**: *When the Judge Changes, So Does the Measurement: Auditing LLM-as-Judge Reliability*, [arXiv:2607.08535](https://arxiv.org/abs/2607.08535).
+- **X-DARKCUR**: *LLM Judges Have Dark Current: A Psychometric Datasheet for LLM-as-a-Judge Evaluation*, [arXiv:2606.15610](https://arxiv.org/abs/2606.15610).

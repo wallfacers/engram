@@ -448,6 +448,12 @@ temporal 分诊(上文)证明"先切答题侧/召回侧再选杠杆"是唯一不
 
 **成本(事后离线重放精算,2026-07-25 补)**:探针脚本**未插桩 usage**(`call()` 丢弃 `usage`、无 `cost.json`),原记"~¥2"是先验拍值、无实测依据。拉 HF store+trace 用同一 `build_prompt` 逻辑重放全部 prompt + tiktoken 计数得:answer(v4-pro)**738 次 / 2,407,422 in-tok**(3262/次)/ 5,292 out-tok;judge(v4-flash)**738 次 / 265,217 in-tok**(359/次)。按 DeepSeek 官方单价折算 = **$0.381 ≈ ¥2.70**(@7.1),原估"~¥2"偏低 26%、同量级。
 
+> ⚠️ **勘误(2026-07-26,插桩实测后修正)**:上面这笔离线重放把 judge 输出按 **22 tok/次**
+> 估,实测是 **728 tok/次**(v4-flash judge 带推理输出,`completion_tokens` 含 reasoning)。
+> 该笔的 judge out 因此低估约 33×,真值应在 **¥3.7** 量级而非 ¥2.70。**离线重放补算补不回
+> reasoning tokens——只有插桩 `usage` 算得准**,这是对 [[probe-scripts-must-instrument-usage]]
+> 的加强:即便事后重放"偏差仅 -0.4%"的结论,也只对 **输入** token 成立。详见下节实测 cost.json。
+
 **校准实测(同日,2 次调用花 $0.00013)**:取同一真实 prompt 发 v4-pro 读回 `usage` —— 实测 `prompt_tokens` 3418 vs tiktoken 估 3403,**偏差仅 -0.4%**(token 量估算可信到 1% 内);`prompt_cache_hit_tokens` 3328/3418 = **97.4% 命中**,`miss` 90 = 缓存 64-tok 块的尾块。据此建命中模型(rep1 只命中 system 前缀 185/312 tok,rep2/3 命中 total−90)得 answer 命中 **66%**、judge **71%**,即"3 reps 串行 ⇒ 2/3 命中"假设被实测证实,硬上界 ¥7.8 不会发生。残留误差仅 judge 输出按 22tok 估(占比<1%)与未记录的 retries;权威口径仍是平台账单。**教训:自制探针一律累加 `usage` 并落 cost.json,不许拍估算。**
 
 | 类 | 正向翻正(实测全集) | 反向翻错(40/类抽样) |
@@ -649,3 +655,124 @@ judge_calls=0`,**零 token 花费,不占用远程评测机**(该机当时由另�
 **教训:任何换 embedding 模型的评测,必须先断言
 `count(memory_embeddings WHERE model=<new>) == 目标行数`,再读分数。** 一趟 build
 不足以完成回填。这条同样适用于未来 SaaS 形态的模型迁移。
+
+---
+
+## ⭐ answerer = deepseek-v4-flash 配对实测(2026-07-26,304 题逐题配对)
+
+**问题**:answerer-parity 那 +2.46pp 必须用 v4-pro 才拿得到吗?便宜一档的 v4-flash 能吃下多少?
+
+**方法**:v4-pro 探针的**严格配对复刻**——任务集直接从 v4-pro 两份 results.json 读 qid
+(58 题 single-hop + 86 fwd + 160 rev = **304 题**),同 top-30 上下文(trace 名单 × 店内容
+重建 `buildAnswerPrompt`)、同 category force system prompt、同 mem0-aligned judge
+(v4-flash)、3-rep 多数投票。**唯一变量 = answerer**。prompt token 实测 3264/次 vs
+v4-pro 那次记录的 3262/次(偏差 0.06%)⇒ prompt 复刻正确。
+
+| 类 | 正向翻正 flash | v4-pro | 反向翻错 flash | v4-pro |
+|---|---:|---:|---:|---:|
+| temporal | **27/41 (66%)** | 27/41 (66%) | 2/40 (5%) | 1/40 (2%) |
+| multi-hop | **14/28 (50%)** | 13/28 (46%) | 0/40 (0%) | 0/40 (0%) |
+| single-hop | **23/58 (40%)** | 25/58 (43%) | 1/40 (2%) | 1/40 (2%) |
+| open-domain | **3/17 (18%)** | 6/17 (35%) | 5/40 (12%) | 5/40 (12%) |
+
+按 v4-pro 同口径外推(正向=错题全集实测翻正,反向=抽样翻错率 × 各类答对池)分类别:
+
+| 类别 | n | base(A-base 3-rep 多数) | **flash-parity** | Δ | pro-parity | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | **89.34%** | +0.51 | 89.57% | +0.75 |
+| multi-hop | 282 | 87.59% | **92.55%** | **+4.96** | 92.20% | +4.61 |
+| temporal | 321 | 81.93% | **86.25%** | **+4.31** | 88.29% | +6.36 |
+| open-domain | 96 | 65.62% | **60.55%** | **−5.08** | 63.67% | −1.95 |
+| **OVERALL** | **1540** | **85.71%** | **87.49%** | **+1.77** | 88.17% | +2.46 |
+
+- **flash 与 pro 统计不可区分**:McNemar 配对 n=304,flash 对/pro 错 = 11,flash 错/pro 对 = 16,
+  **双尾精确 p=0.442**;逐题一致率 **91.1%**。差异唯一集中在 open-domain(flash+2 / pro+5)。
+  temporal 那 0.43pp 的差全部来自反向抽样 **2/40 vs 1/40 的一题之差被 ×6.6 外推放大**,非真信号。
+- **收益结构**:全在 multi-hop(+4.96)与 temporal(+4.31);single-hop 几乎不动(+0.51);
+  **open-domain 反而 −5.08pp** —— 强 answerer 在主观/推断题上"答得不一样而非更好",与 008 US2、
+  opinion-pass、v4-pro 反向 12.5% 翻错三处一致。**⇒ open-domain 换 answerer 救不动,已封口。**
+- **口径注**:base 85.71% 是 A-base 3-rep **多数投票**聚合,与诚实参考点 85.4%(3-rep mean)
+  差 0.31pp,同一批 run 的两种聚合。flash/pro 两列是 **304 题配对探针外推,不是全量 run 实测**。
+- **处置同 v4-pro:属 diagnostic,不进默认栈、不改诚实参考点 85.4%。** 用途是把"对 MemOS 的
+  gap 有多少是 answerer 可比性伪影"用便宜三倍的模型再确认一次——flash 口径下同样成立。
+
+**实测成本(usage 全程插桩,`cost.json` 落盘)**:1824 次调用(912 answer + 912 judge),
+in **3,309,949** tok(缓存命中 **66.7%**)、out **669,738** tok → **$0.3479 ≈ ¥2.47**,692 秒,2 次 retry。
+
+> **关键成本发现**:out 成本 $0.1875 **超过** in 成本 $0.1604。分解后 answer 输出仅 **6 tok/次**
+> (LoCoMo 短答),**judge 输出高达 728 tok/次**(带 reasoning)。此前所有按"judge out ≈22 tok"
+> 做的估算全部严重低估 judge 侧。全量 1540×3 修正后:answer(flash)≈¥5.2 + judge(flash)≈¥7.3
+> = **≈¥12.5**(旧口径估 ¥6.1);若 judge 改 v4-pro,增量 **≈+¥15**(out 单价 0.87 × 3.36M tok),
+> 而非按 22 tok 估的 +¥1.4~3.9。
+
+产物:`.locomo-run/014c-flash-probe/`(`flash_probe.py` / `analyze.py` /
+`flash-probe-results.json`(304 题逐题,含 `pro_maj_correct` 配对列)/ `cost.json` / `run.log`;
+已从会话 scratchpad 持久化,凭据已核无泄漏)。⚠️ **尚未推 HF** —— 该目录 gitignored,
+仍需归档到 HF `014b-oldtplan-confirm/` 才跨机不失传。
+
+---
+
+## 剩余未验方向盘点(2026-07-26 收口后重排)
+
+截至本日,**五连败**(011 alias / 012 doc2query / 010 multi-query / chunk 实体索引 /
+A embedding 模型升级)+ 检索侧结构双 P0 证伪 + 答题侧 prompt 契约两连败 + H1/H2 判死 +
+015 桥接判死。检索侧总空间实测仅 **4.93pp**(证据覆盖口径下完美检索绝对上限 **+3.8pp**),
+答题侧 7.73pp 中 **1.77~2.46pp 已确认为 answerer 伪影**(上节)。**仍未验的只剩四项:**
+
+| # | 方向 | 上限(台账实测分母) | 为何未被"五连败机理"覆盖 | 成本 |
+|---|---|---:|---|---|
+| **1** | **judge 口径补齐**(补 Mem0 的"部分给分"+"±14 天容差") | **~1.7pp 保守**(E+F 族外推) | 不是加检索信号,是改判分尺子——机理不适用 | 零答题成本,只重判 |
+| **2** | **category-conditional 精准浮现**(open-domain) | open-domain 召回侧 16 题 ≈ **1.04pp** | **只对特定类别开信号**,不做全局对称抬升——正是 opinion-pass 净负的根因 | 新机制,需 SDD |
+| **3** | **确定性日期脚手架**(014 Option B,TIMELINE 块) | temporal 答题侧 38 题 ≈ **2.47pp**(实际远低) | 不是让模型自己推理(prompt 契约已两连败),是**用确定性代码替代模型能力** | 新机制,需 SDD |
+| **4** | **`--image-captions`** | **~1.2pp**(caption-borne 18 题,已实测) | 现成 adapter flag;是 ingestion 覆盖缺口,不是排序问题 | 重建店 + 全量 e2e 门 |
+
+**新证据对 2/3 的支持(来自上节)**:open-domain 在 answerer-parity 后**反而降 5.08pp**
+⇒ 坐实 #2 是它唯一的路;temporal 答题侧 **66% 可被强 answerer 翻正**(四类最高)
+⇒ #3 那 38 题的失败是"模型算不动日期"而非"信息不在上下文",正是确定性脚手架的靶心。
+
+**#1 的依据(两处台账结论此前未接上)**:本文 §"证据覆盖正本"把答题侧剩余归为
+"题目难度/**judge 边界**,非工程可解";而 [`competitive-benchmarks.md` §6](./competitive-benchmarks.md)
+的源码逐条对比明确指出 engram judge **注释自称 mem0-aligned 但实际未对齐**,缺"部分给分"与
+"±14 天日期容差"两条 Mem0 核心宽松规则,"**是一个具体、可修的口径缺口**"。single-hop 58 题
+失败模式分类正好对上:**B 粒度过粗 19%**(对应"部分给分")· **F 相对时间 7%**(对应"相对日期
+匹配")· **E judge 边界 5%**。按 E+F 外推全量 220 错题 ≈ 26 题 ≈ **+1.7pp**;若"部分给分"吃到
+B 族一部分,量级到 3-4pp。**验法零答题成本**:答题产物在 HF(`014b-oldtplan-confirm/` +
+`009-full-A-base` 逐题 pred),补齐规则后**只重判、不重答**。
+⚠️ 属**口径改动**(宪法 IV):必须单独 commit、声明新基线、明标"对齐竞品口径非算法涨点"——
+性质同 force-answer 那次(+0.52pp)。
+
+**并行线状态(2026-07-26)**:MemOS 同栈复现 **✅ 已出分**
+(见 [`memos-inhouse-locomo-repro.md`](./memos-inhouse-locomo-repro.md) §6);
+LongMemEval **已启动**(gitignore 就位,commit 1fc86f8)。
+
+### ⚠️ 外部锚点变了:上表四方向的"追赶 MemOS"动机已消失(2026-07-26)
+
+MemOS 自家代码跑在 **engram 同款答题模型 + 同款 embedder + 同一 judge** 上 = **82.40%**,
+**低于** engram 同口径 `009-full-A-base` 的 **85.71%** 达 **3.31pp**;
+leaderboard 那个 88.83 里的 **6.43pp 是 regime 红利**(answerer 强度 + judge 宽松度),不是能力。
+
+| | OVERALL | multi-hop | temporal | open-domain | single-hop |
+|---|---:|---:|---:|---:|---:|
+| MemOS @ engram 同栈 | 82.40% | **89.36%** | 82.55% | 59.38% | 82.64% |
+| engram `009-full-A-base` | **85.71%** | 87.59% | 81.93% | **65.62%** | **88.82%** |
+
+**对本文的三处直接影响**:
+
+1. **本文开头"vs 目标:MemOS 88.83(gap ~5.1pp)"这条目标线作废** —— 它对着的是含 6.43pp
+   伪影的数字。剩余四方向的排序**不再有"竞品已经做到了"这个外部背书**,只剩各自的台账上限
+   (1.7 / 1.04 / 2.47 / 1.2 pp)撑着。**别再用"MemOS 能到 88 所以我们也能"论证任何杠杆。**
+2. **"堆记忆组织/graph/reranker"这条路被外部证据关小**:MemOS 默认栈同时带
+   tree/graph 记忆 + 本地 `bge-reranker-v2-m3` + `fine` 深检索,**在同栈下只换来 multi-hop
+   +1.77pp,总分还输 3.31pp**。这与本文 008 US1(同一 reranker,端到端 −0.06pp)、
+   五连败检索侧结论**互相印证**:engram 剩余 gap 不在"记忆组织形态"。
+   (⚠️ 这条修正了 `memos-inhouse-locomo-repro.md §5.5` 当时"差距收窄到记忆组织形态"的推断——
+   那是在**假定 MemOS 领先**的前提下写的,前提已翻。)
+3. **本文"#1 judge 口径补齐"的性质变了,优先级更高**:此前它是"对齐竞品口径以缩小 gap";
+   现在 engram 已领先,补齐 judge 口径变成**对外发布/论文口径的可信度问题**——
+   要宣称"engram > MemOS",judge 必须站得住,而本文已实证 engram judge 比 Mem0/OmniMemEval 严。
+   仍属宪法 IV 口径改动:单独 commit、声明新基线、明标"非算法涨点"。
+
+**⚠️ 引用该结论必须带的 caveat**(全文见 repro 文档 §6.3):两边各用**自家默认检索预算**,
+engram 实测喂 answerer **3262 tok/次** vs MemOS **~1059 tok/次(≈3 倍)**,+3.31pp 里
+"上下文更多"的贡献未剥离;MemOS 只跑 1 次答题、无误差带;**未做 1540 题配对 McNemar**
+(engram 逐题 pred 在 HF,拉回来 join 是零 token 成本的加固动作)。

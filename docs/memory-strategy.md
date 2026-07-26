@@ -10,6 +10,13 @@
 > 结论摘要见 CLAUDE.md 记忆子系统一节。本文记录在此基础上的两项战略评估与决策。
 
 > ⚠️ **演进提醒(2026-07-22,post 007/008)**:本文数字(~74.7)与"不做云 SaaS"判断已被更新——判题口径对齐后真实水位 **83.70%**(差距对 MemOS ~5pp),且 SaaS 方向收窄为**垂直「设备/应用用户习惯记忆」**重新打开。最新能力认知与方向以 [capability-and-product-north-star.md](./capability-and-product-north-star.md) 为准;本文以下保留为**技术 backlog 正本 + 原始决策记录**。
+>
+> 🚨 **二次更新(2026-07-26)——本文全部以 88.83 为参照的推断需重读。** MemOS 自家代码跑在
+> engram 同款答题模型 + embedder + judge 上 = **82.40%**,engram 同口径 **85.71%**(领先 3.31pp);
+> **88.83 里有 6.43pp 是 regime 红利**。受影响最重的是本文**第 42 行**("我们 ~74 不占优")、
+> **第 301 行**("MemOS 88.83 全本地 = 真正可比标杆,证明本地天花板 ≥88")与**附录 §"88.83 分技术拆解"**
+> ——那份拆解的**机制部分仍有效**(它确实做了那些迭代),但**"这些机制值 +15.5pp"的归因不再可信**,
+> 因为终点分含 regime 红利。逐条见 [`memos-inhouse-locomo-repro.md §6`](./memos-inhouse-locomo-repro.md)。
 
 ## 决策一:产品方向 —— 不做云 SaaS,全力做本地开源记忆产品
 
@@ -298,7 +305,11 @@ FlyVec 2101.06887、Fly-CL 2510.16877。
 ### Mem0/MemOS vs engram(读上游源码核对,synthius §6)
 
 - **engram 架构已等于或强于**:三路 RRF **并集**候选 > Mem0 **semantic-only 候选池**(`main.py:1636`,BM25/entity 只加分不召回);engram OSS temporal(TemporalScore/ParseTemporalIntent 已在)> **Mem0 OSS 的 `reference_date` 直接 raise ValueError**(时序打分仅托管平台有)。
-- **Mem0 92.5 靠托管私有优化,不完全可比**;**MemOS 88.83 全本地 = 真正可比标杆,证明本地天花板 ≥88**,engram 差距是质量非架构。
+- **Mem0 92.5 靠托管私有优化,不完全可比**;~~**MemOS 88.83 全本地 = 真正可比标杆,证明本地天花板 ≥88**,engram 差距是质量非架构。~~
+  🚨 **后半句 2026-07-26 已证伪**:MemOS 全本地这点没错,但 **88.83 不是"可比标杆"**——它自家代码
+  在 engram 同款 answerer + embedder + judge 下只有 **82.40%**(engram 同口径 85.71%)。
+  **"本地天花板 ≥88"这个论断没有证据支撑,它是 regime 红利的产物。** 见
+  [`memos-inhouse-locomo-repro.md §6`](./memos-inhouse-locomo-repro.md) / [`competitive-benchmarks.md §5④`](./competitive-benchmarks.md)。
 - 可移植纯客户端增量只剩:**supersedes 链、实体图游走、检索侧时间窗、答题多候选输出**。不可追:Mem0 托管优化、云 reranker(死规则)。
 
 ### 执行顺序建议
