@@ -189,7 +189,8 @@ in 1,648,248 tok(cache 命中 1,187,456 = **72.0%**)、out 611,876 tok →
 
 ### 6.4 产物
 
-`.locomo-run/016-memos-parity/`(gitignored):
+`.locomo-run/memos-parity/`(gitignored;**刻意不带 spec-kit 特性号**——本复现是诊断/对标线
+不是 spec 特性,且 `016-` 已被 `specs/016-longmemeval-crossbench/` 占用):
 `memos_parity_score.json`(分类别 + 成本)· `memos_judged_detail.json`(1540 题逐题,
 含 3 票 votes)· `memos_responses.json`(MemOS 原始答案 + `search_context`,7.1MB)·
 `judge_memos.py` / `judge_memos.log` · `run_locomo.sh` / `chain4.sh`(6 步管线驱动)·
@@ -198,7 +199,7 @@ in 1,648,248 tok(cache 命中 1,187,456 = **72.0%**)、out 611,876 tok →
 硬编码 key / SSH / password / Bearer,零命中)。
 
 ✅ **已归档 HF**(2026-07-26):私有集 `wallfacers/engram-locomo-artifacts` 下
-[`016-memos-parity/`](https://huggingface.co/datasets/wallfacers/engram-locomo-artifacts/tree/main/016-memos-parity),
+[`memos-parity/`](https://huggingface.co/datasets/wallfacers/engram-locomo-artifacts/tree/main/memos-parity),
 9 文件,已回读仓库列表核验。跨机可取。
 
 ### 6.5 下一步
