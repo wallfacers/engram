@@ -130,7 +130,7 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 - [x] T039 全量回归：`CGO_ENABLED=0 go build ./...` 零错误 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿
 - [x] T040 LoCoMo 路径零行为变更核验：对 `--dataset-format locomo` 跑一次既有零调用探测（如 `--estimate`），确认输出与 T001 记录的基线一致
 - [x] T041 写 `specs/016-longmemeval-crossbench/verdict.md`：数据集版本与子集规模明示（不得简称全量）、官方废弃旧版本的事实、两臂结果、分桶分账、最终判决、以及本次数字与第三方旧版数字不可直接对比的声明（FR-020、FR-021、FR-022）；并显式列出本次范围排除项（官方分题型判分口径 / 弃答子集 / longmemeval_m / V2 / 干预臂，FR-026）
-- [ ] T042 回填 `docs/paper-outline-eval-reliability.md` 的 RQ6 状态（SC-010）；**提交前先 `git status` 确认该文件无其他工作的未提交改动，有冲突则停下升级，不得覆盖**（FR-024）
+- [x] T042 回填 `docs/paper-outline-eval-reliability.md` 的 RQ6 状态（SC-010）；**提交前先 `git status` 确认该文件无其他工作的未提交改动，有冲突则停下升级，不得覆盖**（FR-024）
 - [ ] T043 归档：脚本与原始产物推 HF 私仓；确认数据集、store、run 目录均未入库
 
 ---
