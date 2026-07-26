@@ -229,7 +229,12 @@ func categoryLabel(c int) string {
 	case 11:
 		return "abstention"
 	case 12:
-		return "preference"
+		// LongMemEval's cleaned release renames this type; the answer-side
+		// report groups by category id while the coverage side groups by
+		// question_type string, so the two artifacts would otherwise label the
+		// same questions differently. Category 12 is LongMemEval-only (LoCoMo
+		// uses 1-5), so this does not touch the LoCoMo path.
+		return "single-session-preference"
 	default:
 		return "category-" + strconv.Itoa(c)
 	}

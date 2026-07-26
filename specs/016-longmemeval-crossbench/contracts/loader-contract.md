@@ -10,7 +10,7 @@
 | 承诺 | 内容 |
 |---|---|
 | **引擎零改动** | MUST NOT 修改 `memory/`、`embedding/`、`provider/`、`store/`、`internal/` 下任何文件。验证：`git diff --name-only -- memory embedding provider store internal` 为空 |
-| **LoCoMo 路径零行为变更** | 对 `--dataset-format locomo` 的任何一次运行，本次改动 MUST NOT 改变其结果。唯一触及的共享符号是 `categoryLabel(12)`，而 12 只属 LongMemEval 题型（LoCoMo 用 1–5） |
+| **LoCoMo 路径零行为变更** | 对 `--dataset-format locomo` 的任何一次运行，本次改动 MUST NOT 改变其结果。唯一触及的共享符号是 `categoryLabel(12)`（位于 `dataset.go`，初稿误写为 `main.go`），而 12 只属 LongMemEval 题型（LoCoMo 用 1–5） |
 | **覆盖/归因逻辑零改动** | MUST NOT 修改 `coverage.go`、`attribution.go`、`evidence.go`。LongMemEval 的证据经 DiaID 合成后与 LoCoMo 同形，下游原样复用 |
 | **无 schema 变更** | 不新增 migration，不改任何表 |
 

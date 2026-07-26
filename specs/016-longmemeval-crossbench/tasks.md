@@ -16,7 +16,7 @@
 
 ## 并行度诚实声明
 
-本特性改动面极小：`cmd/locomo-bench/longmemeval.go` **单文件** + `main.go` **一行** +
+本特性改动面极小：`cmd/locomo-bench/longmemeval.go` **单文件** + `dataset.go` **一行** +
 一份新夹具。**真实并行度很低**，绝大多数实现任务串行于同一文件。下文只在任务确实
 落在不同文件且无依赖时标 `[P]`，不为凑并行虚标。
 
@@ -68,7 +68,7 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 - [ ] T013 [US1] 在 `cmd/locomo-bench/longmemeval.go` 新增解析字段：`longMemEvalRecord.HaystackDates []string`(`haystack_dates`)、`longMemEvalRecord.HaystackSessionIDs []string`(`haystack_session_ids`)、`longMemEvalMessage.HasAnswer bool`(`has_answer`)；不改任何既有字段（FR-006）
 - [ ] T014 [US1] 在 `cmd/locomo-bench/longmemeval.go` 的 `longMemEvalTypes` 追加 `{12, "single-session-preference"}`（**复用** id 12，与既有 `preference` 并列为同义名，research R8，FR-001）
 - [ ] T015 [US1] 在 `cmd/locomo-bench/longmemeval.go` 改造 `parseLongMemEvalConversation` 与 `parseLongMemEvalSession`：按下标绑定 `haystack_dates`（长度不匹配返回错误）、为每条写入的 turn 合成 `DiaID`、由 `has_answer` 收集该题 `Evidence` 并经 `loadBenchmarkDataset` 写入 `locomoQA.Evidence`；对象形式分支的内嵌日期**优先**，保持既有行为（FR-002、FR-003、FR-004、FR-005、FR-007）
-- [ ] T016 [US1] 在 `cmd/locomo-bench/main.go` 将 `categoryLabel(12)` 的返回值由 `"preference"` 改为 `"single-session-preference"`（research R8：避免答题侧与覆盖侧两份产物对同一批题用不同名字）
+- [x] T016 [US1] 将 `categoryLabel(12)` 的返回值由 `"preference"` 改为 `"single-session-preference"`（research R8：避免答题侧与覆盖侧两份产物对同一批题用不同名字）。**位置更正**：该函数在 `cmd/locomo-bench/dataset.go:207`，**不在 `main.go`** —— plan/contracts/tasks 三处原先都写错了文件名。类别 12 为 LongMemEval 专属（LoCoMo 用 1–5），故 LoCoMo 路径行为不变
 - [ ] T017 [US1] 运行 `CGO_ENABLED=0 go build ./...` 与 `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench/`，T005–T012 全部转绿
 - [ ] T018 [US1] 用真实数据集全量验证读取：对 `longmemeval_oracle.json` 与 `longmemeval_s_cleaned.json` 各跑一次零调用读取探测，断言 500/500 题成功加载、日期塌缩为单一值的题数为 0（SC-001、SC-002）
 
@@ -164,7 +164,7 @@ Phase 6 (T038-T043)
 | B | T005–T011 | 均在 `longmemeval_test.go`，**同文件 ⇒ 不标 [P]**，但可由同一人一次性写完 |
 | C | T027 与 T022 | 两个独立脚本，不同文件 |
 
-**其余任务全部串行**：T013–T016 同属 `longmemeval.go`/`main.go` 的实现链且互相依赖；
+**其余任务全部串行**：T013–T016 同属 `longmemeval.go`/`dataset.go` 的实现链且互相依赖；
 T023–T026、T030–T037 是评测流水线，天然串行。
 
 **结论：本特性真实并行度 ≈ 2**，不适合多 agent 并行分工；建议单线程执行。
@@ -175,7 +175,7 @@ T023–T026、T030–T037 是评测流水线，天然串行。
 |---|---|---|
 | `cmd/locomo-bench/longmemeval.go` | T013, T014, T015 | 高 —— 必须串行 |
 | `cmd/locomo-bench/longmemeval_test.go` | T005–T012 | 高 —— 必须串行 |
-| `cmd/locomo-bench/main.go` | T016 | 低 —— 仅一行，且与 longmemeval.go 无重叠 |
+| `cmd/locomo-bench/dataset.go` | T016 | 低 —— 仅 `categoryLabel(12)` 一行，与 longmemeval.go 无重叠 |
 | `testdata/longmemeval/sample_array.json` | T004 | 无 —— 新文件 |
 | scratchpad 脚本 | T019, T022, T027 | 无 —— 各自独立文件 |
 | `docs/paper-outline-eval-reliability.md` | T042 | **中 —— 其他工作正在改，提交前必须核对** |

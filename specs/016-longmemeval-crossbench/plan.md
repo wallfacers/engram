@@ -94,7 +94,7 @@ specs/016-longmemeval-crossbench/
 cmd/locomo-bench/
 ├── longmemeval.go              # 【改】loader：题型名 / haystack_dates / has_answer / DiaID 合成
 ├── longmemeval_test.go         # 【改】保留既有对象形式用例，新增真实形状用例
-├── main.go                     # 【仅一行】categoryLabel(12) 标签改名（research R8）
+├── dataset.go                  # 【仅一行】categoryLabel(12) 标签改名（research R8）—— 初稿误写为 main.go
 ├── coverage.go                 # 【不改】证据同构后原样复用
 ├── attribution.go              # 【不改】
 ├── evidence.go                 # 【不改】DiaID 格式反过来被它约束
@@ -107,7 +107,7 @@ testdata/longmemeval/
 memory/ embedding/ provider/ store/ internal/    # 【一行不动】
 ```
 
-**Structure Decision**: 改动集中在 `longmemeval.go` 单文件，加一处 `main.go` 的标签
+**Structure Decision**: 改动集中在 `longmemeval.go` 单文件，加一处 `dataset.go` 的标签
 改名与一份新夹具。选此结构的理由：本特性的全部难点是**让新 benchmark 的证据形式与
 既有 benchmark 同构**，一旦同构成立，计量与归因是纯复用。任何「为 LongMemEval 另写
 一套覆盖计量」的方案都会产生两把不可比的尺子，直接摧毁本特性的目的（跨 benchmark
