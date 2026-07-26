@@ -441,3 +441,69 @@ date"**。该规则为 LoCoMo 的绝对型 "when did X happen" 而写，套到 L
 四个看似离谱的数字（1136 天 / 192 周 / 177 周 / 45 个月）互相之间毫无关系，
 但反解出的锚点全部落在同一周内 —— 这是 harness 伪影的指纹，任何"模型能力不足"
 的解释都无法产生这种一致性。
+
+### 修复后实测（臂 C，2026-07-26 20:02）
+
+与臂 A **完全同配方**（`deepseek-v4-pro` / quota 12 / top-k 30 / hybrid /
+`--force-answer` / mem0-aligned judge / 同一 store），**唯一变量 = `bb99d58`
+的 CURRENT DATE 注入**。3 跑。
+
+| | r1 | r2 | r3 | 均值 | 多数票 |
+|---|---:|---:|---:|---:|---:|
+| A（无锚点） | 82 | 80 | 77 | 79.7 | **82** |
+| **C（有锚点）** | **86** | **86** | **83** | **85.0** | **85** |
+
+**C 的最低跑（83）高于 A 的最高跑（82）**——三跑无重叠，不是跑间噪声。
+
+| 题型 | A（多数） | C（多数） | Δ |
+|---|---:|---:|---:|
+| **temporal-reasoning** | 18/27 (66.7%) | **23/27 (85.2%)** | **+5** |
+| knowledge-update | 13/15 | 13/15 | 0 |
+| single-session-assistant | 10/11 | 10/11 | 0 |
+| single-session-user | 13/14 | 13/14 | 0 |
+| multi-session | 23/27 | 22/27 | −1 |
+| single-session-preference | 5/6 | 4/6 | −1 |
+
+**验尸点名的 6 道题全部翻正，零假阳性**，且每一道都是 **A 票 0/3 → C 票 3/3**
+的确定性翻转（非边缘票数变动）：
+
+```
+conv  6  45 months     -> 5 months       gold 5
+conv 39  4 March 2023  -> 4 weeks        gold 4
+conv 56  192 weeks     -> 2 weeks        gold 2
+conv 92  1136 days     -> 4 days         gold 3~4
+conv 96  19 March 2023 -> 7 days         gold 7~8
+conv 98  Mountain bike -> road bike      gold road bike   ("past weekend" 排歧)
+```
+
+#### 副作用（如实登记，未做后续 prompt 微调）
+
+- **conv 52（multi-session，真回归）**：`How long have I been working in my
+  current role?` gold「1 年 5 个月」。A 答对 2/3；C 三跑答「7 months / 3 days /
+  3 days」。`currentDateRule` 把**「持续至今多久」**与**「距今多久前发生」**归入
+  同一框架，模型用 CURRENT DATE 减去了错误的基准事件。这是规则过度泛化的代价。
+- **conv 94（temporal，翻负但 A 的"对"可疑）**：A 三跑为
+  `164 weeks / 3 weeks / 3 weeks`，C 为 `9 / 9 / 6 weeks`。A 的首跑同样是
+  2026 锚点伪影，后两跑在**没有任何锚点**的情况下答出「3 weeks」——那是猜中，
+  不是能力。C 有了锚点却算错，说明**该题存在真实的候选日期排歧问题**，此前被
+  幸运猜中掩盖。
+- **conv 4 / 42 / 57（preference，净 0）**：三题在「给一条具体建议」与「列一串
+  产品名」之间摇摆，A 自身 3 跑即不稳定（T,T,F）。与日期无关，属采样噪声。
+
+净账：temporal **+6 确定性翻正 −1 真回归**；multi-session **−1 规则副作用**；
+preference 净 0。**未针对这些错题继续调 prompt**——那会滑向对 6 道题的过拟合。
+
+#### 用量（按 usage 插桩）
+
+`answer` 302 次 / 911,859 in / 132,440 out（v4-pro）；`judge` 300 次 /
+110,377 in / 34,806 out（v4-flash）；`rewrite` 2 次。
+**$0.29–0.54 ≈ ¥2.1–3.9**（60% 缓存命中 ~ 全 miss 上界）。
+`extract` / `embed` 零付费（store 复用 + 本地 embedding），未动用远端 GPU。
+
+#### 结论
+
+LongMemEval-S (cleaned) **分层抽样 100 题**、`deepseek-v4-pro` 答题、3 跑多数票：
+**85/100**。`temporal-reasoning` 从 66.7% 升至 **85.2%**，不再是最差题型
+（现最差为 multi-session 81.5% 与 preference 66.7%，后者 n=6 不可判）。
+
+**这不是 engram 变强了，是测量变诚实了。** 检索侧一行未改，引擎一行未改。
