@@ -301,6 +301,12 @@ not available in the open-source SDK"**,且用 **top_200** 检索预算。
 
 ## 8. 产物
 
+✅ **已归档 HF**(2026-07-26):私有集 `wallfacers/engram-locomo-artifacts` 下
+[`matrix-2026-07-26/`](https://huggingface.co/datasets/wallfacers/engram-locomo-artifacts/tree/main/matrix-2026-07-26)
+—— 85 文件(逐题 results / stats / cost / regime + 重判结果 + 驱动脚本 + MANIFEST),
+已回读仓库列表核验,已核无凭据泄漏。store 目录(1.8G)不归档,可由脚本 + 数据集重建。
+
+
 - LoCoMo:`.locomo-run/matrix/locomo-pro-r*/`(gitignored)、
   基线 `009-full-A-base` 在 HF `wallfacers/engram-locomo-artifacts`
 - LongMemEval:`.longmemeval-run/p3-s100/{ans*,pro-A-r*,dated-C-r*,qwen-dated-r*,abl-*}/`
