@@ -74,9 +74,9 @@ MUST NOT 进入 Phase 4。门禁是本阶段的**最后一项**，不是中途�
 
 ### G-尺子门（US1）
 
-- [ ] T019 [US1] 写一次性脚本切出 oracle 前 30 题为 `<scratchpad>/oracle_smoke30.json`（顺序取即可，本门验机制不验统计量），脚本落 scratchpad 不入库（FR-008）
+- [x] T019 [US1] 写一次性脚本切出 30 题 smoke 子集为 `<scratchpad>/oracle_smoke30.json`，脚本落 scratchpad 不入库（FR-008）。**选取规则（实测修正）**：oracle 文件**按题型排序**，「顺序取前 30」实际只覆盖 temporal-reasoning 一种题型、且 30 题全部有证据 —— G1（`single-session-preference` 首见于第 200 题，正是今天硬报错的题型）与 G4（无证据题首见于第 55 题）**一次都不会被触发**，尺子门会在两处缺口未受检的情况下亮绿灯。改为确定性覆盖抽取：按题型名排序，每型取前 4 道**有证据**题（24 道），再取文件序前 6 道**无证据**题，并集还原文件序。实测 = 30 题 / 6 型全覆盖 / 24 有证据 + 6 无证据 / 712 条消息（比顺序取的 819 条更省）
 - [ ] T020 [US1] 建 smoke 库：按 quickstart 的 setsid detach 纪律运行 `--dataset-format longmemeval --coverage-only`，embedding 走本地服务、抽取走小额付费口；**脚本必须插桩 usage 并记录实测成本，不得预先拍数**（FR-008）
-- [ ] T021 [US1] **G-尺子门判定（不过即停止）**：断言精确证据覆盖率 ≥ 0.95 且日志中答题模型调用数与判分模型调用数均为 0（FR-009、SC-003）。**未达标 ⇒ 停止本特性，把实测值与结论写入 `specs/016-longmemeval-crossbench/verdict.md` 并终止，MUST NOT 进入 Phase 4**
+- [ ] T021 [US1] **G-尺子门判定（不过即停止）**：断言精确证据覆盖率 ≥ 0.95 且日志中答题模型调用数与判分模型调用数均为 0（FR-009、SC-003）。**覆盖率的分母是 24 道可评分题** —— 另 6 道无证据题按 FR-007 判为 `gradeable=false`，不进覆盖率统计；但它们**必须**被观察到确实走了该路径，这正是 T019 把它们放进 smoke 集的目的。**未达标 ⇒ 停止本特性，把实测值与结论写入 `specs/016-longmemeval-crossbench/verdict.md` 并终止，MUST NOT 进入 Phase 4**
 
 **Checkpoint**: US1 完成即已交付价值 —— LongMemEval 从「读不进/无尺子」变为「可被诚实测量」，
 即使不做 US2/US3 也是可独立验收的增量。
