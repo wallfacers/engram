@@ -89,6 +89,8 @@ EMBED_BASE_URL=http://127.0.0.1:7999/v1 EMBED_MODEL=bge-small-en-v1.5 ... \
 | 9 | SC-004 逐字节复现失败 | vllm-GPU 查询嵌入非确定（`embed_probe` unstable，bit_identical≈0.875）→ rrf_score 尾数抖 | 要 bit-identical 换 **fastembed CPU** 嵌入；GPU 嵌入不影响分数结论（象限分布两跑一致） |
 | 10 | **冷启动首臂系统性偏低 ~2pp**（多臂配对时首个 arm 被压低，险酿假 GO） | vllm 刚 launch 后立刻跑的第一个 arm，KV cache 冷/共卡 embed 竞争/服务未热 → 同配置比之后复跑低 ~2.25pp（实测 base 82.92% vs 同配置 base2 85.17%，2026-07-24 assoc 014 评测）。若拿冷首臂当基线,任何 treatment 都会凭空 +2pp 显著 | **box 冷启后第一个 arm 作 warm-up 丢弃,或必复跑一次基线 arm 做锚**；多臂配对信「同会话复跑的干净基线」,不信首臂;paired McNemar 也要对干净基线,不对冷首臂 |
 
+| 11 | **全臂 0.0%**(`temporal 0/321`),但 `answer_context_tokens_mean` 正常、`regime.json` 四要素齐 | judge key 失效/轮换(deepseek 返 **401**),bench 把「judge 调用失败」按**判错**记分 → 分数塌到 0 而非报错退出。log 里 `judge call failed; question scored wrong ... api key ... is invalid` 刷屏 | 每轮开跑前先 `curl` 打一发 judge 端点验活;**多臂长跑必须先跑 1-rep warm-up 臂**——它 60 秒内就能暴露这类塌陷,代价是 1 rep 而不是 24 rep。2026-07-27 的 017 三臂就是靠 warm-up 臂在第一分钟发现 key 过期 |
+
 ## 5. 「基线到底用的什么」怎么反查
 
 旧 run 目录里没记全 flag 时：

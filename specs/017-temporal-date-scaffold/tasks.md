@@ -107,23 +107,23 @@ description: "Task list for 017-temporal-date-scaffold"
 
 ### 前置
 
-- [ ] T027 [US2] 取得**显式成本授权**并记录授权范围(预算上限、允许的 box 时长);未获授权则本阶段停止
-- [ ] T028 [US2] 准备 box 与端点:确认 vllm 已起、SSH 隧道已通、`JUDGE_*` env 就位;**隧道启动 MUST 打包进 `setsid` 脚本内**(否则脚本活着隧道死);凭据只走 env,**不得**写入任何文件或日志
-- [ ] T029 [US2] 复用既有 store(不重建,抽取零成本),确认与 canonical recipe 的 embedder 一致(`bge-large-en-v1.5`)
+- [x] T027 [US2] 取得**显式成本授权**并记录授权范围(预算上限、允许的 box 时长);未获授权则本阶段停止
+- [x] T028 [US2] 准备 box 与端点:确认 vllm 已起、SSH 隧道已通、`JUDGE_*` env 就位;**隧道启动 MUST 打包进 `setsid` 脚本内**(否则脚本活着隧道死);凭据只走 env,**不得**写入任何文件或日志
+- [x] T029 [US2] 复用既有 store(不重建,抽取零成本),确认与 canonical recipe 的 embedder 一致(`bge-large-en-v1.5`)
 
 ### 三臂对跑
 
-- [ ] T030 [US2] 跑 `base` 臂:canonical recipe(`--chunks --top-k 30 --chunk-quota 12 --force-answer --judge-mem0-aligned --retrieval hybrid --repeats 3`),脚手架**关**;**冷启动首臂结果丢弃或复跑**(FR-012,014 实测冷首臂偏低 ~2.25pp)
-- [ ] T031 [US2] 跑 `ref` 臂:与 `base` **配置完全相同**的重跑,作为**噪声标尺** —— 不可省(FR-012;LongMemEval 实测同配置重跑差 2 分)
-- [ ] T032 [US2] 跑 `scaffold` 臂:同配置 + `--temporal-date-scaffold`;`--temporal-answer-prompt` 状态 MUST 与前两臂固定一致(contracts C-1,否则两变量混淆)
-- [ ] T033 [US2] 核验各臂 `regime.json`:`scaffold` 臂 fingerprint **必须**含 `;temporal_date_scaffold=true`;若缺失说明开关未生效,**整轮作废重跑**
+- [x] T030 [US2] 跑 `base` 臂:canonical recipe(`--chunks --top-k 30 --chunk-quota 12 --force-answer --judge-mem0-aligned --retrieval hybrid --repeats 3`),脚手架**关**;**冷启动首臂结果丢弃或复跑**(FR-012,014 实测冷首臂偏低 ~2.25pp)
+- [x] T031 [US2] 跑 `ref` 臂:与 `base` **配置完全相同**的重跑,作为**噪声标尺** —— 不可省(FR-012;LongMemEval 实测同配置重跑差 2 分)
+- [x] T032 [US2] 跑 `scaffold` 臂:同配置 + `--temporal-date-scaffold`;`--temporal-answer-prompt` 状态 MUST 与前两臂固定一致(contracts C-1,否则两变量混淆)
+- [x] T033 [US2] 核验各臂 `regime.json`:`scaffold` 臂 fingerprint **必须**含 `;temporal_date_scaffold=true`;若缺失说明开关未生效,**整轮作废重跑**
 
 ### 判定(五项缺一即 inconclusive)
 
-- [ ] T034 [US2] 算 ① temporal 类(n=321)准确率变化 与 ② `scaffold` vs 干净 `base` 的配对 McNemar 显著性(**不得**对冷启动首臂做配对)
-- [ ] T035 [US2] 算 ③ overall 回退检查 与 ④ `ref` vs `base` 噪声标尺差值
-- [ ] T036 [US2] 实测 ⑤ 答题上下文 **token 增量**(`scaffold` vs `base` 每题 prompt token),用于区分"提质"与变相"加量"(FR-013)
-- [ ] T037 [US2] 按 GO 判据判定:**GO ⟺ temporal 配对显著抬升 AND overall 不回退**;任一不满足即 NO-GO;五项数字缺任一则判 inconclusive(SC-006)。同时对照名义上限 **2.47pp** —— 超出该上限的"增益"是错误信号,先查 bug
+- [x] T034 [US2] 算 ① temporal 类(n=321)准确率变化 与 ② `scaffold` vs 干净 `base` 的配对 McNemar 显著性(**不得**对冷启动首臂做配对)
+- [x] T035 [US2] 算 ③ overall 回退检查 与 ④ `ref` vs `base` 噪声标尺差值
+- [x] T036 [US2] 实测 ⑤ 答题上下文 **token 增量**(`scaffold` vs `base` 每题 prompt token),用于区分"提质"与变相"加量"(FR-013)
+- [x] T037 [US2] 按 GO 判据判定:**GO ⟺ temporal 配对显著抬升 AND overall 不回退**;任一不满足即 NO-GO;五项数字缺任一则判 inconclusive(SC-006)。同时对照名义上限 **2.47pp** —— 超出该上限的"增益"是错误信号,先查 bug
 
 **Checkpoint**: 有了可信的 GO/NO-GO 结论
 
@@ -133,19 +133,19 @@ description: "Task list for 017-temporal-date-scaffold"
 
 **Goal**: 让下一个人不必重跑就知道这条路的结局
 
-- [ ] T038 [US3] 在 `docs/locomo-score-levers.md` 新增本 feature 的 verdict 节:判据、五项数字、成本、产物指针;NO-GO 时归因**必须区分**「思路错」/「上下文被稀释」(014 翻车模式)/「落在噪声内」(看 `ref` 标尺)
-- [ ] T039 [US3] 更新 `docs/locomo-score-levers.md`「剩余未验方向盘点」中 #3 的状态(当前为"已立项 017"),并同步修正剩余项计数
-- [ ] T040 [US3] 若 GO:声明新参考点,并把 eval 结果与实现改动**分开提交**(宪法 IV / FR-016),明标"这是端到端答题增益,不与任何已计入基线的口径改动叠加"
-- [ ] T041 [US3] 若 NO-GO:`--temporal-date-scaffold` 维持默认关、不出货、不产出移植文档;记录 `cmd/locomo-bench/timeline.go` 可原子删除的回滚路径
-- [ ] T042 [US3] 产物归档前逐文件扫描凭据(SSH host/port/password、API key、Bearer),确认**零命中**后再归档(FR-015)
+- [x] T038 [US3] 在 `docs/locomo-score-levers.md` 新增本 feature 的 verdict 节:判据、五项数字、成本、产物指针;NO-GO 时归因**必须区分**「思路错」/「上下文被稀释」(014 翻车模式)/「落在噪声内」(看 `ref` 标尺)
+- [x] T039 [US3] 更新 `docs/locomo-score-levers.md`「剩余未验方向盘点」中 #3 的状态(当前为"已立项 017"),并同步修正剩余项计数
+- [~] T040 [US3] 若 GO(**不适用 —— 本轮 NO-GO**):声明新参考点,并把 eval 结果与实现改动**分开提交**(宪法 IV / FR-016),明标"这是端到端答题增益,不与任何已计入基线的口径改动叠加"
+- [x] T041 [US3] 若 NO-GO:`--temporal-date-scaffold` 维持默认关、不出货、不产出移植文档;记录 `cmd/locomo-bench/timeline.go` 可原子删除的回滚路径
+- [x] T042 [US3] 产物归档前逐文件扫描凭据(SSH host/port/password、API key、Bearer),确认**零命中**后再归档(FR-015)
 
 ---
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T043 [P] 为 `cmd/locomo-bench/timeline.go` 补齐包内注释:说明脚手架的立论(014 证伪"让模型自己推理"→ 改用确定性代码替代)与三条不变量(不臆造/可降级/确定性),使后来者不必读 spec 也能理解设计意图
-- [ ] T044 [P] 在 `docs/locomo-e2e-eval-reproduction.md` 记录 `--temporal-date-scaffold` 的存在与默认状态(仅当 US2 判 GO 时才写入 canonical recipe;NO-GO 则只记"已试过、默认关")
-- [ ] T045 清理会话 scratchpad 中的临时脚本与日志,确认仓库 `git status` 除预期改动外干净(临时文件**不得**留在仓库路径)
+- [x] T043 [P] 为 `cmd/locomo-bench/timeline.go` 补齐包内注释:说明脚手架的立论(014 证伪"让模型自己推理"→ 改用确定性代码替代)与三条不变量(不臆造/可降级/确定性),使后来者不必读 spec 也能理解设计意图
+- [x] T044 [P] 在 `docs/locomo-e2e-eval-reproduction.md` 记录 `--temporal-date-scaffold` 的存在与默认状态(仅当 US2 判 GO 时才写入 canonical recipe;NO-GO 则只记"已试过、默认关")
+- [x] T045 清理会话 scratchpad 中的临时脚本与日志,确认仓库 `git status` 除预期改动外干净(临时文件**不得**留在仓库路径)
 
 ---
 

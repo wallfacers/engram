@@ -715,6 +715,83 @@ in **3,309,949** tok(缓存命中 **66.7%**)、out **669,738** tok → **$0.3479
 
 ---
 
+## 确定性日期脚手架(Feature 017,TIMELINE 块)— e2e **NO-GO(落在噪声内)**(2026-07-27)
+
+**立意**:temporal 分诊坐实主瓶颈在**答题侧**(答错题 69% gold 已在 top-30),且 prompt 契约
+两连败(014 强化版显著更差、旧简单版 ns)。017 换一条路:**不要求模型推理,用确定性 Go 代码
+把日期算完**——从每条记忆自带的 `[event:]` 结构化日期抽出时间线、按时序排序、把窄集合的相对
+表述(`next month` / `two weeks ago` / `yesterday`)锚定到该条自己的日期上、并算出首尾跨度,
+作为 `TIMELINE` 块前置进 category-2 答题上下文。模型只做**选择**,不做**计算**。
+默认关(`--temporal-date-scaffold`),canonical recipe 逐字节不受影响(golden 基线测试钉死)。
+
+### 门:temporal n=321,三臂 + warm-up,各 8 rep 多数投票
+
+box 全本地栈(bench 直接跑在 box 上),同店 `009-bge-chunks-store`(bge-large 1024d + chunks),
+canonical recipe(`--chunks --top-k 30 --chunk-quota 12 --retrieval hybrid --force-answer
+--judge-mem0-aligned`,干净 top-k 30 无 cat-top-k),`--only-category 2`,judge=deepseek-v4-flash。
+臂序刻意为 **warmup → base → scaffold → ref**:base 与 scaffold 相邻(主对比受漂移影响最小),
+`ref` 跨整段作**保守**噪声标尺。
+
+> **口径偏离(刻意,已声明)**:三臂跑 `--only-category 2`(321 题)而非全量 1540。理由:
+> 开关**只在 `category==2` 生效**,非 temporal 题的答题提示**逐字节不变**(US1 golden 基线
+> 测试所证),跑它们只是在计费 GPU 上重测已知不变的东西(全量将从 ~26 分钟涨到 ~2 小时)。
+> 代价是 overall 只能**投影**而非直测 —— 上面第 3 项按此如实标注。
+
+| 臂 | temporal maj acc(8-rep) | per-rep 带 | ctx tok 均值 |
+|---|---:|---|---:|
+| warm-up(丢弃) | 81.93%(1 rep) | — | 3693 |
+| `base` | **82.24%** | 79.1–84.7% | 3676 |
+| `scaffold` | **82.87%**(+0.62pp) | **81.6–84.7%** | **4264** |
+| `ref`(= base 复跑) | **81.31%**(−0.93pp) | 78.2–84.1% | 3675 |
+
+**五项必产数字**:
+
+1. **temporal 变化:+0.62pp**(82.24% → 82.87%);
+2. **配对 McNemar(scaffold vs 干净 base)**:b=12 / c=14,**net +2,χ²=0.154(门 3.841),精确二项 p=0.845 → ns**;
+3. **overall 回退检查**:非 temporal 提示**逐字节不变**(US1 golden 基线测试证明,开关只在
+   `category==2` 生效)⇒ overall 投影 **+0.13pp**,不回退也不显著;
+4. **噪声标尺 `ref` vs `base`:−0.93pp**(net −3,χ²=0.474,ns)——**标尺绝对值 0.93pp
+   已经大于处理臂的 +0.62pp**;
+5. **token 增量:+588 tok/题(+16.0%)**,中位 +588、max +1591。
+
+### 判定与归因
+
+**NO-GO**:GO 判据要求「temporal 配对显著抬升 AND overall 不回退」,**第一条不满足**
+(p=0.845,离显著门差一个数量级)。
+
+归因按三分法:**「落在噪声内」**,不是「思路错」也不是 014 式「上下文被稀释」。依据:
+
+- **不是没点火**:逐题 token 配对显示**点火率 100%(321/321)**,每题都拿到了 TIMELINE 块;
+  实现按契约工作(US1 的 22 条断言 + 100% 点火共同排除了"功能没生效"这一解释);
+- **不是被稀释**:scaffold 的 per-rep **下界反而抬高**(81.6% vs base 79.1% / ref 78.2%),
+  上界持平(84.7%)——多出的 588 tok 没有把答题器压垮,只是没换来净新增正确;
+- **就是太小**:+0.62pp = 321 题里净 +2 题,而同配置复跑的标尺是 −0.93pp / net −3。
+  **一个比自己噪声标尺还小的差分,不能宣称有效**(FR-012 设 `ref` 臂的全部意义)。
+  名义上限 2.47pp(答题侧 temporal 38 题)本就标注"实际远低",实测兑现不足其 1/4 且不显著。
+
+### 处置 + 教训
+
+- **`--temporal-date-scaffold` 维持默认关,不出货,不产出移植文档。** 回滚路径:
+  `cmd/locomo-bench/timeline.go` + `timeline_test.go` 可原子删除,其余是签名扩展(传 `""` 即还原)。
+  代码保留的唯一理由是它是**这条路已被走过的证据**,不是待启用的开关。
+- **temporal 方向至此三连收口**:强化 prompt 契约(显著更差)/ 旧简单契约(ns)/ 确定性日期脚手架
+  (ns 且小于噪声)。三条路覆盖了「让模型推理」与「替模型算完」两种范式,**temporal 答题侧
+  38 题的名义空间没有廉价兑现路径**。
+- **又一次 008 铁律的变体**:这次连中间信号都是满分(点火 100%、算得对、降级正确、确定性),
+  端到端仍然 ns。**"实现正确" 与 "有用" 之间没有推论关系**,只有配对实测能连接两者。
+- **方法学兑现**:冷启动纪律再次生效(warm-up 81.93% 明显低于随后 base 的 82.24% 与其 per-rep 上界);
+  `ref` 标尺第一次**直接改写了结论口径**——没有它,+0.62pp 会被读成"小幅有效"。
+
+产物:`.locomo-run/017-scaffold/`(warmup/base/scaffold/ref 四臂 × 逐题 jsonl + `regime.json` +
+`stats.json` + `cost.json` + `context_parity.jsonl`,4.7M,gitignored)。
+`scaffold` 臂 `regime.json` 含 `temporal_date_scaffold=true`(开关生效已核,T033)。
+实测成本:box GPU 约 **45 分钟**(含冷启与一次判题 401 返工),答题/抽取全本地零付费,
+judge 侧 26 rep × 321 题的 deepseek-v4-flash 微付费(`cost.json` 记 0,deepseek 不在价表)。
+产物已逐文件扫描凭据,**零命中**(唯一命中 `43078` 系 ci95 浮点尾数误报)。
+SDD 正本:[`specs/017-temporal-date-scaffold/`](../specs/017-temporal-date-scaffold/)。
+
+---
+
 ## 剩余未验方向盘点(2026-07-26 收口后重排)
 
 截至本日,**五连败**(011 alias / 012 doc2query / 010 multi-query / chunk 实体索引 /
@@ -722,11 +799,15 @@ A embedding 模型升级)+ 检索侧结构双 P0 证伪 + 答题侧 prompt 契�
 015 桥接判死。检索侧总空间实测仅 **4.93pp**(证据覆盖口径下完美检索绝对上限 **+3.8pp**),
 答题侧 7.73pp 中 **1.77~2.46pp 已确认为 answerer 伪影**(上节)。**仍未验的只剩三项:**
 
+> **2026-07-27 再更新**:#3(确定性日期脚手架)已由 **017** 端到端证伪(见上一节),
+> 与 #1 的作废合计 —— **剩余未验方向由三项收缩为两项:#2(category-conditional 精准浮现)
+> 与 #4(`--image-captions`)**。
+
 | # | 方向 | 上限(台账实测分母) | 为何未被"五连败机理"覆盖 | 成本 |
 |---|---|---:|---|---|
 | ~~**1**~~ | ~~**judge 口径补齐**(补 Mem0 的"部分给分"+"±14 天容差")~~ | ~~**~1.7pp 保守**~~ | **❌ 已作废 —— 该工作早已由 spec 007 完成,见下方更正** | — |
 | **2** | **category-conditional 精准浮现**(open-domain) | open-domain 召回侧 16 题 ≈ **1.04pp** | **只对特定类别开信号**,不做全局对称抬升——正是 opinion-pass 净负的根因 | 新机制,需 SDD |
-| **3** | **确定性日期脚手架**(014 Option B,TIMELINE 块) | temporal 答题侧 38 题 ≈ **2.47pp**(实际远低) | 不是让模型自己推理(prompt 契约已两连败),是**用确定性代码替代模型能力** | 新机制,需 SDD → **已立项 [`specs/017-temporal-date-scaffold/`](../specs/017-temporal-date-scaffold/)**(2026-07-27) |
+| ~~**3**~~ | ~~**确定性日期脚手架**(014 Option B,TIMELINE 块)~~ | ~~temporal 答题侧 38 题 ≈ **2.47pp**(实际远低)~~ | **❌ 已证伪(2026-07-27)** —— 017 三臂 e2e **+0.62pp / p=0.845 / 小于 `ref` 噪声标尺 0.93pp**,见上节 verdict | 已花:box ~45min |
 | **4** | **`--image-captions`** | **~1.2pp**(caption-borne 18 题,已实测) | 现成 adapter flag;是 ingestion 覆盖缺口,不是排序问题 | 重建店 + 全量 e2e 门 |
 
 **新证据对 2/3 的支持(来自上节)**:open-domain 在 answerer-parity 后**反而降 5.08pp**

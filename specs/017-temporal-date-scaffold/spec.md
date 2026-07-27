@@ -4,7 +4,13 @@
 
 **Created**: 2026-07-27
 
-**Status**: Draft
+**Status**: **收口 —— US1 PASS(实现正确、默认关);US2 端到端门 NO-GO(2026-07-27)**
+
+> **Verdict**:三臂 8-rep 配对实测 temporal **+0.62pp,McNemar χ²=0.154 / p=0.845(ns)**,
+> 且**小于同配置 `ref` 噪声标尺 0.93pp**;点火率 100%、token +16.0%。
+> 归因 = **落在噪声内**(非"没点火"、非"上下文被稀释")。`--temporal-date-scaffold` 维持默认关、
+> 不出货。完整 verdict 与五项数字:[`docs/locomo-score-levers.md`](../../docs/locomo-score-levers.md)
+> 「确定性日期脚手架(Feature 017)」节。
 
 **Input**: User description: "先做收益高的" —— 经核实 C1(judge 口径补齐)已由 spec 007 落地、不需要立项后,从 [`docs/locomo-score-levers.md`「剩余未验方向盘点」](../../docs/locomo-score-levers.md) 四项中选定台账上限最高的一项:**确定性日期脚手架(014 Option B,TIMELINE 块)**,temporal 答题侧 38 题 ≈ 2.47pp 名义上限。
 
