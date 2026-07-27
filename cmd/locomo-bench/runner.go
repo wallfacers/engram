@@ -350,7 +350,19 @@ func writeCurrentDateHeader(b *strings.Builder, currentDate string) {
 	fmt.Fprintf(b, "CURRENT DATE: %s\n\n", currentDate)
 }
 
-func buildAnswerPrompt(question string, memories []retrievedMemory, currentDate string) string {
+// writeTimelineBlock appends the feature-017 date scaffold between the memory
+// list and the question. An empty timeline writes nothing at all, which is what
+// keeps the default (scaffold off) path byte-identical — see
+// TestAnswerPromptGoldenBaseline.
+func writeTimelineBlock(b *strings.Builder, timeline string) {
+	if timeline == "" {
+		return
+	}
+	b.WriteString("\n")
+	b.WriteString(timeline)
+}
+
+func buildAnswerPrompt(question string, memories []retrievedMemory, currentDate, timeline string) string {
 	var b strings.Builder
 	writeCurrentDateHeader(&b, currentDate)
 	b.WriteString("RETRIEVED MEMORIES:\n")
@@ -360,22 +372,30 @@ func buildAnswerPrompt(question string, memories []retrievedMemory, currentDate 
 	for i, m := range memories {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, m.Line())
 	}
+	writeTimelineBlock(&b, timeline)
 	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)
 	return b.String()
 }
 
-func buildAnswerContextPrompt(question string, hits []memory.Result, currentDate string) string {
+// buildAnswerContextPrompt assembles the user-side answer context. category and
+// scaffold are threaded in for feature 017: the date scaffold is gated on the
+// temporal category, so the caller must say which category this question is.
+// Both prompt paths (ordinary and cluster-sweep) get the scaffold — wiring only
+// one would make the switch silently no-op on part of the set and poison the
+// e2e attribution.
+func buildAnswerContextPrompt(question string, hits []memory.Result, currentDate string, category int, scaffold bool) string {
 	memories := toMemories(hits)
+	timeline := buildTimelineBlock(memories, category, scaffold)
 	if hasClusterSweepHit(hits) {
-		return buildSweepAnswerPrompt(question, memories, currentDate)
+		return buildSweepAnswerPrompt(question, memories, currentDate, timeline)
 	}
-	return buildAnswerPrompt(question, memories, currentDate)
+	return buildAnswerPrompt(question, memories, currentDate, timeline)
 }
 
 // buildSweepAnswerPrompt groups broad-sweep hits by their source session so
 // the answering model can scan one conversation block at a time. The ordinary
 // buildAnswerPrompt path intentionally remains unchanged.
-func buildSweepAnswerPrompt(question string, memories []retrievedMemory, currentDate string) string {
+func buildSweepAnswerPrompt(question string, memories []retrievedMemory, currentDate, timeline string) string {
 	type sweepGroup struct {
 		id       string
 		session  string
@@ -439,6 +459,7 @@ func buildSweepAnswerPrompt(question string, memories []retrievedMemory, current
 			position++
 		}
 	}
+	writeTimelineBlock(&b, timeline)
 	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)
 	return b.String()
 }

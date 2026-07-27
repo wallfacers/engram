@@ -317,7 +317,7 @@ func TestSweepAnswerPromptGroupsMemoriesBySessionAndDate(t *testing.T) {
 		{Name: "early", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"},
 		{Name: "middle", Content: "middle event", EventDate: "2023-05-02", SourceSessionID: "conv0-sess1"},
 	}
-	got := buildSweepAnswerPrompt("What happened?", memories, "")
+	got := buildSweepAnswerPrompt("What happened?", memories, "", "")
 	want := "RETRIEVED MEMORIES:\n" +
 		"[session 1, 2023-05-01]\n" +
 		"1. [event: 2023-05-01] early event\n" +
@@ -942,7 +942,7 @@ func TestAnswerJournalStoresFinalAnswerUsage(t *testing.T) {
 func TestAnswerPromptInjectsCurrentDate(t *testing.T) {
 	memories := []retrievedMemory{{Content: "rafting trip", EventDate: "2023-06-17"}}
 
-	got := buildAnswerPrompt("How many days ago did I go rafting?", memories, "2023/06/20 (Tue) 16:30")
+	got := buildAnswerPrompt("How many days ago did I go rafting?", memories, "2023/06/20 (Tue) 16:30", "")
 	want := "CURRENT DATE: 2023/06/20 (Tue) 16:30\n\n" +
 		"RETRIEVED MEMORIES:\n" +
 		"1. [event: 2023-06-17] rafting trip\n" +
@@ -959,7 +959,7 @@ func TestAnswerPromptInjectsCurrentDate(t *testing.T) {
 func TestAnswerPromptWithoutCurrentDateIsUnchanged(t *testing.T) {
 	memories := []retrievedMemory{{Content: "rafting trip", EventDate: "2023-06-17"}}
 
-	got := buildAnswerPrompt("What did I do?", memories, "")
+	got := buildAnswerPrompt("What did I do?", memories, "", "")
 	want := "RETRIEVED MEMORIES:\n" +
 		"1. [event: 2023-06-17] rafting trip\n" +
 		"\nQUESTION: What did I do?\n\nAnswer:"
@@ -976,7 +976,7 @@ func TestAnswerPromptWithoutCurrentDateIsUnchanged(t *testing.T) {
 func TestSweepAnswerPromptInjectsCurrentDate(t *testing.T) {
 	memories := []retrievedMemory{{Name: "a", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"}}
 
-	got := buildSweepAnswerPrompt("What happened?", memories, "2023/05/10 (Wed) 09:00")
+	got := buildSweepAnswerPrompt("What happened?", memories, "2023/05/10 (Wed) 09:00", "")
 	if !strings.HasPrefix(got, "CURRENT DATE: 2023/05/10 (Wed) 09:00\n\nRETRIEVED MEMORIES:\n") {
 		t.Fatalf("sweep prompt missing current-date header: %q", got)
 	}
@@ -999,5 +999,119 @@ func TestRelativeTimeRuleOnlyWhenDated(t *testing.T) {
 	}
 	if !strings.Contains(dated, "CURRENT DATE") {
 		t.Fatal("dated system prompt must reference the CURRENT DATE anchor")
+	}
+}
+
+// --- feature 017 (temporal date scaffold) golden baseline ---------------------
+//
+// TestAnswerPromptGoldenBaseline freezes the exact bytes both prompt builders
+// emit today, BEFORE the TIMELINE scaffold exists. Feature 017 adds a scaffold
+// parameter to these builders; when it is empty (scaffold off, or a non-temporal
+// question, or no memory carries a date) the output MUST stay byte-identical to
+// what is asserted here.
+//
+// This is the safety net for FR-006 / SC-003: the scaffold ships default-off, so
+// every canonical-recipe run must be provably unaffected. If this test ever goes
+// red, the "0 bytes changed when disabled" claim is false and the 85.71% LoCoMo
+// baseline would need a re-run (Constitution IV).
+func TestAnswerPromptGoldenBaseline(t *testing.T) {
+	cases := []struct {
+		name     string
+		question string
+		memories []retrievedMemory
+		date     string
+		want     string
+	}{
+		{
+			name:     "dated memories, no current date (the LoCoMo shape)",
+			question: "When did Alice adopt the cat?",
+			memories: []retrievedMemory{
+				{Content: "Alice adopted a cat", EventDate: "2023-05-08", Recorded: "2023-05-10"},
+				{Content: "Bob went hiking", EventDate: "2023-07-21"},
+			},
+			want: "RETRIEVED MEMORIES:\n" +
+				"1. [event: 2023-05-08] [recorded: 2023-05-10] Alice adopted a cat\n" +
+				"2. [event: 2023-07-21] Bob went hiking\n" +
+				"\nQUESTION: When did Alice adopt the cat?\n\nAnswer:",
+		},
+		{
+			name:     "memories without any event date",
+			question: "What does Alice like?",
+			memories: []retrievedMemory{
+				{Content: "Alice likes jazz"},
+				{Content: "Alice dislikes crowds"},
+			},
+			want: "RETRIEVED MEMORIES:\n" +
+				"1. Alice likes jazz\n" +
+				"2. Alice dislikes crowds\n" +
+				"\nQUESTION: What does Alice like?\n\nAnswer:",
+		},
+		{
+			name:     "mixed dated and undated",
+			question: "What happened?",
+			memories: []retrievedMemory{
+				{Content: "dated one", EventDate: "2023-01-02"},
+				{Content: "undated one"},
+			},
+			want: "RETRIEVED MEMORIES:\n" +
+				"1. [event: 2023-01-02] dated one\n" +
+				"2. undated one\n" +
+				"\nQUESTION: What happened?\n\nAnswer:",
+		},
+		{
+			name:     "no memories at all",
+			question: "Anything?",
+			memories: nil,
+			want: "RETRIEVED MEMORIES:\n" +
+				"(none)\n" +
+				"\nQUESTION: Anything?\n\nAnswer:",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := buildAnswerPrompt(tc.question, tc.memories, tc.date, ""); got != tc.want {
+				t.Fatalf("buildAnswerPrompt drifted from the frozen baseline:\ngot  %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSweepAnswerPromptGoldenBaseline is the same safety net for the
+// cluster-sweep path. Feature 017 wires the scaffold into BOTH builders; missing
+// this one would let the switch silently no-op on sweep questions and poison the
+// e2e attribution (contract C-3 derived requirement 2).
+func TestSweepAnswerPromptGoldenBaseline(t *testing.T) {
+	memories := []retrievedMemory{
+		{Name: "late", Content: "late event", EventDate: "2023-05-03", SourceSessionID: "conv0-sess2"},
+		{Name: "early", Content: "early event", EventDate: "2023-05-01", SourceSessionID: "conv0-sess1"},
+	}
+	want := "RETRIEVED MEMORIES:\n" +
+		"[session 1, 2023-05-01]\n" +
+		"1. [event: 2023-05-01] early event\n" +
+		"[session 2, 2023-05-03]\n" +
+		"2. [event: 2023-05-03] late event\n" +
+		"\nQUESTION: What happened?\n\nAnswer:"
+
+	if got := buildSweepAnswerPrompt("What happened?", memories, "", ""); got != want {
+		t.Fatalf("buildSweepAnswerPrompt drifted from the frozen baseline:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestTemporalDateScaffoldFingerprint keeps the two regimes from being silently
+// mixed. run-dir resume compares this fingerprint and refuses to continue when
+// it differs, so a scaffold run can never be pooled with a non-scaffold one.
+func TestTemporalDateScaffoldFingerprint(t *testing.T) {
+	off := answerRegimeFingerprint(options{})
+	on := answerRegimeFingerprint(options{temporalDateScaffold: true})
+
+	if strings.Contains(off, "temporal_date_scaffold") {
+		t.Fatalf("scaffold off must not appear in the fingerprint at all, got %q", off)
+	}
+	if !strings.Contains(on, ";temporal_date_scaffold=true") {
+		t.Fatalf("scaffold on must be recorded in the fingerprint, got %q", on)
+	}
+	if off == on {
+		t.Fatal("the two regimes must produce different fingerprints")
 	}
 }

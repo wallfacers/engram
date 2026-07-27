@@ -97,6 +97,7 @@ type options struct {
 	forceAnswer          bool
 	imageCaptions        bool
 	temporalAnswerPrompt bool
+	temporalDateScaffold bool
 	judgeMem0Aligned     bool
 	answerModel          string
 	judgeModel           string
@@ -171,6 +172,7 @@ func run() error {
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
+	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
 	flag.BoolVar(&opt.judgeMem0Aligned, "judge-mem0-aligned", false, "use the Mem0-aligned lenient judge rules")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
@@ -1220,6 +1222,9 @@ func answerRegimeFingerprint(opt options) string {
 	if opt.temporalAnswerPrompt {
 		fingerprint += ";temporal_answer_prompt=true"
 	}
+	if opt.temporalDateScaffold {
+		fingerprint += ";temporal_date_scaffold=true"
+	}
 	if opt.judgeMem0Aligned {
 		fingerprint += ";judge=mem0-aligned"
 	}
@@ -1506,7 +1511,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)
 	}
-	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate), answerCall)
+	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold), answerCall)
 	if abstain != nil {
 		abstain.hardGated = hardGated
 	}
@@ -1641,7 +1646,7 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 	if fresh == 0 {
 		return "", false
 	}
-	retry, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate))
+	retry, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate, qa.Category, opt.temporalDateScaffold))
 	if err != nil || isIDK(retry) {
 		return "", false
 	}
@@ -1677,7 +1682,7 @@ func retryWithRewriteUsageDiagnostics(ctx context.Context, retriever *memory.Ret
 	if fresh == 0 {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}
-	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate))
+	retry, usage, err := answerCall(ctx, prompt, buildAnswerContextPrompt(qa.Question, union, qa.QuestionDate, qa.Category, opt.temporalDateScaffold))
 	if err != nil || isIDK(retry) {
 		return "", usage, nil, diagnostics, false
 	}
@@ -1712,7 +1717,7 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 			hits = hits[:topK]
 		}
 	}
-	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate))
+	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold))
 	if err != nil || isIDK(retry) {
 		return "", usage, nil, diagnostics, false
 	}
