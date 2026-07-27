@@ -12,18 +12,19 @@
 
 | 文档 | 状态 | 目标 | 正本/关联 |
 |---|---|---|---|
-| [capability-and-product-north-star.md](./capability-and-product-north-star.md) | 活跃 | **北极星总纲**:能力认知 + 诚实水位(83.70%)+ 拉平/论文/SaaS 习惯记忆方向 | 一处看全;技术 backlog 链回 memory-strategy |
+| [results-matrix-2026-07-26.md](./results-matrix-2026-07-26.md) | **活跃(分数正本)** | **评测结果总表**:每个数字都是(数据集 × 答题模型 × 判题模型 × 配方)四元组;含三系统汇总、轴效应、消融噪声地板、MemOS 同栈对跑 | **对外引用任何分数一律以本表为准**;跨行比较只在恰好一个轴不同时有效 |
+| [capability-and-product-north-star.md](./capability-and-product-north-star.md) | 活跃 | **北极星总纲**:能力认知 + 诚实水位(**85.71%** 同栈 / 89.03% 强答题模型)+ 拉平/论文/SaaS 习惯记忆方向 | 一处看全;分数以 results-matrix 为准;技术 backlog 链回 memory-strategy |
 | [memory-strategy.md](./memory-strategy.md) | 活跃 | 产品方向 + 论文线 + 涨点 backlog(生物启发检索 P0/P1/P2) | **技术/战略 backlog 正本**;数字/SaaS 演进见北极星总纲 |
 | [locomo-score-levers.md](./locomo-score-levers.md) | 活跃 | LoCoMo 跑分杠杆实验台账(008 US1-US4 + 009 归因诊断 + bge-large 端到端 GO 候选 +1.42pp) | 杠杆 verdict 正本 |
 | [locomo-e2e-eval-reproduction.md](./locomo-e2e-eval-reproduction.md) | 活跃 | LoCoMo 端到端答题评测可复现 runbook:canonical recipe(四必选 flag)+ 三后端栈 + 9 条踩坑史 | e2e run「怎么跑对」正本;与 remote-eval-box 互补 |
-| [benchmark-expansion-plan.md](./benchmark-expansion-plan.md) | 活跃(计划稿) | 基准扩展:LongMemEval 执行计划(可与 009 并发)+ 竞品数据集盘点/优先级 | 竞品分数正本在 competitive-benchmarks |
+| [benchmark-expansion-plan.md](./benchmark-expansion-plan.md) | 活跃(**LongMemEval 部分已交付**) | 基准扩展计划 + 竞品数据集盘点/优先级。LongMemEval-S(cleaned)**分层抽样 100 题**已跑出基线(spec 016);**全量 500 仍未跑**;PersonaMem/PreFEval/HaluMem 待启 | 分数正本在 results-matrix;竞品自报分在 competitive-benchmarks |
 | [temporal-t4-design.md](./temporal-t4-design.md) | 活跃 | temporal 57 错题归因 + T-4 第4路时间融合 contract-first 设计 | temporal 诊断/T-4 正本;工程 GO / 出货 NO-GO |
 | [locomo-single-multihop-failure-diagnosis.md](./locomo-single-multihop-failure-diagnosis.md) | 活跃 | single-hop 112 / multi-hop 40 错题归因(检索排序为主,multi-hop 非推理瓶颈) | single/multi-hop 诊断正本;29 道口径题须与能力错误分开 |
 | [saas-habit-memory-design.md](./saas-habit-memory-design.md) | 活跃(设计稿) | SaaS「用户操作习惯记忆」MVP 产品/技术设计(事件摄入·习惯抽取·条件召回·车机走查) | SaaS 方向设计正本;新能力全标未立项 |
 | [paper-outline-eval-reliability.md](./paper-outline-eval-reliability.md) | 活跃(骨架) | 论文骨架:长期对话记忆评测可靠性审计(噪声分解/选择偏差/coverage≠answer) | 论文线正本;证据分级 + 必补实验门 |
 | [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
 | [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
-| [memos-inhouse-locomo-repro.md](./memos-inhouse-locomo-repro.md) | **已出分** | MemOS 自家代码跑 engram 同栈 = **82.40%**,engram 同口径 85.71%(**领先 3.31pp**);leaderboard 88.83 中 **6.43pp 是 regime 伪影**。方法/踩坑/口径 caveat 正本 | 已回填 competitive-benchmarks §5②/§5④、north-star §2、memory-strategy、paper-outline `E-MEMOSPAR` |
+| [memos-inhouse-locomo-repro.md](./memos-inhouse-locomo-repro.md) | **已出分** | MemOS 自家代码跑 engram 同栈 = **82.40%**,engram 同口径 85.71%(**领先 3.31pp**);leaderboard 88.83 中 **6.43pp 是 regime 伪影**。方法/踩坑/口径 caveat 正本 | 已回填 competitive-benchmarks §5②/§5④、north-star §2、memory-strategy、paper-outline `E-MEMOSPAR`;汇总表见 results-matrix §5 |
 | [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |
 | [memory-freshness-and-retrieval-policy.md](./memory-freshness-and-retrieval-policy.md) | 待实现 | 记忆新鲜度/状态一致性/按需召回问题记录 | 须独立立项;**非当前能力** |
 | [synthius-mem-analysis.md](./synthius-mem-analysis.md) | 存档 | Synthius-Mem 抄什么/不抄什么 + 认知域文献核查 | P0 已落地 spec 006;backlog 正本在 memory-strategy 附二 |

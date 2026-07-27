@@ -362,7 +362,11 @@ abstention。报告哪些结论复现、哪些只属于 LoCoMo；不要求两个
 4. **对系统开发者**:负结果不是“reranker 永远无用”，而是指出 query type 与一段召回
    强度决定适用边界。
 5. **局限**:engram 是单一实现；LoCoMo 对话数有限；answer/judge 提供方可能漂移；
-   旧证据部分缺 raw artifact；LongMemEval 尚未跑。所有局限必须保留到终稿。
+   旧证据部分缺 raw artifact；~~LongMemEval 尚未跑~~ → **LongMemEval 只跑了 S-cleaned 的
+   分层抽样 100 题(spec 016)，不是全量 500；且 n=100 的噪声地板实测为 ±2–4 分
+   (同配置重跑臂差 2 分、per-rep 带宽 9–10 分)，该规模上 <5 分的效应不可判**——
+   这条局限比"尚未跑"更需要写进终稿，因为它直接限定了跨数据集结论的强度。
+   所有局限必须保留到终稿。
 
 ### 6. 报告规范（论文的可复用产物）
 
@@ -480,6 +484,9 @@ reproducibility 对口的 track。** 这是按[`memory-strategy.md` 决策二](.
   workshop 名称和 CFP 必须在投稿时按官方页面重新核验。
 - 若多模型、多跑和 LongMemEval 未完成，只投 workshop/short analysis，不包装成完整的
   领域级可靠性结论。
+  > **进度(2026-07-27)**:多模型 ✅(Qwen3.6-35B + deepseek-v4-pro 两个 answerer，
+  > 且 judge 轴也做了 v4-flash / v4-pro 双跑)；LongMemEval ⚠️ **仅抽样 100 题**，非全量 500；
+  > 多跑 ⚠️ 目前多为 3 rep，未达 P-EXP 要求的 ≥5 rep。**故当前证据强度仍只支持 workshop/short。**
 - 不按“新记忆方法”投主会 methods track；没有新架构贡献，强行包装会削弱论文。
 
 ### 投稿叙事

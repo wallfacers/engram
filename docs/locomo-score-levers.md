@@ -720,29 +720,39 @@ in **3,309,949** tok(缓存命中 **66.7%**)、out **669,738** tok → **$0.3479
 截至本日,**五连败**(011 alias / 012 doc2query / 010 multi-query / chunk 实体索引 /
 A embedding 模型升级)+ 检索侧结构双 P0 证伪 + 答题侧 prompt 契约两连败 + H1/H2 判死 +
 015 桥接判死。检索侧总空间实测仅 **4.93pp**(证据覆盖口径下完美检索绝对上限 **+3.8pp**),
-答题侧 7.73pp 中 **1.77~2.46pp 已确认为 answerer 伪影**(上节)。**仍未验的只剩四项:**
+答题侧 7.73pp 中 **1.77~2.46pp 已确认为 answerer 伪影**(上节)。**仍未验的只剩三项:**
 
 | # | 方向 | 上限(台账实测分母) | 为何未被"五连败机理"覆盖 | 成本 |
 |---|---|---:|---|---|
-| **1** | **judge 口径补齐**(补 Mem0 的"部分给分"+"±14 天容差") | **~1.7pp 保守**(E+F 族外推) | 不是加检索信号,是改判分尺子——机理不适用 | 零答题成本,只重判 |
+| ~~**1**~~ | ~~**judge 口径补齐**(补 Mem0 的"部分给分"+"±14 天容差")~~ | ~~**~1.7pp 保守**~~ | **❌ 已作废 —— 该工作早已由 spec 007 完成,见下方更正** | — |
 | **2** | **category-conditional 精准浮现**(open-domain) | open-domain 召回侧 16 题 ≈ **1.04pp** | **只对特定类别开信号**,不做全局对称抬升——正是 opinion-pass 净负的根因 | 新机制,需 SDD |
-| **3** | **确定性日期脚手架**(014 Option B,TIMELINE 块) | temporal 答题侧 38 题 ≈ **2.47pp**(实际远低) | 不是让模型自己推理(prompt 契约已两连败),是**用确定性代码替代模型能力** | 新机制,需 SDD |
+| **3** | **确定性日期脚手架**(014 Option B,TIMELINE 块) | temporal 答题侧 38 题 ≈ **2.47pp**(实际远低) | 不是让模型自己推理(prompt 契约已两连败),是**用确定性代码替代模型能力** | 新机制,需 SDD → **已立项 [`specs/017-temporal-date-scaffold/`](../specs/017-temporal-date-scaffold/)**(2026-07-27) |
 | **4** | **`--image-captions`** | **~1.2pp**(caption-borne 18 题,已实测) | 现成 adapter flag;是 ingestion 覆盖缺口,不是排序问题 | 重建店 + 全量 e2e 门 |
 
 **新证据对 2/3 的支持(来自上节)**:open-domain 在 answerer-parity 后**反而降 5.08pp**
 ⇒ 坐实 #2 是它唯一的路;temporal 答题侧 **66% 可被强 answerer 翻正**(四类最高)
 ⇒ #3 那 38 题的失败是"模型算不动日期"而非"信息不在上下文",正是确定性脚手架的靶心。
 
-**#1 的依据(两处台账结论此前未接上)**:本文 §"证据覆盖正本"把答题侧剩余归为
-"题目难度/**judge 边界**,非工程可解";而 [`competitive-benchmarks.md` §6](./competitive-benchmarks.md)
-的源码逐条对比明确指出 engram judge **注释自称 mem0-aligned 但实际未对齐**,缺"部分给分"与
-"±14 天日期容差"两条 Mem0 核心宽松规则,"**是一个具体、可修的口径缺口**"。single-hop 58 题
-失败模式分类正好对上:**B 粒度过粗 19%**(对应"部分给分")· **F 相对时间 7%**(对应"相对日期
-匹配")· **E judge 边界 5%**。按 E+F 外推全量 220 错题 ≈ 26 题 ≈ **+1.7pp**;若"部分给分"吃到
-B 族一部分,量级到 3-4pp。**验法零答题成本**:答题产物在 HF(`014b-oldtplan-confirm/` +
-`009-full-A-base` 逐题 pred),补齐规则后**只重判、不重答**。
-⚠️ 属**口径改动**(宪法 IV):必须单独 commit、声明新基线、明标"对齐竞品口径非算法涨点"——
-性质同 force-answer 那次(+0.52pp)。
+### 🚨 更正(2026-07-27):上表 #1「judge 口径补齐」是**基于过期源码对比写的,该工作早已完成**
+
+**核实结论:`judgeMem0AlignedSystemPrompt`(`cmd/locomo-bench/runner.go:502-513`)已经包含
+那两条规则**——「部分给分」在 L505(*"Give partial credit when the prediction includes at least
+one correct item from a gold list"*)、「±14 天日期容差 + 时长 ±50% + 相对日期」在 L508。
+由 **spec 007** 落地,`--judge-mem0-aligned` flag + anti-放水 golden 门(26/26)俱在。
+**且本文全部现行基线(85.71% / 89.03% / 同栈对跑)本来就是用它跑出来的**
+(见 [`results-matrix-2026-07-26.md` §1](./results-matrix-2026-07-26.md):「判题固定
+deepseek-v4-flash + mem0-aligned prompt」)。
+
+**错在哪**:#1 的依据引自 [`competitive-benchmarks.md` §6](./competitive-benchmarks.md),
+那份源码逐条对比作于 **2026-07-21**,对比的是**旧的 strict judge**(`judgeSystemPrompt`,
+runner.go:494-500)——那一版确实缺这两条。007 在**同一天**新增了对齐版常量,但 §6 与本表
+都没回填,于是「一个具体、可修的口径缺口」这句话在自家 commit 已经修掉之后又被引用了一次。
+
+**⇒ 那 ~1.7pp 不是可得增量,它早已计入现行基线。** 不得再作为待验杠杆、不得计入剩余空间、
+更不得叠加到任何其他杠杆的收益上。剩余未验方向由四项改为**三项**(#2 / #3 / #4)。
+
+**教训(方法学)**:台账引用另一份文档的源码结论时,必须核对**该结论作出之后本仓是否已经
+改过那段代码**。跨文档引用 + 同日 commit,是这次误判的成因。
 
 **并行线状态(2026-07-26)**:MemOS 同栈复现 **✅ 已出分**
 (见 [`memos-inhouse-locomo-repro.md`](./memos-inhouse-locomo-repro.md) §6);

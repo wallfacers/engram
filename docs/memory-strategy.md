@@ -9,7 +9,14 @@
 > change `memory-hybrid-retrieval-locomo`**(不在当前 spec-kit `specs/` 树内),
 > 结论摘要见 CLAUDE.md 记忆子系统一节。本文记录在此基础上的两项战略评估与决策。
 
-> ⚠️ **演进提醒(2026-07-22,post 007/008)**:本文数字(~74.7)与"不做云 SaaS"判断已被更新——判题口径对齐后真实水位 **83.70%**(差距对 MemOS ~5pp),且 SaaS 方向收窄为**垂直「设备/应用用户习惯记忆」**重新打开。最新能力认知与方向以 [capability-and-product-north-star.md](./capability-and-product-north-star.md) 为准;本文以下保留为**技术 backlog 正本 + 原始决策记录**。
+> ⚠️ **演进提醒(2026-07-27 更新,post 007/008/013/014)**:本文数字(~74.7)与"不做云 SaaS"判断均已被更新——
+> 判题口径对齐后真实水位为 **85.71%**(全量 1540 / Qwen3.6-35B 答题 / bge-large / 3 跑多数),
+> 换 deepseek-v4-pro 答题 **89.03%**;**~~"差距对 MemOS ~5pp"已作废**——同栈对跑下 engram **领先 3.31pp**~~。
+> 分数正本 = [results-matrix-2026-07-26.md](./results-matrix-2026-07-26.md);能力认知与方向以
+> [capability-and-product-north-star.md](./capability-and-product-north-star.md) 为准。
+> SaaS 方向收窄为**垂直「设备/应用用户习惯记忆」**重新打开。
+> **本文以下保留为技术 backlog 正本 + 原始决策记录**;⚠️ 附二「统一执行优先级」的**两条 P0 已实测证伪**
+> (见该表上方的回填框),引用 backlog 前务必先看各项的现行状态。
 >
 > 🚨 **二次更新(2026-07-26)——本文全部以 88.83 为参照的推断需重读。** MemOS 自家代码跑在
 > engram 同款答题模型 + embedder + judge 上 = **82.40%**,engram 同口径 **85.71%**(领先 3.31pp);
@@ -240,10 +247,27 @@ FlyVec 2101.06887、Fly-CL 2510.16877。
 
 ### 统一执行优先级
 
+> 🚨 **两条 P0 均已实测证伪(2026-07-27 回填)** —— 下表保留为原始优先级判断的记录,
+> **但不得再当作待办执行**。逐条 verdict 见 [`locomo-score-levers.md`](./locomo-score-levers.md):
+>
+> | 原 P0 | 落地为 | 结局 |
+> |---|---|---|
+> | 实体图遍历 / 共现边游走 | **spec 014**(assoc 臂;003 遗产已建,非待建) | **NO-GO** — 免费诊断 PASS(cov@30 **+2.6pp**,深层正交召回真实存在)但**端到端不转化**;叠 cat-top-k 反伤。008 铁律再次成立 |
+> | `event_date` → 时间范围 + T_score 第 4 路 | **spec 013**(检索侧时间窗召回臂) | **NO-GO** — cause 在**解析器**:`ParseTemporalIntent` 仅在 19.6–29.6% 的 temporal query 上点火,臂对 ~80% 的题永不点火 |
+>
+> **更根本的否证**:temporal 的免费覆盖门测得 gold 中位 rank **3**、`oracle_lift@30` = **0.000**
+> ⇒ 检索侧**零可得空间**;而 temporal 55 道错题里 **38(69%)gold 已在 top-30 却答错**
+> ⇒ 瓶颈在答题侧,不在召回。**因此"temporal 靠检索侧时间结构化涨分"这个前提本身是错的。**
+> 该方向的继任者是 [`specs/017-temporal-date-scaffold/`](../specs/017-temporal-date-scaffold/)
+> (确定性日期脚手架,答题侧,用代码替代模型的日期算术能力)。
+>
+> 另:MemOS 默认栈同时带 tree/graph 记忆 + 本地 reranker + fine 深检索,同栈下**总分仍输 3.31pp**
+> ——外部证据也不支持"堆记忆组织形态"这条路。
+
 | 优先级 | 动作 | 短板 | 来源 |
 |--------|------|------|------|
-| **P0** | `memory_entities` 加共现边 + depth-2 质心游走 + 原 query 重排;query-to-triple 链接 | multi-hop | EcphoryRAG + HippoRAG2 |
-| **P0** | `event_date` 升级为时间范围 + event 词汇别名喂 FTS + T_score 进 RRF 第 4 路 | temporal | Chronos + SynapticRAG |
+| ~~**P0**~~ ❌ | ~~`memory_entities` 加共现边 + depth-2 质心游走 + 原 query 重排;query-to-triple 链接~~ | multi-hop | EcphoryRAG + HippoRAG2 —— **spec 014 NO-GO** |
+| ~~**P0**~~ ❌ | ~~`event_date` 升级为时间范围 + event 词汇别名喂 FTS + T_score 进 RRF 第 4 路~~ | temporal | Chronos + SynapticRAG —— **spec 013 NO-GO** |
 | **P1** | ADD 抽取加冲突消解四分类 + D-MEM 写入门 + Shadow Buffer | 冲突/噪声/对抗 | FadeMem + D-MEM |
 | **P1** | 答题 prompt 换 Abstain-R1 1:4 ICL 拒答+澄清契约 + 不对称误拒惩罚 | 编造 27% | Abstain-R1 |
 | **P2** | curation 滞回防抖;衰减曲线**先做消融验证是否涨分再上** | curation 稳定性 | FadeMem |
@@ -298,7 +322,7 @@ FlyVec 2101.06887、Fly-CL 2510.16877。
 | ID | 杠杆 | 对应附二 |
 |---|---|---|
 | **OD-3** | 抽取保留评价性/情感/间接线索(open-domain 软信道) | — |
-| **T-4** | `event_date`→时间范围 + T_score 进 RRF 第 4 路(检索侧时间窗) | 附二短板2 P0 |
+| ~~**T-4**~~ ❌ | ~~`event_date`→时间范围 + T_score 进 RRF 第 4 路(检索侧时间窗)~~ **spec 013 NO-GO**(解析器仅 19.6–29.6% 点火;且 temporal `oracle_lift@30`=0.000 = 检索侧零可得空间) | 附二短板2 P0(已证伪) |
 | **supersedes 链** | 信念修订双向指针(当前 vs 历史状态),治 knowledge-update temporal | 附二短板3 P1 + [freshness 文档](./memory-freshness-and-retrieval-policy.md) |
 | **写入门** | D-MEM 式去噪写入,提 single-hop/整体信噪比 | 附二短板3 P1 |
 

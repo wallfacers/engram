@@ -12,8 +12,14 @@
 
 ## 1. 差距推进:现有计划(引用,不新开)
 
-现状:LoCoMo 端到端 **83.70%**(mem0-aligned judge、无 reranker、全量 1540、单次);
-差 MemOS 88.83 约 **5.1pp**(force-answer 口径 84.22%,差 ~4.6pp)、差 Mem0 92.5 约 **8.8pp**。
+> ⚠️ **本节数字已过期(2026-07-27 回填)**。写作时(2026-07-23)的水位与差距是:
+> ~~LoCoMo 端到端 **83.70%**;差 MemOS 88.83 约 **5.1pp**、差 Mem0 92.5 约 **8.8pp**~~。
+> **现状以 [`results-matrix-2026-07-26.md`](./results-matrix-2026-07-26.md) 为准**:
+> LoCoMo 全量 1540 = **85.71%**(Qwen3.6-35B 答题 / mem0-aligned judge / bge-large / 3 跑多数)
+> 或 **89.03%**(deepseek-v4-pro 答题)。**「差 MemOS 5.1pp」已作废**——同栈对跑证明
+> MemOS 在 engram 同款答题模型 + embedder + judge 下只有 **82.40%**,engram **领先 3.31pp**;
+> 那 88.83 里的 6.43pp 是 regime 伪影。**对 Mem0 的差距未做同栈剥离,仍是未知数**,
+> 不得沿用 8.8pp 这个数。下文其余推进计划的方向依然有效,只是不要再引用上面两个差距值。
 
 推进计划**已在轨,不缺计划,缺执行**:
 
@@ -31,8 +37,16 @@
 
 ## 2. LongMemEval 执行计划(简单版,可与 009 并发)
 
-**现状纠偏**:`testdata/longmemeval/` 目前只有 2KB 手造 `sample.json`(schema 示例),
-**全量数据集尚未下载**;paper-outline RQ6 标注"engram 一手结果为空"。
+> ✅ **本计划已部分交付(2026-07-27 回填)**:spec 016 已跑出
+> **LongMemEval-S(cleaned)分层抽样 100 题**的基线 —— **80**(Qwen3.6-35B 答题)/ **85**(deepseek-v4-pro),
+> 均为 3 跑多数、judge=deepseek-v4-flash。分题型分与口径边界见
+> [`results-matrix-2026-07-26.md` §1.2 / §7](./results-matrix-2026-07-26.md);
+> 验尸与 CURRENT DATE 修复见 [`specs/016-longmemeval-crossbench/verdict.md`](../specs/016-longmemeval-crossbench/verdict.md)。
+> **仍未做:全量 500**。以下步骤表中 T1/T2 已完成,T3 双口径判分与 T4 全量 500 仍未做。
+> ⚠️ **n=100 的噪声地板是 ±2–4 分**(同配置重跑就差 2 分),该规模上 <5 分的结论不可判。
+
+**现状纠偏(写作时,已过期)**:~~`testdata/longmemeval/` 目前只有 2KB 手造 `sample.json`(schema 示例),
+**全量数据集尚未下载**;paper-outline RQ6 标注"engram 一手结果为空"。~~
 
 ### 步骤
 

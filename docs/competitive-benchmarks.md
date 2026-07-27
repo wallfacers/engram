@@ -146,6 +146,17 @@
 
 ## 6. Judge 严格度逐条对比(源码实证,2026-07-21)
 
+> 🚨 **本节结论已被 spec 007 落实,勿再当作待办引用(2026-07-27 核实)。**
+> 下表比的是**旧的 strict judge**(`judgeSystemPrompt`,现 `runner.go:494-500`)。
+> 007 已新增 **`judgeMem0AlignedSystemPrompt`**(现 `runner.go:502-513`),
+> 「部分给分」在 L505、「±14 天日期容差 + 时长 ±50% + 相对日期」在 L508,
+> 由 `--judge-mem0-aligned` 启用 + anti-放水 golden 门(26/26)守住。
+> **本仓所有现行基线(85.71% / 89.03% / MemOS 同栈对跑)都是用对齐版跑的**
+> ([`results-matrix-2026-07-26.md`](./results-matrix-2026-07-26.md) §1)。
+> 因此本节末尾「**是一个具体、可修的口径缺口**」那句**已经不成立**——缺口已修。
+> 该句曾被 [`locomo-score-levers.md`](./locomo-score-levers.md) 误引为"剩余未验杠杆 #1(~1.7pp)",
+> 已在那边更正并除名。**本节自此仅作为「对齐前后差异」的历史记录保留。**
+
 engram judge = `cmd/locomo-bench/runner.go:451-457`;Mem0 judge = `mem0/evaluation/benchmarks/locomo/prompts.py:218-245`;OmniMemEval judge = `OmniMemEval/scripts/utils/prompts.py:216-240`。三方都是二元 LLM-judge,但宽松度不同:
 
 | 规则 | Mem0 | OmniMemEval | engram | 结论 |
@@ -155,9 +166,19 @@ engram judge = `cmd/locomo-bench/runner.go:451-457`;Mem0 judge = `mem0/evaluatio
 | **情绪/同义** | proud=fulfilled=accomplished,同价即对(`prompts.py:224,230`) | 主题相同即可 | 仅接受"同义改写" | engram 略严 |
 | WRONG 触发 | 仅"零命中 或 完全跑题"(`prompts.py:236-238`) | 仅"非同一主题" | "矛盾 / 遗漏 / 名字·日期·数字错 / 说不知道" | **engram 最严** |
 
-**engram judge 的注释自称"aligned with mem0ai/memory-benchmarks"(`runner.go:449`),但实际未对齐**:缺"部分给分"与"±14 天日期容差"两条 Mem0 的核心宽松规则。这是一个具体、可修的口径缺口。
+~~**engram judge 的注释自称"aligned with mem0ai/memory-benchmarks"(`runner.go:449`),但实际未对齐**:缺"部分给分"与"±14 天日期容差"两条 Mem0 的核心宽松规则。这是一个具体、可修的口径缺口。~~
 
-**行动含义**:
-- 修 judge(补部分给分 + 日期容差)是 `cmd/locomo-bench` 内的小改动,不碰引擎。属**口径改动 → 宪法 IV**:必须声明新基线、eval 结果单独 commit、并明确"这是对齐竞品口径,不是算法涨点"。
-- ⚠️ 能否"零成本重判旧 transcript"取决于旧答题产物是否还在(此前都在 scratchpad、gitignored,可能已失效);若失效则需重跑答题(有 token 成本,过成本闸 + 授权)。
-- 诚实边界:judge 放宽会同时抬高**所有**被对比方在**本 harness 下**的分,只用于**口径对齐的公平比较**,不能与竞品 leaderboard 分直接混用宣称。
+✅ **已修(spec 007,2026-07-21 当日)**:新增 `judgeMem0AlignedSystemPrompt`(`runner.go:502-513`),
+两条规则齐备(L505 部分给分 / L508 ±14 天 + 时长 ±50% + 相对日期),由默认关的
+`--judge-mem0-aligned` 启用、fingerprint 追加 `;judge=mem0-aligned` 做口径隔离、
+anti-放水 golden 夹具 26/26 守住。**旧 strict judge 作为 `judgeSystemPrompt` 保留**,
+两套并存、可切换——上表因此仍是有效的"两套 judge 差在哪"对照,只是"待修"性质已消失。
+
+**行动含义(已兑现,存档)**:
+- ~~修 judge 是 `cmd/locomo-bench` 内的小改动,不碰引擎~~ → ✅ 已做,引擎零改。
+- ~~能否"零成本重判旧 transcript"取决于旧答题产物是否还在~~ → 已不适用:对齐版 judge 已是
+  canonical recipe 的常规口径,现行基线直接用它跑,无需回溯重判。
+- **诚实边界(依然生效)**:judge 放宽会同时抬高**所有**被对比方在**本 harness 下**的分,
+  只用于**口径对齐的公平比较**,不能与竞品 leaderboard 分直接混用宣称。
+  ⇒ 这正是 [`results-matrix-2026-07-26.md`](./results-matrix-2026-07-26.md) §3「判题模型轴」
+  与 §5.2「leaderboard 数字 vs 同栈数字」在执行的纪律。
