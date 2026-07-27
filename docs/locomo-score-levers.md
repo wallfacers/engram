@@ -787,7 +787,7 @@ canonical recipe(`--chunks --top-k 30 --chunk-quota 12 --retrieval hybrid --forc
 `scaffold` 臂 `regime.json` 含 `temporal_date_scaffold=true`(开关生效已核,T033)。
 实测成本:box GPU 约 **45 分钟**(含冷启与一次判题 401 返工),答题/抽取全本地零付费,
 judge 侧 26 rep × 321 题的 deepseek-v4-flash 微付费(`cost.json` 记 0,deepseek 不在价表)。
-产物已逐文件扫描凭据,**零命中**(唯一命中 `43078` 系 ci95 浮点尾数误报)。
+产物已逐文件扫描凭据,**零命中**(唯一"命中"是 SSH 端口号恰好落在某个 ci95 浮点尾数里,系误报)。
 SDD 正本:[`specs/017-temporal-date-scaffold/`](../specs/017-temporal-date-scaffold/)。
 
 ---
