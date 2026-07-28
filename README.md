@@ -1,254 +1,290 @@
-# engram
+<h1 align="center">engram</h1>
 
-> **English** | [简体中文](README.zh-CN.md)
+<p align="center">
+  <strong>Local-first long-term memory for AI agents.</strong>
+</p>
 
-[![Go](https://img.shields.io/badge/Go-1.25.0-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![CGO](https://img.shields.io/badge/CGO-disabled-00599C)](https://go.dev/)
-[![MCP](https://img.shields.io/badge/MCP-SDK%20v1.5.0-0052CC)](https://modelcontextprotocol.io/)
-[![Storage](https://img.shields.io/badge/SQLite-pure--Go%20%7C%20WAL%20%7C%20FTS5-003B57)](https://pkg.go.dev/modernc.org/sqlite)
-[![Retrieval](https://img.shields.io/badge/retrieval-semantic%20%2B%20BM25%20%2B%20entity%20RRF-success)](#architecture)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+<p align="center">
+  Pure Go · Embedded SQLite · MCP &amp; CLI · Hybrid retrieval
+</p>
 
-A **local-first, embeddable memory layer** for any AI agent. One tuned memory engine
-behind thin integration surfaces — MCP server / AI-first CLI / SDK — giving Codex,
-Claude Code, Cursor, or your own agent long-term memory without you building one.
+<p align="center">
+  <a href="README.zh-CN.md">简体中文</a>
+  · <a href="#quick-start">Quick start</a>
+  · <a href="#architecture">Architecture</a>
+  · <a href="#benchmarks">Benchmarks</a>
+  · <a href="docs/README.md">Documentation</a>
+</p>
 
-Three-signal hybrid retrieval (semantic + BM25 keyword + entity, RRF fusion) + ADD-only
-fact extraction + deterministic curation. Runs fully offline, pure Go, no CGO, cross-compilable.
+<p align="center">
+  <a href="https://github.com/wallfacers/engram/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wallfacers/engram/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://go.dev/"><img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white"></a>
+  <a href="https://github.com/wallfacers/engram/blob/master/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <img alt="CGO disabled" src="https://img.shields.io/badge/CGO-disabled-2f855a">
+</p>
 
----
+engram gives Codex, Claude Code, Cursor, and custom agents durable memory
+without requiring a hosted database. Every namespace lives in its own local
+SQLite file, and the same pure-Go engine is available through an MCP stdio
+server, an automation-friendly CLI, and embeddable Go packages.
 
-## Table of Contents
+Start with fully offline read/write and keyword retrieval. Add compatible local
+or remote model endpoints only when you want semantic search, conversation
+fact extraction, or memory curation.
 
-- [Features](#features)
-- [Benchmark](#benchmark)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Evaluation](#evaluation)
-- [Project Structure](#project-structure)
-- [Documentation](#documentation)
-- [Development](#development)
-- [License](#license)
+## Why engram
 
-## Features
+| | |
+|---|---|
+| **Local by default**<br>Data stays in SQLite on your machine. Core paths need neither a cloud account nor a network connection. | **Useful without models**<br>CRUD, namespaces, export, and keyword retrieval remain available when every model endpoint is absent. |
+| **Hybrid when available**<br>Semantic, BM25 keyword, and entity signals are combined with tuning-free Reciprocal Rank Fusion. | **Explicit lifecycle**<br>Agents decide when to write or ingest. Curation is shipped but opt-in; ordinary chat is never captured implicitly. |
+| **One engine, thin adapters**<br>MCP and CLI call the public engine API instead of reimplementing memory behavior. | **Portable deployment**<br>Pure Go, no CGO, an embedded database, and no separate vector database to operate. |
 
-- **Local-first, offline by default** — core read/write paths need no network or cloud; SQLite local files; embedding / LLM are swappable local sidecars (Ollama / fastembed / any OpenAI-compatible endpoint), never a required hosted service.
-- **Three-signal hybrid retrieval** — semantic (cosine) + keyword (FTS5 BM25, LIKE fallback) + entity (exact match), fused with RRF (k=60, tuning-free); optional cross-encoder reranker. Signals degrade per lane — a missing lane silently drops out of the fusion instead of failing the whole query.
-- **Engine / adapter separation** — the memory engine is an independent, host-free, unit-testable library; MCP / CLI / SDK call only its public API and carry no host-specific logic.
-- **Namespace isolation** — one namespace = one independent engine store (`<dataDir>/<ns>.db`) with LRU bound + eviction; cross-namespace access is off by default. Path-escape reads/writes = 0.
-- **Evaluation regression gate** — any change touching retrieval / extraction / curation / storage / embedding must run a comparable-metric LoCoMo eval before merge and must not regress the baseline.
+## Quick start
 
-## Benchmark
+### 1. Build and use the CLI offline
 
-> ⚠️ **Read before comparing**: every number is a function of **(dataset × answerer × judge × recipe)**,
-> not "engram's score". Cross-row comparison is valid **only when exactly one axis differs**;
-> never compare directly with others' leaderboard numbers. 🔬 = same-stack, measured by this project;
-> 📣 = vendor self-report, not reproduced. Source of truth:
-> [`docs/results-matrix-2026-07-26.md`](docs/results-matrix-2026-07-26.md).
-
-**Unified conditions**: embedding `bge-large-en-v1.5` 1024d (local sidecar); engram retrieval uses the
-canonical recipe (`--top-k 30 --chunk-quota 12 --force-answer`, hybrid, **no reranker**); judging uses
-the mem0-aligned prompt.
-
-### Same-stack, measured — the only directly comparable table
-
-Same machine, Qwen answerer + bge-large embedding + identical judge prompt / judge model; competitors run their own code, unmodified.
-
-| Dataset (n) | Framework | Answerer | Judge | Score |
-|---|---|---|---|---:|
-| **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · local vllm | deepseek-v4-flash | **85.71%** |
-| LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · local vllm | deepseek-v4-pro | 83.77% |
-| LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vllm | deepseek-v4-flash | 82.40% |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vllm | deepseek-v4-pro | 80.26% |
-| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · local vllm | deepseek-v4-flash | **80.80%** |
-| LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
-
-### Best self-reported scores — NOT directly comparable (different stacks)
-
-| Dataset | engram 🔬 | MemOS 📣 | Mem0 📣 |
-|---|---:|---:|---:|
-| LoCoMo | **89.03%** (v4-pro, n=1540) | 88.83 | 92.5 |
-| LongMemEval | **86.00%** (v4-pro, S-cleaned 500) | 89.20 | 94.4 |
-
-### LoCoMo per-category scores (1540, judge=v4-flash, majority of 3 runs)
-
-| Category | n | engram (Qwen) | engram (v4-pro) | MemOS@same-stack | Δ (engram−MemOS) |
-|---|---:|---:|---:|---:|---:|
-| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18** |
-| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77 |
-| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62 |
-| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24** |
-| **OVERALL** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31** |
-
-> The per-category shape: MemOS's tree/graph memory **only wins multi-hop by 1.77pp**
-> (exactly where it should); it loses 6pp+ on single-hop / open-domain. The gain from a stronger
-> engram answerer is also uneven — temporal +7.5pp, open-domain +6.3pp, but multi-hop only +1.1pp,
-> meaning multi-hop is bottlenecked on retrieval while the others are bottlenecked on answering.
-
-### Three key deltas
-
-| Axis | Change | Net effect | Conclusion |
-|---|---|---:|---|
-| **Framework (same-stack)** | engram − MemOS, LoCoMo 1540 | **+3.31pp** (v4-flash) / **+3.51pp** (v4-pro) | engram leads, holds under both judges |
-| **Answerer** | Qwen → v4-pro | **+3.32pp** (LoCoMo) / **+5.20pp** (LME, p=0.0049) | Stronger answerer cashes in on temporal / open-domain |
-| **Judge** | v4-flash → v4-pro | **−2 to −3pp** | Additive offset; does not change any delta's direction |
-
-> Mem0's 92.5 / 94.4 come from a **managed platform** (proprietary optimizations not in the open-source SDK)
-> + `top_200` retrieval budget, so they cannot be reproduced same-stack; the real gap to Mem0 is
-> **unknown**. MemOS self-report 88.83 → same-stack 82.40 — the **−6.43pp is entirely regime artifact**
-> (answerer strength + judge leniency).
-
-## Architecture
-
-```
-        ┌─────────────── Adapter layer (thin) ──────────────┐
-        │  mcpserver (stdio)   cmd/engram (CLI)              │
-        │         MCP / CLI / SDK call the public API only    │
-        └──────────────────────┬──────────────────────────────┘
-                               ▼  public API
-        ┌─────────────── Engine layer (pure lib, offline) ───┐
-        │  memory/   entrystore · retriever · pipeline        │
-        │            curation · prompt · queryplan            │
-        │  embedding/  embedder + reranker (optional)         │
-        │  provider/    LLM abstraction (anthropic / openai)  │
-        │  store/       SQLite: WAL · FTS5 trigram            │
-        └─────────────────────────────────────────────────────┘
-```
-
-**Retrieval pipeline**: query → three lanes in parallel (semantic cosine / FTS5 BM25 / entity exact match)
-→ RRF (k=60) fusion → (optional) cross-encoder rerank → return. A missing lane silently drops out of the
-fusion instead of failing the query; adapters report degradation only from **structural facts** (e.g. "no
-embedding endpoint configured"), never by probing the engine.
-
-## Quick Start
-
-Requires Go 1.25+. All build & test pass under `CGO_ENABLED=0`.
+Requires Go 1.25 or newer.
 
 ```bash
-git clone https://github.com/wallfacers/engram.git && cd engram
-CGO_ENABLED=0 go build ./...
-CGO_ENABLED=0 go test  -count=1 ./...
+git clone https://github.com/wallfacers/engram.git
+cd engram
+
+mkdir -p bin
+CGO_ENABLED=0 go build -o ./bin/engram ./cmd/engram
+export ENGRAM_DATA_DIR="$PWD/data"
+
+./bin/engram add \
+  --name preferred-editor \
+  --content "The user prefers Neovim for Go development." \
+  --category preference
+
+./bin/engram search "Neovim"
 ```
 
-### As an MCP server (Codex / Claude Code / Cursor)
+The example creates `data/default.db` and performs a degraded-but-functional
+offline search. Configure an embedding endpoint later to add the semantic lane;
+your existing data and commands stay the same.
 
-Build the server, then register a local stdio process in your MCP client config.
+Common commands:
 
 ```bash
-CGO_ENABLED=0 go build -o engram-mcp ./cmd/engram-mcp
+./bin/engram get preferred-editor
+./bin/engram list
+./bin/engram stats
+./bin/engram export
+./bin/engram delete preferred-editor
+./bin/engram namespaces
+./bin/engram version
 ```
+
+See the [CLI guide](docs/guides/cli.md) for ingest, curation, namespaces, and
+automation behavior.
+
+### 2. Connect an MCP client
+
+Build the stdio server:
+
+```bash
+CGO_ENABLED=0 go build -o ./bin/engram-mcp ./cmd/engram-mcp
+```
+
+Register the absolute binary path in your MCP client. The surrounding config
+shape varies by client:
 
 ```json
 {
   "mcpServers": {
     "engram": {
-      "command": "/abs/path/to/engram-mcp",
-      "args": ["--data-dir", "/home/you/.engram/memory"]
+      "command": "/absolute/path/to/engram/bin/engram-mcp",
+      "args": ["--data-dir", "/absolute/path/to/engram-data"]
     }
   }
 }
 ```
 
-After launch, the agent can call `memory_write` / `memory_search` / `memory_list` / `memory_get` /
-`memory_delete`; `memory_ingest` appears once an LLM is configured. **Runs offline with no endpoints configured.**
-Details: [`docs/mcp-server.md`](docs/mcp-server.md).
+With no model configuration, the server exposes `memory_write`,
+`memory_search`, `memory_list`, `memory_get`, and `memory_delete`. Configure an
+LLM to add `memory_ingest`. Each tool accepts a namespace; namespaces are
+isolated in separate database files.
 
-### As an AI-first CLI
+See the [MCP server guide](docs/guides/mcp-server.md) for client integration,
+tool boundaries, and opt-in curation.
 
-Successful commands write deterministic markdown to stdout; failures write one actionable diagnostic to
-stderr and return non-zero — easy for AI agents / cron / CI to consume. Full command list: [`docs/cli.md`](docs/cli.md).
+## Architecture
 
-```bash
-CGO_ENABLED=0 go build -o engram ./cmd/engram
+```mermaid
+flowchart LR
+    subgraph clients["Clients"]
+        agent["AI agents<br/>Codex · Claude Code · Cursor"]
+        app["Go applications"]
+    end
 
-engram --data-dir ~/.engram/memory add    --name dark-mode --content "user prefers dark mode" --category preference
-engram --data-dir ~/.engram/memory search "appearance settings"
-engram --data-dir ~/.engram/memory get    dark-mode
-engram --data-dir ~/.engram/memory list
-engram --data-dir ~/.engram/memory delete dark-mode
-printf 'user: I moved to Berlin last month.\nassistant: Noted.\n' | engram --data-dir ~/.engram/memory ingest   # needs LLM
-engram --data-dir ~/.engram/memory stats
+    subgraph interfaces["Thin interfaces"]
+        mcp["MCP server<br/>stdio"]
+        cli["AI-first CLI"]
+        api["Public Go API"]
+    end
+
+    subgraph engine["Memory engine · pure Go"]
+        write["Direct write<br/>& explicit ingest"]
+        search["Hybrid retrieval<br/>semantic · BM25 · entity → RRF"]
+        curate["Opt-in curation"]
+    end
+
+    db[("SQLite per namespace<br/>WAL · FTS5")]
+    models["Optional model sidecars<br/>Embeddings · LLM"]
+
+    agent --> mcp
+    agent --> cli
+    app --> api
+    mcp --> api
+    cli --> api
+    api --> write
+    api --> search
+    api --> curate
+    write --> db
+    curate --> db
+    db --> search
+    models -. "extract & embed" .-> write
+    models -. "embed query" .-> search
+    models -. "judge" .-> curate
+
+    classDef client fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    classDef interface fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef core fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    classDef storage fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    classDef optional fill:#faf5ff,stroke:#a855f7,color:#581c87,stroke-dasharray:5 5
+
+    class agent,app client
+    class mcp,cli,api interface
+    class write,search,curate core
+    class db storage
+    class models optional
 ```
+
+The solid path is local. Model connections are optional:
+
+1. **Write:** `add` / `memory_write` stores caller-provided content directly;
+   explicit `ingest` uses an LLM to extract durable facts before writing.
+2. **Search:** keyword search always runs locally. Indexed entity matches and
+   semantic cosine results join the ranking when their data and dependencies
+   are available; RRF fuses the lanes that succeeded.
+3. **Curate:** a bounded pass scores and deduplicates memories. It runs only
+   when explicitly invoked by the CLI or enabled for the MCP server.
+
+For implementation boundaries, storage primitives, and provenance, read the
+[memory-system architecture](docs/architecture/memory-system.md).
+
+## Capability matrix
+
+| Capability | Default | Optional dependency |
+|---|---|---|
+| Local CRUD, list, stats, export | Available offline | None |
+| Keyword retrieval | Available offline | None |
+| Entity retrieval | Used when entity facts are indexed | Facts are produced by explicit ingest |
+| Semantic retrieval | Gracefully omitted | OpenAI-compatible embedding endpoint |
+| Conversation fact extraction | Not exposed without a model | OpenAI or Anthropic-compatible LLM |
+| Memory curation | Opt-in | LLM; explicit CLI command or MCP enablement |
+| Namespace isolation | One SQLite file per namespace | None |
+
+engram is currently designed for local, single-user workloads in the
+approximately 100k-entry class. It is not a distributed vector service, and it
+does not yet claim complete memory freshness or state-consistency guarantees.
+See [current capabilities](docs/product/capabilities.md) for the authoritative
+shipped/planned boundary.
 
 ## Configuration
 
-Non-secret config is either a global flag or an `ENGRAM_*` env var (flag wins over env).
-**API keys are env-only — never passed as a flag, never written to logs / tool responses / config files.**
+Non-secret flags override their `ENGRAM_*` environment equivalents. API keys
+are environment-only: they are never accepted as command-line flags.
 
-| Flag | Env | Default | Description |
-|---|---|---|---|
-| `--data-dir` | `ENGRAM_DATA_DIR` | required | SQLite storage dir |
-| `--namespace` | `ENGRAM_NAMESPACE` | `default` | namespace (CLI) |
-| — | `ENGRAM_MAX_OPEN_NAMESPACES` | — | namespace LRU cap (MCP) |
-| `--embed-base-url` | `ENGRAM_EMBED_BASE_URL` | offline | OpenAI-compatible `/v1` endpoint |
-| `--embed-model` | `ENGRAM_EMBED_MODEL` | offline | embedding model name |
-| — | `ENGRAM_EMBED_API_KEY` | — | embedding key (env only) |
-| `--llm-provider` | `ENGRAM_LLM_PROVIDER` | ingest unavailable | `anthropic` / `openai` |
-| `--llm-base-url` | `ENGRAM_LLM_BASE_URL` | ingest unavailable | LLM endpoint |
-| `--llm-model` | `ENGRAM_LLM_MODEL` | ingest unavailable | LLM model name |
-| — | `ENGRAM_LLM_API_KEY` | — | LLM key (env only) |
+| Flag | Environment | Purpose |
+|---|---|---|
+| `--data-dir` | `ENGRAM_DATA_DIR` | Directory containing namespace databases |
+| `--namespace` | `ENGRAM_NAMESPACE` | CLI namespace; defaults to `default` |
+| `--embed-base-url` | `ENGRAM_EMBED_BASE_URL` | OpenAI-compatible embedding endpoint |
+| `--embed-model` | `ENGRAM_EMBED_MODEL` | Embedding model name |
+| — | `ENGRAM_EMBED_API_KEY` | Embedding API key |
+| `--llm-provider` | `ENGRAM_LLM_PROVIDER` | `openai` or `anthropic` |
+| `--llm-base-url` | `ENGRAM_LLM_BASE_URL` | LLM endpoint |
+| `--llm-model` | `ENGRAM_LLM_MODEL` | LLM model name |
+| — | `ENGRAM_LLM_API_KEY` | LLM API key |
+| `--max-open-namespaces` | `ENGRAM_MAX_OPEN_NAMESPACES` | MCP namespace cache limit; default `64` |
+| `--curation-enabled` | `ENGRAM_CURATION_ENABLED` | Enable persistent MCP curation; default `false` |
 
-## Evaluation
+The final two rows are MCP-server settings. Run `engram-mcp --help` against
+your installed version for its exact startup contract.
 
-engram's retrieval fidelity is proven by deterministic parity goldens (`testdata/parity/`) + the LoCoMo
-harness, not by trust. Offline gates need no network.
+## Benchmarks
 
-```bash
-go test ./memory -run TestRetrievalParity        # retrieval parity (memory_search == Retriever.Search)
-go test ./memory -run TestSignalDegradation      # per-lane signal degradation
-```
+Benchmark numbers depend on the dataset, answer model, judge, retrieval recipe,
+and aggregation method. The table below shows the current local-stack results;
+it is evidence for a fixed evaluation setup, not a universal leaderboard.
 
-End-to-end answer eval needs your own dataset + endpoints (`.locomo-run/`, `*.db`, `testdata/locomo/` are gitignored):
+| Dataset | Samples | Answer model | Score |
+|---|---:|---|---:|
+| LoCoMo, categories 1–4 | 1,540 | Qwen3.6-35B-A3B-FP8 | **85.71%** |
+| LongMemEval-S, cleaned | 500 | Qwen3.6-35B-A3B-FP8 | **80.80%** |
 
-```bash
-go build ./cmd/locomo-bench
-export LOCOMO_API_KEY=...      LOCOMO_BASE_URL=...   LOCOMO_MODEL=...   LOCOMO_PROVIDER=anthropic
-export EXTRACT_MODEL=...
-export EMBED_BASE_URL=http://127.0.0.1:11434/v1   EMBED_MODEL=...   EMBED_API_KEY=...
-go run ./cmd/locomo-bench --data ./path/to/locomo.json \
-      --run-dir ./.locomo-run --retrieval both
-```
+In the controlled LoCoMo comparison with the same answerer, embedding model,
+judge prompt, and judge model, engram scored **85.71%** and MemOS scored
+**82.40%** (+3.31 percentage points). Retrieval and context budgets still
+differed, so this result should not be generalized beyond that stack.
 
-Canonical recipe (four required flags), three backend stacks and known pitfalls:
-[`docs/locomo-e2e-eval-reproduction.md`](docs/locomo-e2e-eval-reproduction.md);
-score-lever experiment ledger: [`docs/locomo-score-levers.md`](docs/locomo-score-levers.md).
-
-## Project Structure
-
-```
-memory/        engine core (public pkgs): entrystore / retriever / pipeline / curation / prompt / queryplan
-embedding/     engine: embedder + reranker (OpenAI-compatible /v1, optional)
-provider/      engine: LLM abstraction (+ anthropic / + openai)
-store/         engine: SQLite (modernc, pure Go) — Open / Options / migrations / ProbeFTS5
-internal/      engine-internal: idgen / version (not for external use)
-mcpserver/     adapter: MCP stdio server (config / namespace / registry / server / tools)
-cmd/
-  engram-mcp/    MCP server binary (thin main)
-  engram/        AI-first CLI binary
-  locomo-bench/  LoCoMo eval harness
-specs/          spec-kit SDD: specs/NNN-feature/ spec·plan·tasks·research·data-model·contracts
-docs/           strategy / background / competitors / adapter usage / eval / open issues
-testdata/       parity goldens; locomo/ dataset (gitignored)
-```
+The [current evaluation results](docs/evaluation/results.md) are the only
+source of truth for scores and comparison limits. Use the
+[LoCoMo runbook](docs/operations/evaluation/locomo-runbook.md) to reproduce the
+recipe.
 
 ## Documentation
 
-- [`docs/results-matrix-2026-07-26.md`](docs/results-matrix-2026-07-26.md) — **eval results master table (any external score quote must cite this)**
-- [`docs/competitive-benchmarks.md`](docs/competitive-benchmarks.md) — competitor targets + methodology audit
-- [`docs/memos-inhouse-locomo-repro.md`](docs/memos-inhouse-locomo-repro.md) — MemOS same-stack reproduction methodology
-- [`docs/memory-strategy.md`](docs/memory-strategy.md) — tech & strategy source of truth, score-lever backlog
-- [`docs/memory-architecture.md`](docs/memory-architecture.md) — runtime architecture: extraction timing, write/retrieval/curation flow, SQLite schema
-- [`docs/mcp-server.md`](docs/mcp-server.md) · [`docs/cli.md`](docs/cli.md) — adapter usage
-- [`docs/README.md`](docs/README.md) — full doc index (with status semantics)
+| Goal | Document |
+|---|---|
+| Browse all current docs | [Documentation portal](docs/README.md) |
+| Use the CLI | [CLI guide](docs/guides/cli.md) |
+| Connect an MCP client | [MCP server guide](docs/guides/mcp-server.md) |
+| Understand the runtime | [Memory-system architecture](docs/architecture/memory-system.md) |
+| Check shipped vs planned features | [Current capabilities](docs/product/capabilities.md) |
+| Inspect benchmark evidence | [Evaluation results](docs/evaluation/results.md) |
+| See product direction | [Roadmap](docs/product/roadmap.md) |
+
+<details>
+<summary><strong>Repository layout</strong></summary>
+
+```text
+memory/         public memory engine, retrieval, extraction, and curation
+embedding/      embedding client and optional reranker interfaces
+provider/       LLM provider abstraction
+store/          pure-Go SQLite setup and migrations
+mcpserver/      MCP stdio adapter and namespace registry
+cmd/engram/     AI-first CLI
+cmd/engram-mcp/ MCP server executable
+cmd/locomo-bench/ evaluation harness
+docs/           user, architecture, product, evaluation, and operations docs
+specs/          contract-first feature specifications and plans
+```
+
+</details>
 
 ## Development
 
-- **Spec-driven** with [github/spec-kit](https://github.com/github/spec-kit) — `constitution → specify → plan → tasks → implement`. Scaffolding in `.specify/`, Claude integration skills in `.claude/skills/`.
-- **Constitution (five non-negotiables)**, source [`.specify/memory/constitution.md`](.specify/memory/constitution.md): ① local-first/offline ② engine-adapter separation ③ contract-first + namespace isolation ④ evaluation regression gate ⑤ graceful degradation + honest scale.
-- **Commit discipline**: engine changes vs eval-config changes on separate commits (attribution); secrets never enter tracked files / logs / tool responses.
+The hard gate is a complete build and test run with CGO disabled:
+
+```bash
+CGO_ENABLED=0 go build ./...
+CGO_ENABLED=0 go test -count=1 ./...
+go vet ./...
+
+node docs/validation/check-docs.mjs
+node --test docs/validation/check-docs.test.mjs
+```
+
+Changes to retrieval, extraction, curation, storage, or embedding also require a
+comparable evaluation run before merge. The project principles are recorded in
+the [memory constitution](.specify/memory/constitution.md); documentation
+governance is in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-engram is licensed under the [Apache License 2.0](./LICENSE). Copyright 2026 wallfacers.
+engram is available under the [Apache License 2.0](LICENSE).

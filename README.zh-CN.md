@@ -1,245 +1,276 @@
-# engram
+<h1 align="center">engram</h1>
 
-> [English](README.md) | **简体中文**
+<p align="center">
+  <strong>AI Agent 的本地优先长期记忆。</strong>
+</p>
 
-[![Go](https://img.shields.io/badge/Go-1.25.0-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![CGO](https://img.shields.io/badge/CGO-disabled-00599C)](https://go.dev/)
-[![MCP](https://img.shields.io/badge/MCP-SDK%20v1.5.0-0052CC)](https://modelcontextprotocol.io/)
-[![Storage](https://img.shields.io/badge/SQLite-pure--Go%20%7C%20WAL%20%7C%20FTS5-003B57)](https://pkg.go.dev/modernc.org/sqlite)
-[![Retrieval](https://img.shields.io/badge/retrieval-semantic%20%2B%20BM25%20%2B%20entity%20RRF-success)](#架构)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+<p align="center">
+  纯 Go · 嵌入式 SQLite · MCP 与 CLI · 混合检索
+</p>
 
-**可嵌入任意智能体的本地优先记忆层**:一套记忆引擎,多个集成面——MCP server /
-AI-first CLI / SDK——让 Codex、Claude Code、Cursor、自研 Agent 无需自建记忆即可拥有长期记忆。
+<p align="center">
+  <a href="README.md">English</a>
+  · <a href="#快速开始">快速开始</a>
+  · <a href="#架构">架构</a>
+  · <a href="#基准评测">基准评测</a>
+  · <a href="docs/README.md">文档</a>
+</p>
 
-三路混合检索(语义 + BM25 关键词 + 实体,RRF 融合)+ ADD-only 事实抽取 + 确定性 curation,
-完全离线可运行,纯 Go、无 CGO、可交叉编译。
+<p align="center">
+  <a href="https://github.com/wallfacers/engram/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wallfacers/engram/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://go.dev/"><img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white"></a>
+  <a href="https://github.com/wallfacers/engram/blob/master/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <img alt="CGO disabled" src="https://img.shields.io/badge/CGO-disabled-2f855a">
+</p>
 
----
+engram 为 Codex、Claude Code、Cursor 和自研 Agent 提供持久记忆，无需部署托管数据库。
+每个命名空间存储为独立的本地 SQLite 文件；同一套纯 Go 引擎可通过 MCP stdio
+server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 
-## 目录
+默认即可离线读写并使用关键词检索。只有需要语义检索、对话事实抽取或记忆整理时，
+才需要接入兼容的本地或远程模型端点。
 
-- [特性](#特性)
-- [基准评测](#基准评测)
-- [架构](#架构)
-- [快速开始](#快速开始)
-- [配置](#配置)
-- [评测与复现](#评测与复现)
-- [项目结构](#项目结构)
-- [文档](#文档)
-- [开发规范](#开发规范)
-- [License](#license)
+## 为什么选择 engram
 
-## 特性
-
-- **默认离线、本地优先** —— 核心读写路径无需网络/云;SQLite 本地文件;embedding / LLM 是可替换的本地 sidecar(Ollama / fastembed / 任意 OpenAI 兼容端点),绝非强制依赖的托管服务。
-- **三信号混合检索** —— 语义(cosine)+ 关键词(FTS5 BM25,LIKE 兜底)+ 实体(精确匹配),RRF(k=60,免调参)融合;可选 cross-encoder reranker。信号逐路降级,缺哪路自动剔除、绝不整体失败。
-- **引擎 / 适配器隔离** —— 记忆引擎是独立、无宿主、可单测的库;MCP / CLI / SDK 只通过引擎公开 API 调用,不耦合宿主逻辑。
-- **命名空间隔离** —— 一个命名空间 = 一个独立引擎 store(`<dataDir>/<ns>.db`),LRU + 驱逐;跨命名空间访问默认关闭。路径逃逸读写 = 0。
-- **评测回归门禁** —— 检索 / 抽取 / curation / 存储 / embedding 的任何改动,合入前必须跑可比指标的 LoCoMo 评测且不得回归基线。
-
-## 基准评测
-
-> ⚠️ **读表前必读**:每一个数字都是 **(数据集 × 答题模型 × 判题模型 × 配方)** 的函数,**不是"engram 的分"**。
-> 跨行比较只在**恰好一个轴不同**时有效;与他人 leaderboard 数字**一律不可直接横比**。
-> 🔬 = 本项目同栈实测,📣 = 厂商自报未复现。正本:[`docs/results-matrix-2026-07-26.md`](docs/results-matrix-2026-07-26.md)。
-
-**统一条件**:嵌入 `bge-large-en-v1.5` 1024d(本地 sidecar);engram 检索走 canonical recipe
-(`--top-k 30 --chunk-quota 12 --force-answer`,hybrid,**无 reranker**);判题用 mem0-aligned prompt。
-
-### 同栈实测 —— 唯一可直接比较的表
-
-同一台机器的 Qwen 答题 + bge-large 嵌入 + 同一 judge prompt / 同一 judge 模型;竞品跑自家代码,零改动。
-
-| 数据集 (n) | 框架 | 答题模型 | 判题模型 | 得分 |
-|---|---|---|---|---:|
-| **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · 本地 vllm | deepseek-v4-flash | **85.71%** |
-| LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · 本地 vllm | deepseek-v4-pro | 83.77% |
-| LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vllm | deepseek-v4-flash | 82.40% |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vllm | deepseek-v4-pro | 80.26% |
-| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · 本地 vllm | deepseek-v4-flash | **80.80%** |
-| LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
-
-### 各方自报最好成绩 —— 不可直接比较(栈不同)
-
-| 数据集 | engram 🔬 | MemOS 📣 | Mem0 📣 |
-|---|---:|---:|---:|
-| LoCoMo | **89.03%**(v4-pro,n=1540) | 88.83 | 92.5 |
-| LongMemEval | **86.00%**(v4-pro,S-cleaned 500) | 89.20 | 94.4 |
-
-### LoCoMo 分类别得分(1540,judge=v4-flash,3 跑多数)
-
-| 类别 | n | engram (Qwen) | engram (v4-pro) | MemOS@同栈 | Δ (engram−MemOS) |
-|---|---:|---:|---:|---:|---:|
-| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18** |
-| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77 |
-| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62 |
-| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24** |
-| **OVERALL** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31** |
-
-> 分类别的"比分"形状:MemOS 的 tree/graph 记忆组织**只在 multi-hop 赢 1.77pp**(正是它该赢的地方);
-> single-hop / open-domain 各输 6pp+。engram 换强答题模型的收益也极不均匀——temporal +7.5pp、
-> open-domain +6.3pp,而 multi-hop 仅 +1.1pp,说明 multi-hop 瓶颈在检索侧,其余类别瓶颈在答题侧。
-
-### 三个关键 Δ
-
-| 轴 | 变化 | 净效应 | 结论 |
-|---|---|---:|---|
-| **框架(同栈)** | engram − MemOS,LoCoMo 1540 | **+3.31pp**(v4-flash)/ **+3.51pp**(v4-pro) | engram 领先,两个 judge 下均成立 |
-| **答题模型** | Qwen → v4-pro | **+3.32pp**(LoCoMo)/ **+5.20pp**(LME,p=0.0049) | 强 answerer 主要兑现 temporal / open-domain |
-| **判题模型** | v4-flash → v4-pro | **−2 ~ −3pp** | 加性偏移,不改变任何 Δ 的方向 |
-
-> Mem0 的 92.5 / 94.4 来自**托管平台**(含开源 SDK 不带的私有优化)+ `top_200` 检索预算,无法同栈复现;
-> 对 Mem0 的真实差距 = **未知数**。MemOS 自报 88.83 → 同栈 82.40,**−6.43pp 全是 regime 伪影**(答题模型强度 + judge 宽松度)。
-
-## 架构
-
-```
-        ┌─────────────── 适配层(薄) ──────────────┐
-        │  mcpserver (stdio)   cmd/engram (CLI)      │
-        │         MCP / CLI / SDK 仅调用公共 API      │
-        └──────────────────────┬──────────────────────┘
-                               ▼  公共 API
-        ┌─────────────── 引擎层(纯库,离线) ────────┐
-        │  memory/   entrystore · retriever · pipeline│
-        │            curation · prompt · queryplan    │
-        │  embedding/  embedder + reranker (可选)     │
-        │  provider/    LLM 抽象 (anthropic / openai) │
-        │  store/       SQLite: WAL · FTS5 trigram    │
-        └─────────────────────────────────────────────┘
-```
-
-**检索流水线**:query → 三路并行(语义 cosine / FTS5 BM25 / 实体精确匹配)→ RRF(k=60)融合
-→(可选)cross-encoder rerank → 返回。任一路信号缺失即静默退出融合,不拖垮整体;适配器只从
-**结构性事实**(如"未配置 embedding 端点")报告降级,不探测引擎。
+| | |
+|---|---|
+| **默认本地**<br>数据保存在本机 SQLite 中，核心路径无需云账号，也不依赖网络。 | **没有模型也能用**<br>未配置任何模型端点时，CRUD、命名空间、导出和关键词检索仍然可用。 |
+| **按需混合检索**<br>语义、BM25 关键词和实体信号通过免调参的 RRF（Reciprocal Rank Fusion）融合。 | **显式记忆生命周期**<br>由 Agent 决定何时写入或抽取；curation 已交付但默认关闭，普通聊天不会被隐式采集。 |
+| **一个引擎，轻薄适配**<br>MCP 与 CLI 只调用引擎公开 API，不重复实现记忆逻辑。 | **部署简单**<br>纯 Go、无 CGO、嵌入式数据库，不需要单独运维向量数据库。 |
 
 ## 快速开始
 
-要求 Go 1.25+。全部构建与测试在 `CGO_ENABLED=0` 下通过。
+### 1. 构建并离线使用 CLI
+
+需要 Go 1.25 或更高版本。
 
 ```bash
-git clone https://github.com/wallfacers/engram.git && cd engram
-CGO_ENABLED=0 go build ./...
-CGO_ENABLED=0 go test  -count=1 ./...
+git clone https://github.com/wallfacers/engram.git
+cd engram
+
+mkdir -p bin
+CGO_ENABLED=0 go build -o ./bin/engram ./cmd/engram
+export ENGRAM_DATA_DIR="$PWD/data"
+
+./bin/engram add \
+  --name preferred-editor \
+  --content "The user prefers Neovim for Go development." \
+  --category preference
+
+./bin/engram search "Neovim"
 ```
 
-### 作为 MCP server 接入(Codex / Claude Code / Cursor)
+以上命令会创建 `data/default.db`，并完成一次降级但可用的离线搜索。后续配置 embedding
+端点即可增加语义检索通道，已有数据和命令无需改变。
 
-构建 server,然后在 MCP 客户端配置中注册本地 stdio 进程。
+常用命令：
 
 ```bash
-CGO_ENABLED=0 go build -o engram-mcp ./cmd/engram-mcp
+./bin/engram get preferred-editor
+./bin/engram list
+./bin/engram stats
+./bin/engram export
+./bin/engram delete preferred-editor
+./bin/engram namespaces
+./bin/engram version
 ```
+
+对话抽取、curation、命名空间及自动化行为详见
+[CLI 使用指南](docs/guides/cli.md)。
+
+### 2. 接入 MCP 客户端
+
+构建 stdio server：
+
+```bash
+CGO_ENABLED=0 go build -o ./bin/engram-mcp ./cmd/engram-mcp
+```
+
+在 MCP 客户端中注册二进制文件的绝对路径。不同客户端的外层配置格式可能不同：
 
 ```json
 {
   "mcpServers": {
     "engram": {
-      "command": "/abs/path/to/engram-mcp",
-      "args": ["--data-dir", "/home/you/.engram/memory"]
+      "command": "/absolute/path/to/engram/bin/engram-mcp",
+      "args": ["--data-dir", "/absolute/path/to/engram-data"]
     }
   }
 }
 ```
 
-启动后,Agent 可调用 `memory_write` / `memory_search` / `memory_list` / `memory_get` /
-`memory_delete`;配置 LLM 后额外出现 `memory_ingest`。**不配置任何端点仍可离线运行。**
-接入细节见 [`docs/mcp-server.md`](docs/mcp-server.md)。
+未配置模型时，server 暴露 `memory_write`、`memory_search`、`memory_list`、
+`memory_get` 和 `memory_delete`；配置 LLM 后增加 `memory_ingest`。每个工具都可指定
+namespace，不同 namespace 使用相互隔离的数据库文件。
 
-### 作为 AI-first CLI
+客户端接入、工具边界与可选 curation 详见
+[MCP Server 配置指南](docs/guides/mcp-server.md)。
 
-成功命令向 stdout 写确定性 markdown,失败向 stderr 写一条可操作诊断并返回非零退出码——
-便于 AI Agent / cron / CI 直接消费。完整命令见 [`docs/cli.md`](docs/cli.md)。
+## 架构
 
-```bash
-CGO_ENABLED=0 go build -o engram ./cmd/engram
+```mermaid
+flowchart LR
+    subgraph clients["客户端"]
+        agent["AI Agent<br/>Codex · Claude Code · Cursor"]
+        app["Go 应用"]
+    end
 
-engram --data-dir ~/.engram/memory add    --name dark-mode --content "user prefers dark mode" --category preference
-engram --data-dir ~/.engram/memory search "appearance settings"
-engram --data-dir ~/.engram/memory get    dark-mode
-engram --data-dir ~/.engram/memory list
-engram --data-dir ~/.engram/memory delete dark-mode
-printf 'user: I moved to Berlin last month.\nassistant: Noted.\n' | engram --data-dir ~/.engram/memory ingest   # 需 LLM
-engram --data-dir ~/.engram/memory stats
+    subgraph interfaces["轻薄接入层"]
+        mcp["MCP Server<br/>stdio"]
+        cli["AI-first CLI"]
+        api["公开 Go API"]
+    end
+
+    subgraph engine["记忆引擎 · 纯 Go"]
+        write["直接写入<br/>与显式抽取"]
+        search["混合检索<br/>语义 · BM25 · 实体 → RRF"]
+        curate["可选 Curation"]
+    end
+
+    db[("每个 Namespace 一个 SQLite<br/>WAL · FTS5")]
+    models["可选模型 Sidecar<br/>Embedding · LLM"]
+
+    agent --> mcp
+    agent --> cli
+    app --> api
+    mcp --> api
+    cli --> api
+    api --> write
+    api --> search
+    api --> curate
+    write --> db
+    curate --> db
+    db --> search
+    models -. "抽取与向量化" .-> write
+    models -. "查询向量化" .-> search
+    models -. "判定" .-> curate
+
+    classDef client fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    classDef interface fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef core fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    classDef storage fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    classDef optional fill:#faf5ff,stroke:#a855f7,color:#581c87,stroke-dasharray:5 5
+
+    class agent,app client
+    class mcp,cli,api interface
+    class write,search,curate core
+    class db storage
+    class models optional
 ```
+
+实线是本地路径，模型连接均为可选：
+
+1. **写入：** `add` / `memory_write` 直接保存调用方提供的内容；只有显式
+   `ingest` 才会调用 LLM 抽取持久事实后写入。
+2. **检索：** 关键词检索始终在本地运行；实体索引与依赖可用时，实体匹配和语义
+   cosine 结果参与排序，RRF 只融合成功返回的通道。
+3. **整理：** 有界 curation pass 会评分并去重记忆；只有 CLI 显式调用或 MCP server
+   主动开启后才会执行。
+
+实现边界、存储原语与 provenance 详见
+[记忆系统架构](docs/architecture/memory-system.md)。
+
+## 能力矩阵
+
+| 能力 | 默认行为 | 可选依赖 |
+|---|---|---|
+| 本地 CRUD、列表、统计、导出 | 离线可用 | 无 |
+| 关键词检索 | 离线可用 | 无 |
+| 实体检索 | 已索引实体事实存在时参与 | 实体事实由显式 ingest 产生 |
+| 语义检索 | 不可用时自动退出融合 | OpenAI 兼容 embedding 端点 |
+| 对话事实抽取 | 无模型时不暴露 | OpenAI 或 Anthropic 兼容 LLM |
+| 记忆 curation | 默认关闭 | LLM；CLI 显式命令或 MCP 开关 |
+| 命名空间隔离 | 每个 namespace 一个 SQLite 文件 | 无 |
+
+engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布式向量服务，也尚未宣称
+完整解决记忆新鲜度与状态一致性。已交付与规划能力的权威边界见
+[当前能力边界](docs/product/capabilities.md)。
 
 ## 配置
 
-非密钥配置既可用全局 flag、也可用 `ENGRAM_*` 环境变量(flag 覆盖环境变量)。
-**API key 只走环境变量,绝不作为 flag 传入,也绝不写入日志 / tool 响应 / 配置文件。**
+非密钥 flag 会覆盖对应的 `ENGRAM_*` 环境变量。API key 只能通过环境变量提供，
+不会作为命令行 flag 暴露。
 
-| Flag | 环境变量 | 默认 | 说明 |
-|---|---|---|---|
-| `--data-dir` | `ENGRAM_DATA_DIR` | 必填 | SQLite 存储目录 |
-| `--namespace` | `ENGRAM_NAMESPACE` | `default` | 命名空间(CLI) |
-| — | `ENGRAM_MAX_OPEN_NAMESPACES` | — | 命名空间 LRU 上限(MCP) |
-| `--embed-base-url` | `ENGRAM_EMBED_BASE_URL` | 离线 | OpenAI 兼容 `/v1` 端点 |
-| `--embed-model` | `ENGRAM_EMBED_MODEL` | 离线 | 嵌入模型名 |
-| — | `ENGRAM_EMBED_API_KEY` | — | 嵌入密钥(仅 env) |
-| `--llm-provider` | `ENGRAM_LLM_PROVIDER` | ingest 不可用 | `anthropic` / `openai` |
-| `--llm-base-url` | `ENGRAM_LLM_BASE_URL` | ingest 不可用 | LLM 端点 |
-| `--llm-model` | `ENGRAM_LLM_MODEL` | ingest 不可用 | LLM 模型名 |
-| — | `ENGRAM_LLM_API_KEY` | — | LLM 密钥(仅 env) |
+| Flag | 环境变量 | 用途 |
+|---|---|---|
+| `--data-dir` | `ENGRAM_DATA_DIR` | namespace 数据库所在目录 |
+| `--namespace` | `ENGRAM_NAMESPACE` | CLI namespace，默认 `default` |
+| `--embed-base-url` | `ENGRAM_EMBED_BASE_URL` | OpenAI 兼容 embedding 端点 |
+| `--embed-model` | `ENGRAM_EMBED_MODEL` | embedding 模型名 |
+| — | `ENGRAM_EMBED_API_KEY` | embedding API key |
+| `--llm-provider` | `ENGRAM_LLM_PROVIDER` | `openai` 或 `anthropic` |
+| `--llm-base-url` | `ENGRAM_LLM_BASE_URL` | LLM 端点 |
+| `--llm-model` | `ENGRAM_LLM_MODEL` | LLM 模型名 |
+| — | `ENGRAM_LLM_API_KEY` | LLM API key |
+| `--max-open-namespaces` | `ENGRAM_MAX_OPEN_NAMESPACES` | MCP namespace 缓存上限，默认 `64` |
+| `--curation-enabled` | `ENGRAM_CURATION_ENABLED` | 开启 MCP 持久 curation，默认 `false` |
 
-## 评测与复现
+最后两项是 MCP server 配置。请以当前安装版本的 `engram-mcp --help` 为准确启动契约。
 
-engram 的检索保真度由确定性 parity golden(`testdata/parity/`)+ LoCoMo harness 证明,而非靠信任。离线门禁无需外网。
+## 基准评测
 
-```bash
-go test ./memory -run TestRetrievalParity        # 检索 parity(memory_search == Retriever.Search)
-go test ./memory -run TestSignalDegradation      # 三路信号逐路降级
-```
+评测数字取决于数据集、答题模型、判题模型、检索配方和聚合方式。下表仅展示当前本地栈
+结果，是固定评测条件下的证据，不是通用排行榜。
 
-端到端答题评测需自备数据集与端点(`.locomo-run/`、`*.db`、`testdata/locomo/` 均已 gitignore):
+| 数据集 | 样本数 | 答题模型 | 得分 |
+|---|---:|---|---:|
+| LoCoMo，类别 1–4 | 1,540 | Qwen3.6-35B-A3B-FP8 | **85.71%** |
+| LongMemEval-S，cleaned | 500 | Qwen3.6-35B-A3B-FP8 | **80.80%** |
 
-```bash
-go build ./cmd/locomo-bench
-export LOCOMO_API_KEY=...      LOCOMO_BASE_URL=...   LOCOMO_MODEL=...   LOCOMO_PROVIDER=anthropic
-export EXTRACT_MODEL=...
-export EMBED_BASE_URL=http://127.0.0.1:11434/v1   EMBED_MODEL=...   EMBED_API_KEY=...
-go run ./cmd/locomo-bench --data ./path/to/locomo.json \
-      --run-dir ./.locomo-run --retrieval both
-```
+在答题模型、embedding 模型、judge prompt 和 judge 模型一致的 LoCoMo 受控比较中，
+engram 得分 **85.71%**，MemOS 得分 **82.40%**（+3.31 个百分点）。两者的检索预算与
+上下文预算仍有差异，因此不能把该结果外推为跨配置的普遍结论。
 
-canonical recipe(四必选 flag)、三后端栈与踩坑史见
-[`docs/locomo-e2e-eval-reproduction.md`](docs/locomo-e2e-eval-reproduction.md);
-评分杠杆实验台账见 [`docs/locomo-score-levers.md`](docs/locomo-score-levers.md)。
-
-## 项目结构
-
-```
-memory/        引擎核心(公开包):entrystore / retriever / pipeline / curation / prompt / queryplan
-embedding/     引擎:embedder + reranker(OpenAI 兼容 /v1,可选)
-provider/      引擎:LLM 抽象(+ anthropic / + openai)
-store/         引擎:SQLite(modernc,纯 Go)— Open / Options / migrations / ProbeFTS5
-internal/      引擎内部:idgen / version(不对外)
-mcpserver/     适配器:MCP stdio server(config / namespace / registry / server / tools)
-cmd/
-  engram-mcp/    MCP server 二进制(薄 main)
-  engram/        AI-first CLI 二进制
-  locomo-bench/  LoCoMo 评测 harness
-specs/          spec-kit SDD:specs/NNN-feature/ spec·plan·tasks·research·data-model·contracts
-docs/           战略 / 背景 / 竞品 / 适配器用法 / 评测 / 未决问题
-testdata/       parity goldens;locomo/ 数据集(gitignored)
-```
+[当前评测结果](docs/evaluation/results.md)是分数与比较边界的唯一正本；复现配方见
+[LoCoMo 评测运行手册](docs/operations/evaluation/locomo-runbook.md)。
 
 ## 文档
 
-- [`docs/results-matrix-2026-07-26.md`](docs/results-matrix-2026-07-26.md) — **评测结果总表(对外引用任何分数一律以本表为准)**
-- [`docs/competitive-benchmarks.md`](docs/competitive-benchmarks.md) — 竞品对标基准 + 口径核对
-- [`docs/memos-inhouse-locomo-repro.md`](docs/memos-inhouse-locomo-repro.md) — MemOS 同栈复现方法学正本
-- [`docs/memory-strategy.md`](docs/memory-strategy.md) — 技术与战略正本、涨点 backlog
-- [`docs/memory-architecture.md`](docs/memory-architecture.md) — 运行架构总览:抽取时机、写入/检索/curation 流程、SQLite 表图
-- [`docs/mcp-server.md`](docs/mcp-server.md) · [`docs/cli.md`](docs/cli.md) — 适配器用法
-- [`docs/README.md`](docs/README.md) — 文档全索引(含状态语义)
+| 目标 | 文档 |
+|---|---|
+| 浏览全部当前文档 | [文档门户](docs/README.md) |
+| 使用 CLI | [CLI 使用指南](docs/guides/cli.md) |
+| 接入 MCP 客户端 | [MCP Server 配置指南](docs/guides/mcp-server.md) |
+| 理解运行架构 | [记忆系统架构](docs/architecture/memory-system.md) |
+| 核对已交付与规划能力 | [当前能力边界](docs/product/capabilities.md) |
+| 查看评测证据 | [当前评测结果](docs/evaluation/results.md) |
+| 了解产品方向 | [产品路线图](docs/product/roadmap.md) |
 
-## 开发规范
+<details>
+<summary><strong>仓库结构</strong></summary>
 
-- **规范驱动开发**:采用 [github/spec-kit](https://github.com/github/spec-kit) —— `constitution → specify → plan → tasks → implement`。脚手架在 `.specify/`,Claude 集成 skills 在 `.claude/skills/`。
-- **宪法(五条不可妥协)**,正本 [`.specify/memory/constitution.md`](.specify/memory/constitution.md):① local-first 默认离线 ② 引擎/适配器隔离 ③ 契约优先 + 命名空间隔离 ④ 评测回归门禁 ⑤ 优雅降级 + 诚实量级。
-- **提交纪律**:引擎改动与评测配置改动分轨提交(可归因);密钥绝不进 tracked 文件 / 日志 / tool 响应。
+```text
+memory/         公开记忆引擎、检索、抽取与 curation
+embedding/      embedding client 与可选 reranker 接口
+provider/       LLM provider 抽象
+store/          纯 Go SQLite 初始化与 migration
+mcpserver/      MCP stdio 适配器与 namespace registry
+cmd/engram/     AI-first CLI
+cmd/engram-mcp/ MCP server 可执行程序
+cmd/locomo-bench/ 评测工具
+docs/           使用、架构、产品、评测与运维文档
+specs/          契约优先的功能规格与计划
+```
+
+</details>
+
+## 开发
+
+硬性门禁是关闭 CGO 后完成全部构建与测试：
+
+```bash
+CGO_ENABLED=0 go build ./...
+CGO_ENABLED=0 go test -count=1 ./...
+go vet ./...
+
+node docs/validation/check-docs.mjs
+node --test docs/validation/check-docs.test.mjs
+```
+
+检索、抽取、curation、存储或 embedding 的变更在合入前还必须完成可比较的评测。
+项目原则见[记忆系统宪法](.specify/memory/constitution.md)，文档治理见
+[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)。
 
 ## License
 
-engram 基于 [Apache License 2.0](./LICENSE) 开源。Copyright 2026 wallfacers。
+engram 基于 [Apache License 2.0](LICENSE) 开源。
