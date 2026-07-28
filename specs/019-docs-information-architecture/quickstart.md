@@ -164,11 +164,14 @@ schema v6、FTS5、provenance/event/supersession/revision、可降级三信号�
 不等于机制出货，并回链 `architecture/memory-system.md`。
 
 结构门通过后，由两个独立审阅过程分别从 `docs/README.md` 开始回答 Q1–Q8，记录首个
-正本、生命周期、结论和证据链接。两份结果必须 8/8 一致。
+正本、生命周期、结论和证据链接到 `reviews/retrieval-review-a.md` 和
+`reviews/retrieval-review-b.md`；Reviewer B 不得读取 A 的输出。比较步骤再写入
+validation report，两份结果必须 8/8 一致。
 
-另由两个独立审阅过程只阅读 `docs/CONTRIBUTING.md`，分类元数据契约中的 G1–G3。两份
-结果必须在生命周期、目标路径和后续引用/归档动作上 3/3 一致；该测试不能用 Q1–Q8
-结果替代。
+另由两个独立审阅过程只阅读 `docs/CONTRIBUTING.md`，分别写入
+`reviews/governance-review-a.md` 和 `reviews/governance-review-b.md`；Reviewer B 不得
+读取 A 的输出。比较步骤再把结论写入 validation report。两份结果必须在生命周期、目标
+路径和后续引用/归档动作上 3/3 一致；该测试不能用 Q1–Q8 结果替代。
 
 ## 7. 验证迁移页和已知漂移
 
@@ -237,3 +240,7 @@ git diff --name-status c86e47e
 Q1–Q8 复核和两份 G1–G3 复核写入
 `specs/019-docs-information-architecture/validation-report.md`；该报告是 SC-003、
 SC-009、SC-010 和 SC-011 的验收证据。
+
+报告最后必须提供 disposition manifest，并与 `git diff --name-status c86e47e` 对账：
+21 个顶层源文件、恰好 12 个 relocated、八个既有设计归档、三个删除/转归档结论、019
+设计最终归档以及所有允许修改的 specs 路径都必须逐项出现。

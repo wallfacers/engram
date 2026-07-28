@@ -70,6 +70,11 @@ specs/019-docs-information-architecture/
 ├── data-model.md
 ├── quickstart.md
 ├── validation-report.md
+├── reviews/
+│   ├── governance-review-a.md
+│   ├── governance-review-b.md
+│   ├── retrieval-review-a.md
+│   └── retrieval-review-b.md
 ├── checklists/
 │   └── requirements.md
 ├── contracts/
@@ -184,7 +189,9 @@ Phase 0 结束条件：所有决策均有 rationale 和 alternatives，且不存
 [quickstart.md](./quickstart.md) 给出实施前基线、`docs/validation/check-docs.mjs` 命令、
 过期事实扫描、变更隔离和最终回归命令及明确期望结果。实施结束时将全部确定性输出、三份
 删除门证明、两次独立 Q1–Q8 复核和两次独立治理分类复核记录写入
-`validation-report.md`。
+`validation-report.md`。两类 reviewer 分别写独立文件且不能读取对方输出，由后续 compare
+步骤统一写入报告；报告另以 disposition manifest 对账 21 个源文件、12 个迁移页、
+8+1 个设计归档、3 个删除候选和 specs 白名单。
 
 ## Post-Design Constitution Check
 
