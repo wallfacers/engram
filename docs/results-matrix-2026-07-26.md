@@ -1,8 +1,14 @@
 # engram 评测结果总表(2026-07-26)
 
 **一句话**:engram 在 LoCoMo 全量 1540 题上 **89.03%**(deepseek-v4-pro 答题,3 跑多数),
-在 LongMemEval-S(cleaned)分层抽样 100 题上 **85%**;同栈对跑下 MemOS 为 **82.40%**
+在 **LongMemEval-S(cleaned)全量 500 题**上 **80.80%**(Qwen3.6-35B 本地栈)/ **86.00%**
+(deepseek-v4-pro,公平对照 +5.20pp SIGNIFICANT);同栈对跑下 MemOS 为 **82.40%**
 (engram 同栈 85.71%,**+3.31pp**;换 v4-pro judge 后 80.26% vs 83.77%,**+3.51pp**)。
+
+> 📌 **2026-07-28 更新**:LongMemEval-S 已跑**全量 500**(非抽样),取代下方旧的
+> "抽样 100"数。**local 栈 80.80%(Qwen)/ 强 answerer 栈 86.00%(v4-pro)均已坐实、
+> 勿重跑**——正本 [`specs/016-longmemeval-crossbench/verdict.md`](../specs/016-longmemeval-crossbench/verdict.md)
+> US4(local)/ US5(召回深度 bracket 全 ns)/ US6(v4-pro 公平对照)。
 
 > ⚠️ **读表前必读**:本表的每一个数字都是 **(数据集 × 答题模型 × 判题模型 × 配方)**
 > 四元组的函数,**不是"engram 的分"**。跨行比较只在**恰好一个轴不同**时有效。
@@ -21,7 +27,8 @@
 |---|---:|---:|---:|---:|---:|
 | LoCoMo(cat 1-4) · judge=v4-flash | 1540 | **85.71%** 🔬 | **82.40%** 🔬 | — 未测 | **+3.31** |
 | LoCoMo(cat 1-4) · judge=v4-pro | 1540 | **83.77%** 🔬 | **80.26%** 🔬 | — 未测 | **+3.51** |
-| LongMemEval-S (cleaned) 抽样 | 100 | **80** 🔬 | — 未测 | — 未测 | — |
+| LongMemEval-S (cleaned) · Qwen 本地栈 | **500** | **80.80%** 🔬 | — 未测 | — 未测 | — |
+| LongMemEval-S (cleaned) · v4-pro | **500** | **86.00%** 🔬 | — 未测 | — 未测 | — |
 
 🔬 = 本项目实测。**engram 在唯一做过同栈对跑的对手(MemOS)上领先 3.3–3.5pp,
 且该结论在两个 judge 下都成立。**
@@ -31,7 +38,7 @@
 | 数据集 | **engram** 🔬 | **MemOS** | **Mem0** |
 |---|---:|---:|---:|
 | LoCoMo | **89.03%**<br>(v4-pro 答题,3 跑多数,n=1540) | 88.83%<br>📣 自报 | **92.5**<br>📣 自报 |
-| LongMemEval | **85 / 100**<br>(v4-pro 答题,S-cleaned **抽样 100**) | 89.20<br>📣 自报 | **94.4**<br>📣 自报 |
+| LongMemEval | **86.00%**<br>(v4-pro 答题,S-cleaned **全量 500**,3 跑多数) | 89.20<br>📣 自报 | **94.4**<br>📣 自报 |
 
 📣 = 厂商自报,**未经本项目复现**。
 
@@ -76,11 +83,18 @@ Mem0 2026-04 blog:LoCoMo 71.4 → **92.5**,LongMemEval 67.8 → **94.4**。但�
 | LoCoMo | 1540 | Qwen3.6-35B-A3B-FP8 | 3 跑均值 | 85.11% (ci95 84.38–85.84) |
 | **LoCoMo** | **1540** | **deepseek-v4-pro** | **3 跑多数** | **89.03%** |
 | LoCoMo | 1540 | deepseek-v4-pro | 3 跑 per-rep | 88.70 / 88.64 / 88.70 |
-| LongMemEval-S (cleaned) | 100 | Qwen3.6-35B-A3B-FP8 | 3 跑多数 | 80% |
-| **LongMemEval-S (cleaned)** | **100** | **deepseek-v4-pro** | **3 跑多数** | **85%** |
+| LongMemEval-S (cleaned) | **500** | Qwen3.6-35B-A3B-FP8 | 3 跑多数 | **80.80%** |
+| LongMemEval-S (cleaned) | **500** | Qwen3.6-35B-A3B-FP8 | 3 跑 per-rep | 79.0 / 78.4 / 80.4 |
+| **LongMemEval-S (cleaned)** | **500** | **deepseek-v4-pro** | **3 跑多数** | **86.00%** |
+| LongMemEval-S (cleaned) | **500** | deepseek-v4-pro | 3 跑 per-rep | 86.0 / 85.4 / 86.2 |
+
+> 上表 LongMemEval 的 100 题抽样数(80/85)已被 2026-07-28 的**全量 500**取代
+> (80.80 / 86.00),旧抽样数仅存档、勿引用。v4-pro 净效应 **+5.20pp**(p=0.0049
+> SIGNIFICANT,McNemar b=27 c=53);preference +33pp / temporal +8.3 / multi +5.3。
 
 **答题模型轴的净效应**(同数据集、同检索、同判题):
-LoCoMo **+3.32pp**(85.71 → 89.03,同为 3 跑多数);LongMemEval **+5pp**(80 → 85)。
+LoCoMo **+3.32pp**(85.71 → 89.03,3 跑多数);LongMemEval **+5.20pp**(80.80 → 86.00,
+p=0.0049 SIGNIFICANT)。
 
 > **n 的作用**:LoCoMo(n=1540)三跑落在 **88.64–88.70**,带宽 **0.06pp**;
 > LongMemEval(n=100)三跑落在 **83–86**,带宽 **3 分**。同一套代码、同一个答题模型,
