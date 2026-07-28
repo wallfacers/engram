@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/wallfacers/engram/memory"
@@ -20,7 +21,7 @@ import (
 // decision to query time.
 const (
 	chunkTargetChars = 900  // soft target per chunk (entry budget is 1200)
-	chunkMaxChars    = 1100 // hard cap for a single oversized turn
+	chunkMaxChars    = 1100 // hard cap per stored chunk
 	pcicWindowSize   = 60
 )
 
@@ -35,9 +36,9 @@ type sessionChunk struct {
 }
 
 // buildSessionChunks splits one session's turns into speaker-attributed chunks
-// of at most ~chunkTargetChars code points, never splitting a turn except when
-// a single turn alone exceeds chunkMaxChars (then it is truncated). Each chunk
-// records the dialogue ids of the turns it contains (blank ids are dropped).
+// of at most chunkMaxChars code points. An oversized turn is emitted losslessly
+// as multiple chunks carrying the same dialogue id. Each chunk records the
+// dialogue ids of the turns it contains (blank ids are dropped).
 func buildSessionChunks(s session) []sessionChunk {
 	var chunks []sessionChunk
 	var b strings.Builder
@@ -51,8 +52,18 @@ func buildSessionChunks(s session) []sessionChunk {
 	}
 	for _, t := range s.Turns {
 		line := t.Speaker + ": " + t.Text
-		if n := utf8.RuneCountInString(line); n > chunkMaxChars {
-			line = string([]rune(line)[:chunkMaxChars])
+		if utf8.RuneCountInString(line) > chunkMaxChars {
+			if size > 0 {
+				flush()
+			}
+			for _, fragment := range splitOversizedTurn(t.Speaker, t.Text) {
+				chunk := sessionChunk{Text: fragment}
+				if t.DiaID != "" {
+					chunk.DiaIDs = []string{t.DiaID}
+				}
+				chunks = append(chunks, chunk)
+			}
+			continue
 		}
 		n := utf8.RuneCountInString(line)
 		if size > 0 && size+1+n > chunkTargetChars {
@@ -72,6 +83,56 @@ func buildSessionChunks(s session) []sessionChunk {
 		flush()
 	}
 	return chunks
+}
+
+// splitOversizedTurn keeps every rune of an oversized turn while repeating the
+// speaker prefix so each fragment remains independently understandable.
+func splitOversizedTurn(speaker, text string) []string {
+	prefix := speaker + ": "
+	prefixRunes := utf8.RuneCountInString(prefix)
+	if prefixRunes >= chunkMaxChars {
+		prefix = ""
+		prefixRunes = 0
+	}
+	maxPayload := chunkMaxChars - prefixRunes
+	targetPayload := chunkTargetChars - prefixRunes
+	if targetPayload <= 0 || targetPayload > maxPayload {
+		targetPayload = maxPayload
+	}
+
+	remaining := []rune(text)
+	parts := make([]string, 0, (len(remaining)+targetPayload-1)/targetPayload)
+	for len(remaining) > 0 {
+		cut := len(remaining)
+		if cut > maxPayload {
+			cut = preferredChunkCut(remaining, targetPayload)
+		}
+		parts = append(parts, prefix+string(remaining[:cut]))
+		remaining = remaining[cut:]
+	}
+	return parts
+}
+
+// preferredChunkCut chooses a stable boundary without trimming it. The caller
+// concatenating the payloads therefore reconstructs the original turn exactly.
+func preferredChunkCut(runes []rune, limit int) int {
+	if len(runes) <= limit {
+		return len(runes)
+	}
+	lower := limit / 2
+	boundaries := []func(rune) bool{
+		func(r rune) bool { return r == '\n' },
+		func(r rune) bool { return strings.ContainsRune(".!?;。！？；", r) },
+		unicode.IsSpace,
+	}
+	for _, boundary := range boundaries {
+		for i := limit - 1; i >= lower; i-- {
+			if boundary(runes[i]) {
+				return i + 1
+			}
+		}
+	}
+	return limit
 }
 
 // chunkTrigger derives the single-line manifest trigger from chunk content.
@@ -165,6 +226,18 @@ func applyChunkQuota(wide []memory.Result, topK, quota int) []memory.Result {
 // text covers (for exact-turn evidence recall) and the number of chunks written.
 func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation) (map[string][]string, int, error) {
 	chunkTurns := make(map[string][]string)
+	namePrefix := fmt.Sprintf("chunk-c%d-", conv.ID)
+	entries, err := es.List(ctx)
+	if err != nil {
+		return chunkTurns, 0, fmt.Errorf("list existing chunks for conversation %d: %w", conv.ID, err)
+	}
+	existing := make(map[string]*memory.Entry)
+	for _, entry := range entries {
+		if entry.Category == "chunk" && strings.HasPrefix(entry.Name, namePrefix) {
+			existing[entry.Name] = entry
+		}
+	}
+	expected := make(map[string]struct{})
 	n := 0
 	for _, s := range conv.Sessions {
 		var eventDate *time.Time
@@ -174,6 +247,7 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 		}
 		for i, chunk := range buildSessionChunks(s) {
 			name := fmt.Sprintf("chunk-c%d-s%d-%03d", conv.ID, s.Index, i)
+			expected[name] = struct{}{}
 			e := &memory.Entry{
 				Name:            name,
 				Trigger:         chunkTrigger(chunk.Text),
@@ -184,6 +258,11 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 				FactSource:      "verbatim_chunk",
 				SourceSessionID: fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index),
 			}
+			if previous, ok := existing[name]; ok && previous.Content != e.Content {
+				if err := es.Delete(ctx, name); err != nil {
+					return chunkTurns, n, fmt.Errorf("invalidate changed chunk %s: %w", name, err)
+				}
+			}
 			if err := es.Upsert(ctx, e); err != nil {
 				return chunkTurns, n, fmt.Errorf("chunk %s: %w", e.Name, err)
 			}
@@ -191,6 +270,14 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 				chunkTurns[name] = chunk.DiaIDs
 			}
 			n++
+		}
+	}
+	for name := range existing {
+		if _, keep := expected[name]; keep {
+			continue
+		}
+		if err := es.Delete(ctx, name); err != nil {
+			return chunkTurns, n, fmt.Errorf("delete obsolete chunk %s: %w", name, err)
 		}
 	}
 	return chunkTurns, n, nil

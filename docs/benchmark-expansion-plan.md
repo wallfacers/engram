@@ -46,6 +46,12 @@
 > 分题型对照见 [`results-matrix-2026-07-26.md` §1.2 / §7](./results-matrix-2026-07-26.md)。
 > **仍排除(FR-026)**:T3 官方分题型 judge 双口径、abstention 子集、`longmemeval_m`、V2 —— 不在本轮范围。
 
+> ⚠️ **后续发现的基线缺陷（2026-07-28）**：`a40b48a` 的 chunk builder 会把单个
+> 超长 turn 截断在 1100 code point；4 道稳定错误的 `single-session-assistant`
+> 题其关键答案均位于截断点之后。80.80% 继续保留为历史基线，但在无损分片、chunk
+> 向量重建和同配方全量复跑完成前，不再视为已校正基线。turn coverage 是 DiaID 级
+> 指标，不等价于答案片段可见率。详见 verdict 的「后续纠偏」。
+
 **现状纠偏(写作时,已过期)**:~~`testdata/longmemeval/` 目前只有 2KB 手造 `sample.json`(schema 示例),
 **全量数据集尚未下载**;paper-outline RQ6 标注"engram 一手结果为空"。~~
 

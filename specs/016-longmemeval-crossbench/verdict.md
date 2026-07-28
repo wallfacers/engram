@@ -574,6 +574,30 @@ warm-up(丢弃,1 rep)= 390/500 = 78.00%,与主臂 Δ=+2.80pp,落在 temp=1.0 跑
 | single-session-preference | **53.3%** | 30 | 0.778 |
 | **OVERALL** | **80.80%** | 500 | 0.879(n=479) |
 
+### 后续纠偏：基线存在超长 turn 截断（2026-07-28）
+
+基线提交 `a40b48a` 的 `buildSessionChunks` 会把超过 1100 code point 的单 turn
+直接截断。多数票中 `single-session-assistant` 的 4 道错题全部是三跑全错，且
+gold-bearing assistant turn 的关键答案文本都位于旧截断点之后：
+
+| question_id | 关键答案文本起点（code point offset） |
+|---|---:|
+| `b759caee` | 1149 |
+| `51b23612` | 1312 |
+| `8752c811` | 1501 |
+| `58470ed2` | 1520 |
+
+因此上表的 turn coverage=1.000 只表示检索结果映射到了 gold **DiaID**，不表示答案
+所在片段实际进入了索引或答题上下文；不得再把该指标描述为 answer-span visibility。
+
+后续修复把超长 turn 按边界无损拆成多个 ≤1100 code point 的 speaker-attributed chunk，
+每片保留相同 DiaID；coverage 的集合语义会去重。持久化 store 中内容变化的同名 chunk
+必须先删除再写入，以清除旧 embedding；已不存在的 chunk 同步删除。因此新口径必须先
+重建/补齐 chunk 向量，再做同配方 500 题复跑。
+
+**本节只登记基线缺陷与修复要求，不修改历史 404/500，也不声称已获得 +0.8pp。**
+只有可比的全量复跑完成后，才可声明替代基线。
+
 ### 两个跨臂对照(必须带混杂声明)
 
 1. **vs 016 ORACLE-500(76.4%)**:本 S-500 高 **+4.4pp**。但 ORACLE 臂跑于 `bb99d58`

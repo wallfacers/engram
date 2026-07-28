@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestBuildSessionChunks(t *testing.T) {
-	long := strings.Repeat("x", 1500)
+	long := strings.Repeat("x", 1300) + " ANSWER_AFTER_THE_OLD_CAP " + strings.Repeat("界", 300)
 	s := session{
 		Index: 3,
 		Date:  time.Date(2023, 5, 8, 0, 0, 0, 0, time.UTC),
@@ -38,18 +39,38 @@ func TestBuildSessionChunks(t *testing.T) {
 			t.Errorf("chunks lost turn content %q", want)
 		}
 	}
-	// Every turn's dialogue id must be attributed to exactly one chunk so
-	// exact-turn evidence recall can resolve retrieved chunks back to turns.
+	if !strings.Contains(joined, "ANSWER_AFTER_THE_OLD_CAP") {
+		t.Fatal("oversized turn lost content after the old hard cap")
+	}
+	var reconstructed strings.Builder
+	longFragments := 0
+	for _, chunk := range chunks {
+		if slices.Contains(chunk.DiaIDs, "D3:3") {
+			longFragments++
+			reconstructed.WriteString(strings.TrimPrefix(chunk.Text, "Caroline: "))
+		}
+	}
+	if longFragments < 2 {
+		t.Fatalf("oversized turn fragments = %d, want at least 2", longFragments)
+	}
+	if reconstructed.String() != long {
+		t.Fatalf("oversized turn was not preserved exactly: got %d runes, want %d", utf8.RuneCountInString(reconstructed.String()), utf8.RuneCountInString(long))
+	}
+	// Ordinary turns belong to one chunk. Every fragment of an oversized turn
+	// carries the same dialogue id; set-based coverage deduplicates it.
 	seen := map[string]int{}
 	for _, c := range chunks {
 		for _, d := range c.DiaIDs {
 			seen[d]++
 		}
 	}
-	for _, want := range []string{"D3:1", "D3:2", "D3:3", "D3:4"} {
+	for _, want := range []string{"D3:1", "D3:2", "D3:4"} {
 		if seen[want] != 1 {
 			t.Errorf("dia id %s attributed %d times, want exactly 1", want, seen[want])
 		}
+	}
+	if seen["D3:3"] != longFragments {
+		t.Errorf("oversized dia id attributed %d times, want once per fragment (%d)", seen["D3:3"], longFragments)
 	}
 	if buildSessionChunks(session{}) != nil {
 		t.Errorf("empty session should yield no chunks")
