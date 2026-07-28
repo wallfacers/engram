@@ -243,4 +243,3 @@ testdata/       parity goldens;locomo/ 数据集(gitignored)
 ## License
 
 engram 基于 [Apache License 2.0](./LICENSE) 开源。Copyright 2026 wallfacers。
-贡献者提交的 Contribution 依据该 License 第 5 条自动按相同条款许可。

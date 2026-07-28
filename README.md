@@ -252,4 +252,3 @@ testdata/       parity goldens; locomo/ dataset (gitignored)
 ## License
 
 engram is licensed under the [Apache License 2.0](./LICENSE). Copyright 2026 wallfacers.
-Contributions are licensed under the same terms per License §5.
