@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/memory/pipeline"
 )
@@ -48,5 +50,29 @@ func TestIngestWithoutLLMReportsCapabilityDiagnostic(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "ingest requires an LLM") || !strings.Contains(stderr, "ENGRAM_LLM_BASE_URL/MODEL/PROVIDER") {
 		t.Errorf("ingest stderr = %q, want LLM configuration diagnostic", stderr)
+	}
+}
+
+func TestOrdinaryIngestDoesNotStartOrNotifyCurator(t *testing.T) {
+	ctx := context.Background()
+	var calls atomic.Int32
+	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+		calls.Add(1)
+		return `{"facts":[{"fact":"The user moved to Berlin.","category":"profile","durability":"durable"}]}`, nil
+	})
+	handle, err := openEngineWith(ctx, Config{
+		DataDir: t.TempDir(), Namespace: defaultNamespace,
+	}, nil, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+	var stdout, stderr bytes.Buffer
+	if code := runIngest(ctx, handle, strings.NewReader("user: I moved to Berlin.\n"), &stdout, &stderr); code != exitOK {
+		t.Fatalf("ingest code = %d, stderr = %q", code, stderr.String())
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("ordinary ingest model calls = %d, want extraction only", got)
 	}
 }

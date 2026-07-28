@@ -118,7 +118,8 @@ func (e *Embedder) drain() {
 // (ErrNotFound) is a silent skip.
 func (e *Embedder) embedOne(ctx context.Context, name string) error {
 	if source, isShadow := resolveQueryShadow(name); isShadow {
-		if _, err := e.entries.GetByName(ctx, source); err != nil {
+		entry, err := e.entries.GetByName(ctx, source)
+		if err != nil {
 			return nil //nolint:nilerr // source gone before we embedded its queries
 		}
 		queries, err := e.entries.FactQueries(ctx, source)
@@ -136,7 +137,8 @@ func (e *Embedder) embedOne(ctx context.Context, name string) error {
 		if len(vecs) != 1 {
 			return nil
 		}
-		return e.vectors.Put(ctx, name, e.client.Model(), vecs[0], time.Now())
+		_, err = e.vectors.putIfOwnerUnchanged(ctx, name, entry, e.client.Model(), vecs[0], time.Now())
+		return err
 	}
 	if source, isShadow := resolveAliasShadow(name); isShadow {
 		entry, err := e.entries.GetByName(ctx, source)
@@ -158,7 +160,8 @@ func (e *Embedder) embedOne(ctx context.Context, name string) error {
 		if len(vecs) != 1 {
 			return nil
 		}
-		return e.vectors.Put(ctx, name, e.client.Model(), vecs[0], time.Now())
+		_, err = e.vectors.putIfOwnerUnchanged(ctx, name, entry, e.client.Model(), vecs[0], time.Now())
+		return err
 	}
 
 	entry, err := e.entries.GetByName(ctx, name)
@@ -172,7 +175,8 @@ func (e *Embedder) embedOne(ctx context.Context, name string) error {
 	if len(vecs) != 1 {
 		return nil
 	}
-	return e.vectors.Put(ctx, name, e.client.Model(), vecs[0], time.Now())
+	_, err = e.vectors.putIfOwnerUnchanged(ctx, name, entry, e.client.Model(), vecs[0], time.Now())
+	return err
 }
 
 func (e *Embedder) aliases(ctx context.Context, entryName string) ([]string, error) {

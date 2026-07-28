@@ -208,6 +208,17 @@ var v5FactQueriesDown = []string{
 	`DROP TABLE IF EXISTS memory_fact_queries`,
 }
 
+// v6EntryRevision adds a database-maintained optimistic-concurrency token.
+// Wall-clock timestamps are presentation/audit data and may repeat; curation
+// and write-behind jobs use revision to reject decisions made from stale rows.
+var v6EntryRevision = []string{
+	`ALTER TABLE memory_entries ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`,
+}
+
+var v6EntryRevisionDown = []string{
+	`ALTER TABLE memory_entries DROP COLUMN revision`,
+}
+
 // migrationsByVersion is the ordered list of all migrations. Each entry is
 // applied inside its own transaction; schema_version is bumped per step.
 var migrationsByVersion = []Migration{
@@ -216,6 +227,7 @@ var migrationsByVersion = []Migration{
 	{Version: 3, Up: v3BioRetrieval, Down: v3BioRetrievalDown},
 	{Version: 4, Up: v4TemporalIndexes, Down: v4TemporalIndexesDown},
 	{Version: 5, Up: v5FactQueries, Down: v5FactQueriesDown},
+	{Version: 6, Up: v6EntryRevision, Down: v6EntryRevisionDown},
 }
 
 func (s *Store) migrate(ctx context.Context) error {

@@ -23,6 +23,7 @@
 | [saas-habit-memory-design.md](./saas-habit-memory-design.md) | 活跃(设计稿) | SaaS「用户操作习惯记忆」MVP 产品/技术设计(事件摄入·习惯抽取·条件召回·车机走查) | SaaS 方向设计正本;新能力全标未立项 |
 | [paper-outline-eval-reliability.md](./paper-outline-eval-reliability.md) | 活跃(骨架) | 论文骨架:长期对话记忆评测可靠性审计(噪声分解/选择偏差/coverage≠answer) | 论文线正本;证据分级 + 必补实验门 |
 | [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
+| [memory-architecture.md](./memory-architecture.md) | 活跃 | 记忆提取时机、写入/检索/curation 流程、同步异步耗时与 SQLite 存储图 | 运行架构总览；精确 feature 契约仍以对应 spec 为准 |
 | [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
 | [memos-inhouse-locomo-repro.md](./memos-inhouse-locomo-repro.md) | **已出分** | MemOS 自家代码跑 engram 同栈 = **82.40%**,engram 同口径 85.71%(**领先 3.31pp**);leaderboard 88.83 中 **6.43pp 是 regime 伪影**。方法/踩坑/口径 caveat 正本 | 已回填 competitive-benchmarks §5②/§5④、north-star §2、memory-strategy、paper-outline `E-MEMOSPAR`;汇总表见 results-matrix §5 |
 | [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |

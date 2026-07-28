@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 var knownCommands = map[string]struct{}{
 	"add":        {},
+	"curate":     {},
 	"ingest":     {},
 	"delete":     {},
 	"search":     {},
@@ -49,6 +51,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 
 	handle, err := openEngine(context.Background(), config)
 	if err != nil {
+		var capability llmCapabilityError
+		if command == "curate" && errors.As(err, &capability) {
+			return diagnose(stderr, exitCapability, "curate requires an LLM", "set ENGRAM_LLM_BASE_URL/MODEL/PROVIDER and ENGRAM_LLM_API_KEY")
+		}
 		return diagnose(stderr, exitEngine, "unable to open memory store", "check --data-dir and try again")
 	}
 	defer handle.Close() //nolint:errcheck // Close drains queued embeddings before process exit.
@@ -66,6 +72,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return runDelete(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	case "ingest":
 		return runIngest(context.Background(), handle, stdin, stdout, stderr)
+	case "curate":
+		return runCurate(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	case "stats":
 		return runStats(context.Background(), handle, commandArgs[1:], stdout, stderr)
 	case "export":

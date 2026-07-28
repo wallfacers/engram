@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/memory"
 )
@@ -132,5 +133,85 @@ func TestEmbedder_FailureIsNonFatal(t *testing.T) {
 	emb.Close() // must not panic despite embed error
 	if v, _ := vs.LoadAllForModel(ctx, "m1"); len(v) != 0 {
 		t.Fatalf("expected no vector on failure, got %d", len(v))
+	}
+}
+
+type blockingEmbeddingClient struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingEmbeddingClient) Model() string { return "blocking-model" }
+
+func (c *blockingEmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	close(c.started)
+	select {
+	case <-c.release:
+		return [][]float32{{1, 2, 3}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestEmbedderDoesNotRecreateVectorAfterConcurrentDelete(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	if err := es.Upsert(ctx, &memory.Entry{Name: "race", Content: "delete during embedding"}); err != nil {
+		t.Fatal(err)
+	}
+	client := &blockingEmbeddingClient{started: make(chan struct{}), release: make(chan struct{})}
+	emb := memory.NewEmbedder(es, vs, client, 1)
+	emb.Enqueue("race")
+	select {
+	case <-client.started:
+	case <-time.After(time.Second):
+		t.Fatal("embedding did not start")
+	}
+	if err := es.Delete(ctx, "race"); err != nil {
+		t.Fatal(err)
+	}
+	close(client.release)
+	emb.Close()
+
+	vectors, err := vs.LoadAllForModel(ctx, client.Model())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := vectors["race"]; exists {
+		t.Fatal("in-flight embedder recreated an orphan vector after Delete returned")
+	}
+}
+
+func TestEmbedderDoesNotPublishVectorAfterSameTimestampRewrite(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	fixed := time.Unix(1_700_000_000, 123_000).UTC()
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "race-rewrite", Content: "old content", UpdatedAt: fixed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &blockingEmbeddingClient{started: make(chan struct{}), release: make(chan struct{})}
+	emb := memory.NewEmbedder(es, vs, client, 1)
+	emb.Enqueue("race-rewrite")
+	select {
+	case <-client.started:
+	case <-time.After(time.Second):
+		t.Fatal("embedding did not start")
+	}
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "race-rewrite", Content: "new content", UpdatedAt: fixed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(client.release)
+	emb.Close()
+
+	vectors, err := vs.LoadAllForModel(ctx, client.Model())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := vectors["race-rewrite"]; exists {
+		t.Fatal("in-flight embedder published a stale vector after same-timestamp rewrite")
 	}
 }

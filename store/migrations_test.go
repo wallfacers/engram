@@ -28,8 +28,8 @@ func TestMigration_IdempotentRerun(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 5 {
-		t.Errorf("expected version 5 after first open, got %d", version)
+	if version != 6 {
+		t.Errorf("expected version 6 after first open, got %d", version)
 	}
 	s.Close()
 
@@ -96,8 +96,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("expected migration v5, got v%d", version)
+	if version != 6 {
+		t.Fatalf("expected migration v6, got v%d", version)
 	}
 
 	db := s.DB()
@@ -111,7 +111,7 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 			t.Fatalf("table %q missing", table)
 		}
 	}
-	for _, column := range []string{"event_start", "event_end", "superseded_by"} {
+	for _, column := range []string{"event_start", "event_end", "superseded_by", "revision"} {
 		var count int
 		if err := db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM pragma_table_info('memory_entries') WHERE name = ?`, column).Scan(&count); err != nil {
@@ -137,6 +137,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	// Apply the v4/v3 Down contracts, then reopen so normal migration logic
 	// upgrades the same v2 database back to v4.
 	for _, stmt := range []string{
+		`ALTER TABLE memory_entries DROP COLUMN revision`,
+		`DELETE FROM schema_version WHERE version = 6`,
 		`DROP TABLE IF EXISTS memory_fact_queries`,
 		`DELETE FROM schema_version WHERE version = 5`,
 		`DROP INDEX IF EXISTS idx_memory_entries_event_end`,
@@ -171,8 +173,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read upgraded schema version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("expected migration v5 after round trip, got v%d", version)
+	if version != 6 {
+		t.Fatalf("expected migration v6 after round trip, got v%d", version)
 	}
 }
 
@@ -189,8 +191,8 @@ func TestMigration_V5FactQueries(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("expected migration v5, got v%d", version)
+	if version != 6 {
+		t.Fatalf("expected migration v6, got v%d", version)
 	}
 
 	var count int
@@ -222,6 +224,29 @@ func TestMigration_V5FactQueries(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 distinct queries for alpha, got %d", count)
+	}
+}
+
+func TestMigration_V6EntryRevision(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	if _, err := s.DB().ExecContext(ctx,
+		`INSERT INTO memory_entries(id, name, content, created_at, updated_at)
+		 VALUES ('id-revision','revision-entry','hello',1,1)`); err != nil {
+		t.Fatalf("insert entry: %v", err)
+	}
+	var revision int64
+	if err := s.DB().QueryRowContext(ctx,
+		`SELECT revision FROM memory_entries WHERE name = 'revision-entry'`).Scan(&revision); err != nil {
+		t.Fatalf("read revision: %v", err)
+	}
+	if revision != 1 {
+		t.Fatalf("revision = %d, want default 1", revision)
 	}
 }
 

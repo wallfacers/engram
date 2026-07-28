@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wallfacers/engram/memory/pipeline"
@@ -65,4 +67,84 @@ func hasTool(tools []*mcp.Tool, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestMemoryIngestNotifiesCuratorOncePerSuccessfulBatch(t *testing.T) {
+	ctx := context.Background()
+	curationStarted := make(chan struct{})
+	releaseJudge := make(chan struct{})
+	var calls atomic.Int32
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+		switch calls.Add(1) {
+		case 1:
+			return `{"facts":[
+				{"fact":"The user likes jasmine tea.","entities":["jasmine tea"],"category":"preference","durability":"evergreen"},
+				{"fact":"The user likes dark mode.","entities":["dark mode"],"category":"preference","durability":"evergreen"}
+			]}`, nil
+		case 2:
+			close(curationStarted)
+			select {
+			case <-releaseJudge:
+				return `{"evict":[],"merge":[]}`, nil
+			case <-callCtx.Done():
+				return "", callCtx.Err()
+			}
+		default:
+			return `{"evict":[],"merge":[]}`, nil
+		}
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:         t.TempDir(),
+		LLMCaller:       caller,
+		CurationEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	adapter := &toolAdapter{registry: registry}
+	_, output, err := adapter.memoryIngest(ctx, nil, memoryIngestInput{
+		Messages: []memoryIngestMessage{{Role: "user", Text: "I like jasmine tea and dark mode."}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.ExtractedCount != 2 {
+		t.Fatalf("ExtractedCount = %d, want 2", output.ExtractedCount)
+	}
+	select {
+	case <-curationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("successful ingest batch did not notify curator")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("model calls = %d, want one extraction + one curation", got)
+	}
+	close(releaseJudge)
+}
+
+func TestMemoryIngestDoesNotNotifyCuratorByDefault(t *testing.T) {
+	ctx := context.Background()
+	var calls atomic.Int32
+	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+		calls.Add(1)
+		return `{"facts":[{"fact":"The user likes jasmine tea.","entities":["jasmine tea"],"category":"preference","durability":"evergreen"}]}`, nil
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{DataDir: t.TempDir(), LLMCaller: caller})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	adapter := &toolAdapter{registry: registry}
+	if _, output, err := adapter.memoryIngest(ctx, nil, memoryIngestInput{
+		Messages: []memoryIngestMessage{{Role: "user", Text: "I like jasmine tea."}},
+	}); err != nil {
+		t.Fatal(err)
+	} else if output.ExtractedCount != 1 {
+		t.Fatalf("ExtractedCount = %d, want 1", output.ExtractedCount)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("default mode model calls = %d, want extraction only", got)
+	}
 }

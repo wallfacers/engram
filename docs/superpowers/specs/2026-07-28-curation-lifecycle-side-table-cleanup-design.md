@@ -189,6 +189,11 @@ CLI 不启动后台 loop。`engram curate` 创建 worker 后直接同步调用�
 
 无关 entry、其 side rows 和仍有效的 `superseded_by` 必须保持不变。
 
+后台 judge 与 embedding 使用 schema v6 的 `memory_entries.revision` 作为并发令牌。
+revision 由数据库单调递增，不能用可能同微秒重复或由调用方提供的 `updated_at`
+替代。Delete/Merge 验证全部相关 entry；Supersede 在一个原子 UPDATE 中同时验证
+loser/winner，任一变化或 loser 被 pin 都跳过旧决策。
+
 ## 6. 错误与并发语义
 
 - MCP curation 继续 fail-safe：模型/解析/单个 apply 错误记录 WARN，不使原写请求失败。
@@ -258,4 +263,3 @@ go vet ./...
 degradation 测试。清理逻辑只作用于显式 Delete/Merge，默认关闭的 curation
 装配不改变正常检索算法；无需为开关接线重新支付 LoCoMo 模型评测，但必须明确记录
 这一归因判断。
-

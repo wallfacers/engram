@@ -27,6 +27,7 @@ type ServerConfig struct {
 	LLMProvider string
 
 	MaxOpenNamespaces int
+	CurationEnabled   bool
 }
 
 // Config is kept as a short name for callers that construct a server directly.
@@ -57,6 +58,13 @@ func LoadConfigWithEnv(args []string, getenv func(string) string) (ServerConfig,
 		LLMProvider:       getenv("ENGRAM_LLM_PROVIDER"),
 		MaxOpenNamespaces: defaultMaxOpenNamespaces,
 	}
+	if raw := strings.TrimSpace(getenv("ENGRAM_CURATION_ENABLED")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("parse ENGRAM_CURATION_ENABLED: %w", err)
+		}
+		defaults.CurationEnabled = enabled
+	}
 	if raw := getenv("ENGRAM_MAX_OPEN_NAMESPACES"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil {
@@ -74,6 +82,7 @@ func LoadConfigWithEnv(args []string, getenv func(string) string) (ServerConfig,
 	llmModel := fs.String("llm-model", defaults.LLMModel, "LLM model")
 	llmProvider := fs.String("llm-provider", defaults.LLMProvider, "LLM provider name")
 	maxOpen := fs.Int("max-open-namespaces", defaults.MaxOpenNamespaces, "maximum cached namespaces")
+	curationEnabled := fs.Bool("curation-enabled", defaults.CurationEnabled, "enable persistent asynchronous memory curation")
 	if err := fs.Parse(args); err != nil {
 		return ServerConfig{}, err
 	}
@@ -88,6 +97,7 @@ func LoadConfigWithEnv(args []string, getenv func(string) string) (ServerConfig,
 		LLMAPIKey:         defaults.LLMAPIKey,
 		LLMProvider:       strings.TrimSpace(*llmProvider),
 		MaxOpenNamespaces: *maxOpen,
+		CurationEnabled:   *curationEnabled,
 	}
 	if config.DataDir == "" {
 		return ServerConfig{}, errors.New("data directory is required (use --data-dir or ENGRAM_DATA_DIR)")

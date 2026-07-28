@@ -26,7 +26,11 @@ testdata/parity/cache/
 
 # OS / editor
 .DS_Store
+Thumbs.db
 *.swp
+*.tmp
+.vscode/
+.idea/
 
 # LoCoMo dataset (public, not redistributed via repo)
 /testdata/locomo/

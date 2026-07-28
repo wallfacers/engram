@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,6 +113,45 @@ func TestWorkerAppliesConflictsAsSupersede(t *testing.T) {
 	// A name already consumed by the merge is gone; the conflict referencing it
 	// is skipped without error.
 	assertGone(t, es, "merged-b")
+}
+
+func TestWorkerDoesNotApplyConflictAfterSameTimestampRewrite(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+
+	fixed := time.Unix(1_700_000_000, 123_000).UTC()
+	seed(t, es, &memory.Entry{Name: "old-job", Content: "works at Acme", UpdatedAt: fixed})
+	seed(t, es, &memory.Entry{Name: "new-job", Content: "works at Globex", UpdatedAt: fixed})
+	snapshot := []*memory.Entry{mustGet(t, es, "old-job"), mustGet(t, es, "new-job")}
+
+	// Simulate an interactive rewrite while the remote judge is considering the
+	// snapshot. Keep updated_at identical to exercise the revision token rather
+	// than relying on wall-clock resolution.
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "old-job", Content: "now works at Initech", UpdatedAt: fixed,
+	}); err != nil {
+		t.Fatalf("rewrite loser: %v", err)
+	}
+
+	w := NewWorker(es, s.DB(), func(context.Context, string, string) (string, error) {
+		return "", nil
+	}, DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	decision := &JudgeDecision{Conflicts: []ConflictDecision{{
+		Loser: "old-job", Winner: "new-job",
+	}}}
+	if err := w.apply(ctx, decision, snapshot); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got := mustGet(t, es, "old-job")
+	if got.Content != "now works at Initech" || got.SupersededBy != "" {
+		t.Fatalf("stale conflict changed rewritten loser: %+v", got)
+	}
 }
 
 func TestBuildJudgeClustersCarriesContentAndTime(t *testing.T) {
@@ -416,6 +456,318 @@ func TestWorkerEmptyStoreNeverRuns(t *testing.T) {
 	if w.shouldRun(ctx, now.Add(2*time.Minute)) {
 		t.Fatal("empty store must never trigger a pass")
 	}
+}
+
+func TestDefaultConfigMatchesAdapterContract(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.EntryCountHigh != 80 {
+		t.Errorf("EntryCountHigh = %d, want 80", cfg.EntryCountHigh)
+	}
+	if cfg.MinInterval != 30*time.Minute {
+		t.Errorf("MinInterval = %s, want 30m", cfg.MinInterval)
+	}
+	if cfg.LeaseTTL != 60*time.Second {
+		t.Errorf("LeaseTTL = %s, want 60s", cfg.LeaseTTL)
+	}
+	if cfg.ManifestBudgetChars != 2000 {
+		t.Errorf("ManifestBudgetChars = %d, want 2000", cfg.ManifestBudgetChars)
+	}
+	if cfg.MaxCandidatesPerPass != 20 {
+		t.Errorf("MaxCandidatesPerPass = %d, want 20", cfg.MaxCandidatesPerPass)
+	}
+	if cfg.ContentSnippetChars != 1200 {
+		t.Errorf("ContentSnippetChars = %d, want 1200", cfg.ContentSnippetChars)
+	}
+	if cfg.Weights != (Weights{Hit: 1, Recency: 1, Age: 0.5, Volatility: 0.5}) {
+		t.Errorf("Weights = %+v, want adapter defaults", cfg.Weights)
+	}
+	if cfg.Budgets != memory.DefaultBudgets() {
+		t.Errorf("Budgets = %+v, want memory.DefaultBudgets()", cfg.Budgets)
+	}
+	if cfg.PassTimeout != 2*time.Minute {
+		t.Errorf("PassTimeout = %s, want 2m", cfg.PassTimeout)
+	}
+}
+
+func TestWorkerPassProvidesConfiguredDeadlineToCaller(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "deadline-entry", Content: "one"})
+
+	var remaining time.Duration
+	call := func(ctx context.Context, _, _ string) (string, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("curation caller context has no deadline")
+		}
+		remaining = time.Until(deadline)
+		return `{"evict":[],"merge":[]}`, nil
+	}
+	w := NewWorker(es, s.DB(), call, DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.RunPass(ctx)
+
+	if remaining < 119*time.Second || remaining > 2*time.Minute {
+		t.Fatalf("caller deadline remaining = %s, want approximately 2m", remaining)
+	}
+}
+
+func TestWorkerPassTimeoutCancelsBlockingCaller(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "blocked-entry", Content: "one"})
+
+	callerDone := make(chan error, 1)
+	call := func(ctx context.Context, _, _ string) (string, error) {
+		<-ctx.Done()
+		callerDone <- ctx.Err()
+		return "", ctx.Err()
+	}
+	cfg := DefaultConfig()
+	cfg.PassTimeout = 20 * time.Millisecond
+	w := NewWorker(es, s.DB(), call, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.RunPass(ctx)
+
+	select {
+	case err := <-callerDone:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("blocking caller error = %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocking caller did not receive pass timeout")
+	}
+	assertExists(t, es, "blocked-entry")
+}
+
+func TestWorkerDoesNotEvictSameNameRewriteMadeDuringJudgeCall(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "victim", Content: "old content"})
+	original := mustGet(t, es, "victim")
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	call := func(callCtx context.Context, _, _ string) (string, error) {
+		close(started)
+		select {
+		case <-release:
+			return `{"evict":["victim"],"merge":[]}`, nil
+		case <-callCtx.Done():
+			return "", callCtx.Err()
+		}
+	}
+	w := NewWorker(es, s.DB(), call, DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	done := make(chan struct{})
+	go func() {
+		w.RunPass(ctx)
+		close(done)
+	}()
+	<-started
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name:      "victim",
+		Content:   "new pinned content",
+		Pinned:    true,
+		UpdatedAt: original.UpdatedAt.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+
+	got := mustGet(t, es, "victim")
+	if got.Content != "new pinned content" || !got.Pinned {
+		t.Fatalf("late stale eviction changed rewritten entry: %+v", got)
+	}
+}
+
+func TestWorkerDoesNotMergeSourceRewrittenDuringJudgeCall(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "source-a", Content: "old a"})
+	seed(t, es, &memory.Entry{Name: "source-b", Content: "old b"})
+	originalB := mustGet(t, es, "source-b")
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	call := func(callCtx context.Context, _, _ string) (string, error) {
+		close(started)
+		select {
+		case <-release:
+			return `{"evict":[],"merge":[{"names":["source-a","source-b"],"into":{"name":"source-a","trigger":"merged","content":"old a plus old b","durability":"volatile","category":"test"}}]}`, nil
+		case <-callCtx.Done():
+			return "", callCtx.Err()
+		}
+	}
+	w := NewWorker(es, s.DB(), call, DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	done := make(chan struct{})
+	go func() {
+		w.RunPass(ctx)
+		close(done)
+	}()
+	<-started
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name:      "source-b",
+		Content:   "new b",
+		UpdatedAt: originalB.UpdatedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+
+	if got := mustGet(t, es, "source-a"); got.Content != "old a" {
+		t.Fatalf("stale merge rewrote source-a: %+v", got)
+	}
+	if got := mustGet(t, es, "source-b"); got.Content != "new b" {
+		t.Fatalf("stale merge consumed rewritten source-b: %+v", got)
+	}
+}
+
+func TestRunPassWaitsForHeartbeatGoroutineToExit(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "heartbeat", Content: "heartbeat candidate"})
+
+	heartbeatStarted := make(chan struct{})
+	releaseHeartbeat := make(chan struct{})
+	call := func(context.Context, string, string) (string, error) {
+		<-heartbeatStarted
+		return `{"evict":[],"merge":[]}`, nil
+	}
+	cfg := DefaultConfig()
+	cfg.LeaseTTL = 3 * time.Millisecond
+	w := NewWorker(es, s.DB(), call, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	fixedNow := time.Unix(1_700_000_000, 0).UTC()
+	var nowCalls atomic.Int32
+	w.nowFn = func() time.Time {
+		if nowCalls.Add(1) == 1 {
+			return fixedNow
+		}
+		close(heartbeatStarted)
+		<-releaseHeartbeat
+		return fixedNow
+	}
+
+	done := make(chan struct{})
+	go func() {
+		w.RunPass(ctx)
+		close(done)
+	}()
+	<-heartbeatStarted
+	select {
+	case <-done:
+		t.Fatal("RunPass returned while its heartbeat goroutine was still running")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseHeartbeat)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunPass did not return after heartbeat exited")
+	}
+}
+
+func TestWorkerPeriodicChecksAreMeasuredFromCheckStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	es := memory.NewEntryStore(s.DB())
+	seed(t, es, &memory.Entry{Name: "periodic", Content: "periodic candidate"})
+
+	calls := make(chan time.Time, 4)
+	releaseFirst := make(chan struct{})
+	var count atomic.Int32
+	call := func(callCtx context.Context, _, _ string) (string, error) {
+		n := count.Add(1)
+		calls <- time.Now()
+		if n == 1 {
+			select {
+			case <-releaseFirst:
+			case <-callCtx.Done():
+				return "", callCtx.Err()
+			}
+		}
+		return `{"evict":[],"merge":[]}`, nil
+	}
+	cfg := DefaultConfig()
+	cfg.EntryCountHigh = 0
+	cfg.MinInterval = 100 * time.Millisecond
+	w := NewWorker(es, s.DB(), call, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.Start(ctx)
+	w.Notify()
+	<-calls
+	time.Sleep(150 * time.Millisecond) // the periodic deadline passes during the first call
+	close(releaseFirst)
+
+	select {
+	case <-calls:
+		// The overdue periodic check starts immediately after the active pass.
+	case <-time.After(50 * time.Millisecond):
+		cancel()
+		w.Wait()
+		t.Fatal("next periodic check was scheduled from pass completion instead of pass start")
+	}
+	cancel()
+	w.Wait()
+}
+
+func TestWorkerStartIsIdempotentAndWaitsForFirstContext(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MinInterval = time.Hour
+	w := NewWorker(nil, nil, func(context.Context, string, string) (string, error) {
+		return `{"evict":[],"merge":[]}`, nil
+	}, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	firstCtx, cancel := context.WithCancel(context.Background())
+	w.Start(firstCtx)
+	for range 99 {
+		w.Start(context.Background())
+	}
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Wait did not return after the first Start context was cancelled; duplicate loops are still running")
+	}
+}
+
+func TestInertWorkerStartAndWaitAreSafe(t *testing.T) {
+	w := NewWorker(nil, nil, nil, DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	w.Start(context.Background())
+	w.Wait()
 }
 
 func failCall(t *testing.T) ModelCaller {

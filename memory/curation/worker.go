@@ -21,11 +21,28 @@ type Config struct {
 	EntryCountHigh       int            // pressure water line (hot-reloadable)
 	MinInterval          time.Duration  // floor between passes (hot-reloadable)
 	LeaseTTL             time.Duration  // leader-lease duration (hot-reloadable)
+	PassTimeout          time.Duration  // upper bound for one complete pass (restart-only)
 	ManifestBudgetChars  int            // manifest-size water line (restart-only)
 	MaxCandidatesPerPass int            // cap on entries sent to the judge (restart-only)
 	ContentSnippetChars  int            // content code points shown to the judge (restart-only)
 	Weights              Weights        // scorer weights (restart-only)
 	Budgets              memory.Budgets // per-entry limits enforced on merge output (restart-only)
+}
+
+// DefaultConfig returns the adapter-facing curation defaults. Keeping these
+// defaults in the curation package prevents MCP and CLI wiring from drifting.
+func DefaultConfig() Config {
+	return Config{
+		EntryCountHigh:       80,
+		MinInterval:          30 * time.Minute,
+		LeaseTTL:             60 * time.Second,
+		PassTimeout:          2 * time.Minute,
+		ManifestBudgetChars:  2000,
+		MaxCandidatesPerPass: 20,
+		ContentSnippetChars:  1200,
+		Weights:              Weights{Hit: 1, Recency: 1, Age: 0.5, Volatility: 0.5},
+		Budgets:              memory.DefaultBudgets(),
+	}
 }
 
 // Worker is the background curation maintenance loop (design D5/D6). It owns a
@@ -45,6 +62,7 @@ type Worker struct {
 	manifestBudget int
 	maxCandidates  int
 	contentSnippet int
+	passTimeout    time.Duration
 	weights        Weights
 	budgets        memory.Budgets
 
@@ -59,6 +77,9 @@ type Worker struct {
 	// trigger is a buffered(1) debounced pressure signal: a pending wake
 	// suppresses duplicates so a write burst enqueues at most one pass.
 	trigger chan struct{}
+
+	startOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 // NewWorker builds a curation worker over the shared DB. call may be nil, in
@@ -78,6 +99,7 @@ func NewWorker(store *memory.EntryStore, db *sql.DB, call ModelCaller, cfg Confi
 		manifestBudget: cfg.ManifestBudgetChars,
 		maxCandidates:  cfg.MaxCandidatesPerPass,
 		contentSnippet: cfg.ContentSnippetChars,
+		passTimeout:    cfg.PassTimeout,
 		weights:        cfg.Weights,
 		budgets:        cfg.Budgets,
 		entryCountHigh: cfg.EntryCountHigh,
@@ -114,16 +136,42 @@ func (w *Worker) Notify() {
 // Start launches the background loop until ctx is cancelled. It is a no-op on an
 // inert worker (no judge model configured).
 func (w *Worker) Start(ctx context.Context) {
-	if w.call == nil {
+	if w == nil || w.call == nil {
+		if w == nil {
+			return
+		}
 		w.logger.Debug("curation worker inert (no judge model configured)")
 		return
 	}
-	go w.run(ctx)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	w.startOnce.Do(func() {
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			w.run(ctx)
+		}()
+	})
+}
+
+// Wait blocks until the loop started by Start exits. It is safe for nil,
+// inert, and never-started workers.
+func (w *Worker) Wait() {
+	if w == nil {
+		return
+	}
+	w.wg.Wait()
 }
 
 func (w *Worker) run(ctx context.Context) {
+	lastCheckStarted := time.Now()
 	for {
-		timer := time.NewTimer(w.snapshotMinInterval())
+		wait := w.snapshotMinInterval() - time.Since(lastCheckStarted)
+		if wait < 0 {
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -132,6 +180,7 @@ func (w *Worker) run(ctx context.Context) {
 			timer.Stop()
 		case <-timer.C:
 		}
+		lastCheckStarted = time.Now()
 		w.RunPass(ctx)
 	}
 }
@@ -141,33 +190,68 @@ func (w *Worker) run(ctx context.Context) {
 // drive a pass deterministically without the timer loop. Errors are absorbed
 // (fail-safe) — RunPass never panics or propagates.
 func (w *Worker) RunPass(ctx context.Context) {
+	_ = w.runPass(ctx)
+}
+
+// RunPassContext is RunPass with an explicit cancellation outcome for
+// synchronous adapters. Model/parse/action failures remain fail-safe nil; only
+// caller cancellation or the configured pass deadline is returned. A pass that
+// committed before cancellation is reported as completed.
+func (w *Worker) RunPassContext(ctx context.Context) error {
+	return w.runPass(ctx)
+}
+
+func (w *Worker) runPass(ctx context.Context) error {
+	if w == nil || w.call == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if w.passTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, w.passTimeout)
+		defer cancel()
+	}
+
 	now := w.nowFn()
 	if !w.shouldRun(ctx, now) {
-		return
+		return ctx.Err()
 	}
 
 	ttl := w.snapshotLeaseTTL()
 	held, err := w.lease.Acquire(ctx, now, ttl)
 	if err != nil {
 		w.logger.Warn("curation: lease acquire failed", "error", err)
-		return
+		return ctx.Err()
 	}
 	if !held {
 		w.logger.Debug("curation: another process holds the lease; skipping pass")
-		return
+		return ctx.Err()
 	}
 	// Release uses a background context so a cancelled parent still frees the
 	// lease + in-process backstop. Ordered to run AFTER cancel() (LIFO).
 	defer func() { _ = w.lease.Release(context.Background()) }()
 
 	passCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go w.heartbeat(passCtx, cancel, ttl)
+	heartbeatDone := make(chan struct{})
+	defer func() {
+		cancel()
+		<-heartbeatDone
+	}()
+	go func() {
+		defer close(heartbeatDone)
+		w.heartbeat(passCtx, cancel, ttl)
+	}()
 
 	if err := w.curate(passCtx, now); err != nil {
 		w.logger.Warn("curation: pass failed (fail-safe no-op)", "error", err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 	}
 	w.setLastPass(now)
+	return nil
 }
 
 // heartbeat renews the lease every ttl/3 while the pass runs. A failed renewal
@@ -184,7 +268,7 @@ func (w *Worker) heartbeat(ctx context.Context, cancel context.CancelFunc, ttl t
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok, err := w.lease.Renew(context.Background(), w.nowFn(), w.snapshotLeaseTTL())
+			ok, err := w.lease.Renew(ctx, w.nowFn(), w.snapshotLeaseTTL())
 			if err != nil || !ok {
 				w.logger.Warn("curation: lease renewal lost; aborting pass", "error", err)
 				cancel()
@@ -268,6 +352,9 @@ func (w *Worker) curate(ctx context.Context, now time.Time) error {
 
 	decision, err := Judge(ctx, w.call, w.buildJudgeCandidates(candidates, now), buildJudgeClusters(clusters))
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return w.apply(ctx, decision, entries)
@@ -477,19 +564,32 @@ func entryWhen(e *memory.Entry) string {
 // WARN — the judge can never delete a pinned memory or invent a name.
 func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.Entry) error {
 	byName := make(map[string]*memory.Entry, len(entries))
+	revisions := make(map[string]memory.EntryRevision, len(entries))
 	for _, e := range entries {
 		byName[e.Name] = e
+		revisions[e.Name] = memory.EntryRevision{ID: e.ID, Revision: e.Revision}
 	}
 	consumed := make(map[string]bool)
 
 	merged := 0
 	for _, m := range d.Merge {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		into, names, ok := w.validateMerge(m, byName)
 		if !ok {
 			continue
 		}
-		if err := w.store.Merge(ctx, names, into); err != nil {
+		applied, err := w.store.MergeIfUnchanged(ctx, names, into, revisions)
+		if err != nil {
 			w.logger.Warn("curation: merge failed", "into", into.Name, "error", err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if !applied {
+			w.logger.Debug("curation: merge skipped because an entry changed while judging", "into", into.Name)
 			continue
 		}
 		for _, n := range names {
@@ -504,6 +604,9 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 	// with superseded_by set and the retriever downweights it.
 	superseded := 0
 	for _, c := range d.Conflicts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if c.Loser == "" || c.Winner == "" || c.Loser == c.Winner {
 			w.logger.Warn("curation: ill-formed conflict decision; skipping", "loser", c.Loser, "winner", c.Winner)
 			continue
@@ -524,8 +627,18 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 			w.logger.Warn("curation: conflict names an unknown winner; skipping", "winner", c.Winner)
 			continue
 		}
-		if err := w.store.Supersede(ctx, c.Loser, c.Winner); err != nil {
+		applied, err := w.store.SupersedeIfUnchanged(
+			ctx, c.Loser, c.Winner, revisions[c.Loser], revisions[c.Winner],
+		)
+		if err != nil {
 			w.logger.Warn("curation: supersede failed", "loser", c.Loser, "winner", c.Winner, "error", err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if !applied {
+			w.logger.Debug("curation: conflict skipped because an entry changed while judging", "loser", c.Loser, "winner", c.Winner)
 			continue
 		}
 		superseded++
@@ -533,6 +646,9 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 
 	evicted := 0
 	for _, name := range d.Evict {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if consumed[name] {
 			continue // already removed by a merge
 		}
@@ -545,8 +661,16 @@ func (w *Worker) apply(ctx context.Context, d *JudgeDecision, entries []*memory.
 			w.logger.Warn("curation: judge tried to evict a pinned entry; refusing", "name", name)
 			continue
 		}
-		if err := w.store.Delete(ctx, name); err != nil {
+		applied, err := w.store.DeleteIfUnchanged(ctx, name, revisions[name])
+		if err != nil {
 			w.logger.Warn("curation: delete failed", "name", name, "error", err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if !applied {
+			w.logger.Debug("curation: eviction skipped because the entry changed while judging", "name", name)
 			continue
 		}
 		evicted++

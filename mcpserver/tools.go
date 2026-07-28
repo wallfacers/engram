@@ -160,6 +160,9 @@ func (a *toolAdapter) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, memoryWriteOutput{}, err
 	}
 	handle.embedder.Enqueue(entry.Name)
+	if handle.curator != nil {
+		handle.curator.Notify()
+	}
 	return nil, memoryWriteOutput{Name: entry.Name, Written: true}, nil
 }
 

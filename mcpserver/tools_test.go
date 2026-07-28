@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wallfacers/engram/memory/pipeline"
@@ -225,5 +228,103 @@ func TestToolsRejectPathLikeNamespacesWithoutCreatingOutsideFiles(t *testing.T) 
 		if entry.Name() != "data" {
 			t.Fatalf("invalid namespace created outside data directory: %s", entry.Name())
 		}
+	}
+}
+
+func TestMemoryWriteNotifiesEnabledCuratorWithoutBlockingRequest(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{})
+	releaseJudge := make(chan struct{})
+	var startedOnce sync.Once
+	var judgeCalls atomic.Int32
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+		judgeCalls.Add(1)
+		startedOnce.Do(func() { close(started) })
+		select {
+		case <-releaseJudge:
+			return `{"evict":[],"merge":[]}`, nil
+		case <-callCtx.Done():
+			return "", callCtx.Err()
+		}
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:         t.TempDir(),
+		LLMCaller:       caller,
+		CurationEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		close(releaseJudge)
+		_ = registry.Close()
+	})
+	adapter := &toolAdapter{registry: registry}
+
+	writesDone := make(chan error, 1)
+	go func() {
+		for i := range 100 {
+			_, _, err := adapter.memoryWrite(ctx, nil, memoryWriteInput{
+				Name:    "async-" + string(rune('一'+i)),
+				Content: "write must not wait for curation",
+			})
+			if err != nil {
+				writesDone <- err
+				return
+			}
+		}
+		writesDone <- nil
+	}()
+	select {
+	case err := <-writesDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("100 memory_write calls blocked on curation")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("enabled curator did not receive write notification")
+	}
+	if got := judgeCalls.Load(); got != 1 {
+		t.Fatalf("judge calls while first pass is blocked = %d, want 1", got)
+	}
+
+	close(releaseJudge)
+	releaseJudge = make(chan struct{}) // prevent cleanup from closing an already closed channel
+	time.Sleep(50 * time.Millisecond)
+	if got := judgeCalls.Load(); got > 2 {
+		t.Fatalf("debounced write burst produced %d passes, want at most 2 (active + one pending)", got)
+	}
+}
+
+func TestMemoryWriteDoesNotNotifyWhenCurationIsDisabled(t *testing.T) {
+	ctx := context.Background()
+	var judgeCalls atomic.Int32
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir: t.TempDir(),
+		LLMCaller: pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+			judgeCalls.Add(1)
+			return `{"evict":[],"merge":[]}`, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	adapter := &toolAdapter{registry: registry}
+	for i := range 100 {
+		if _, _, err := adapter.memoryWrite(ctx, nil, memoryWriteInput{
+			Name:    "disabled-" + string(rune('一'+i)),
+			Content: "default mode remains curation-free",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := judgeCalls.Load(); got != 0 {
+		t.Fatalf("disabled curation made %d judge calls, want 0", got)
 	}
 }

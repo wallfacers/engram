@@ -22,6 +22,15 @@ func newEntryStore(t *testing.T) (*memory.EntryStore, *sql.DB) {
 	return memory.NewEntryStore(s.DB()), s.DB()
 }
 
+func mustEntry(t *testing.T, es *memory.EntryStore, name string) *memory.Entry {
+	t.Helper()
+	entry, err := es.GetByName(context.Background(), name)
+	if err != nil {
+		t.Fatalf("get %q: %v", name, err)
+	}
+	return entry
+}
+
 func ftsCount(t *testing.T, db *sql.DB, match string) int {
 	t.Helper()
 	var n int
@@ -81,6 +90,95 @@ func TestUpsertInsertThenConflictUpdate(t *testing.T) {
 	}
 	if !got2.UpdatedAt.After(origCreated) {
 		t.Fatalf("updated_at should advance past created_at: created %v updated %v", origCreated, got2.UpdatedAt)
+	}
+}
+
+func TestRevisionAdvancesWhenTimestampRepeatsAndRejectsStaleDelete(t *testing.T) {
+	es, _ := newEntryStore(t)
+	ctx := context.Background()
+	fixed := time.Unix(1_700_000_000, 123_000).UTC()
+
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "same-clock", Content: "old", CreatedAt: fixed, UpdatedAt: fixed,
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	before, err := es.GetByName(ctx, "same-clock")
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
+	if before.Revision < 1 {
+		t.Fatalf("initial revision = %d, want >= 1", before.Revision)
+	}
+
+	// A caller-supplied timestamp can repeat exactly. The persisted revision
+	// must still advance so background work cannot mistake this rewrite for the
+	// snapshot it judged.
+	if err := es.Upsert(ctx, &memory.Entry{
+		Name: "same-clock", Content: "new", UpdatedAt: fixed,
+	}); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	after, err := es.GetByName(ctx, "same-clock")
+	if err != nil {
+		t.Fatalf("get after: %v", err)
+	}
+	if after.Revision <= before.Revision {
+		t.Fatalf("revision did not advance: before=%d after=%d", before.Revision, after.Revision)
+	}
+	applied, err := es.DeleteIfUnchanged(ctx, "same-clock", memory.EntryRevision{
+		ID: before.ID, Revision: before.Revision,
+	})
+	if err != nil {
+		t.Fatalf("conditional delete: %v", err)
+	}
+	if applied {
+		t.Fatal("stale delete applied after a same-timestamp rewrite")
+	}
+	if got, err := es.GetByName(ctx, "same-clock"); err != nil || got.Content != "new" {
+		t.Fatalf("rewritten entry changed: got=%+v err=%v", got, err)
+	}
+}
+
+func TestSupersedeIfUnchangedValidatesBothRevisions(t *testing.T) {
+	for _, changed := range []string{"loser", "winner"} {
+		t.Run(changed, func(t *testing.T) {
+			es, _ := newEntryStore(t)
+			ctx := context.Background()
+			fixed := time.Unix(1_700_000_000, 123_000).UTC()
+			for _, entry := range []*memory.Entry{
+				{Name: "loser", Content: "old fact", UpdatedAt: fixed},
+				{Name: "winner", Content: "new fact", UpdatedAt: fixed},
+			} {
+				if err := es.Upsert(ctx, entry); err != nil {
+					t.Fatalf("seed %s: %v", entry.Name, err)
+				}
+			}
+			loser := mustEntry(t, es, "loser")
+			winner := mustEntry(t, es, "winner")
+
+			if err := es.Upsert(ctx, &memory.Entry{
+				Name: changed, Content: "interactive rewrite", UpdatedAt: fixed,
+			}); err != nil {
+				t.Fatalf("rewrite %s: %v", changed, err)
+			}
+			applied, err := es.SupersedeIfUnchanged(
+				ctx,
+				"loser",
+				"winner",
+				memory.EntryRevision{ID: loser.ID, Revision: loser.Revision},
+				memory.EntryRevision{ID: winner.ID, Revision: winner.Revision},
+			)
+			if err != nil {
+				t.Fatalf("conditional supersede: %v", err)
+			}
+			if applied {
+				t.Fatalf("stale supersede applied after %s rewrite", changed)
+			}
+			if got := mustEntry(t, es, "loser"); got.SupersededBy != "" {
+				t.Fatalf("loser superseded after %s rewrite: %+v", changed, got)
+			}
+		})
 	}
 }
 
@@ -489,6 +587,263 @@ func TestDeleteCascadesDerived(t *testing.T) {
 		if n != 0 {
 			t.Fatalf("%s not cascaded: %d rows remain", tbl, n)
 		}
+	}
+}
+
+func TestDeleteCleansAllOwnedSideDataAndDanglingReferences(t *testing.T) {
+	es, db := newEntryStore(t)
+	ctx := context.Background()
+	for _, entry := range []*memory.Entry{
+		{Name: "victim", Content: "remove me"},
+		{Name: "keeper", Content: "keep me"},
+		{Name: "referrer", Content: "points at victim", SupersededBy: "victim"},
+	} {
+		if err := es.Upsert(ctx, entry); err != nil {
+			t.Fatalf("upsert %s: %v", entry.Name, err)
+		}
+	}
+	for _, statement := range []string{
+		`INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at) VALUES
+			('victim','m',1,x'00',0), ('victim#alias','m',1,x'00',0),
+			('victim#query','m',1,x'00',0), ('victim#other','m',1,x'00',0),
+			('keeper','m',1,x'00',0)`,
+		`INSERT INTO memory_entities(entry_name, entity_norm, entity_raw) VALUES
+			('victim','victim-only','Victim Only'), ('victim','shared','Shared'),
+			('keeper','shared','Shared'), ('keeper','keeper-only','Keeper Only')`,
+		`INSERT INTO memory_entity_edges(entity_a, entity_b, kind, weight, updated_at) VALUES
+			('victim-only','shared','co',1,0), ('shared','keeper-only','co',1,0),
+			('historical-orphan-a','historical-orphan-b','co',1,0)`,
+		`INSERT INTO memory_event_aliases(entry_name, alias) VALUES
+			('victim','obsolete alias'), ('keeper','durable alias')`,
+		`INSERT INTO memory_fact_queries(entry_name, query) VALUES
+			('victim','obsolete query'), ('keeper','durable query')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed side data: %v", err)
+		}
+	}
+
+	if err := es.Delete(ctx, "victim"); err != nil {
+		t.Fatalf("delete victim: %v", err)
+	}
+
+	assertEntryMissing(t, es, "victim")
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name IN ('victim','victim#alias','victim#query')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name IN ('victim#other','keeper')`, 2)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entities WHERE entry_name='victim'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases WHERE entry_name='victim'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases_fts WHERE entry_name='victim'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_fact_queries WHERE entry_name='victim'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entity_edges WHERE entity_a='victim-only' OR entity_b='victim-only'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entity_edges WHERE entity_a='shared' AND entity_b='keeper-only'`, 1)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entity_edges WHERE entity_a='historical-orphan-a'`, 1)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases WHERE entry_name='keeper'`, 1)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_fact_queries WHERE entry_name='keeper'`, 1)
+	referrer, err := es.GetByName(ctx, "referrer")
+	if err != nil {
+		t.Fatalf("get referrer: %v", err)
+	}
+	if referrer.SupersededBy != "" {
+		t.Fatalf("reverse supersession survived delete: %q", referrer.SupersededBy)
+	}
+}
+
+func TestDeletePreservesShadowKeyThatIsAlsoALiveEntryName(t *testing.T) {
+	es, db := newEntryStore(t)
+	ctx := context.Background()
+	for _, name := range []string{"owner", "owner#alias", "owner#query"} {
+		if err := es.Upsert(ctx, &memory.Entry{Name: name, Content: "content for " + name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at) VALUES
+		('owner','m',1,x'00',0), ('owner#alias','m',1,x'00',0), ('owner#query','m',1,x'00',0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := es.Delete(ctx, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	assertEntryMissing(t, es, "owner")
+	if _, err := es.GetByName(ctx, "owner#alias"); err != nil {
+		t.Fatalf("live suffix-name entry was deleted: %v", err)
+	}
+	if _, err := es.GetByName(ctx, "owner#query"); err != nil {
+		t.Fatalf("live suffix-name entry was deleted: %v", err)
+	}
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name='owner'`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name IN ('owner#alias','owner#query')`, 2)
+}
+
+func TestMergeCleansConsumedAndInvalidatesSurvivingTargetSideData(t *testing.T) {
+	es, db := newEntryStore(t)
+	ctx := context.Background()
+	for _, entry := range []*memory.Entry{
+		{Name: "source-a", Content: "old a"},
+		{Name: "source-b", Content: "old b"},
+		{Name: "target", Content: "old target"},
+		{Name: "source-ref", Content: "points at source", SupersededBy: "source-a"},
+		{Name: "target-ref", Content: "points at target", SupersededBy: "target"},
+		{Name: "keeper", Content: "keep me"},
+	} {
+		if err := es.Upsert(ctx, entry); err != nil {
+			t.Fatalf("upsert %s: %v", entry.Name, err)
+		}
+	}
+	for _, statement := range []string{
+		`INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at) VALUES
+			('source-a','m',1,x'00',0), ('source-a#alias','m',1,x'00',0),
+			('source-a#query','m',1,x'00',0), ('source-b','m',1,x'00',0),
+			('target','m',1,x'00',0), ('target#alias','m',1,x'00',0),
+			('target#query','m',1,x'00',0), ('keeper','m',1,x'00',0)`,
+		`INSERT INTO memory_entities(entry_name, entity_norm, entity_raw) VALUES
+			('source-a','source-only','Source Only'), ('source-b','shared','Shared'),
+			('target','target-only','Target Only'), ('keeper','shared','Shared'),
+			('keeper','keeper-only','Keeper Only')`,
+		`INSERT INTO memory_entity_edges(entity_a, entity_b, kind, weight, updated_at) VALUES
+			('source-only','shared','co',1,0), ('target-only','shared','co',1,0),
+			('shared','keeper-only','co',1,0)`,
+		`INSERT INTO memory_event_aliases(entry_name, alias) VALUES
+			('source-a','source alias'), ('target','target alias'), ('keeper','keeper alias')`,
+		`INSERT INTO memory_fact_queries(entry_name, query) VALUES
+			('source-a','source query'), ('target','target query'), ('keeper','keeper query')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed side data: %v", err)
+		}
+	}
+
+	if err := es.Merge(ctx, []string{"source-a", "source-b"}, &memory.Entry{
+		Name: "target", Content: "merged content",
+	}); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+
+	assertEntryMissing(t, es, "source-a")
+	assertEntryMissing(t, es, "source-b")
+	target, err := es.GetByName(ctx, "target")
+	if err != nil || target.Content != "merged content" {
+		t.Fatalf("target after merge = %+v, err %v", target, err)
+	}
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name IN
+		('source-a','source-a#alias','source-a#query','source-b','source-b#alias','source-b#query',
+		 'target','target#alias','target#query')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entities WHERE entry_name IN ('source-a','source-b','target')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases WHERE entry_name IN ('source-a','source-b','target')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases_fts WHERE entry_name IN ('source-a','source-b','target')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_fact_queries WHERE entry_name IN ('source-a','source-b','target')`, 0)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entity_edges`, 1)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name='keeper'`, 1)
+
+	sourceRef, err := es.GetByName(ctx, "source-ref")
+	if err != nil || sourceRef.SupersededBy != "" {
+		t.Fatalf("source reverse reference = %+v, err %v; want cleared", sourceRef, err)
+	}
+	targetRef, err := es.GetByName(ctx, "target-ref")
+	if err != nil || targetRef.SupersededBy != "target" {
+		t.Fatalf("live target reverse reference = %+v, err %v; want preserved", targetRef, err)
+	}
+}
+
+func TestDeleteAndMergeRollbackAtEveryCleanupStage(t *testing.T) {
+	stages := []struct {
+		name    string
+		trigger string
+	}{
+		{"embeddings", `CREATE TEMP TRIGGER fail_cleanup BEFORE DELETE ON memory_embeddings
+			WHEN OLD.entry_name='source' BEGIN SELECT RAISE(ABORT, 'embeddings'); END`},
+		{"entities", `CREATE TEMP TRIGGER fail_cleanup BEFORE DELETE ON memory_entities
+			WHEN OLD.entry_name='source' BEGIN SELECT RAISE(ABORT, 'entities'); END`},
+		{"aliases", `CREATE TEMP TRIGGER fail_cleanup BEFORE DELETE ON memory_event_aliases
+			WHEN OLD.entry_name='source' BEGIN SELECT RAISE(ABORT, 'aliases'); END`},
+		{"fact_queries", `CREATE TEMP TRIGGER fail_cleanup BEFORE DELETE ON memory_fact_queries
+			WHEN OLD.entry_name='source' BEGIN SELECT RAISE(ABORT, 'fact queries'); END`},
+		{"reverse_reference", `CREATE TEMP TRIGGER fail_cleanup BEFORE UPDATE OF superseded_by ON memory_entries
+			WHEN OLD.superseded_by='source' BEGIN SELECT RAISE(ABORT, 'reverse reference'); END`},
+		{"entity_edge_prune", `CREATE TEMP TRIGGER fail_cleanup BEFORE DELETE ON memory_entity_edges
+			WHEN OLD.entity_a='source-only' BEGIN SELECT RAISE(ABORT, 'entity edge'); END`},
+	}
+
+	for _, operation := range []string{"delete", "merge"} {
+		for _, stage := range stages {
+			t.Run(operation+"/"+stage.name, func(t *testing.T) {
+				es, db := newEntryStore(t)
+				ctx := context.Background()
+				for _, entry := range []*memory.Entry{
+					{Name: "source", Content: "original source"},
+					{Name: "referrer", Content: "points at source", SupersededBy: "source"},
+					{Name: "keeper", Content: "keep me"},
+					{Name: "target", Content: "old target"},
+				} {
+					if err := es.Upsert(ctx, entry); err != nil {
+						t.Fatalf("upsert %s: %v", entry.Name, err)
+					}
+				}
+				for _, statement := range []string{
+					`INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at)
+					 VALUES ('source','m',1,x'00',0)`,
+					`INSERT INTO memory_entities(entry_name, entity_norm, entity_raw) VALUES
+					 ('source','source-only','Source Only'), ('keeper','shared','Shared')`,
+					`INSERT INTO memory_entity_edges(entity_a, entity_b, kind, weight, updated_at)
+					 VALUES ('source-only','shared','co',1,0)`,
+					`INSERT INTO memory_event_aliases(entry_name, alias) VALUES ('source','source alias')`,
+					`INSERT INTO memory_fact_queries(entry_name, query) VALUES ('source','source query')`,
+				} {
+					if _, err := db.ExecContext(ctx, statement); err != nil {
+						t.Fatalf("seed side data: %v", err)
+					}
+				}
+				if _, err := db.ExecContext(ctx, stage.trigger); err != nil {
+					t.Fatalf("create failure trigger: %v", err)
+				}
+
+				var err error
+				if operation == "delete" {
+					err = es.Delete(ctx, "source")
+				} else {
+					err = es.Merge(ctx, []string{"source"}, &memory.Entry{Name: "target", Content: "new target"})
+				}
+				if err == nil {
+					t.Fatal("operation succeeded despite injected cleanup failure")
+				}
+
+				source, getErr := es.GetByName(ctx, "source")
+				if getErr != nil || source.Content != "original source" {
+					t.Fatalf("source was not rolled back: %+v, err %v", source, getErr)
+				}
+				target, getErr := es.GetByName(ctx, "target")
+				if getErr != nil || target.Content != "old target" {
+					t.Fatalf("target upsert was not rolled back: %+v, err %v", target, getErr)
+				}
+				referrer, getErr := es.GetByName(ctx, "referrer")
+				if getErr != nil || referrer.SupersededBy != "source" {
+					t.Fatalf("reverse reference was not rolled back: %+v, err %v", referrer, getErr)
+				}
+				assertRowCount(t, db, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name='source'`, 1)
+				assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entities WHERE entry_name='source'`, 1)
+				assertRowCount(t, db, `SELECT COUNT(*) FROM memory_event_aliases WHERE entry_name='source'`, 1)
+				assertRowCount(t, db, `SELECT COUNT(*) FROM memory_fact_queries WHERE entry_name='source'`, 1)
+				assertRowCount(t, db, `SELECT COUNT(*) FROM memory_entity_edges WHERE entity_a='source-only'`, 1)
+			})
+		}
+	}
+}
+
+func assertEntryMissing(t *testing.T, es *memory.EntryStore, name string) {
+	t.Helper()
+	if _, err := es.GetByName(context.Background(), name); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("entry %q still exists: %v", name, err)
+	}
+}
+
+func assertRowCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRowContext(context.Background(), query).Scan(&got); err != nil {
+		t.Fatalf("count rows: %v\nquery: %s", err, query)
+	}
+	if got != want {
+		t.Fatalf("row count = %d, want %d\nquery: %s", got, want, query)
 	}
 }
 

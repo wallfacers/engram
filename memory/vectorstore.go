@@ -39,6 +39,38 @@ func (v *VectorStore) Put(ctx context.Context, entryName, model string, vec []fl
 	return nil
 }
 
+// putIfOwnerUnchanged atomically upserts a base or shadow vector only while its
+// source entry is still the same revision that produced the embedding input.
+// This prevents a slow write-behind call from recreating an orphan vector after
+// Delete/Merge, or publishing a stale vector after a same-name rewrite.
+func (v *VectorStore) putIfOwnerUnchanged(ctx context.Context, vectorName string, owner *Entry, model string, vec []float32, at time.Time) (bool, error) {
+	if owner == nil {
+		return false, nil
+	}
+	res, err := v.db.ExecContext(ctx,
+		`INSERT INTO memory_embeddings(entry_name, model, dims, vec, updated_at)
+		 SELECT ?,?,?,?,?
+		 WHERE EXISTS (
+			SELECT 1 FROM memory_entries
+			WHERE name = ? AND id = ? AND revision = ?
+		 )
+		 ON CONFLICT(entry_name) DO UPDATE SET
+			model      = excluded.model,
+			dims       = excluded.dims,
+			vec        = excluded.vec,
+			updated_at = excluded.updated_at`,
+		vectorName, model, len(vec), embedding.EncodeVector(vec), at.UTC().UnixMicro(),
+		owner.Name, owner.ID, owner.Revision)
+	if err != nil {
+		return false, fmt.Errorf("memory: put embedding %q if owner unchanged: %w", vectorName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("memory: put embedding %q rows: %w", vectorName, err)
+	}
+	return n == 1, nil
+}
+
 // LoadAllForModel returns every stored vector whose model matches the given
 // model, decoded. Rows for other models are skipped (they are stale and will be
 // rebuilt). Used to assemble the semantic-search candidate set.

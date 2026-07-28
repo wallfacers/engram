@@ -45,6 +45,7 @@ are env-only — never a flag, never a tracked file.**
 | LLM provider (`openai`\|`anthropic`) | `--llm-provider` | `ENGRAM_LLM_PROVIDER` | — |
 | LLM API key | — | `ENGRAM_LLM_API_KEY` | — |
 | Max cached namespaces | `--max-open-namespaces` | `ENGRAM_MAX_OPEN_NAMESPACES` | 64 |
+| Persistent async curation | `--curation-enabled` | `ENGRAM_CURATION_ENABLED` | `false` |
 
 ### Three modes
 
@@ -60,6 +61,48 @@ are env-only — never a flag, never a tracked file.**
    env): additionally exposes `memory_ingest`, which extracts durable facts from
    conversation turns into a namespace. When no LLM is configured this tool does
    **not** appear in `tools/list`; the other 5 are unaffected.
+
+## Persistent asynchronous curation (explicit opt-in)
+
+Curation is disabled by default. Enable it only when an LLM is configured:
+
+```bash
+ENGRAM_CURATION_ENABLED=true \
+ENGRAM_LLM_PROVIDER=openai \
+ENGRAM_LLM_BASE_URL=http://127.0.0.1:11434/v1 \
+ENGRAM_LLM_MODEL=local-model \
+./engram-mcp --data-dir ~/.engram/memory
+```
+
+An enabled server owns exactly one worker per open namespace. A successful
+`memory_write` sends a non-blocking notification; a successful
+`memory_ingest` sends one notification for the whole batch. The tool response
+does not wait for curation. Notifications are debounced to one pending wake.
+
+The worker checks pressure immediately after a notification and every 30
+minutes. It runs when the namespace is new to that worker, has more than 80
+non-pinned entries, exceeds the 2000-character manifest budget, or has not
+completed a pass for 30 minutes. One pass examines at most 20 candidates and
+has a two-minute deadline. A write during an active pass can leave one pending
+check, so two consecutive passes can take close to four minutes; a check that
+no longer meets a water line is a quick no-op.
+
+Enabling curation without an LLM is a startup error. LRU eviction and server
+shutdown cancel and wait for the namespace worker, then drain embedding work,
+then close SQLite. Background model/decision failures are logged as safe
+no-ops and never turn a successful write response into a failure.
+
+The judge works from a snapshot, but apply is guarded by a database-maintained
+monotonic revision: if a loser, winner, source, or target is rewritten,
+recreated, or pinned while the model is responding, the stale
+supersede/merge/eviction is skipped atomically. This does not rely on
+`updated_at`, which may repeat. A late write-behind embedding likewise writes
+only while its owner revision still matches. LRU
+detaches a closing namespace under the registry lock and performs the slow
+wait/drain outside it, so unrelated namespaces remain available.
+
+For the end-to-end extraction, curation, retrieval and storage diagrams, see
+[memory-architecture.md](./memory-architecture.md).
 
 ## Wire into Claude Code
 

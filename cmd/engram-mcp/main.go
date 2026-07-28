@@ -10,6 +10,7 @@ import (
 
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/mcpserver"
+	"github.com/wallfacers/engram/memory/pipeline"
 )
 
 func main() {
@@ -32,12 +33,7 @@ func main() {
 		os.Exit(2)
 	}
 	ctx := context.Background()
-	registry, err := mcpserver.NewRegistry(ctx, mcpserver.RegistryConfig{
-		DataDir:           config.DataDir,
-		EmbClient:         embClient,
-		LLMCaller:         llmCaller,
-		MaxOpenNamespaces: config.MaxOpenNamespaces,
-	})
+	registry, err := mcpserver.NewRegistry(ctx, buildRegistryConfig(config, embClient, llmCaller))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -48,11 +44,22 @@ func main() {
 		"data_dir", config.DataDir,
 		"embedding", embClient != nil,
 		"memory_ingest", llmCaller != nil,
+		"curation", config.CurationEnabled,
 		"max_open_namespaces", config.MaxOpenNamespaces,
 	)
 	if err := mcpserver.Run(ctx, registry); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func buildRegistryConfig(config mcpserver.ServerConfig, embClient embedding.Client, llmCaller pipeline.ModelCaller) mcpserver.RegistryConfig {
+	return mcpserver.RegistryConfig{
+		DataDir:           config.DataDir,
+		EmbClient:         embClient,
+		LLMCaller:         llmCaller,
+		MaxOpenNamespaces: config.MaxOpenNamespaces,
+		CurationEnabled:   config.CurationEnabled,
 	}
 }
 

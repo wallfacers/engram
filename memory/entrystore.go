@@ -43,6 +43,10 @@ type Entry struct {
 	// SupersededBy names the newer entry that replaces this entry. Empty means
 	// the entry has not been superseded.
 	SupersededBy string
+	// Revision is a database-maintained, monotonically increasing
+	// optimistic-concurrency token. It is deliberately independent of
+	// UpdatedAt because timestamps can repeat or be supplied by callers.
+	Revision int64
 }
 
 // ErrSupersedeSelf is returned when a Supersede call names the same entry as
@@ -59,6 +63,15 @@ var (
 // of the memory subsystem local to this package.
 type EntryStore struct {
 	db *sql.DB
+}
+
+// EntryRevision is the optimistic-concurrency token used by background
+// curation. ID distinguishes delete/recreate; Revision distinguishes every
+// mutation of the same row without relying on wall-clock resolution.
+// Interactive Delete/Merge remain unconditional.
+type EntryRevision struct {
+	ID       string
+	Revision int64
 }
 
 // NewEntryStore wraps the shared *sql.DB (obtain via store.Store.DB()).
@@ -128,7 +141,12 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error {
+type upsertContext interface {
+	execContext
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *EntryStore) upsert(ctx context.Context, q upsertContext, e *Entry) error {
 	if e.ID == "" {
 		e.ID = idgen.NewULID()
 	}
@@ -141,7 +159,9 @@ func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error 
 	if e.Durability == "" {
 		e.Durability = "volatile"
 	}
-	_, err := q.ExecContext(ctx,
+	var persistedID string
+	var createdAt, updatedAt, revision int64
+	err := q.QueryRowContext(ctx,
 		`INSERT INTO memory_entries(
 			id, name, trigger, content, pinned, durability, category,
 			 hit_count, last_used_at, created_at, updated_at, char_count, source_session_id,
@@ -159,16 +179,23 @@ func (s *EntryStore) upsert(ctx context.Context, q execContext, e *Entry) error 
 			fact_source       = excluded.fact_source,
 			event_start       = COALESCE(excluded.event_start, event_start),
 			event_end         = COALESCE(excluded.event_end, event_end),
-			updated_at        = excluded.updated_at`,
+			updated_at        = excluded.updated_at,
+			revision          = memory_entries.revision + 1
+		 RETURNING id, created_at, updated_at, revision`,
 		e.ID, e.Name, e.Trigger, e.Content, boolToInt(e.Pinned), e.Durability, e.Category,
 		e.HitCount, entryNullableMicros(e.LastUsedAt),
 		entryToMicros(e.CreatedAt), entryToMicros(e.UpdatedAt), e.CharCount, e.SourceSessionID,
 		entryNullableMicros(e.EventDate), e.FactSource,
 		entryNullableSeconds(e.EventStart), entryNullableSeconds(e.EventEnd),
-		sql.NullString{String: e.SupersededBy, Valid: e.SupersededBy != ""})
+		sql.NullString{String: e.SupersededBy, Valid: e.SupersededBy != ""}).
+		Scan(&persistedID, &createdAt, &updatedAt, &revision)
 	if err != nil {
 		return fmt.Errorf("memory: upsert entry %q: %w", e.Name, err)
 	}
+	e.ID = persistedID
+	e.CreatedAt = entryFromMicros(createdAt)
+	e.UpdatedAt = entryFromMicros(updatedAt)
+	e.Revision = revision
 	return nil
 }
 
@@ -180,7 +207,7 @@ func (s *EntryStore) Upsert(ctx context.Context, e *Entry) error {
 
 const entrySelectCols = `id, name, trigger, content, pinned, durability, category,
 	hit_count, last_used_at, created_at, updated_at, char_count, source_session_id,
-	event_date, fact_source, event_start, event_end, superseded_by`
+	event_date, fact_source, event_start, event_end, superseded_by, revision`
 
 func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 	var e Entry
@@ -191,7 +218,8 @@ func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 	if err := sc.Scan(&e.ID, &e.Name, &e.Trigger, &e.Content, &pinned,
 		&e.Durability, &e.Category, &e.HitCount, &lastUsedAt,
 		&createdAt, &updatedAt, &e.CharCount, &e.SourceSessionID,
-		&eventDate, &e.FactSource, &eventStart, &eventEnd, &supersededBy); err != nil {
+		&eventDate, &e.FactSource, &eventStart, &eventEnd, &supersededBy,
+		&e.Revision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -303,43 +331,123 @@ func (s *EntryStore) List(ctx context.Context) ([]*Entry, error) {
 }
 
 // Delete removes the entry by name, returning store.ErrNotFound when no row
-// matched. Derived rows in memory_embeddings and memory_entities are cascaded
-// away in the same transaction (migration v8 has no FK cascade because the
-// side tables key on entry_name, not rowid).
+// matched. All owned derived rows, shadow vectors, and references that would
+// dangle are cleaned in the same transaction.
 func (s *EntryStore) Delete(ctx context.Context, name string) error {
+	_, err := s.delete(ctx, name, nil)
+	return err
+}
+
+// DeleteIfUnchanged deletes name only if it is still the unpinned revision
+// observed before a long-running curation judge call. false,nil means the row
+// disappeared, changed, or became pinned, so the stale decision was skipped.
+func (s *EntryStore) DeleteIfUnchanged(ctx context.Context, name string, expected EntryRevision) (bool, error) {
+	return s.delete(ctx, name, &expected)
+}
+
+func (s *EntryStore) delete(ctx context.Context, name string, expected *EntryRevision) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("memory: delete begin: %w", err)
+		return false, fmt.Errorf("memory: delete begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
-	res, err := tx.ExecContext(ctx, `DELETE FROM memory_entries WHERE name = ?`, name)
+	query := `DELETE FROM memory_entries WHERE name = ?`
+	args := []any{name}
+	if expected != nil {
+		query += ` AND id = ? AND revision = ? AND pinned = 0`
+		args = append(args, expected.ID, expected.Revision)
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("memory: delete entry %q: %w", name, err)
+		return false, fmt.Errorf("memory: delete entry %q: %w", name, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("memory: delete entry %q rows: %w", name, err)
+		return false, fmt.Errorf("memory: delete entry %q rows: %w", name, err)
 	}
 	if n == 0 {
-		return store.ErrNotFound
+		if expected != nil {
+			return false, nil
+		}
+		return false, store.ErrNotFound
 	}
 	if err := deleteDerivedTx(ctx, tx, name); err != nil {
-		return err
+		return false, err
+	}
+	if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("memory: delete commit: %w", err)
+		return false, fmt.Errorf("memory: delete commit: %w", err)
+	}
+	return true, nil
+}
+
+// deleteDerivedTx invalidates every side row derived from one entry. Shadow
+// vectors use exact synthetic names so unrelated suffixes are preserved.
+func deleteDerivedTx(ctx context.Context, q execContext, name string) error {
+	if _, err := q.ExecContext(ctx,
+		`DELETE FROM memory_embeddings WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: delete embeddings %q: %w", name, err)
+	}
+	for _, shadowName := range []string{name + "#alias", name + "#query"} {
+		if _, err := q.ExecContext(ctx,
+			`DELETE FROM memory_embeddings
+			 WHERE entry_name = ?
+			   AND NOT EXISTS (SELECT 1 FROM memory_entries WHERE name = ?)`,
+			shadowName, shadowName); err != nil {
+			return fmt.Errorf("memory: delete shadow embedding %q: %w", shadowName, err)
+		}
+	}
+	if err := pruneEntityEdgesForEntryTx(ctx, q, name); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM memory_entities WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: delete entities %q: %w", name, err)
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM memory_event_aliases WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: delete event aliases %q: %w", name, err)
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM memory_fact_queries WHERE entry_name = ?`, name); err != nil {
+		return fmt.Errorf("memory: delete fact queries %q: %w", name, err)
 	}
 	return nil
 }
 
-// deleteDerivedTx removes the embedding and entity rows for one entry name.
-func deleteDerivedTx(ctx context.Context, q execContext, name string) error {
-	if _, err := q.ExecContext(ctx, `DELETE FROM memory_embeddings WHERE entry_name = ?`, name); err != nil {
-		return fmt.Errorf("memory: delete embedding %q: %w", name, err)
+// clearReverseSupersessionTx clears references to an entry that is truly being
+// deleted. It is deliberately not called for a surviving merge target.
+func clearReverseSupersessionTx(ctx context.Context, q execContext, name string) error {
+	if _, err := q.ExecContext(ctx,
+		`UPDATE memory_entries
+		 SET superseded_by = NULL, revision = revision + 1
+		 WHERE superseded_by = ?`, name); err != nil {
+		return fmt.Errorf("memory: clear reverse supersession %q: %w", name, err)
 	}
-	if _, err := q.ExecContext(ctx, `DELETE FROM memory_entities WHERE entry_name = ?`, name); err != nil {
-		return fmt.Errorf("memory: delete entities %q: %w", name, err)
+	return nil
+}
+
+// pruneEntityEdgesForEntryTx removes edges that lose an endpoint when name's
+// entity rows are deleted. The entry's rows still exist while this query runs,
+// so the surviving-endpoint checks explicitly exclude name. Restricting the
+// candidate set to name's entities preserves unrelated historical orphan rows;
+// this lifecycle fix is not a whole-database repair sweep.
+func pruneEntityEdgesForEntryTx(ctx context.Context, q execContext, name string) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM memory_entity_edges
+		WHERE (
+			entity_a IN (SELECT entity_norm FROM memory_entities WHERE entry_name = ?)
+			OR entity_b IN (SELECT entity_norm FROM memory_entities WHERE entry_name = ?)
+		) AND (
+			NOT EXISTS (
+				SELECT 1 FROM memory_entities
+				WHERE entity_norm = memory_entity_edges.entity_a AND entry_name <> ?
+			)
+			OR NOT EXISTS (
+				SELECT 1 FROM memory_entities
+				WHERE entity_norm = memory_entity_edges.entity_b AND entry_name <> ?
+			)
+		)`, name, name, name, name); err != nil {
+		return fmt.Errorf("memory: prune entity edges for %q: %w", name, err)
 	}
 	return nil
 }
@@ -349,14 +457,70 @@ func deleteDerivedTx(ctx context.Context, q execContext, name string) error {
 // name is skipped so the freshly written merged entry survives. A failure at any
 // step rolls the whole operation back, leaving all rows in their pre-call state.
 func (s *EntryStore) Merge(ctx context.Context, names []string, into *Entry) error {
+	_, err := s.merge(ctx, names, into, nil)
+	return err
+}
+
+// MergeIfUnchanged applies a curation merge only while every source and any
+// pre-existing target still match the revisions observed before judging.
+// expected must contain every source; absence of into.Name means the target did
+// not exist in the snapshot and must still be absent. false,nil skips a stale
+// decision without modifying any row.
+func (s *EntryStore) MergeIfUnchanged(ctx context.Context, names []string, into *Entry, expected map[string]EntryRevision) (bool, error) {
+	return s.merge(ctx, names, into, expected)
+}
+
+func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, expected map[string]EntryRevision) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("memory: merge begin: %w", err)
+		return false, fmt.Errorf("memory: merge begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
+	if expected != nil {
+		required := make(map[string]struct{}, len(names)+1)
+		for _, name := range names {
+			required[name] = struct{}{}
+		}
+		if _, existed := expected[into.Name]; existed {
+			required[into.Name] = struct{}{}
+		}
+		for name := range required {
+			revision, ok := expected[name]
+			if !ok {
+				return false, nil
+			}
+			var id string
+			var currentRevision int64
+			var pinned int
+			err := tx.QueryRowContext(ctx,
+				`SELECT id, revision, pinned FROM memory_entries WHERE name = ?`, name).
+				Scan(&id, &currentRevision, &pinned)
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, nil
+			}
+			if err != nil {
+				return false, fmt.Errorf("memory: merge check revision %q: %w", name, err)
+			}
+			if id != revision.ID || currentRevision != revision.Revision || pinned != 0 {
+				return false, nil
+			}
+		}
+		if _, existed := expected[into.Name]; !existed {
+			var found int
+			err := tx.QueryRowContext(ctx,
+				`SELECT 1 FROM memory_entries WHERE name = ?`, into.Name).Scan(&found)
+			if err == nil {
+				return false, nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return false, fmt.Errorf("memory: merge check new target %q: %w", into.Name, err)
+			}
+		}
+	}
+
 	if err := s.upsert(ctx, tx, into); err != nil {
-		return err
+		return false, err
 	}
 	for _, name := range names {
 		if name == into.Name {
@@ -365,22 +529,25 @@ func (s *EntryStore) Merge(ctx context.Context, names []string, into *Entry) err
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM memory_entries WHERE name = ?`, name); err != nil {
-			return fmt.Errorf("memory: merge delete %q: %w", name, err)
+			return false, fmt.Errorf("memory: merge delete %q: %w", name, err)
 		}
 		if err := deleteDerivedTx(ctx, tx, name); err != nil {
-			return err
+			return false, err
+		}
+		if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
+			return false, err
 		}
 	}
 	// The merged target's own derived rows are stale (content changed); drop
 	// them so the write-behind embedder re-embeds and the caller re-indexes
 	// entities from the merged content.
 	if err := deleteDerivedTx(ctx, tx, into.Name); err != nil {
-		return err
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("memory: merge commit: %w", err)
+		return false, fmt.Errorf("memory: merge commit: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // Supersede non-destructively suppresses oldName in favor of newName by setting
@@ -391,18 +558,15 @@ func (s *EntryStore) Supersede(ctx context.Context, oldName, newName string) err
 	if oldName == newName {
 		return ErrSupersedeSelf
 	}
-	old, err := s.GetByName(ctx, oldName)
-	if err != nil {
-		return err // store.ErrNotFound when the loser is unknown
-	}
-	if old.Pinned {
-		return ErrSupersedePinned
-	}
-	if _, err := s.GetByName(ctx, newName); err != nil {
-		return fmt.Errorf("memory: supersede winner %q: %w", newName, err)
-	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE memory_entries SET superseded_by = ? WHERE name = ?`, newName, oldName)
+		`UPDATE memory_entries
+		 SET superseded_by = ?, revision = revision + 1
+		 WHERE name = ?
+		   AND pinned = 0
+		   AND EXISTS (
+			SELECT 1 FROM memory_entries AS winner WHERE winner.name = ?
+		   )`,
+		newName, oldName, newName)
 	if err != nil {
 		return fmt.Errorf("memory: supersede %q: %w", oldName, err)
 	}
@@ -410,17 +574,68 @@ func (s *EntryStore) Supersede(ctx context.Context, oldName, newName string) err
 	if err != nil {
 		return fmt.Errorf("memory: supersede %q rows: %w", oldName, err)
 	}
-	if n == 0 {
-		return store.ErrNotFound
+	if n != 0 {
+		return nil
 	}
-	return nil
+
+	// Preserve the public method's specific error contract after the atomic
+	// guarded update declined to mutate anything.
+	old, err := s.GetByName(ctx, oldName)
+	if err != nil {
+		return err
+	}
+	if old.Pinned {
+		return ErrSupersedePinned
+	}
+	if _, err := s.GetByName(ctx, newName); err != nil {
+		return fmt.Errorf("memory: supersede winner %q: %w", newName, err)
+	}
+	return store.ErrNotFound
+}
+
+// SupersedeIfUnchanged applies a curation conflict only while both endpoints
+// still match the exact revisions observed before the remote judge call.
+// false,nil means either endpoint disappeared or changed, or the loser became
+// pinned, so the stale decision was skipped without mutation.
+func (s *EntryStore) SupersedeIfUnchanged(
+	ctx context.Context,
+	oldName, newName string,
+	expectedOld, expectedNew EntryRevision,
+) (bool, error) {
+	if oldName == newName {
+		return false, ErrSupersedeSelf
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE memory_entries
+		 SET superseded_by = ?, revision = revision + 1
+		 WHERE name = ?
+		   AND id = ?
+		   AND revision = ?
+		   AND pinned = 0
+		   AND EXISTS (
+			SELECT 1
+			FROM memory_entries AS winner
+			WHERE winner.name = ? AND winner.id = ? AND winner.revision = ?
+		   )`,
+		newName, oldName, expectedOld.ID, expectedOld.Revision,
+		newName, expectedNew.ID, expectedNew.Revision)
+	if err != nil {
+		return false, fmt.Errorf("memory: supersede %q if unchanged: %w", oldName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("memory: supersede %q rows: %w", oldName, err)
+	}
+	return n == 1, nil
 }
 
 // Unsupersede clears an entry's superseded_by marker, reversing a misjudged
 // suppression. Returns store.ErrNotFound when no entry matches name.
 func (s *EntryStore) Unsupersede(ctx context.Context, name string) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE memory_entries SET superseded_by = NULL WHERE name = ?`, name)
+		`UPDATE memory_entries
+		 SET superseded_by = NULL, revision = revision + 1
+		 WHERE name = ?`, name)
 	if err != nil {
 		return fmt.Errorf("memory: unsupersede %q: %w", name, err)
 	}
@@ -693,7 +908,9 @@ func (s *EntryStore) EntitiesByEntry(ctx context.Context, names []string) (map[s
 // affected is silently fine), matching the read-only-tool usage-log semantics.
 func (s *EntryStore) BumpUsage(ctx context.Context, name string, at time.Time) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE memory_entries SET hit_count = hit_count + 1, last_used_at = ? WHERE name = ?`,
+		`UPDATE memory_entries
+		 SET hit_count = hit_count + 1, last_used_at = ?, revision = revision + 1
+		 WHERE name = ?`,
 		entryToMicros(at.UTC()), name)
 	if err != nil {
 		return fmt.Errorf("memory: bump usage %q: %w", name, err)

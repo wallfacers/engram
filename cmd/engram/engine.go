@@ -24,8 +24,17 @@ type engineHandle struct {
 	embedder  *memory.Embedder
 	retriever *memory.Retriever
 	pipe      *pipeline.Pipeline
+	curator   *curation.Worker
 	embClient embedding.Client
+	namespace string
 }
+
+type llmCapabilityError struct {
+	cause error
+}
+
+func (e llmCapabilityError) Error() string { return e.cause.Error() }
+func (e llmCapabilityError) Unwrap() error { return e.cause }
 
 func openEngine(ctx context.Context, config Config) (*engineHandle, error) {
 	embClient, err := buildEmbeddingClient(config)
@@ -54,6 +63,16 @@ func openEngineWith(ctx context.Context, config Config, embClient embedding.Clie
 	entries := memory.NewEntryStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
 	embedder := memory.NewEmbedder(entries, vectors, embClient, memory.DefaultEmbedBuffer)
+	var curator *curation.Worker
+	if llmCaller != nil {
+		curator = curation.NewWorker(
+			entries,
+			st.DB(),
+			curation.ModelCaller(llmCaller),
+			curation.DefaultConfig(),
+			nil,
+		)
+	}
 	return &engineHandle{
 		store:     st,
 		entries:   entries,
@@ -67,6 +86,8 @@ func openEngineWith(ctx context.Context, config Config, embClient embedding.Clie
 			Budgets:  memory.DefaultBudgets(),
 		}),
 		embClient: embClient,
+		curator:   curator,
+		namespace: config.Namespace,
 	}, nil
 }
 
@@ -104,10 +125,10 @@ func buildLLMCaller(config Config) (pipeline.ModelCaller, error) {
 		if strings.TrimSpace(config.LLMBaseURL) == "" && strings.TrimSpace(config.LLMModel) == "" && config.LLMAPIKey == "" {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("LLM provider is required when LLM configuration is set")
+		return nil, llmCapabilityError{cause: fmt.Errorf("LLM provider is required when LLM configuration is set")}
 	}
 	if strings.TrimSpace(config.LLMModel) == "" {
-		return nil, fmt.Errorf("LLM model is required for provider %q", providerName)
+		return nil, llmCapabilityError{cause: fmt.Errorf("LLM model is required for provider %q", providerName)}
 	}
 
 	var llmProvider provider.Provider
@@ -117,12 +138,15 @@ func buildLLMCaller(config Config) (pipeline.ModelCaller, error) {
 	case "anthropic":
 		llmProvider = anthropic.New(anthropic.Options{APIKey: config.LLMAPIKey, BaseURL: config.LLMBaseURL})
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider %q (want openai or anthropic)", providerName)
+		return nil, llmCapabilityError{cause: fmt.Errorf("unsupported LLM provider %q (want openai or anthropic)", providerName)}
 	}
 	caller, err := curation.NewProviderCaller(
 		map[string]provider.Provider{providerName: llmProvider},
 		providerName+":"+config.LLMModel,
 		4096,
 	)
-	return pipeline.ModelCaller(caller), err
+	if err != nil {
+		return nil, llmCapabilityError{cause: err}
+	}
+	return pipeline.ModelCaller(caller), nil
 }

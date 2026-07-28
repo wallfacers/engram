@@ -6,8 +6,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/pipeline"
 )
 
 // getForTest acquires ns and immediately releases the pin, returning the handle.
@@ -179,5 +181,247 @@ func TestRegistryDoesNotEvictInUseHandle(t *testing.T) {
 	getForTest(t, registry, ctx, "reclaim")
 	if got := registry.handleCount(); got > 1 {
 		t.Fatalf("after releasing pin, handleCount = %d, want <= 1 (bound)", got)
+	}
+}
+
+func TestEnabledRegistryOwnsExactlyOneCuratorPerNamespace(t *testing.T) {
+	ctx := context.Background()
+	var calls atomic.Int32
+	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+		calls.Add(1)
+		return `{"evict":[],"merge":[]}`, nil
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:         t.TempDir(),
+		LLMCaller:       caller,
+		CurationEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+
+	first := getForTest(t, registry, ctx, "first")
+	if first.curator == nil {
+		t.Fatal("enabled namespace has no curator")
+	}
+	for range 100 {
+		handle, release, err := registry.Acquire(ctx, "first")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if handle != first || handle.curator != first.curator {
+			t.Fatal("repeated Acquire replaced the namespace worker")
+		}
+		handle.curator.Start(context.Background())
+		release()
+	}
+	second := getForTest(t, registry, ctx, "second")
+	if second.curator == nil || second.curator == first.curator {
+		t.Fatal("namespaces do not own distinct curator workers")
+	}
+
+	if err := first.entries.Upsert(ctx, &memory.Entry{Name: "wake", Content: "wake first"}); err != nil {
+		t.Fatal(err)
+	}
+	first.curator.Notify()
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("one notification reached %d judge loops after repeated Start, want 1", got)
+	}
+}
+
+func TestEnabledRegistryCompletes100OpenStartEvictCloseLifecycles(t *testing.T) {
+	ctx := context.Background()
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir: t.TempDir(),
+		LLMCaller: pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+			t.Fatal("lifecycle-only test must not invoke judge")
+			return "", nil
+		}),
+		CurationEnabled:   true,
+		MaxOpenNamespaces: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 100 {
+		handle, release, err := registry.Acquire(ctx, fmt.Sprintf("lifecycle-%d", i))
+		if err != nil {
+			t.Fatalf("lifecycle %d acquire: %v", i, err)
+		}
+		if handle.curator == nil {
+			t.Fatalf("lifecycle %d has no curator", i)
+		}
+		handle.curator.Start(context.Background()) // duplicate Start remains idempotent
+		release()
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.handleCount(); got != 0 {
+		t.Fatalf("closed registry has %d handles, want 0", got)
+	}
+}
+
+func TestRegistryCloseCancelsAndWaitsBeforeClosingNamespaceStore(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{})
+	storeProbe := make(chan error, 1)
+	var entries *memory.EntryStore
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+		close(started)
+		<-callCtx.Done()
+		_, err := entries.Count(context.Background())
+		storeProbe <- err
+		return "", callCtx.Err()
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:         t.TempDir(),
+		LLMCaller:       caller,
+		CurationEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := getForTest(t, registry, ctx, "close-order")
+	entries = handle.entries
+	if err := entries.Upsert(ctx, &memory.Entry{Name: "blocked", Content: "blocked pass"}); err != nil {
+		t.Fatal(err)
+	}
+	handle.curator.Notify()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("curation pass did not start")
+	}
+
+	if err := registry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-storeProbe:
+		if err != nil {
+			t.Fatalf("store was closed before curator exited: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("curator did not observe registry cancellation")
+	}
+}
+
+func TestRegistryLRUEvictionCancelsAndWaitsBeforeClosingCuratorStore(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{})
+	storeProbe := make(chan error, 1)
+	var entries *memory.EntryStore
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+		close(started)
+		<-callCtx.Done()
+		_, err := entries.Count(context.Background())
+		storeProbe <- err
+		return "", callCtx.Err()
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:           t.TempDir(),
+		LLMCaller:         caller,
+		CurationEnabled:   true,
+		MaxOpenNamespaces: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	first := getForTest(t, registry, ctx, "first")
+	entries = first.entries
+	if err := entries.Upsert(ctx, &memory.Entry{Name: "blocked", Content: "blocked pass"}); err != nil {
+		t.Fatal(err)
+	}
+	first.curator.Notify()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("curation pass did not start")
+	}
+
+	getForTest(t, registry, ctx, "second")
+	select {
+	case err := <-storeProbe:
+		if err != nil {
+			t.Fatalf("LRU closed store before curator exited: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("LRU eviction did not cancel and wait for curator")
+	}
+	if _, ok := registry.handles["first"]; ok {
+		t.Fatal("first namespace was not evicted")
+	}
+}
+
+func TestRegistryLRUEvictionDoesNotHoldGlobalLockWhileWorkerExits(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	allowExit := make(chan struct{})
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+		close(started)
+		<-callCtx.Done()
+		close(cancelled)
+		<-allowExit
+		return "", callCtx.Err()
+	})
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir:           t.TempDir(),
+		LLMCaller:         caller,
+		CurationEnabled:   true,
+		MaxOpenNamespaces: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+
+	slow := getForTest(t, registry, ctx, "slow")
+	if err := slow.entries.Upsert(ctx, &memory.Entry{Name: "blocked", Content: "blocked pass"}); err != nil {
+		t.Fatal(err)
+	}
+	slow.curator.Notify()
+	<-started
+	getForTest(t, registry, ctx, "keeper")
+	getForTest(t, registry, ctx, "keeper") // keep "slow" as the LRU victim
+
+	thirdDone := make(chan error, 1)
+	go func() {
+		_, release, err := registry.Acquire(ctx, "third")
+		if release != nil {
+			release()
+		}
+		thirdDone <- err
+	}()
+	<-cancelled // eviction detached and cancelled the slow namespace
+
+	keeperDone := make(chan error, 1)
+	go func() {
+		_, release, err := registry.Acquire(ctx, "keeper")
+		if release != nil {
+			release()
+		}
+		keeperDone <- err
+	}()
+	select {
+	case err := <-keeperDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(50 * time.Millisecond):
+		close(allowExit)
+		<-thirdDone
+		t.Fatal("slow namespace shutdown held the registry-global lock")
+	}
+	close(allowExit)
+	if err := <-thirdDone; err != nil {
+		t.Fatal(err)
 	}
 }

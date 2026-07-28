@@ -11,6 +11,7 @@ import (
 
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/curation"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/store"
 )
@@ -21,6 +22,7 @@ type RegistryConfig struct {
 	EmbClient         embedding.Client
 	LLMCaller         pipeline.ModelCaller
 	MaxOpenNamespaces int
+	CurationEnabled   bool
 }
 
 // NamespaceHandle owns one independent engine store and its assembled public
@@ -32,6 +34,9 @@ type NamespaceHandle struct {
 	embedder  *memory.Embedder
 	retriever *memory.Retriever
 	pipe      *pipeline.Pipeline
+	curator   *curation.Worker
+
+	curatorCancel context.CancelFunc
 
 	// refs counts in-flight Acquire holders. Guarded by Registry.mu. A handle
 	// with refs > 0 is in use and MUST NOT be evicted/closed underneath its
@@ -42,6 +47,12 @@ type NamespaceHandle struct {
 func (h *NamespaceHandle) close() error {
 	if h == nil {
 		return nil
+	}
+	if h.curatorCancel != nil {
+		h.curatorCancel()
+	}
+	if h.curator != nil {
+		h.curator.Wait()
 	}
 	if h.embedder != nil {
 		h.embedder.Close()
@@ -58,11 +69,23 @@ type Registry struct {
 	embClient         embedding.Client
 	llmCaller         pipeline.ModelCaller
 	maxOpenNamespaces int
+	curationEnabled   bool
+	ctx               context.Context
+	cancel            context.CancelFunc
 
-	mu      sync.Mutex
-	handles map[string]*NamespaceHandle
-	lru     *list.List // front is most recently used; values are namespace strings
-	closed  bool
+	mu        sync.Mutex
+	handles   map[string]*NamespaceHandle
+	closing   map[string]chan struct{}
+	lru       *list.List // front is most recently used; values are namespace strings
+	closed    bool
+	closeDone chan struct{}
+	closeErr  error
+}
+
+type detachedHandle struct {
+	namespace string
+	handle    *NamespaceHandle
+	done      chan struct{}
 }
 
 // NewRegistry creates a registry and validates that its data directory can be
@@ -79,6 +102,9 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 	}
 	if config.MaxOpenNamespaces == 0 {
 		config.MaxOpenNamespaces = defaultMaxOpenNamespaces
+	}
+	if config.CurationEnabled && config.LLMCaller == nil {
+		return nil, errors.New("curation requires an LLM caller")
 	}
 	dataDir, err := filepath.Abs(filepath.Clean(config.DataDir))
 	if err != nil {
@@ -97,13 +123,19 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 	if _, err := namespaceDatabasePath(dataDir, defaultNamespace); err != nil {
 		return nil, err
 	}
+	registryCtx, cancel := context.WithCancel(ctx)
 	return &Registry{
 		dataDir:           dataDir,
 		embClient:         config.EmbClient,
 		llmCaller:         config.LLMCaller,
 		maxOpenNamespaces: config.MaxOpenNamespaces,
+		curationEnabled:   config.CurationEnabled,
+		ctx:               registryCtx,
+		cancel:            cancel,
 		handles:           make(map[string]*NamespaceHandle),
+		closing:           make(map[string]chan struct{}),
 		lru:               list.New(),
+		closeDone:         make(chan struct{}),
 	}, nil
 }
 
@@ -129,44 +161,85 @@ func (r *Registry) Acquire(ctx context.Context, namespace string) (*NamespaceHan
 		return nil, nil, err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, nil, errors.New("registry is closed")
-	}
-	if handle := r.handles[ns]; handle != nil {
-		r.touchLocked(ns)
-		handle.refs++
-		return handle, r.releaseFunc(handle), nil
+	for {
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			return nil, nil, errors.New("registry is closed")
+		}
+		if done := r.closing[ns]; done != nil {
+			r.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		if handle := r.handles[ns]; handle != nil {
+			r.touchLocked(ns)
+			handle.refs++
+			release := r.releaseFunc(handle)
+			r.mu.Unlock()
+			return handle, release, nil
+		}
+		break
 	}
 
 	st, err := store.Open(ctx, store.Options{DSN: path})
 	if err != nil {
+		r.mu.Unlock()
 		return nil, nil, fmt.Errorf("open namespace %q: %w", ns, err)
 	}
 	entries := memory.NewEntryStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
 	embedder := memory.NewEmbedder(entries, vectors, r.embClient, memory.DefaultEmbedBuffer)
 	retriever := memory.NewRetriever(entries, vectors, r.embClient)
+	var curator *curation.Worker
+	var curatorCtx context.Context
+	var curatorCancel context.CancelFunc
+	var onWrite func()
+	if r.curationEnabled {
+		var cancel context.CancelFunc
+		curatorCtx, cancel = context.WithCancel(r.ctx)
+		curatorCancel = cancel
+		curator = curation.NewWorker(
+			entries,
+			st.DB(),
+			curation.ModelCaller(r.llmCaller),
+			curation.DefaultConfig(),
+			nil,
+		)
+		onWrite = curator.Notify
+	}
 	pipe := pipeline.New(pipeline.Config{
 		Entries:  entries,
 		Embedder: embedder,
 		Call:     r.llmCaller,
 		Budgets:  memory.DefaultBudgets(),
+		OnWrite:  onWrite,
 	})
 	handle := &NamespaceHandle{
-		store:     st,
-		entries:   entries,
-		vectors:   vectors,
-		embedder:  embedder,
-		retriever: retriever,
-		pipe:      pipe,
-		refs:      1,
+		store:         st,
+		entries:       entries,
+		vectors:       vectors,
+		embedder:      embedder,
+		retriever:     retriever,
+		pipe:          pipe,
+		curator:       curator,
+		curatorCancel: curatorCancel,
+		refs:          1,
+	}
+	if curator != nil {
+		curator.Start(curatorCtx)
 	}
 	r.handles[ns] = handle
 	r.lru.PushFront(ns)
-	r.evictLocked()
-	return handle, r.releaseFunc(handle), nil
+	victims := r.detachEvictionsLocked()
+	release := r.releaseFunc(handle)
+	r.mu.Unlock()
+	r.closeDetached(victims)
+	return handle, release, nil
 }
 
 // releaseFunc builds the idempotent pin-release closure for handle. It is safe
@@ -196,25 +269,37 @@ func (r *Registry) touchLocked(namespace string) {
 	}
 }
 
-// evictLocked keeps the number of opened namespace stores within the configured
-// bound. It runs while mu is held, so a namespace cannot be evicted twice or
-// replaced concurrently. Only idle handles (refs == 0) are closed; a handle
-// pinned by an in-flight Acquire is skipped so its store is never closed
-// underneath its callers. If every over-budget handle is currently in use the
-// bound is exceeded transiently (soft cap) until a pin is released and a later
-// open reclaims. Store.Close is performed before the next Acquire can observe
-// the new cache state.
-func (r *Registry) evictLocked() {
+// detachEvictionsLocked removes idle LRU victims from the live cache and marks
+// their namespaces closing. Slow worker/embedder shutdown happens after mu is
+// released, so unrelated namespaces continue serving. An Acquire for the same
+// namespace waits on the closing marker and cannot create a duplicate worker.
+func (r *Registry) detachEvictionsLocked() []detachedHandle {
+	var victims []detachedHandle
 	for len(r.handles) > r.maxOpenNamespaces {
 		victim := r.oldestIdleLocked()
 		if victim == nil {
-			return // all over-budget handles are in use; tolerate soft overflow
+			return victims // all over-budget handles are in use; tolerate soft overflow
 		}
 		namespace := victim.Value.(string)
 		handle := r.handles[namespace]
 		delete(r.handles, namespace)
 		r.lru.Remove(victim)
-		_ = handle.close()
+		done := make(chan struct{})
+		r.closing[namespace] = done
+		victims = append(victims, detachedHandle{namespace: namespace, handle: handle, done: done})
+	}
+	return victims
+}
+
+func (r *Registry) closeDetached(victims []detachedHandle) {
+	for _, victim := range victims {
+		_ = victim.handle.close()
+		r.mu.Lock()
+		if r.closing[victim.namespace] == victim.done {
+			delete(r.closing, victim.namespace)
+			close(victim.done)
+		}
+		r.mu.Unlock()
 	}
 }
 
@@ -236,19 +321,44 @@ func (r *Registry) Close() error {
 		return nil
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
-		return nil
+		done := r.closeDone
+		r.mu.Unlock()
+		<-done
+		r.mu.Lock()
+		err := r.closeErr
+		r.mu.Unlock()
+		return err
 	}
 	r.closed = true
-	var closeErr error
+	if r.cancel != nil {
+		r.cancel()
+	}
+	handles := make(map[string]*NamespaceHandle, len(r.handles))
 	for namespace, handle := range r.handles {
+		handles[namespace] = handle
+		delete(r.handles, namespace)
+	}
+	closing := make([]chan struct{}, 0, len(r.closing))
+	for _, done := range r.closing {
+		closing = append(closing, done)
+	}
+	r.lru.Init()
+	r.mu.Unlock()
+
+	var closeErr error
+	for namespace, handle := range handles {
 		if err := handle.close(); err != nil && closeErr == nil {
 			closeErr = fmt.Errorf("close namespace %q: %w", namespace, err)
 		}
-		delete(r.handles, namespace)
 	}
-	r.lru.Init()
+	for _, done := range closing {
+		<-done
+	}
+	r.mu.Lock()
+	r.closeErr = closeErr
+	close(r.closeDone)
+	r.mu.Unlock()
 	return closeErr
 }
 
