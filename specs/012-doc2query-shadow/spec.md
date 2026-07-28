@@ -1,7 +1,7 @@
 # Feature 012: 写入侧 Doc2Query 伪查询影子向量
 
 **Branch**: `012-doc2query-shadow` | **Date**: 2026-07-24
-**Brainstorm 设计**: [../../docs/superpowers/specs/2026-07-24-doc2query-pseudo-query-shadow-design.md](../../docs/superpowers/specs/2026-07-24-doc2query-pseudo-query-shadow-design.md)
+**Brainstorm 设计**: [归档设计](../../docs/archive/designs/2026-07-24-doc2query-pseudo-query-shadow-design.md)
 **承接**: 010 多查询（query 侧，门② NO-GO）、011 dual-index alias 影子（写入侧，门② NO-GO）
 
 ## 问题

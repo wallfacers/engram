@@ -4,7 +4,7 @@
 
 **Input**: Feature specification from `/specs/016-longmemeval-crossbench/spec.md`
 
-**上游事实源**: [设计文档](../../docs/superpowers/specs/2026-07-26-longmemeval-subset-design.md)（brainstorming 逐段确认）
+**上游事实源**: [归档设计](../../docs/archive/designs/2026-07-26-longmemeval-subset-design.md)（brainstorming 逐段确认）
 
 ## Summary
 

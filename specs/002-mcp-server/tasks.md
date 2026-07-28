@@ -130,7 +130,7 @@ engram 单仓库布局:新增二进制入 `cmd/engram-mcp/`,适配逻辑入顶�
 
 - Setup 内 T002 与 T001 收尾可并行。
 - Foundational 内 T004(namespace 测)与 T006(registry 测)可并行起草。
-- 各故事的"先行测试"任务标 [P](不同新文件):T009/T014/T015/T017/T018/T020/T021/T025 可并行起草。
+- 各故事的“先行测试”任务标为 `[P]`（不同新文件）：T009/T014/T015/T017/T018/T020/T021/T025 可并行起草。
 - 同一文件的实现任务(多个 handler 都在 `tools.go`)**不可**并行——T010/T011/T012 顺序改同一文件。
 
 ## Implementation Strategy(MVP 优先)

@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: brainstorm 定稿 `docs/superpowers/specs/2026-07-24-write-side-alias-embedding-design.md`
+**Input**: brainstorm 定稿 `docs/archive/designs/2026-07-24-write-side-alias-embedding-design.md`
 
 ## 背景与动机
 

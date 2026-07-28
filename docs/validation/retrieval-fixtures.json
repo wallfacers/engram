@@ -1,0 +1,114 @@
+[
+  {
+    "id": "Q1",
+    "query": "如何配置 engram MCP server？",
+    "topic": "mcp-integration",
+    "canonical_path": "docs/guides/mcp-server.md",
+    "required_assertions": [
+      {
+        "label": "现行稳定使用指南",
+        "patterns": ["status: stable", "配置"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q2",
+    "query": "engram CLI 支持哪些命令？",
+    "topic": "cli-usage",
+    "canonical_path": "docs/guides/cli.md",
+    "required_assertions": [
+      {
+        "label": "CLI 已交付并提供现行命令参考",
+        "patterns": ["shipped-default", "命令"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q3",
+    "query": "engram 的记忆什么时候抽取，curation 怎么运行？",
+    "topic": "memory-architecture",
+    "canonical_path": "docs/architecture/memory-system.md",
+    "required_assertions": [
+      {
+        "label": "只有显式 ingest 才抽取，write/add 直接写入",
+        "patterns": ["显式", "ingest", "直接写入"]
+      },
+      {
+        "label": "curation 是已交付且显式启用的能力",
+        "patterns": ["shipped-opt-in", "显式开启"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q4",
+    "query": "engram 当前 LoCoMo 和 LongMemEval-S 分数是多少？",
+    "topic": "evaluation-results",
+    "canonical_path": "docs/evaluation/results.md",
+    "required_assertions": [
+      {
+        "label": "LongMemEval-S 为 full 500",
+        "patterns": ["500", "LongMemEval-S"]
+      },
+      {
+        "label": "结果包含 dataset、answerer、judge、recipe",
+        "patterns": ["数据集", "答题模型", "判题模型", "配方"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q5",
+    "query": "Feature 013 最终是否出货？",
+    "topic": "experiment-verdicts",
+    "canonical_path": "docs/evaluation/experiment-verdicts.md",
+    "required_assertions": [
+      {
+        "label": "Feature 013 是 closed-no-go 且不在当前路线",
+        "patterns": ["013", "closed-no-go", "当前路线"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q6",
+    "query": "记忆新鲜度和状态一致性是否已经实现？",
+    "topic": "current-capabilities",
+    "canonical_path": "docs/product/capabilities.md",
+    "required_assertions": [
+      {
+        "label": "新鲜度和状态一致性尚未实现并链接 proposed backlog",
+        "patterns": ["新鲜度", "状态一致性", "尚未实现", "memory-freshness"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q7",
+    "query": "SaaS 习惯记忆是不是当前能力？",
+    "topic": "current-capabilities",
+    "canonical_path": "docs/product/capabilities.md",
+    "required_assertions": [
+      {
+        "label": "习惯记忆未立项且未实现并链接 proposed exploration",
+        "patterns": ["习惯记忆", "未立项", "未实现", "habit-memory"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  },
+  {
+    "id": "Q8",
+    "query": "engram 当前论文方向是什么？",
+    "topic": "research-direction",
+    "canonical_path": "docs/research/paper-direction.md",
+    "required_assertions": [
+      {
+        "label": "完整负结果史、共同失败机理和低成本止损",
+        "patterns": ["负结果", "失败机理", "止损"]
+      }
+    ],
+    "forbidden_lifecycles": ["proposed", "archived", "relocated"]
+  }
+]

@@ -1,7 +1,7 @@
 # Phase 0 · 技术调研：离线固结 · 跨 session 桥接合成
 
 **日期**: 2026-07-25
-**上游**: [设计文档](../../docs/superpowers/specs/2026-07-25-offline-consolidation-bridging-design.md) · [spec.md](./spec.md)
+**上游**: [归档设计](../../docs/archive/designs/2026-07-25-offline-consolidation-bridging-design.md) · [spec.md](./spec.md)
 
 本轮调研的目的是把设计文档的决策落到既有代码的确切接缝上。调研中发现**两处
 设计文档与代码现状不符**（R1、R2），已按事实修正并回写设计文档。

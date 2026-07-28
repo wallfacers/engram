@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: 已批准 brainstorm 设计正本 `docs/superpowers/specs/2026-07-24-answer-side-temporal-reasoning-contract-design.md`。LoCoMo temporal(category 2)瓶颈经近免费分诊定位在**答题侧**(69% 答错题 gold 已进 top-30 上下文却答错),三失败模式:±1 月/年误归属去歧 55% · 相对表达未解析成绝对 26% · 时长/区间算术 18%。纯 client-side 零成本提质型契约,引擎零改。
+**Input**: 已批准 brainstorm 设计正本 `docs/archive/designs/2026-07-24-answer-side-temporal-reasoning-contract-design.md`。LoCoMo temporal(category 2)瓶颈经近免费分诊定位在**答题侧**(69% 答错题 gold 已进 top-30 上下文却答错),三失败模式:±1 月/年误归属去歧 55% · 相对表达未解析成绝对 26% · 时长/区间算术 18%。纯 client-side 零成本提质型契约,引擎零改。
 
 ## 背景 *(context)*
 

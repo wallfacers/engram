@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: brainstorm 定稿 `docs/superpowers/specs/2026-07-23-multi-query-retrieval-design.md`
+**Input**: brainstorm 定稿 `docs/archive/designs/2026-07-23-multi-query-retrieval-design.md`
 
 ## 背景与动机
 
