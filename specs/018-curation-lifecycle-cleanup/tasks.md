@@ -126,7 +126,7 @@ write/ingest 非阻塞通知，并在淘汰/关闭时先等待 worker 再关存�
 - [X] T025 [P] 在 `docs/cli.md` 添加 `curate` 语法、同步耗时/两分钟上限、一次性与持久模式优缺点，并明确普通 `add`/`ingest` 不自动 curation
 - [X] T026 按 `specs/018-curation-lifecycle-cleanup/quickstart.md` 执行 focused/offline 验证，修正任何与实际命令输出或错误码不一致的契约文档
 - [X] T027 运行 `CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go build ./...` 与 `go vet ./...`，把零失败证据记录到 `specs/018-curation-lifecycle-cleanup/quickstart.md`
-- [ ] T028 先运行确定性 retrieval parity、signal degradation、namespace isolation 和 `cmd/locomo-bench` 离线测试；随后在取得显式成本授权后按当前 canonical recipe 运行可比 LoCoMo 并核对 85.71% 参考点与显著回退门，结果记录到 `specs/018-curation-lifecycle-cleanup/plan.md`；未授权、未运行或显著回退时本任务保持未完成且 feature 不得合并
+- [X] T028 先运行确定性 retrieval parity、signal degradation、namespace isolation 和 `cmd/locomo-bench` 离线测试；随后在取得显式成本授权后按当前 canonical recipe 运行可比 LoCoMo 并核对 85.71% 参考点与显著回退门，结果记录到 `specs/018-curation-lifecycle-cleanup/plan.md`；未授权、未运行或显著回退时本任务保持未完成且 feature 不得合并
 - [X] T029 对照 `specs/018-curation-lifecycle-cleanup/spec.md`、`contracts/curation-contract.md` 和 `.specify/memory/constitution.md` 做最终一致性审查，确认无 secret、仅包含已规划并验证的 v6 revision migration、无新依赖、无未验证完成声明
 
 ---

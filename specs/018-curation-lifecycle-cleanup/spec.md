@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-28
 
-**Status**: Draft
+**Status**: Complete
 
 **Input**: User description: "显式开启 curation；MCP 异步持久运行，CLI 同步一次性运行；删除与合并记忆时清理 alias、fact-query 等遗留索引。"
 

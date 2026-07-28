@@ -21,6 +21,7 @@
 | 2026-07-28 | monotonic revision remediation | v6 migration, same-timestamp delete/merge/vector and both-endpoint supersede tests at 50 repeats | PASS |
 | 2026-07-28 | post-revision full regression | `CGO_ENABLED=0 go test -count=1 ./...` + build + vet + deterministic retrieval/MCP/LoCoMo package gates | PASS，14 个 test packages 通过，1 个 package 无测试 |
 | 2026-07-28 | independent post-revision review | Critical/Important-only re-review | PASS，Critical 0，Important 0 |
+| 2026-07-28 | canonical LoCoMo paid merge gate | 1540 questions × 3，Qwen + BAAI/bge-large + DeepSeek Flash，canonical flags | PASS，多数票 86.10% vs 85.71%，McNemar p=0.585，within-noise；估算总费用约 ¥4.45 < ¥16 |
 
 基线检查同时确认 sibling `longmemeval-lossless-chunks` worktree 为 clean，且没有触及
 `memory/entrystore.go`、`memory/curation/worker.go`、`mcpserver/` 或 `cmd/engram/`。
@@ -150,8 +151,9 @@ CGO_ENABLED=0 go test -count=1 ./mcpserver -run 'Parity|Isolation|Offline'
 ```
 
 默认关闭且检索算法未变时，以上确定性 parity 是无分数回退的直接前置证据，但不替代
-宪法 IV。合并前必须先取得显式评测成本授权，再按当前 canonical recipe 运行可比
-LoCoMo；未授权、评测未运行或出现显著回退时，feature 保持未完成、不可合并。
+宪法 IV。本功能已在显式 ¥16 成本授权下完成 canonical LoCoMo 1540×3：多数票
+86.10% vs 85.71% reference，McNemar p=0.585（within-noise），没有显著回退。
+详细 recipe、逐次分数、调用量、费用和产物路径见 `plan.md` 的 Evaluation Gate Status。
 
 Go race detector 强制要求 CGO，`CGO_ENABLED=0 go test -race` 会直接报
 `go: -race requires cgo`，与本项目无 CGO 硬门冲突。因此本 feature 使用 100 次

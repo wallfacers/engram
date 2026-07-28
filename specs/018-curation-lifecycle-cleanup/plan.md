@@ -95,7 +95,7 @@ deadline 是安全边界，不承诺在 10 万条历史库首次开启时完成�
 | I. 本地优先、默认离线 | PASS | curation 默认关闭；开启后仍可使用本地 sidecar；无托管服务依赖。 |
 | II. 引擎/适配层分离 | PASS | timeout、Wait、清理事务属于 host-agnostic 引擎契约；MCP/CLI 仅装配和呈现。 |
 | III. 契约优先、namespace 隔离 | PASS | [contracts/curation-contract.md](contracts/curation-contract.md) 固定配置、错误与时序；每 ns 独立 store/worker。 |
-| IV. 评测回归门 | PENDING（合并前） | retrieval parity、signal degradation、相关 bench 单测和全套测试已通过；还必须在显式成本授权下跑与当前基线同口径的可比 LoCoMo。未授权或显著回退时保持未完成、不可合并。 |
+| IV. 评测回归门 | PASS | 确定性门与全套测试通过；显式授权后的 canonical LoCoMo 1540×3 多数票为 86.10%，参考基线为 85.71%，配对 McNemar p=0.585（within-noise、无显著回退）。 |
 | V. 优雅降级、规模诚实 | PASS | 未开启零影响；后台错误不反向失败写请求；大型历史库首次 pass 的限制已声明。 |
 | 无 CGO / 依赖最小化 | PASS | 仅标准库同步/上下文能力；新增纯 SQLite v6 revision migration，无新依赖。 |
 | 单一存储真相 | PASS | 所有适配器继续共享现有 SQLite schema；不增加平行状态。 |
@@ -258,5 +258,31 @@ detach 并设置同 namespace closing marker，在锁外执行慢关闭，避免
 - `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench`
 - schema v6 revision、相同时间戳 CAS 与 Supersede 双端校验 focused tests（50 repeats）
 
-可比 LoCoMo 端到端评测尚未运行：它需要显式成本授权。当前 85.71% reference 尚未
-复核，因此 T028、SC-009 与宪法 IV 合并门保持未完成；本 feature 仍为 Draft、不可合并。
+同日取得维护者 **¥16 硬上限**的显式成本授权后，完成可比 LoCoMo 端到端门禁：
+
+- 数据/店：`locomo10.json` 全量 1540 题，隔离复制
+  `.locomo-run/009-bge-chunks-store`，`extract_calls=0`。
+- 模型栈：Qwen `Qwen/Qwen3.6-35B-A3B-FP8` answer、与店内模型标识一致的
+  `BAAI/bge-large-en-v1.5` embed、`deepseek-v4-flash` judge。
+- canonical 参数：`--chunks --top-k 30 --chunk-quota 12 --retrieval hybrid
+  --force-answer --judge-mem0-aligned --repeats 3 --concurrency 40`。
+- regime：
+  `force_answer=true;abstain_prompt=false;no_idk_retry=false;judge=mem0-aligned;judge_model=deepseek-v4-flash;retrieval=hybrid`。
+- 三次分数：85.58%（1318/1540）、85.52%（1317/1540）、86.17%（1327/1540）；
+  均值 **85.76%**，95% CI **[84.87%, 86.65%]**。
+- 三次多数票：当前 **1326/1540 = 86.10%**，参考
+  `.locomo-run/009-full-A-base` **1320/1540 = 85.71%**，净 +6 题。
+- 逐题比较：当前错/基线对 39，当前对/基线错 45，McNemar
+  **p=0.585379**，CI 重叠，verdict=`within-noise`；没有显著回退。
+- 上下文均值 3616.98 token（参考 3613.56，+0.09%）；answer 4630 次、
+  judge 4620 次、extract 0 次，产物在
+  `.locomo-run/018-curation-gate-full/`。
+- 干净门禁的 DeepSeek judge 实测 usage 成本 **¥1.74**。计入两次 2 题预检、
+  一次被及时隔离的模型标识失配 warm-up（1540+62 题）与约 21 分钟受控 GPU
+  窗口后，本次总费用估算约 **¥4.45**（公开 GPU 单价口径），低于 ¥16 上限。
+
+短模型名 warm-up 被归档到 `.locomo-run/018-curation-gate-cold-warmup/`，未进入门禁：
+其请求模型名与原店的完整模型名不一致，只加载了部分语义向量。正式门禁前已从原始
+canonical store 重新隔离复制，不能把该配置伪影混入可比结果。
+
+因此 T028、SC-009 与宪法 IV 均完成，本 feature 可以进入合并验证。
