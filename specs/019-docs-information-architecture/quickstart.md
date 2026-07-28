@@ -16,7 +16,8 @@
 - Node.js 24、Bash 5.2、ripgrep 15 和 Git 2.53 可用。
 - 不需要网络、付费模型、LoCoMo 数据或新增 package。
 - 本 feature 在吸收已接受的双语根 README 并行提交后，以 `c86e47e` 为实施隔离基线。
-- `docs/validation/check-docs.mjs` 和 `docs/validation/retrieval-fixtures.json` 已存在。
+- `docs/validation/check-docs.mjs`、`check-docs.test.mjs` 和
+  `retrieval-fixtures.json` 已存在。
 
 ```bash
 git branch --show-current
@@ -213,6 +214,7 @@ validator 还必须验证 `product/capabilities.md`、`product/roadmap.md`、
 ## 8. 最终回归
 
 ```bash
+node --test docs/validation/check-docs.test.mjs
 node docs/validation/check-docs.mjs
 git diff --check
 CGO_ENABLED=0 go test -count=1 ./...
@@ -223,7 +225,7 @@ git diff --name-status c86e47e
 
 预期：
 
-- whitespace 检查和 Go 全量测试退出码为 0；
+- validator 单元测试、whitespace 检查和 Go 全量测试退出码为 0；
 - 只有 `docs/`、019 规格工件和允许的历史设计链接文件发生变化；
 - 删除候选入链为 0；
 - 保留文档孤儿为 0；

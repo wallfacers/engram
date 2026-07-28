@@ -312,6 +312,8 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
 不新增依赖，在 `docs/validation/` 保留可重复使用的只读检查器和固定 fixture：
 
 - `check-docs.mjs` 使用 Node.js 标准库，扫描 Git 跟踪文件且不写入仓库；
+- `check-docs.test.mjs` 使用 Node.js 内建 test runner，以最小临时 fixture 先证明每类
+  违规会失败、合规语料会通过；
 - `retrieval-fixtures.json` 机器可读地固化 Q1–Q8 的原文、主题、路径和必须结论。
 
 检查器配合 Git、Bash 和 ripgrep 验证：

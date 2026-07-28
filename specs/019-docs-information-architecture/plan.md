@@ -22,7 +22,8 @@ Bash 5.2、Node.js 24 标准库、ripgrep 15 与 Git 2.53
 
 **Storage**: Git 跟踪的文本文件
 
-**Testing**: `node docs/validation/check-docs.mjs` 确定性检查元数据、标题、全仓本地链接与
+**Testing**: `node --test docs/validation/check-docs.test.mjs` 覆盖 validator 失败/通过
+fixture；`node docs/validation/check-docs.mjs` 确定性检查元数据、标题、全仓本地链接与
 GitHub 风格锚点、导航图、迁移页和固定 Q1–Q8；`git diff --check`、删除门证据、两次
 独立语义复核；最终确认 Go 全量测试基线未受影响
 
@@ -86,6 +87,7 @@ docs/
 ├── CONTRIBUTING.md
 ├── validation/
 │   ├── check-docs.mjs
+│   ├── check-docs.test.mjs
 │   └── retrieval-fixtures.json
 ├── guides/
 │   ├── cli.md
