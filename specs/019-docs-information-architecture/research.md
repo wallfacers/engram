@@ -5,7 +5,7 @@
 **Scope**: `docs/` 内容重组，以及既有 `specs/` 中历史设计链接的最小修正
 
 本文件记录实施前已经收口的研究决策。所有决策均来自仓库内现有代码、正式 feature
-材料、评测日志、verdict 和已批准的信息架构设计；不存在 `NEEDS CLARIFICATION`。
+材料、评测日志、verdict 和已批准的信息架构设计；不存在未决澄清项。
 
 ## R-001：现行正本与历史证据分层
 
@@ -106,7 +106,9 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
 条件字段：
 
 - `archived` 至少提供 `outcome` 或 `superseded_by`；历史设计另加 `feature`。
-- `relocated` 必须提供唯一 `canonical_path`，并直接指向 `stable` / `active` 正本。
+- `relocated` 必须提供唯一 `canonical_path`，并直接指向 `stable`、`active` 或
+  `proposed` 的目标主题页；不得指向 archive 或另一个迁移页。旧新鲜度路径是唯一允许
+  指向 `proposed` 的兼容入口，当前能力查询仍先到 `product/capabilities.md`。
 - `stable` / `active` 在唯一 H1 后、第一个 H2 前给出可见摘要和权威边界。
 
 **Rationale**
@@ -175,6 +177,15 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
   `stats`、`export`、`namespaces`、`version`。其中 `ingest` 和 `curate` 需要 LLM。
 - Curation 是 `shipped-opt-in`：MCP 后台模式默认关闭；CLI `curate` 是显式、同步、
   单次操作。普通 `add` / `ingest` 不触发 curation。
+- 当前存储是 local-first：每个 namespace 使用独立 SQLite 文件；schema v6 以
+  `memory_entries` 为事务真相，提供 FTS5 mirror，并保存 provenance、event time、
+  `superseded_by` 和单调 `revision`。side tables 保存 embedding、entity、alias、
+  fact-query 和 entity-edge。默认检索是 keyword、可选 semantic、entity 三信号 RRF；
+  embedding 未配置时降级为 keyword + entity，再缺 entity 时退化为 keyword，离线 CRUD
+  和关键词检索仍可用。
+- side table 或实验代码存在不等于产品默认出货。Associative、cluster sweep、temporal
+  score、multi-query、Doc2Query 等机制的出货状态必须以实验裁决表为准；不能从 schema
+  推断它们已启用。
 - 完整记忆新鲜度、状态一致性、read-your-writes、精确 source-span 闭包和按需动态召回
   尚未实现；已有时间与 supersession 原语不能被描述成完整能力。
 - 习惯记忆未立项、未实现，设计中的目标 API 不是当前公共 API。
@@ -183,7 +194,8 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
 
 **Rationale**
 
-这些事实是本次整理中已发现的明确冲突点，也是固定检索验收的状态断言。
+这些事实是本次整理中已发现的明确冲突点，也是固定检索验收的状态断言。存储事实以
+`store/migrations.go`、`memory/entrystore.go` 和 `memory/retriever.go` 为实现证据。
 
 **Alternatives considered**
 
@@ -277,8 +289,10 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
 - `docs/remote-eval-box.md`
 - `docs/results-matrix-2026-07-26.md`
 
-每个入口直接指向一个 `stable` / `active` 正本，不得串联到另一个迁移页，也不得复制
-配置、数字或结论。既有 `specs/` 只修改八份归档设计的链接目标，不改变其正文语义。
+每个入口直接指向登记的 `stable`、`active` 或 `proposed` 主题页，不得串联到另一个
+迁移页，也不得复制配置、数字或结论。除新鲜度旧路径按已批准映射指向 proposed backlog
+外，其余 11 个入口都指向现行正本。既有 `specs/` 只修改八份归档设计的链接目标，不
+改变其正文语义。
 
 **Rationale**
 
@@ -295,7 +309,12 @@ LongMemEval Feature 016 的评测适配与 full-500 基线已经完成，但预�
 
 **Decision**
 
-不新增依赖，使用 Git、Bash、Node.js 标准库和 ripgrep 验证：
+不新增依赖，在 `docs/validation/` 保留可重复使用的只读检查器和固定 fixture：
+
+- `check-docs.mjs` 使用 Node.js 标准库，扫描 Git 跟踪文件且不写入仓库；
+- `retrieval-fixtures.json` 机器可读地固化 Q1–Q8 的原文、主题、路径和必须结论。
+
+检查器配合 Git、Bash 和 ripgrep 验证：
 
 - front matter、枚举、条件字段和主题唯一性；
 - 单一 H1、连续标题层级和唯一 GitHub slug；
@@ -320,6 +339,8 @@ Q1–Q8 的默认正本固定为：
 
 Q6 和 Q7 的 backlog / exploration 是次级证据，不是第二个当前正本。结构门禁之后，再由
 两个独立审阅过程从 `docs/README.md` 开始执行相同八问；8/8 路径与结论一致才通过。
+实施结果写入 `specs/019-docs-information-architecture/validation-report.md`；三份删除
+候选逐份记录正式覆盖、独有证据复核和删除前入链为零的证明。
 
 **Rationale**
 
@@ -330,7 +351,8 @@ Q6 和 Q7 的 backlog / exploration 是次级证据，不是第二个当前正�
 
 - 只依赖人工点击：不稳定且容易漏掉深链。
 - 只让 LLM 判断：不能证明主题唯一性、链接图和状态过滤。
-- 新增第三方 lint 工具：当前规模无需增加维护面。
+- 只使用一次性临时脚本：无法被后续维护者重复执行，规范会再次漂移。
+- 新增第三方 lint 工具：当前规模无需增加依赖维护面。
 
 ## R-011：正文语言与敏感上下文
 
@@ -350,3 +372,29 @@ Q6 和 Q7 的 backlog / exploration 是次级证据，不是第二个当前正�
 
 - 原样搬运聊天：保留了不必要的身份和口语噪声。
 - 全部翻译命令和专有名词：会损坏可复制性和技术准确性。
+
+## R-012：维护治理分类 fixture
+
+**Decision**
+
+`docs/CONTRIBUTING.md` 必须分别定义新增、更新、引用、归档、删除和人工复核规则，并给出
+一个可执行决策树。SC-011 固定使用以下三个输入，不与 Q1–Q8 混用：
+
+| ID | 输入 | 唯一正确分类与动作 |
+|---|---|---|
+| G1 | 产生一组新的当前 benchmark 结果 | 更新 `active` 的 `docs/evaluation/results.md`；其他文档只链接，不新建分数矩阵 |
+| G2 | 提出尚未实现的记忆能力 | 创建或更新 `proposed` backlog/exploration；`product/capabilities.md` 只给未实现结论和链接 |
+| G3 | 一项实验已经收口为 NO-GO | 在 `active` verdict 索引登记 `closed-no-go`；完整过程以 `archived` 证据冻结并退出当前路线 |
+
+两个独立审阅过程只阅读 `docs/CONTRIBUTING.md` 后分别分类 G1–G3；3/3 的生命周期、目标
+路径和引用/归档动作完全一致才通过，结果写入 `validation-report.md`。
+
+**Rationale**
+
+固定治理样例验证维护规则能阻止未来漂移；它与 Q1–Q8 的“如何检索现有事实”是不同的
+验收目标。
+
+**Alternatives considered**
+
+- 用 Q1–Q8 代替治理复核：只能证明当前导航，不能证明新增内容如何落位。
+- 只写原则不写样例：不同维护者仍可能把提案或 NO-GO 放进当前能力/路线。

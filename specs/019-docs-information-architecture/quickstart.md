@@ -16,6 +16,7 @@
 - Node.js 24、Bash 5.2、ripgrep 15 和 Git 2.53 可用。
 - 不需要网络、付费模型、LoCoMo 数据或新增 package。
 - 本 feature 在吸收已接受的双语根 README 并行提交后，以 `c86e47e` 为实施隔离基线。
+- `docs/validation/check-docs.mjs` 和 `docs/validation/retrieval-fixtures.json` 已存在。
 
 ```bash
 git branch --show-current
@@ -71,9 +72,14 @@ git status --short docs
 
 ## 4. 验证元数据与正文结构
 
-使用 Node.js 标准库对 `git ls-files 'docs/*.md' 'docs/**/*.md'` 返回的每个文件执行
-[元数据契约](./contracts/document-metadata.md) 的确定性检查。检查器只读取文件，不写入
-仓库，必须报告：
+运行持久只读检查器：
+
+```bash
+node docs/validation/check-docs.mjs --metadata --headings
+```
+
+检查器使用 Node.js 标准库读取 `git ls-files 'docs/*.md' 'docs/**/*.md'`，按
+[元数据契约](./contracts/document-metadata.md) 验证且不写入仓库，必须报告：
 
 ```text
 PASS metadata: <document-count> docs, <topic-count> canonical topics
@@ -88,7 +94,8 @@ PASS headings: <document-count> docs
 - 每份文件只有一个与 `title` 一致的 H1；
 - 标题层级不跳级，GitHub 风格标题 slug 文件内唯一；
 - `archived` 有 outcome 或替代入口；
-- `relocated` 直接指向 `stable` / `active` 正本；
+- `relocated` 直接指向登记的 `stable` / `active` / `proposed` 目标，且只有新鲜度旧
+  路径允许指向 proposed；
 - 当前正文以中文为主，技术标识保持标准英文。
 
 可用以下命令快速审阅生命周期分布；它不替代完整结构检查：
@@ -100,14 +107,15 @@ rg -n '^canonical_for: \\[[a-z0-9,-]+( [a-z0-9,-]+)*\\]$' docs -g '*.md'
 
 ## 5. 验证全仓链接、锚点与可达性
 
-使用同一只读 Node.js 标准库检查器扫描：
+运行：
 
 ```bash
-git ls-files '*.md'
+node docs/validation/check-docs.mjs --links --navigation
 ```
 
-检查 Markdown fenced code 之外的本地链接，按目标文件解析相对路径，并按 GitHub 标题
-slug 解析 `#fragment`。再以 `docs/README.md` 为根对 `docs/` 本地链接图执行 BFS。
+检查器扫描 `git ls-files '*.md'`，检查 Markdown fenced code 之外的本地链接，按目标
+文件解析相对路径，并按 GitHub 标题 slug 解析 `#fragment`。再以 `docs/README.md` 为根
+对 `docs/` 本地链接图执行 BFS。
 
 必须得到：
 
@@ -125,7 +133,14 @@ PASS navigation: all current/proposed docs within 2 hops, 0 orphan docs
 
 ## 6. 验证 Q1–Q8
 
-先从 front matter 构建只含 `stable` / `active` 的主题索引，逐项核对
+运行：
+
+```bash
+node docs/validation/check-docs.mjs --retrieval
+```
+
+检查器从 front matter 构建只含 `stable` / `active` 的主题索引，读取
+`docs/validation/retrieval-fixtures.json`，逐项核对
 [固定检索集](./contracts/navigation-and-retrieval.md#5-fixed-retrieval-verification-set)。
 确定性检查必须输出：
 
@@ -137,17 +152,32 @@ PASS retrieval fixtures: Q1-Q8 canonical paths and required assertions
 
 - Q1–Q5、Q8 的主题和路径各自唯一；
 - Q6/Q7 都先到 `docs/product/capabilities.md`，backlog/exploration 只是次级证据；
-- Q3 得到 `shipped-opt-in`；
+- Q3 同时得到“只有显式 MCP/CLI ingest 才抽取、write/add 直接写入”和
+  `shipped-opt-in`；
 - Q4 得到 full 500 且结果包含 dataset/answerer/judge/recipe；
 - Q5 得到 Feature 013=`closed-no-go`；
 - proposed、archived、relocated 的当前答案命中数为 0。
 
+同一检查还必须验证 `product/capabilities.md` 的当前存储基线：per-namespace SQLite
+schema v6、FTS5、provenance/event/supersession/revision、可降级三信号检索、side table
+不等于机制出货，并回链 `architecture/memory-system.md`。
+
 结构门通过后，由两个独立审阅过程分别从 `docs/README.md` 开始回答 Q1–Q8，记录首个
 正本、生命周期、结论和证据链接。两份结果必须 8/8 一致。
 
+另由两个独立审阅过程只阅读 `docs/CONTRIBUTING.md`，分类元数据契约中的 G1–G3。两份
+结果必须在生命周期、目标路径和后续引用/归档动作上 3/3 一致；该测试不能用 Q1–Q8
+结果替代。
+
 ## 7. 验证迁移页和已知漂移
 
-迁移页必须恰好是归档契约列出的 12 个路径：
+迁移页内容和固定清单先由检查器验证：
+
+```bash
+node docs/validation/check-docs.mjs --relocation
+```
+
+再人工列出路径复核；必须恰好是归档契约列出的 12 个路径：
 
 ```bash
 rg -l '^status: relocated$' docs -g '*.md' | sort
@@ -175,9 +205,15 @@ rg -l '404/500|430/500|80\\.80%|86\\.00%' \
 
 预期为空；其他现行文档只链接 `docs/evaluation/results.md`。
 
+validator 还必须验证 `product/capabilities.md`、`product/roadmap.md`、
+`evaluation/competitors.md` 和 `research/paper-direction.md` 都回链结果正本，并且没有
+复制完整 engram 当前分数矩阵。人工审阅本 feature 的所有链接变更，确认链接文字与目标
+职责相符，把结果写入 validation report。
+
 ## 8. 最终回归
 
 ```bash
+node docs/validation/check-docs.mjs
 git diff --check
 CGO_ENABLED=0 go test -count=1 ./...
 git status --short
@@ -192,4 +228,10 @@ git diff --name-status c86e47e
 - 删除候选入链为 0；
 - 保留文档孤儿为 0；
 - 全仓坏链与坏锚点为 0；
-- 两份 Q1–Q8 独立复核完全一致。
+- 两份 Q1–Q8 独立复核完全一致；
+- 两份 G1–G3 治理分类复核完全一致。
+
+把 validator 汇总、范围隔离、三份删除门逐项证明、链接语义审阅、Go 回归结果、两份
+Q1–Q8 复核和两份 G1–G3 复核写入
+`specs/019-docs-information-architecture/validation-report.md`；该报告是 SC-003、
+SC-009、SC-010 和 SC-011 的验收证据。

@@ -58,15 +58,47 @@
 - Q6/Q7 的 backlog 和 exploration 是次级链接；二者的当前答案仍由
   `current-capabilities` 唯一提供。
 
+### 分数消费者
+
+下列现行文档必须链接 `docs/evaluation/results.md`，不得维护第二份 engram 当前分数
+矩阵：
+
+- `docs/product/capabilities.md`
+- `docs/product/roadmap.md`
+- `docs/evaluation/competitors.md`
+- `docs/research/paper-direction.md`
+
+validator 必须检查四份回链存在，并禁止它们复制当前结果正本中的完整 score tuple 或
+多行 engram 结果矩阵。单句定性结论或竞品厂商自报数字可以保留，但必须标明口径并链接
+结果正本；人工语义复核在 validation report 确认没有以改写格式规避门禁。
+
+### 当前存储能力
+
+`current-capabilities` 正本必须说明并回链架构：
+
+- 每个 namespace 使用独立本地 SQLite 文件，schema v6；
+- `memory_entries`、FTS5、provenance/event/supersession/revision 是当前存储原语；
+- 默认检索为 keyword、可选 semantic、entity 三信号 RRF，并能在 embedding 缺席时
+  离线降级；
+- side table 或实验代码存在不代表 associative、temporal、multi-query、Doc2Query 等
+  机制已经出货；
+- curation 是 `shipped-opt-in`，完整 freshness/state consistency 仍未实现。
+
+validator 必须检查这些边界存在，并检查能力页链接
+`docs/architecture/memory-system.md`；不得只列 CLI 和未来方向。
+
 ## 5. Fixed Retrieval Verification Set
 
 以下 query、主题、路径和结论都是验收 fixture，不得在实施时改成更容易通过的问法。
+`docs/validation/retrieval-fixtures.json` 必须逐项镜像本表，作为检查器的机器可读输入；
+本表和 feature spec 是语义正本，validator 必须在 fixture 缺项、重复 ID 或路径漂移时
+失败。
 
 | ID | 固定查询文本 | 唯一主题 | 唯一默认正本 | 必须得到的状态或结论 |
 |---|---|---|---|---|
 | Q1 | 如何配置 engram MCP server？ | `mcp-integration` | `docs/guides/mcp-server.md` | `stable` 使用指南 |
 | Q2 | engram CLI 支持哪些命令？ | `cli-usage` | `docs/guides/cli.md` | CLI 已交付，返回现行命令参考 |
-| Q3 | engram 的记忆什么时候抽取，curation 怎么运行？ | `memory-architecture` | `docs/architecture/memory-system.md` | curation=`shipped-opt-in` |
+| Q3 | engram 的记忆什么时候抽取，curation 怎么运行？ | `memory-architecture` | `docs/architecture/memory-system.md` | 只有显式 MCP/CLI ingest 才抽取，write/add 直接写入；curation=`shipped-opt-in` |
 | Q4 | engram 当前 LoCoMo 和 LongMemEval-S 分数是多少？ | `evaluation-results` | `docs/evaluation/results.md` | LongMemEval-S 为 full 500；每条结果含 dataset/answerer/judge/recipe |
 | Q5 | Feature 013 最终是否出货？ | `experiment-verdicts` | `docs/evaluation/experiment-verdicts.md` | `closed-no-go`，不在当前路线 |
 | Q6 | 记忆新鲜度和状态一致性是否已经实现？ | `current-capabilities` | `docs/product/capabilities.md` | 尚未实现；链接 proposed backlog |
@@ -75,7 +107,7 @@
 
 ## 6. 结构验收
 
-确定性检查必须证明：
+运行 `node docs/validation/check-docs.mjs`，确定性检查必须证明：
 
 - 上表每个主题恰好有一个文档所有者；
 - 所有者路径与表一致；
@@ -83,6 +115,25 @@
 - `proposed`、`archived`、`relocated` 的 fixture 命中数为 0；
 - 所有现行文档距离门户不超过 2；
 - Q1–Q8 的要求关键词或等价结构化结论存在，且禁止状态不存在。
+- 四个分数消费者都回链唯一结果正本，且没有复制完整当前矩阵。
+
+fixture 的每一项至少包含 `id`、`query`、`topic`、`canonical_path`、
+`required_assertions` 和 `forbidden_lifecycles`。`required_assertions` 是可审阅的中文
+语义标签，不允许以宽泛的单字符或只匹配标题的模式制造假阳性。
+
+### 链接语义
+
+文件和锚点存在只是基础门。validator 还必须确定性检查：
+
+- 12 个旧路径与归档契约中的目标逐项一致，正文唯一链接等于 `canonical_path`；
+- 八份设计的正式入链都指向对应 archive 文件，不存在旧设计路径；
+- archive 的 `superseded_by` 指向语义相符的现行索引或正本；
+- 门户任务标签指向该分类登记的 canonical topic；
+- Q1–Q8 的 topic、路径和正文断言一致。
+
+对无法从元数据确定的普通叙述链接，实施者必须审阅本 feature 的链接变更 diff，逐项确认
+链接文字和目标职责相符，并在 `validation-report.md` 记录。未修改的既有链接只需通过
+文件/锚点存在性门。
 
 ## 7. 独立语义复核
 

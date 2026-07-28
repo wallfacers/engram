@@ -77,7 +77,8 @@ feature: "013"
 ### `relocated`
 
 - `canonical_path` 必填且只能有一个路径。
-- 目标必须存在，状态只能是 `stable` 或 `active`。
+- 目标必须存在，状态只能是 `stable`、`active` 或 `proposed`。指向 `proposed` 时，
+  迁移说明必须明确目标未实现；当前能力查询仍排除该目标。
 - 不能指向另一个 `relocated` 文件，不能形成链或循环。
 - 不得出现 `outcome`、`superseded_by` 或功能状态。
 
@@ -104,7 +105,8 @@ feature: "013"
 2. 一段迁移说明；
 3. 一个指向 `canonical_path` 的 Markdown 链接。
 
-不得复制原文、命令、配置、数字、状态结论、目录、代码块或其他业务链接。
+不得复制原文、命令、配置、数字、功能状态结论、目录、代码块或其他业务链接；若目标为
+`proposed`，允许且必须说明“目标为未实现提案”这一文档生命周期事实。
 
 ## 6. 状态与权威性
 
@@ -116,3 +118,29 @@ feature: "013"
 - `relocated` 只用于路径兼容。
 
 违反任一 MUST 规则即阻塞验收。
+
+## 7. `docs/CONTRIBUTING.md` 治理契约
+
+维护规范必须显式覆盖六类动作：
+
+1. **新增**：先选唯一主问题、目录、生命周期、`canonical_for` 和 owner；主题已存在时
+   不得另建第二正本。
+2. **更新**：只在主题所有者中更新事实，同时更新 `last_reviewed` 和 evidence；不得用
+   新文档旁路正本。
+3. **引用**：快速变化的分数、能力和 verdict 只链接正本，不复制矩阵或状态台账。
+4. **归档**：先把仍有效结论提炼到现行正本，再冻结全文，补 outcome/替代入口并加入
+   archive 索引。
+5. **删除**：逐项通过归档契约的五项删除门并在 validation report 留证。
+6. **人工复核**：每次语义修改、证据或功能状态变化时，owner 核验元数据、当前事实、
+   evidence 和本地链接后更新 `last_reviewed`；只改排版不得伪造复核日期。
+
+维护规范必须包含以下三个固定分类样例：
+
+| ID | 情境 | 预期分类 |
+|---|---|---|
+| G1 | 新的当前 benchmark 结果 | 更新 `evaluation/results.md`（`active`），其他文档只引用 |
+| G2 | 尚未实现的记忆能力 | `proposed` backlog/exploration；当前能力页只写“未实现”并链接 |
+| G3 | 已收口 NO-GO 实验 | verdict 索引登记 `closed-no-go`，完整过程 `archived`，从路线移除 |
+
+两个独立审阅过程只依据维护规范分类 G1–G3，必须在生命周期、目标路径和后续动作上 3/3
+一致；记录写入 `validation-report.md`。

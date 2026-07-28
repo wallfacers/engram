@@ -23,7 +23,7 @@
 | `outcome` | string | `archived` 的条件字段 |
 | `superseded_by` | path | `archived` 的条件字段；目标存在 |
 | `feature` | feature id | 历史设计的条件字段 |
-| `canonical_path` | path | `relocated` 必填；直接指向当前正本 |
+| `canonical_path` | path | `relocated` 必填；直接指向登记的当前或 proposed 主题页 |
 | `body` | GFM | 一个 H1；层级连续；文件内 slug 唯一 |
 
 ### DocumentLifecycle
@@ -147,11 +147,12 @@ relocated ────┘── compatibility routing corpus
 | 字段 | 类型 | 约束 |
 |---|---|---|
 | `legacy_path` | path | 固定旧路径 |
-| `canonical_path` | path | 唯一且直接指向 `stable` / `active` |
+| `canonical_path` | path | 唯一且直接指向 `stable`、`active` 或 `proposed`；不得指向 archive/relocated |
 | `message` | paragraph | 一段迁移说明，不含事实结论 |
 | `link` | local link | 正文唯一业务链接；与 `canonical_path` 相同 |
 
-迁移页不得包含分数、命令清单、配置样例、能力状态或第二跳迁移。
+迁移页不得包含分数、命令清单、配置样例、能力状态或第二跳迁移。指向 `proposed` 时，
+迁移说明必须明确目标是未实现提案；这不使提案成为当前能力正本。
 
 ## 7. 关系与全局不变量
 
@@ -162,7 +163,7 @@ docs/README.md
                               ├─ owns CanonicalTopic
                               └─ contains CapabilityOrExperimentRecord
 
-legacy path ── RelocationEntry ──────────────> current Document
+legacy path ── RelocationEntry ──────────────> target Document (current or proposed)
 archive index ───────────────────────────────> archived EvidenceRecord
 ```
 
@@ -175,3 +176,34 @@ archive index ──────────────────────
 5. 归档和迁移内容不作为当前能力证据。
 6. 所有本地文件链接和锚点有效。
 7. 范围外产品文件相对 feature 基线不变。
+
+## 8. GovernanceFixture
+
+验证维护者能否一致使用规范的固定分类输入。
+
+| 字段 | 类型 | 约束 |
+|---|---|---|
+| `id` | `G1` / `G2` / `G3` | 唯一 |
+| `scenario` | string | 当前结果、未实现提案或已收口实验 |
+| `expected_lifecycle` | DocumentLifecycle | 单值 |
+| `expected_path` | path | 指向唯一正本、提案目录或 archive 类别 |
+| `expected_actions` | set | 更新、引用、登记 verdict、归档、移出路线等 |
+| `review_results` | two records | 两个独立过程都必须与期望完全一致 |
+
+G1 更新 active 结果正本；G2 进入 proposed 并由能力正本给否定结论；G3 在 active verdict
+登记 NO-GO 并把完整过程 archived。Q1–Q8 不能替代该分类测试。
+
+## 9. ValidationEvidence
+
+`specs/019-docs-information-architecture/validation-report.md` 中的一条验收证据。
+
+| 字段 | 类型 | 约束 |
+|---|---|---|
+| `check` | string | 对应 SC 或契约门 |
+| `command_or_method` | string | 可重复命令或人工审阅方法 |
+| `result` | pass / fail | fail 时不得完成 feature |
+| `observed_output` | string/table | 记录计数、路径或分类结论 |
+| `reviewer` | stable process label | 不记录个人敏感信息 |
+
+每个删除目标另有五项门、删除前零入链和最终处置的独立记录；全局汇总不能代替逐文件
+证明。

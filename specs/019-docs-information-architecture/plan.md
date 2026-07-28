@@ -22,9 +22,9 @@ Bash 5.2、Node.js 24 标准库、ripgrep 15 与 Git 2.53
 
 **Storage**: Git 跟踪的文本文件
 
-**Testing**: 确定性文档契约检查、全仓本地链接与 GitHub 风格锚点检查、导航图可达性、
-固定 Q1–Q8 检索映射、`git diff --check`、独立人工分类复核；最终确认 Go 全量测试基线
-未受影响
+**Testing**: `node docs/validation/check-docs.mjs` 确定性检查元数据、标题、全仓本地链接与
+GitHub 风格锚点、导航图、迁移页和固定 Q1–Q8；`git diff --check`、删除门证据、两次
+独立语义复核；最终确认 Go 全量测试基线未受影响
 
 **Target Platform**: GitHub 仓库阅读界面、本地 Markdown 阅读器和以仓库为知识源的
 AI agent
@@ -68,6 +68,7 @@ specs/019-docs-information-architecture/
 ├── research.md
 ├── data-model.md
 ├── quickstart.md
+├── validation-report.md
 ├── checklists/
 │   └── requirements.md
 ├── contracts/
@@ -83,6 +84,9 @@ specs/019-docs-information-architecture/
 docs/
 ├── README.md
 ├── CONTRIBUTING.md
+├── validation/
+│   ├── check-docs.mjs
+│   └── retrieval-fixtures.json
 ├── guides/
 │   ├── cli.md
 │   └── mcp-server.md
@@ -131,7 +135,11 @@ specs/012-doc2query-shadow/spec.md
 specs/014-temporal-answer-contract/spec.md
 specs/015-consolidation-bridging/{spec.md,plan.md,research.md}
 specs/016-longmemeval-crossbench/{spec.md,plan.md,research.md}
+specs/019-docs-information-architecture/{spec.md,plan.md}
 ```
+
+019 的两处链接仅在已批准设计移入 `docs/archive/designs/` 后更新到新路径；它们属于本
+feature 自身的规格维护，不改变需求或方案。
 
 **Structure Decision**: 采用“领域化现行层 + 单独 archive + 旧路径薄迁移页”。现行层按读者
 任务拆分，快速变化的分数和实验裁决各只有一个正本；archive 保存完整独有证据但退出默认
@@ -146,11 +154,12 @@ specs/016-longmemeval-crossbench/{spec.md,plan.md,research.md}
 3. 现有 21 个顶层文档的合并、迁移、归档与删除映射。
 4. 历史设计的独有证据保留门和八份被引用设计的迁移方式。
 5. 旧路径兼容策略与范围外只读链接的处理。
-6. 无新增依赖的链接、锚点、元数据、孤儿和两跳可达性验证。
+6. 位于 `docs/validation/`、无新增依赖的链接、锚点、元数据、孤儿和两跳可达性验证器。
 7. Q1–Q8 固定检索集的判定方式。
+8. 当前本地存储能力、降级边界和“表存在不等于功能出货”的事实基线。
+9. 当前结果、未实现提案、已收口实验三类维护决策 fixture。
 
-Phase 0 结束条件：所有决策均有 rationale 和 alternatives，且不存在
-`NEEDS CLARIFICATION`。
+Phase 0 结束条件：所有决策均有 rationale 和 alternatives，且不存在未决澄清项。
 
 ## Phase 1: Design & Contracts
 
@@ -164,20 +173,22 @@ Phase 0 结束条件：所有决策均有 rationale 和 alternatives，且不存
 - [document-metadata.md](./contracts/document-metadata.md)：front matter 必填字段、允许值、
   条件字段、中文正文和标题约束。
 - [navigation-and-retrieval.md](./contracts/navigation-and-retrieval.md)：门户分类、正本唯一性、
-  Q1–Q8 期望主题/结论、两跳可达与 archive 默认排除规则。
+  Q1–Q8 期望主题/结论、分数消费者回链、两跳可达与 archive 默认排除规则。
 - [archive-and-relocation.md](./contracts/archive-and-relocation.md)：独有证据保留门、删除条件、
   archive 首屏声明、迁移页最大内容和旧路径兼容清单。
 
 ### Validation guide
 
-[quickstart.md](./quickstart.md) 给出实施前基线、元数据与状态检查、全仓文件/锚点检查、导航
-图、Q1–Q8、过期事实扫描、变更隔离和最终回归命令及明确期望结果。
+[quickstart.md](./quickstart.md) 给出实施前基线、`docs/validation/check-docs.mjs` 命令、
+过期事实扫描、变更隔离和最终回归命令及明确期望结果。实施结束时将全部确定性输出、三份
+删除门证明、两次独立 Q1–Q8 复核和两次独立治理分类复核记录写入
+`validation-report.md`。
 
 ## Post-Design Constitution Check
 
 | 原则 | Phase 1 后判定 | 依据 |
 |---|---|---|
-| I. 本地优先、默认离线 | PASS | 三份契约和 quickstart 仅依赖本地仓库与标准工具 |
+| I. 本地优先、默认离线 | PASS | 三份契约、validator 和 quickstart 仅依赖本地仓库与标准工具 |
 | II. 引擎与适配层分离 | PASS | data model 只描述文档实体；无产品代码接口 |
 | III. 契约优先与 namespace 隔离 | PASS | 实施前已冻结文档对人和 AI 的可观察契约 |
 | IV. 评测回归门禁 | PASS / 不触发 | quickstart 只核对已存在结果与变更隔离，不产生新评测口径 |

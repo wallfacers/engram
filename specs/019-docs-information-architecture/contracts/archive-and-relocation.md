@@ -36,6 +36,10 @@
 
 实施时必须再次扫描入链；出现新的并行引用则停止删除并改为归档。
 
+每个实际删除目标必须在
+`specs/019-docs-information-architecture/validation-report.md` 单独记录五项门的证据、
+入链扫描命令和删除前的零入链输出。候选清单不是删除证明。
+
 ## 3. Archive 首屏契约
 
 每份 `archived` 文档必须：
@@ -91,6 +95,11 @@
 
 不得改变这些文件的需求、状态、数字或 verdict。
 
+本 feature 的批准设计归档后，还必须把
+`specs/019-docs-information-architecture/{spec.md,plan.md}` 中指向
+`docs/superpowers/specs/` 旧路径的链接更新为 archive 新路径；这两处是 019 自身工件
+维护，不计入上述既有 feature 链接白名单。
+
 ## 6. Relocation 契约
 
 以下旧路径必须保留：
@@ -110,8 +119,10 @@
 | `docs/remote-eval-box.md` | `docs/operations/evaluation/remote-gpu-runbook.md` |
 | `docs/results-matrix-2026-07-26.md` | `docs/evaluation/results.md` |
 
-每份文件只能包含 front matter、一个 H1、一段迁移说明和一个正本链接。目标必须是
-`stable` / `active`，不得指向 archive、proposed 或另一个 relocated 页面。
+每份文件只能包含 front matter、一个 H1、一段迁移说明和一个目标链接。目标必须是
+`stable`、`active` 或 `proposed`，不得指向 archive 或另一个 relocated 页面。只有
+`memory-freshness-and-retrieval-policy.md` 按批准映射指向 proposed backlog；其迁移
+说明必须明确“未实现提案”，且当前状态答案仍由 `product/capabilities.md` 提供。
 
 ## 7. 冲突与失败处理
 
@@ -119,3 +130,5 @@
 - 若并行修改与目标文档重叠，停止该文件的迁移，报告双方意图；不得覆盖或回滚。
 - 若范围外文档存在无法通过新路径或兼容入口修复的坏链，feature 阻塞并请求扩大权限。
 - 链接、锚点、孤儿、元数据或状态过滤任一门失败，都不能宣称迁移完成。
+- validator 输出、删除门证据、范围隔离和两次独立 Q1–Q8 复核必须写入
+  `validation-report.md`，不能只存在于终端滚动记录中。
