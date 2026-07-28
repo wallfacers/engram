@@ -20,8 +20,8 @@ matter、保持单一 H1、修复本任务引入的链接，并遵守
 
 **Purpose**: 固定实施基线和机器可读验收输入。
 
-- [ ] T001 在 `specs/019-docs-information-architecture/validation-report.md` 创建验收报告骨架，记录分支、`c86e47e` 基线、初始 `git status`、根 README 双语并行提交和 SC-001–SC-011 证据槽
-- [ ] T002 [P] 按 `specs/019-docs-information-architecture/contracts/navigation-and-retrieval.md` 的 Q1–Q8 原文、主题、路径、必需断言和禁止生命周期创建 `docs/validation/retrieval-fixtures.json`
+- [X] T001 在 `specs/019-docs-information-architecture/validation-report.md` 创建验收报告骨架，记录分支、`c86e47e` 基线、初始 `git status`、根 README 双语并行提交和 SC-001–SC-011 证据槽
+- [X] T002 [P] 按 `specs/019-docs-information-architecture/contracts/navigation-and-retrieval.md` 的 Q1–Q8 原文、主题、路径、必需断言和禁止生命周期创建 `docs/validation/retrieval-fixtures.json`
 
 ---
 
@@ -31,12 +31,12 @@ matter、保持单一 H1、修复本任务引入的链接，并遵守
 
 **⚠️ CRITICAL**: T008 完成前不得开始 user story 内容迁移。
 
-- [ ] T003 在 `docs/validation/check-docs.test.mjs` 先写 metadata/headings 的合规 fixture 与定向违规 fixture，运行测试并确认缺失/非法 front matter、重复 canonical topic、H1/层级/slug 规则处于 RED
-- [ ] T004 在 `docs/validation/check-docs.mjs` 实现受限 YAML front matter、生命周期/条件字段、全局主题唯一性、单一 H1、连续标题层级和 GitHub 风格 slug 检查，运行 T003 定向测试至 GREEN
-- [ ] T005 在 `docs/validation/check-docs.test.mjs` 追加 links/navigation 的合规 fixture 与坏文件、坏锚点、孤儿、超过两跳 fixture，确认原 metadata 组保持 GREEN 且新增组定向 RED
-- [ ] T006 在 `docs/validation/check-docs.mjs` 实现 tracked Markdown 本地文件/锚点扫描、入链/孤儿统计、从 `docs/README.md` 的 BFS 两跳检查和 changed-link 结构检查，运行 T005 定向测试至 GREEN
-- [ ] T007 在 `docs/validation/check-docs.test.mjs` 追加 retrieval/relocation 的合规 fixture 与错误 Q1–Q8、错误迁移映射/正文上限、archive 条件字段、分数消费者副本和存储能力缺失 fixture，确认前两组保持 GREEN 且新增组定向 RED
-- [ ] T008 在 `docs/validation/check-docs.mjs` 实现 `--metadata`、`--headings`、`--links`、`--navigation`、`--retrieval`、`--relocation` 和全量模式，读取 `docs/validation/retrieval-fixtures.json`，验证 12 个迁移映射、Q1–Q8、四个分数消费者和当前存储边界；运行全套测试至 GREEN，并把三组 RED/GREEN、Node 版本和测试数写入 `specs/019-docs-information-architecture/validation-report.md`
+- [X] T003 在 `docs/validation/check-docs.test.mjs` 先写 metadata/headings 的合规 fixture 与定向违规 fixture，运行测试并确认缺失/非法 front matter、重复 canonical topic、H1/层级/slug 规则处于 RED
+- [X] T004 在 `docs/validation/check-docs.mjs` 实现受限 YAML front matter、生命周期/条件字段、全局主题唯一性、单一 H1、连续标题层级和 GitHub 风格 slug 检查，运行 T003 定向测试至 GREEN
+- [X] T005 在 `docs/validation/check-docs.test.mjs` 追加 links/navigation 的合规 fixture 与坏文件、坏锚点、孤儿、超过两跳 fixture，确认原 metadata 组保持 GREEN 且新增组定向 RED
+- [X] T006 在 `docs/validation/check-docs.mjs` 实现 tracked Markdown 本地文件/锚点扫描、入链/孤儿统计、从 `docs/README.md` 的 BFS 两跳检查和 changed-link 结构检查，运行 T005 定向测试至 GREEN
+- [X] T007 在 `docs/validation/check-docs.test.mjs` 追加 retrieval/relocation 的合规 fixture 与错误 Q1–Q8、错误迁移映射/正文上限、archive 条件字段、分数消费者副本和存储能力缺失 fixture，确认前两组保持 GREEN 且新增组定向 RED
+- [X] T008 在 `docs/validation/check-docs.mjs` 实现 `--metadata`、`--headings`、`--links`、`--navigation`、`--retrieval`、`--relocation` 和全量模式，读取 `docs/validation/retrieval-fixtures.json`，验证 12 个迁移映射、Q1–Q8、四个分数消费者和当前存储边界；运行全套测试至 GREEN，并把三组 RED/GREEN、Node 版本和测试数写入 `specs/019-docs-information-architecture/validation-report.md`
 
 **Checkpoint**: validator 的三类失败与通过行为已分别锁定，可开始迁移。
 
