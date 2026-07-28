@@ -192,9 +192,14 @@ function resolveLink(root, from, target) {
   return resolved.split(path.sep).join('/');
 }
 
+function existsTarget(root, file) {
+  const fullPath = path.join(root, file);
+  return existsSync(fullPath);
+}
+
 function isFile(root, file) {
   const fullPath = path.join(root, file);
-  return existsSync(fullPath) && statSync(fullPath).isFile();
+  return existsTarget(root, file) && statSync(fullPath).isFile();
 }
 
 export function validateLinks({root, files}) {
@@ -204,7 +209,7 @@ export function validateLinks({root, files}) {
     const {body} = readDocument(root, file);
     for (const link of localLinks(body)) {
       const target = resolveLink(root, file, link.target);
-      if (!isFile(root, target)) {
+      if (!existsTarget(root, target)) {
         issues.push(issue(file, `missing file ${link.href}`));
         continue;
       }
@@ -375,18 +380,24 @@ export function validateCurrentCapabilities({root, file = 'docs/product/capabili
   return issues;
 }
 
-function trackedMarkdownFiles(root) {
-  return execFileSync('git', ['-C', root, 'ls-files', '--', 'docs'], {encoding: 'utf8'})
-    .split('\n').filter((file) => file.endsWith('.md'));
+export function parseTrackedMarkdownPaths(output) {
+  return output.split('\0').filter((file) => file.endsWith('.md'));
+}
+
+function trackedMarkdownFiles(root, {docsOnly = false} = {}) {
+  const args = ['-C', root, 'ls-files', '-z'];
+  if (docsOnly) args.push('--', 'docs');
+  return parseTrackedMarkdownPaths(execFileSync('git', args, {encoding: 'utf8'}));
 }
 
 export function runChecks({root = process.cwd(), modes = ['all']} = {}) {
-  const files = trackedMarkdownFiles(root);
+  const files = trackedMarkdownFiles(root, {docsOnly: true});
+  const allMarkdown = trackedMarkdownFiles(root);
   const selected = new Set(modes.includes('all') ? ['metadata', 'headings', 'links', 'navigation', 'retrieval', 'relocation'] : modes);
   const issues = [];
   if (selected.has('metadata')) issues.push(...validateMetadata({root, files, today: new Date().toISOString().slice(0, 10)}));
   if (selected.has('headings')) issues.push(...validateHeadings({root, files}));
-  if (selected.has('links')) issues.push(...validateLinks({root, files}));
+  if (selected.has('links')) issues.push(...validateLinks({root, files: allMarkdown}));
   if (selected.has('navigation')) issues.push(...validateNavigation({root, files}));
   if (selected.has('retrieval')) {
     const fixtures = JSON.parse(readFileSync(path.join(root, 'docs/validation/retrieval-fixtures.json'), 'utf8'));

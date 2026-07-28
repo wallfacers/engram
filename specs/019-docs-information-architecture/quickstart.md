@@ -44,7 +44,7 @@ git diff --name-only c86e47e -- \
 预期为空。
 
 `specs/` 中除 019 规格工件外，只能修改归档迁移契约列出的 007、009–012、014–016
-历史设计链接：
+历史设计链接，以及契约明确记录的两处全仓链接修复：
 
 ```bash
 git diff --name-only c86e47e -- specs \
@@ -79,13 +79,9 @@ git status --short docs
 node docs/validation/check-docs.mjs --metadata --headings
 ```
 
-检查器使用 Node.js 标准库读取 `git ls-files 'docs/*.md' 'docs/**/*.md'`，按
-[元数据契约](./contracts/document-metadata.md) 验证且不写入仓库，必须报告：
-
-```text
-PASS metadata: <document-count> docs, <topic-count> canonical topics
-PASS headings: <document-count> docs
-```
+检查器使用 Node.js 标准库读取 Git 已追踪的 `docs/` Markdown，按
+[元数据契约](./contracts/document-metadata.md) 验证且不写入仓库；成功时输出
+`Documentation validation passed.`。
 
 通过条件：
 
@@ -118,12 +114,7 @@ node docs/validation/check-docs.mjs --links --navigation
 文件解析相对路径，并按 GitHub 标题 slug 解析 `#fragment`。再以 `docs/README.md` 为根
 对 `docs/` 本地链接图执行 BFS。
 
-必须得到：
-
-```text
-PASS links: 0 missing files, 0 missing anchors
-PASS navigation: all current/proposed docs within 2 hops, 0 orphan docs
-```
+命令必须以 0 退出并输出 `Documentation validation passed.`。
 
 其中：
 
@@ -143,11 +134,7 @@ node docs/validation/check-docs.mjs --retrieval
 检查器从 front matter 构建只含 `stable` / `active` 的主题索引，读取
 `docs/validation/retrieval-fixtures.json`，逐项核对
 [固定检索集](./contracts/navigation-and-retrieval.md#5-fixed-retrieval-verification-set)。
-确定性检查必须输出：
-
-```text
-PASS retrieval fixtures: Q1-Q8 canonical paths and required assertions
-```
+确定性检查必须以 0 退出并输出 `Documentation validation passed.`。
 
 重点确认：
 
@@ -204,7 +191,7 @@ rg -n \
 
 ```bash
 rg -l '404/500|430/500|80\\.80%|86\\.00%' \
-  docs -g '*.md' -g '!evaluation/results.md' -g '!*archive*'
+  docs -g '*.md' -g '!docs/evaluation/results.md' -g '!docs/archive/**'
 ```
 
 预期为空；其他现行文档只链接 `docs/evaluation/results.md`。

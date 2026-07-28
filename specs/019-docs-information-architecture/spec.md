@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "重新整理 docs 下的文档，合并重复内容，明确探索方向，形成方便 AI 检索和用户查看的企业级文档规范；已确认的设计见 `docs/superpowers/specs/2026-07-28-documentation-information-architecture-design.md`。"
+**Input**: User description: "重新整理 docs 下的文档，合并重复内容，明确探索方向，形成方便 AI 检索和用户查看的企业级文档规范；已确认的设计见 `docs/archive/designs/2026-07-28-documentation-information-architecture-design.md`。"
 
 ## User Scenarios & Testing *(mandatory)*
 

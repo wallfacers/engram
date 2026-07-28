@@ -95,6 +95,13 @@
 
 不得改变这些文件的需求、状态、数字或 verdict。
 
+全仓链接检查在实施中还识别出两个原有 Markdown 缺陷，因此允许以下最小修复；二者不改变
+需求、状态、数字或 verdict：
+
+- `specs/009-retrieval-attribution-gate/research.md`：把已删除的 temporal 历史页链接改为
+  对应 archive；
+- `specs/002-mcp-server/tasks.md`：把误写成链接的并行标记文字改为普通文本。
+
 本 feature 的批准设计归档后，还必须把
 `specs/019-docs-information-architecture/{spec.md,plan.md}` 中指向
 `docs/superpowers/specs/` 旧路径的链接更新为 archive 新路径；这两处是 019 自身工件

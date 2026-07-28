@@ -1,6 +1,6 @@
 # Phase 0 · Research：LongMemEval 子集先行
 
-**日期**: 2026-07-26 · **上游事实源**: [设计文档](../../docs/superpowers/specs/2026-07-26-longmemeval-subset-design.md)
+**日期**: 2026-07-26 · **上游事实源**: [归档设计](../../docs/archive/designs/2026-07-26-longmemeval-subset-design.md)
 
 所有结论均以**实读代码或实测数据**为依据，不采信推断。
 

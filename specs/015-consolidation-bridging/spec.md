@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: 设计文档 [docs/superpowers/specs/2026-07-25-offline-consolidation-bridging-design.md](../../docs/superpowers/specs/2026-07-25-offline-consolidation-bridging-design.md)（唯一事实来源，本 spec 不引入新决策）
+**Input**: [归档设计](../../docs/archive/designs/2026-07-25-offline-consolidation-bridging-design.md)（唯一事实来源，本 spec 不引入新决策）
 
 ## 背景与问题
 

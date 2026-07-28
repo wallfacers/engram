@@ -1,43 +1,68 @@
-# engram docs 索引
+---
+title: Engram 文档门户
+summary: 本文按任务导航 engram 的当前文档与历史证据；不复制会变化的命令、分数或实验台账。
+status: stable
+audience: [users, maintainers, agents]
+owner: engram-maintainers
+last_reviewed: 2026-07-28
+canonical_for: [docs-portal]
+tags: [documentation, portal, navigation]
+---
 
-本目录是 engram 的**叙事性文档**(战略、背景、竞品、适配器用法、未决问题记录)。
-逐特性的规格/实现细节在 [`../specs/NNN-*/`](../specs);工程约束正本是
-[`../.specify/memory/constitution.md`](../.specify/memory/constitution.md);
-一句话知识地图见根 [`../CLAUDE.md`](../CLAUDE.md) 的 Knowledge Map 一节。
+# Engram 文档门户
 
-> 状态语义:**活跃**=持续维护的决策/参考正本 · **已交付**=对应 spec 已实现的用法文档 ·
-> **待实现**=已确认但尚未立项/实现的问题记录 · **存档**=一次性分析,结论已被吸收、不再更新。
+从这里按任务进入唯一当前正本。`stable` 与 `active` 是当前答案；`proposed` 只描述未实现工作；`archived` 只作历史证据；`relocated` 只保留旧路径兼容，均不应被当作当前能力。
 
-## 索引
+## 常见问题的首个正本
 
-| 文档 | 状态 | 目标 | 正本/关联 |
-|---|---|---|---|
-| [results-matrix-2026-07-26.md](./results-matrix-2026-07-26.md) | **活跃(分数正本)** | **评测结果总表**:每个数字都是(数据集 × 答题模型 × 判题模型 × 配方)四元组;含三系统汇总、轴效应、消融噪声地板、MemOS 同栈对跑 | **对外引用任何分数一律以本表为准**;跨行比较只在恰好一个轴不同时有效 |
-| [capability-and-product-north-star.md](./capability-and-product-north-star.md) | 活跃 | **北极星总纲**:能力认知 + 诚实水位(**85.71%** 同栈 / 89.03% 强答题模型)+ 拉平/论文/SaaS 习惯记忆方向 | 一处看全;分数以 results-matrix 为准;技术 backlog 链回 memory-strategy |
-| [memory-strategy.md](./memory-strategy.md) | 活跃 | 产品方向 + 论文线 + 涨点 backlog(生物启发检索 P0/P1/P2) | **技术/战略 backlog 正本**;数字/SaaS 演进见北极星总纲 |
-| [locomo-score-levers.md](./locomo-score-levers.md) | 活跃 | LoCoMo 跑分杠杆实验台账(008 US1-US4 + 009 归因诊断 + bge-large 端到端 GO 候选 +1.42pp) | 杠杆 verdict 正本 |
-| [locomo-e2e-eval-reproduction.md](./locomo-e2e-eval-reproduction.md) | 活跃 | LoCoMo 端到端答题评测可复现 runbook:canonical recipe(四必选 flag)+ 三后端栈 + 9 条踩坑史 | e2e run「怎么跑对」正本;与 remote-eval-box 互补 |
-| [benchmark-expansion-plan.md](./benchmark-expansion-plan.md) | 活跃(**LongMemEval 部分已交付**) | 基准扩展计划 + 竞品数据集盘点/优先级。LongMemEval-S(cleaned)**分层抽样 100 题**已跑出基线(spec 016);**全量 500 仍未跑**;PersonaMem/PreFEval/HaluMem 待启 | 分数正本在 results-matrix;竞品自报分在 competitive-benchmarks |
-| [temporal-t4-design.md](./temporal-t4-design.md) | 活跃 | temporal 57 错题归因 + T-4 第4路时间融合 contract-first 设计 | temporal 诊断/T-4 正本;工程 GO / 出货 NO-GO |
-| [locomo-single-multihop-failure-diagnosis.md](./locomo-single-multihop-failure-diagnosis.md) | 活跃 | single-hop 112 / multi-hop 40 错题归因(检索排序为主,multi-hop 非推理瓶颈) | single/multi-hop 诊断正本;29 道口径题须与能力错误分开 |
-| [saas-habit-memory-design.md](./saas-habit-memory-design.md) | 活跃(设计稿) | SaaS「用户操作习惯记忆」MVP 产品/技术设计(事件摄入·习惯抽取·条件召回·车机走查) | SaaS 方向设计正本;新能力全标未立项 |
-| [paper-outline-eval-reliability.md](./paper-outline-eval-reliability.md) | 活跃(骨架) | 论文骨架:长期对话记忆评测可靠性审计(噪声分解/选择偏差/coverage≠answer) | 论文线正本;证据分级 + 必补实验门 |
-| [background-extraction-from-workhorse-agent.md](./background-extraction-from-workhorse-agent.md) | 活跃 | 为何抽离、抽离什么、对外产品形态 | 来历/边界正本 |
-| [memory-architecture.md](./memory-architecture.md) | 活跃 | 记忆提取时机、写入/检索/curation 流程、同步异步耗时与 SQLite 存储图 | 运行架构总览；精确 feature 契约仍以对应 spec 为准 |
-| [competitive-benchmarks.md](./competitive-benchmarks.md) | 活跃 | 为涨点锚定外部竞品目标 + 口径对齐 | MemOS 机制拆解正本在 memory-strategy 附 |
-| [memos-inhouse-locomo-repro.md](./memos-inhouse-locomo-repro.md) | **已出分** | MemOS 自家代码跑 engram 同栈 = **82.40%**,engram 同口径 85.71%(**领先 3.31pp**);leaderboard 88.83 中 **6.43pp 是 regime 伪影**。方法/踩坑/口径 caveat 正本 | 已回填 competitive-benchmarks §5②/§5④、north-star §2、memory-strategy、paper-outline `E-MEMOSPAR`;汇总表见 results-matrix §5 |
-| [local-model-eval-setup.md](./local-model-eval-setup.md) | 活跃(计划稿) | 自托管 70B + 本地 embedding 的离线评测栈 | embedding 已在用;LLM 侧待部署 |
-| [memory-freshness-and-retrieval-policy.md](./memory-freshness-and-retrieval-policy.md) | 待实现 | 记忆新鲜度/状态一致性/按需召回问题记录 | 须独立立项;**非当前能力** |
-| [synthius-mem-analysis.md](./synthius-mem-analysis.md) | 存档 | Synthius-Mem 抄什么/不抄什么 + 认知域文献核查 | P0 已落地 spec 006;backlog 正本在 memory-strategy 附二 |
-| [cli.md](./cli.md) | 已交付 | engram CLI 适配器用法 | spec 004-cli-ai-first |
-| [mcp-server.md](./mcp-server.md) | 已交付 | MCP stdio server 构建与接入 | spec 002-mcp-server |
-| [superpowers/specs/](./superpowers/specs) | 存档 | brainstorm 设计定稿(003/004/007) | 被对应 spec.md 引用,勿删 |
+| 问题 | 首个正本 | 当前结论 |
+|---|---|---|
+| 如何配置 MCP server？ | [MCP Server 配置指南](guides/mcp-server.md) | stable 使用指南 |
+| CLI 支持哪些命令？ | [CLI 使用指南](guides/cli.md) | CLI 已交付，命令以本地帮助输出为准 |
+| 何时抽取记忆，curation 如何运行？ | [记忆系统架构](architecture/memory-system.md) | 仅显式 ingest 抽取；curation 为 shipped-opt-in |
+| 当前 LoCoMo 与 LongMemEval-S 结果？ | [当前评测结果](evaluation/results.md) | LongMemEval-S 为 full 500；每行带完整评测口径 |
+| Feature 013 是否出货？ | [实验裁决索引](evaluation/experiment-verdicts.md) | closed-no-go，不在当前路线 |
+| 新鲜度与状态一致性是否实现？ | [当前能力边界](product/capabilities.md) | 尚未实现，见 proposed backlog |
+| SaaS 习惯记忆是否为当前能力？ | [当前能力边界](product/capabilities.md) | 未立项、未实现，见 proposed exploration |
+| 当前论文方向？ | [论文方向](research/paper-direction.md) | 负结果史、共同失败机理与低成本止损 |
 
-## 正本约定(避免重复维护)
+## 使用指南
 
-- **涨点 backlog / 生物启发检索优先级** → 只在 `memory-strategy.md` 附二维护;
-  其他文档引用不重复。
-- **竞品机制拆解(MemOS 等)** → 正本在 `memory-strategy.md` 附;
-  `competitive-benchmarks.md` 只记分数与差距。
-- **单篇论文分析(Synthius 等)** → 结论若可执行,落到 spec 或 memory-strategy backlog 后,
-  原分析文档转"存档"、不再更新。
+- [CLI 使用指南](guides/cli.md)：安装、命令、离线与模型边界。
+- [MCP Server 配置指南](guides/mcp-server.md)：MCP 配置、工具、namespace 与 curation。
+
+## 架构
+
+- [记忆系统架构](architecture/memory-system.md)：写入、抽取、存储、检索和 curation 边界。
+- [Provenance 架构](architecture/provenance.md)：来源、事件与宿主边界。
+
+## 评测与运维
+
+- [当前评测结果](evaluation/results.md)：唯一当前结果矩阵。
+- [实验裁决索引](evaluation/experiment-verdicts.md)：已收口实验与 Feature 013 verdict。
+- [竞品与基准口径](evaluation/competitors.md)：同栈复现与厂商自报的比较纪律。
+- [MemOS LoCoMo 同栈复现报告](evaluation/reports/memos-locomo-reproduction.md)：可追溯的同栈证据。
+- [LoCoMo 评测运行手册](operations/evaluation/locomo-runbook.md)：recipe、验证和常见故障。
+- [远端 GPU 评测运维](operations/evaluation/remote-gpu-runbook.md)：机器生命周期、资产和停机纪律。
+- [基准扩展路线](evaluation/benchmark-roadmap.md)：未实现的 proposed 评测方向。
+
+## 产品与研究
+
+- [当前能力边界](product/capabilities.md)：已交付和未实现能力的唯一当前答案。
+- [产品路线图](product/roadmap.md)：当前方向与明确排除项。
+- [记忆新鲜度与状态一致性 Backlog](product/backlog/memory-freshness.md)：未实现的 proposed backlog。
+- [SaaS 习惯记忆探索](product/explorations/habit-memory.md)：未立项、未实现的 proposed 探索。
+- [论文方向](research/paper-direction.md)：评测可靠性研究方向。
+
+## AI 检索协议
+
+1. 先用 `canonical_for` 定位主题，再只接受 `stable` 或 `active` 文档作为当前答案。
+2. 对计划问题才读取 `proposed`，并明确“未实现”；对历史原因才读取 `archived`，并说明适用时间与 outcome。
+3. 将 `relocated` 视为路由，不从其正文推断功能状态。
+4. 当前能力、命令、路线、裁决和完整分数以各自正本为准；需要依据时再沿其 evidence 链接进入归档。
+5. Q6、Q7 的 proposed 页面是次级说明，当前答案唯一来自[当前能力边界](product/capabilities.md)。
+
+## 历史与维护
+
+- [历史归档索引](archive/README.md)：决策、评测、计划、研究与历史设计。
+- [文档维护规范](CONTRIBUTING.md)：新增、更新、引用、归档、删除与人工复核规则。

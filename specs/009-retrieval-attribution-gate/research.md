@@ -54,7 +54,7 @@ grounding 基于对 `cmd/locomo-bench`(evidence.go/coverage.go/chunks.go/journal
 
 - **Decision**:①纯 Go 契约门(`CGO_ENABLED=0` 构建 + parity golden 关时逐字节 + 新排序单测);②离线归因门(US1 trace 复跑,Q3 象限 gold 平均排名上升,无云/付费杠杆);③端到端决胜门(同机配对 hybrid vs hybrid+US2,唯一变量=排序机制,先目标类后全量 1540,McNemar above-noise + overall 及任一非目标类不显著回退)。
 - **反证须超越**:legacy temporal Δ−0.3pp/p=1.000(003 eval-log:149)、008 US1 reranker 端到端 −0.06pp/p=1.0。coverage 增益不作 GO 依据。
-- **Rationale**:宪法 IV + 死规则;与 [temporal-t4-design.md](../../docs/temporal-t4-design.md) 三道门同构,统一 engram 涨点判定纪律。
+- **Rationale**:宪法 IV + 死规则;与[Temporal T-4 历史分析](../../docs/archive/evaluation/temporal-t4-analysis-2026-07.md)的三道门同构,统一 engram 涨点判定纪律。
 
 ## 未决 / 显式外部依赖
 

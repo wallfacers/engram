@@ -45,6 +45,16 @@ async function writeDoc(root, relativePath, options = {}) {
   return relativePath;
 }
 
+test('tracked Markdown parser preserves Unicode paths and includes non-docs Markdown links', () => {
+  const paths = validator.parseTrackedMarkdownPaths(
+    'docs/archive/designs/2026-07-21-judge-口径-alignment-design.md\0specs/009/research.md\0memory/retriever.go\0',
+  );
+  assert.deepEqual(paths, [
+    'docs/archive/designs/2026-07-21-judge-口径-alignment-design.md',
+    'specs/009/research.md',
+  ]);
+});
+
 test('metadata accepts a complete current document set with unique topics', async (t) => {
   const root = await fixtureRoot();
   t.after(() => rm(root, {recursive: true, force: true}));
@@ -103,6 +113,18 @@ test('links accept valid local targets and report missing files and anchors', as
   const issues = validator.validateLinks({root, files: [...valid, invalid]});
   assert.ok(issues.some((issue) => issue.includes('missing file')));
   assert.ok(issues.some((issue) => issue.includes('missing anchor')));
+});
+
+test('links accept tracked documentation directories', async (t) => {
+  const root = await fixtureRoot();
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const files = [
+    await writeDoc(root, 'docs/README.md', {
+      title: '文档门户', canonicalFor: '[docs-portal]', body: '# 文档门户\n\n[契约目录](contracts/)\n',
+    }),
+    await writeDoc(root, 'docs/contracts/example.md', {title: '契约示例', canonicalFor: '[contract-example]'}),
+  ];
+  assert.deepEqual(validator.validateLinks({root, files}), []);
 });
 
 test('navigation requires every current document to be reachable within two hops and non-orphaned', async (t) => {

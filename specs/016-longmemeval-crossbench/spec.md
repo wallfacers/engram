@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: 设计文档 [`docs/superpowers/specs/2026-07-26-longmemeval-subset-design.md`](../../docs/superpowers/specs/2026-07-26-longmemeval-subset-design.md)（brainstorming 逐段确认，唯一事实来源）
+**Input**: [归档设计](../../docs/archive/designs/2026-07-26-longmemeval-subset-design.md)（brainstorming 逐段确认，唯一事实来源）
 
 ## 背景与目的
 

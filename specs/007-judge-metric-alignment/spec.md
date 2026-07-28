@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "把 engram 的 LoCoMo LLM-judge 宽松度逐条对齐 Mem0,剥离 65.4% vs 88.83%(同 1540 分母)差距里的 judge 严格度伪影。纯 cmd/locomo-bench 改动,引擎零改。默认 off 的 flag + fingerprint 口径隔离 + anti-放水 golden 夹具。只做免费部分,不量化新分,宪法 IV 声明新基线。" 设计定稿:[docs/superpowers/specs/2026-07-21-judge-口径-alignment-design.md](../../docs/superpowers/specs/2026-07-21-judge-口径-alignment-design.md)。
+**Input**: User description: "把 engram 的 LoCoMo LLM-judge 宽松度逐条对齐 Mem0,剥离 65.4% vs 88.83%(同 1540 分母)差距里的 judge 严格度伪影。纯 cmd/locomo-bench 改动,引擎零改。默认 off 的 flag + fingerprint 口径隔离 + anti-放水 golden 夹具。只做免费部分,不量化新分,宪法 IV 声明新基线。" 设计定稿:[归档设计](../../docs/archive/designs/2026-07-21-judge-口径-alignment-design.md)。
 
 ## 背景
 

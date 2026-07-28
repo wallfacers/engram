@@ -4,7 +4,7 @@
 **Spec**: [spec.md](./spec.md)
 
 **Input**: [Feature specification](./spec.md) and the approved
-[documentation architecture design](../../docs/superpowers/specs/2026-07-28-documentation-information-architecture-design.md)
+[documentation architecture design](../../docs/archive/designs/2026-07-28-documentation-information-architecture-design.md)
 
 ## Summary
 
