@@ -99,6 +99,28 @@
 > (§5④)。**"~23pp 差距"是两端各错一次叠出来的,不是真差距。**
 > **Mem0 的 92.5 尚未做同栈剥离,对 Mem0 的差距仍是未知数,不能套用 MemOS 的结论。**
 
+### 📌 engram 的 LongMemEval 分数(2026-07-28,**已测,勿重跑**)
+
+LongMemEval-S (cleaned) **全量 500** 已跑完两个 answerer 档,正本
+[`specs/016-longmemeval-crossbench/verdict.md`](../specs/016-longmemeval-crossbench/verdict.md)
+US4/US5/US6:
+
+| 答题器 | 总分 | per-rep | 性质 |
+|---|---:|---|---|
+| **Qwen3.6-35B**(本地 vllm) | **80.80%** | [79.0, 78.4, 80.4] | **local-first 基线**(宪法 I,默认栈) |
+| **deepseek-v4-pro**(API) | **86.00%** | [86.0, 85.4, 86.2] | 强 answerer 档(付费 API,非默认栈) |
+
+**Δ = +5.20pp**,配对 McNemar χ²=8.45 p=**0.0049** SIGNIFICANT。涨幅集中在 Qwen
+最弱的 preference(+33pp)/ temporal(+8.3)/ multi-session(+5.3)。
+
+- **检索侧/上下文预算已探尽**(US5):gold rank 中位 = 2、bracket top-k 15/30/40/50 全 ns。
+  瓶颈是 answer-side(87.5%),换更强 answerer 是唯一有效杠杆。
+- **与竞品不可直接比**:MemOS 论文 89.20 / Mem0 blog 94.4 是 GPT-4o(-mini)口径 +
+  自报 judge;engram 86% 是 v4-pro + mem0-aligned judge。但同 answerer 量级下
+  engram+v4-pro 86% vs MemOS 论文 89.2,差距在 judge 宽松度 + 数据版本(cleaned vs 旧版)。
+- **LoCoMo"强 answerer 反伤 opinion"不得外推到 LongMemEval preference**(LCoMo −5pp vs
+  LME +33pp,题型本质不同)。
+
 **⚠️ 两处未证实**:(1) Mem0 自家 `memory-benchmarks` 仓是未初始化的 git submodule(空),无法读其源码核对——上表 Mem0 列按"OmniMemEval 驱动 Mem0 + Mem0 论文惯例"推断,**未逐行验证**;(2) engram 的 judge 是否和 gpt-4o-mini 一样宽松未核——若 engram judge 更严,部分差距是 judge 口径伪影。
 
 ---

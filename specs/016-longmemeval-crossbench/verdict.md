@@ -670,3 +670,100 @@ LoCoMo 调的 `top-k 30 / chunk-quota 12` 在这个干扰密度下还是不是�
 缺失 run-3 判定的题退化为 2-rep 多数票(需 2/2 全对),系统性压低多数票准确率。
 **纪律:多数票分析必须在所有 rep 的 results-hybrid.jsonl 行数都到齐(=题数)后才跑**;
 `bash -n` 对空文件/截断照过、md5 核对抓不到语义不完整——行数齐是必要前置。
+
+---
+
+## US6 · answerer-parity:v4-pro 公平对照 = 86.00%(SIGNIFICANT,2026-07-28)
+
+**动机**:US5 证死检索侧/上下文预算(gold rank 2、bracket 全 ns),瓶颈是 answer-side
+(87.5%)。唯一能动的是答题器强度。016 arm C 曾跑过 v4-pro(S-100, 85/100),但那是
+**v4-pro+锚点 vs Qwen 无锚点**的不公平对照,据此一度误判"v4-pro 不帮"。本轮做**首次
+公平对照**:同 store、同检索、同配方、同 judge、**两边都带 bb99d58 锚点**,唯一变量
+= 答题器 Qwen3.6-35B → deepseek-v4-pro。
+
+### 结果(3-rep 多数票)
+
+| | 多数票 | per-rep | 备注 |
+|---|---:|---|---|
+| Qwen3.6-35B(US4) | 80.80% | [78.4, 79.0, 80.4] | 本地 vllm,免费 |
+| **deepseek-v4-pro** | **86.00%** | **[86.0, 85.4, 86.2]** | API,~¥5 |
+
+**Δ = +5.20pp**,配对 McNemar b=27 c=53 net=+26,**χ²=8.45 p=0.0049 → SIGNIFICANT**
+(远超 3.841 阈值)。v4-pro 不仅更准,per-rep 带也更紧(±0.4 vs Qwen ±1.0)——更强还更稳。
+
+| 题型 | Qwen | v4-pro | Δ |
+|---|---:|---:|---:|
+| single-session-preference | 53.3% | **86.7%** | **+33.3** |
+| temporal-reasoning | 78.2% | 86.5% | +8.3 |
+| multi-session | 74.4% | 79.7% | +5.3 |
+| knowledge-update | 80.8% | 80.8% | 0 |
+| single-session-assistant | 92.9% | 92.9% | 0 |
+| single-session-user | 100.0% | 97.1% | −2.9 |
+
+涨幅全集中在 Qwen 最弱的三型(preference/temporal/multi-session)。**preference +33pp
+尤其决定性**:它从最差(53.3%,拖总分)跃到近顶(86.7%)。
+
+### 与 LoCoMo 的关键对照(推翻一个外推)
+
+LoCoMo 上换更强 answerer(deepseek-v4-pro)**反伤 open-domain −5pp**(主观推断题,
+强模型"答得不一样而非更好")。LongMemEval 上 v4-pro 对 preference **反涨 +33pp**。
+**两个数据集的"preference/open-domain"题型不是一回事**:LongMemEval preference 是
+"从上下文综合用户**陈述过**的偏好"(检索+综合,推理题);LoCoMo open-domain 是"推断
+用户**没明说**的特质/主观判断"。⇒ **LoCoMo 的"强 answerer 救不动 opinion"结论,
+不得外推到 LongMemEval 的 preference。**
+
+### 成本(实测 usage,非牌价推算)
+
+3-rep × 500 = 1500 次答题 + 1500 次判题。DeepSeek prompt 缓存命中率极高(answer
+in 实测仅 175,893 tok / 1500 次 = 117/次 miss,即 **~96% 命中**,rep2/3 的上下文前缀
+全缓存)。按官方价(v4-pro: in miss ¥3/M、in hit ¥0.025/M、out ¥6/M;v4-flash judge):
+
+- answer:¥4.30(其中 out 0.687M × ¥6 = ¥4.12 占绝大头)
+- judge:¥0.40
+- **合计 ≈ ¥4.70**($0.66),低于 US5 预估的 ¥9.5(缓存比预期更有效)
+
+**思考链确认关闭**:bench 不设 `ThinkingEnabled` → 非 thinking 模式,out/call=455
+(与 016 arm C 的 439 一致);若开 thinking,out 会膨胀、成本翻数倍。
+
+### 性质声明(诚实)
+
+这是**答题器强度杠杆,不是 engram 能力涨点**。引擎/检索/上下文一字未改
+(`git diff -- memory embedding provider store internal` 为空)。86.00% 依赖**付费 API
+v4-pro**,不满足宪法 I 的 local-first/offline-by-default——它是**对外发布/论文的可比性
+数字**,不是 engram 默认出货栈的能力。engram 的 local-first 基线仍是 Qwen 的 80.80%
+(US4),v4-pro 的 86.00% 是"换更强 answerer 后的天花板探针"。
+
+**对标**:engram+v4-pro 86.00% vs MemOS 论文 77.8(GPT-4o-mini)→ 领先 8.2pp;
+vs Mem0 blog 94.4(GPT-4o + 自评)→ 仍不可直接比(answerer/judge 口径不同)。LongMemEval
+独立基线声明:**local 栈 80.80% / 强 answerer 栈 86.00%**,两个数分开报、不混用。
+
+---
+
+## US7 · v4-pro + top-k 50 —— 完美 null,top-k 对任何 answerer 都不是杠杆(2026-07-28)
+
+US5 的 Qwen bracket(15/30/40/50)全 ns,但留了一个口子:更强的模型能否更好利用
+更多上下文?测 **v4-pro + k50**(同 store/检索/judge,唯一变量 vs v4-pro k30 = top-k 30→50)。
+
+**结果:v4-pro + k50 = 86.00% = v4-pro k30 的 86.00%,McNemar χ²=0.00 p=1.0
+net=0(b=13 c=13)——完美 null。** 更多上下文对强模型也零效果。
+
+| answerer | k30 | k50 | Δ |
+|---|---:|---:|---|
+| Qwen3.6-35B | 78.80% | 80.40% | +1.6 (ns) |
+| **deepseek-v4-pro** | **86.00%** | **86.00%** | **0.0 (χ²=0)** |
+
+⇒ **top-k 在 15–50 区间对答分无可测影响,且不随 answerer 强度改变。** gold 在 rank 2
+这个事实是 answerer-无关的:多看 rank 31–50 的干扰项,v4-pro 也用不上。
+**86.00% 是 v4-pro 在 LongMemEval 的天花板;top-k 这条路对任何 answerer 都已证死,
+勿重跑。**
+
+**精确成本(脚本 `deepseek-cost.py` 从 main 3-rep 实测 usage × 官方 DeepSeek 价)**:
+
+| 角色 | calls | in_miss | out | 费用 |
+|---|---:|---:|---:|---:|
+| answer(v4-pro) | 1507 | 237,410 | 694,207 | ¥4.88 |
+| judge(v4-flash) | 1500 | 140,815 | 161,907 | ¥0.46 |
+| **合计** | | | | **¥5.34 ($0.75)** |
+
+out-token 是大头(¥4.17 = 78%);in 因 DeepSeek 缓存(rep2/3 命中,实测 in_miss 仅
+157 tok/次、命中率 ~97%)几乎不花钱。思考链确认关(out/call=471,与 k30 的 455 一致)。
