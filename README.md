@@ -218,24 +218,80 @@ your installed version for its exact startup contract.
 
 ## Benchmarks
 
-Benchmark numbers depend on the dataset, answer model, judge, retrieval recipe,
-and aggregation method. The table below shows the current local-stack results;
-it is evidence for a fixed evaluation setup, not a universal leaderboard.
+> **Read before comparing:** every number is a function of
+> **dataset × answerer × judge × recipe**, not simply "engram's score".
+> Cross-row comparison is valid only when the other axes are controlled.
+> 🔬 means measured by this project; 📣 means vendor self-report, not reproduced.
+> The [current evaluation results](docs/evaluation/results.md) are the source of
+> truth for scores and comparison limits.
 
-| Dataset | Samples | Answer model | Score |
-|---|---:|---|---:|
-| LoCoMo, categories 1–4 | 1,540 | Qwen3.6-35B-A3B-FP8 | **85.71%** |
-| LongMemEval-S, cleaned | 500 | Qwen3.6-35B-A3B-FP8 | **80.80%** |
+**Unified conditions:** `bge-large-en-v1.5` 1024d embedding from a local
+sidecar; engram uses the canonical hybrid recipe
+(`--top-k 30 --chunk-quota 12 --force-answer`, no reranker); judging uses the
+mem0-aligned prompt.
 
-In the controlled LoCoMo comparison with the same answerer, embedding model,
-judge prompt, and judge model, engram scored **85.71%** and MemOS scored
-**82.40%** (+3.31 percentage points). Retrieval and context budgets still
-differed, so this result should not be generalized beyond that stack.
+### Same-stack measurements
 
-The [current evaluation results](docs/evaluation/results.md) are the only
-source of truth for scores and comparison limits. Use the
-[LoCoMo runbook](docs/operations/evaluation/locomo-runbook.md) to reproduce the
-recipe.
+This is the only directly comparable table: same machine, Qwen answerer,
+bge-large embedding, judge prompt, and judge model. Competitors run their own
+code without modifications.
+
+| Dataset (n) | Framework | Answerer | Judge | Score |
+|---|---|---|---|---:|
+| **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.71%** |
+| LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-pro | 83.77% |
+| LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
+| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | 82.40% |
+| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-pro | 80.26% |
+| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **80.80%** |
+| LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
+
+### Best reported results across different stacks
+
+These numbers are useful context, but they are **not directly comparable**:
+
+| Dataset | engram 🔬 | MemOS 📣 | Mem0 📣 |
+|---|---:|---:|---:|
+| LoCoMo | **89.03%** (v4-pro, n=1540) | 88.83% | 92.5% |
+| LongMemEval | **86.00%** (v4-pro, S-cleaned 500) | 89.20% | 94.4% |
+
+### LoCoMo by category
+
+Results below use all 1,540 category 1–4 questions,
+`judge=deepseek-v4-flash`, and majority voting across three answer runs.
+
+| Category | n | engram (Qwen) | engram (v4-pro) | MemOS, same stack | Δ engram−MemOS |
+|---|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18pp** |
+| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77pp |
+| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62pp |
+| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24pp** |
+| **Overall** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31pp** |
+
+The category breakdown matters more than one aggregate number. MemOS's
+tree/graph organization leads on multi-hop by 1.77 points, while engram leads
+by more than 6 points on single-hop and open-domain. A stronger engram answerer
+adds 7.48 points on temporal and 6.26 on open-domain, but only 1.06 on
+multi-hop—evidence that multi-hop remains retrieval-bound while the other two
+categories are more answerer-bound.
+
+### Three controlled deltas
+
+| Axis | Controlled change | Net effect | Interpretation |
+|---|---|---:|---|
+| **Framework** | engram − MemOS, LoCoMo 1540 | **+3.31pp** (v4-flash judge) / **+3.51pp** (v4-pro judge) | Direction holds under both judges |
+| **Answerer** | Qwen → v4-pro | **+3.32pp** (LoCoMo) / **+5.20pp** (LongMemEval-S, p=0.0049) | Stronger answering primarily improves temporal and open-domain |
+| **Judge** | v4-flash → v4-pro | **−2 to −3pp** | Additive shift; the framework delta keeps the same direction |
+
+Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
+that are not present in the open-source SDK, and a `top_200` retrieval budget.
+They cannot be reproduced under the same stack, so the true controlled gap to
+Mem0 remains **unknown**. MemOS's self-reported 88.83% becomes 82.40% in the
+controlled stack, a −6.43 point regime difference driven by answerer and judge
+conditions.
+
+Use the [LoCoMo runbook](docs/operations/evaluation/locomo-runbook.md) to
+reproduce the canonical recipe.
 
 ## Documentation
 

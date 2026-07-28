@@ -209,19 +209,73 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 ## 基准评测
 
-评测数字取决于数据集、答题模型、判题模型、检索配方和聚合方式。下表仅展示当前本地栈
-结果，是固定评测条件下的证据，不是通用排行榜。
+> **读表前必读：**每一个数字都是
+> **数据集 × 答题模型 × 判题模型 × 配方**的函数，不是简单的“engram 得分”。
+> 只有其他轴受到控制时，跨行比较才有效。🔬 表示本项目实测；📣 表示厂商自报、尚未复现。
+> [当前评测结果](docs/evaluation/results.md)是分数与比较边界的唯一正本。
 
-| 数据集 | 样本数 | 答题模型 | 得分 |
-|---|---:|---|---:|
-| LoCoMo，类别 1–4 | 1,540 | Qwen3.6-35B-A3B-FP8 | **85.71%** |
-| LongMemEval-S，cleaned | 500 | Qwen3.6-35B-A3B-FP8 | **80.80%** |
+**统一条件：**使用本地 sidecar 提供的 `bge-large-en-v1.5` 1024d embedding；
+engram 使用 canonical hybrid recipe
+（`--top-k 30 --chunk-quota 12 --force-answer`，无 reranker）；判题使用
+mem0-aligned prompt。
 
-在答题模型、embedding 模型、judge prompt 和 judge 模型一致的 LoCoMo 受控比较中，
-engram 得分 **85.71%**，MemOS 得分 **82.40%**（+3.31 个百分点）。两者的检索预算与
-上下文预算仍有差异，因此不能把该结果外推为跨配置的普遍结论。
+### 同栈实测
 
-[当前评测结果](docs/evaluation/results.md)是分数与比较边界的唯一正本；复现配方见
+这是唯一可以直接比较的表：同一台机器、Qwen 答题模型、bge-large embedding、
+相同 judge prompt 和 judge 模型；竞品运行自己的原始代码，不做修改。
+
+| 数据集 (n) | 框架 | 答题模型 | 判题模型 | 得分 |
+|---|---|---|---|---:|
+| **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.71%** |
+| LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 83.77% |
+| LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
+| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
+| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 80.26% |
+| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **80.80%** |
+| LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
+
+### 不同评测栈下的各方最好成绩
+
+这些数字可作为背景信息，但**不能直接横向比较**：
+
+| 数据集 | engram 🔬 | MemOS 📣 | Mem0 📣 |
+|---|---:|---:|---:|
+| LoCoMo | **89.03%**（v4-pro，n=1540） | 88.83% | 92.5% |
+| LongMemEval | **86.00%**（v4-pro，S-cleaned 500） | 89.20% | 94.4% |
+
+### LoCoMo 分类别得分
+
+以下结果覆盖类别 1–4 的全部 1,540 道题，使用
+`judge=deepseek-v4-flash`，并对三次答题结果进行多数投票。
+
+| 类别 | n | engram (Qwen) | engram (v4-pro) | MemOS，同栈 | Δ engram−MemOS |
+|---|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18pp** |
+| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77pp |
+| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62pp |
+| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24pp** |
+| **总计** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31pp** |
+
+分类结果比单一总分更有解释力。MemOS 的 tree/graph 组织在 multi-hop 上领先
+1.77 个百分点；engram 则在 single-hop 和 open-domain 上领先超过 6 个百分点。
+engram 换用更强的答题模型后，temporal 提升 7.48 个百分点、open-domain 提升
+6.26 个百分点，但 multi-hop 只提升 1.06 个百分点——这说明 multi-hop 的主要瓶颈
+仍在检索侧，而另外两类更受答题模型限制。
+
+### 三个受控差值
+
+| 轴 | 受控变化 | 净效应 | 解读 |
+|---|---|---:|---|
+| **框架** | engram − MemOS，LoCoMo 1540 | **+3.31pp**（v4-flash judge）/ **+3.51pp**（v4-pro judge） | 两个 judge 下方向一致 |
+| **答题模型** | Qwen → v4-pro | **+3.32pp**（LoCoMo）/ **+5.20pp**（LongMemEval-S，p=0.0049） | 强答题模型主要改善 temporal 和 open-domain |
+| **判题模型** | v4-flash → v4-pro | **−2 至 −3pp** | 产生加性偏移，但框架差值方向不变 |
+
+Mem0 的 92.5% / 94.4% 来自托管平台，其中包含开源 SDK 未提供的优化，并使用
+`top_200` 检索预算，因此无法在同栈条件下复现，对 Mem0 的真实受控差距仍然
+**未知**。MemOS 自报的 88.83% 在受控栈下变为 82.40%，−6.43 个百分点的评测
+regime 差异主要来自答题模型与 judge 条件。
+
+canonical recipe 的复现步骤见
 [LoCoMo 评测运行手册](docs/operations/evaluation/locomo-runbook.md)。
 
 ## 文档
