@@ -736,3 +736,34 @@ v4-pro**,不满足宪法 I 的 local-first/offline-by-default——它是**对�
 **对标**:engram+v4-pro 86.00% vs MemOS 论文 77.8(GPT-4o-mini)→ 领先 8.2pp;
 vs Mem0 blog 94.4(GPT-4o + 自评)→ 仍不可直接比(answerer/judge 口径不同)。LongMemEval
 独立基线声明:**local 栈 80.80% / 强 answerer 栈 86.00%**,两个数分开报、不混用。
+
+---
+
+## US7 · v4-pro + top-k 50 —— 完美 null,top-k 对任何 answerer 都不是杠杆(2026-07-28)
+
+US5 的 Qwen bracket(15/30/40/50)全 ns,但留了一个口子:更强的模型能否更好利用
+更多上下文?测 **v4-pro + k50**(同 store/检索/judge,唯一变量 vs v4-pro k30 = top-k 30→50)。
+
+**结果:v4-pro + k50 = 86.00% = v4-pro k30 的 86.00%,McNemar χ²=0.00 p=1.0
+net=0(b=13 c=13)——完美 null。** 更多上下文对强模型也零效果。
+
+| answerer | k30 | k50 | Δ |
+|---|---:|---:|---|
+| Qwen3.6-35B | 78.80% | 80.40% | +1.6 (ns) |
+| **deepseek-v4-pro** | **86.00%** | **86.00%** | **0.0 (χ²=0)** |
+
+⇒ **top-k 在 15–50 区间对答分无可测影响,且不随 answerer 强度改变。** gold 在 rank 2
+这个事实是 answerer-无关的:多看 rank 31–50 的干扰项,v4-pro 也用不上。
+**86.00% 是 v4-pro 在 LongMemEval 的天花板;top-k 这条路对任何 answerer 都已证死,
+勿重跑。**
+
+**精确成本(脚本 `deepseek-cost.py` 从 main 3-rep 实测 usage × 官方 DeepSeek 价)**:
+
+| 角色 | calls | in_miss | out | 费用 |
+|---|---:|---:|---:|---:|
+| answer(v4-pro) | 1507 | 237,410 | 694,207 | ¥4.88 |
+| judge(v4-flash) | 1500 | 140,815 | 161,907 | ¥0.46 |
+| **合计** | | | | **¥5.34 ($0.75)** |
+
+out-token 是大头(¥4.17 = 78%);in 因 DeepSeek 缓存(rep2/3 命中,实测 in_miss 仅
+157 tok/次、命中率 ~97%)几乎不花钱。思考链确认关(out/call=471,与 k30 的 455 一致)。
