@@ -54,7 +54,7 @@ go run ./cmd/locomo-bench --data <locomo.json> --run-dir ./.locomo-run --retriev
 #   judge endpoint split: JUDGE_PROVIDER/BASE_URL/MODEL/API_KEY (fall back to LOCOMO_* if empty).
 ```
 
-**Remote eval box (near-free answer/extract model)** — full-scale eval runs its answer+extract model on a **rented cloud GPU** (vllm, OpenAI-compatible) so the run is near-free (only tiny judge tokens paid). Runbook + what-changes-on-restart: [docs/remote-eval-box.md](docs/remote-eval-box.md). Non-negotiables: (1) **省钱 — 空闲必停**, it's metered; never leave it idle. (2) Its **SSH host/port/password rotate every restart** and vllm may need re-launching — credentials are supplied live by the maintainer and go **only** through env/tunnel, **never** into a tracked file, log, or tool response. (3) The box is eval infra only; the engine stays local-first/offline and never depends on it.
+**Remote eval box (near-free answer/extract model)** — full-scale eval runs its answer+extract model on a **rented cloud GPU** (vllm, OpenAI-compatible) so the run is near-free (only tiny judge tokens paid). Runbook + what-changes-on-restart: [docs/operations/evaluation/remote-gpu-runbook.md](docs/operations/evaluation/remote-gpu-runbook.md). Non-negotiables: (1) **省钱 — 空闲必停**, it's metered; never leave it idle. (2) Its **SSH host/port/password rotate every restart** and vllm may need re-launching — credentials are supplied live by the maintainer and go **only** through env/tunnel, **never** into a tracked file, log, or tool response. (3) The box is eval infra only; the engine stays local-first/offline and never depends on it.
 
 ## Constitution — the five non-negotiables
 
@@ -78,7 +78,7 @@ Full text: [.specify/memory/constitution.md](.specify/memory/constitution.md) (v
 
 ## Knowledge Map
 
-Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extraction provenance: [docs/background-extraction-from-workhorse-agent.md](docs/background-extraction-from-workhorse-agent.md). Unresolved freshness, state-consistency, memory-hallucination, and conditional-recall problem: [docs/memory-freshness-and-retrieval-policy.md](docs/memory-freshness-and-retrieval-policy.md) — this is a required future feature, **not a current capability**. MCP build/wire/modes: [docs/mcp-server.md](docs/mcp-server.md). CLI usage: [docs/cli.md](docs/cli.md). Per-feature detail lives in `specs/NNN-*/`. Delivered so far: **001** memory-engine-extraction, **002** mcp-server. Retrieval fidelity is proven by deterministic parity goldens (`testdata/parity/`) + the LoCoMo harness, not by trust.
+Strategy & positioning: [docs/product/roadmap.md](docs/product/roadmap.md). Extraction provenance: [docs/architecture/provenance.md](docs/architecture/provenance.md). Unresolved freshness, state-consistency, memory-hallucination, and conditional-recall problem: [docs/product/backlog/memory-freshness.md](docs/product/backlog/memory-freshness.md) — this is a required future feature, **not a current capability**. MCP build/wire/modes: [docs/guides/mcp-server.md](docs/guides/mcp-server.md). CLI usage: [docs/guides/cli.md](docs/guides/cli.md). Per-feature detail lives in `specs/NNN-*/`. Delivered so far: **001** memory-engine-extraction, **002** mcp-server. Retrieval fidelity is proven by deterministic parity goldens (`testdata/parity/`) + the LoCoMo harness, not by trust.
 
 ## Working Rules
 
