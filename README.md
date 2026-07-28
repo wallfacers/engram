@@ -12,8 +12,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 三路混合检索(语义 + BM25 关键词 + 实体,RRF 融合)+ ADD-only 事实抽取
-+ 确定性 curation,完全离线可运行,纯 Go、无 CGO、可交叉编译。核心引擎抽离自
-[workhorse-agent](https://github.com/wallfacers/workhorse-agent) 的记忆子系统。
++ 确定性 curation,完全离线可运行,纯 Go、无 CGO、可交叉编译。
 
 ---
 
@@ -68,6 +67,21 @@
 |---|---:|---:|---:|
 | LoCoMo | **89.03%**(v4-pro,n=1540) | 88.83 | 92.5 |
 | LongMemEval | **86.00%**(v4-pro,S-cleaned 500) | 89.20 | 94.4 |
+
+### LoCoMo 分类别得分(1540,judge=v4-flash,3 跑多数)
+
+| 类别 | n | engram(Qwen) | engram(v4-pro) | MemOS@同栈 | Δ(engram−MemOS) |
+|---|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18** |
+| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77 |
+| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62 |
+| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24** |
+| **OVERALL** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31** |
+
+> 分类别的"比分"形状:MemOS 的 tree/graph 记忆组织**只在 multi-hop 赢 1.77pp**
+> (正是它该赢的地方);single-hop / open-domain 各输 6pp+。engram 换强答题模型的收益
+> 也极不均匀——temporal +7.5pp、open-domain +6.3pp,而 multi-hop 仅 +1.1pp,
+> 说明 multi-hop 瓶颈在检索侧,其余类别瓶颈在答题侧。
 
 ### 三个关键 Δ
 
@@ -221,7 +235,6 @@ testdata/       parity goldens;locomo/ 数据集(gitignored)
 - [`docs/memory-strategy.md`](docs/memory-strategy.md) — 技术与战略正本、涨点 backlog
 - [`docs/memory-architecture.md`](docs/memory-architecture.md) — 运行架构总览:抽取时机、写入/检索/curation 流程、SQLite 表图
 - [`docs/mcp-server.md`](docs/mcp-server.md) · [`docs/cli.md`](docs/cli.md) — 适配器用法
-- [`docs/background-extraction-from-workhorse-agent.md`](docs/background-extraction-from-workhorse-agent.md) — 立项背景与边界
 - [`docs/README.md`](docs/README.md) — 文档全索引(含状态语义)
 
 ## 开发规范
