@@ -37,13 +37,14 @@
 
 ## 2. LongMemEval 执行计划(简单版,可与 009 并发)
 
-> ✅ **本计划已部分交付(2026-07-27 回填)**:spec 016 已跑出
-> **LongMemEval-S(cleaned)分层抽样 100 题**的基线 —— **80**(Qwen3.6-35B 答题)/ **85**(deepseek-v4-pro),
-> 均为 3 跑多数、judge=deepseek-v4-flash。分题型分与口径边界见
-> [`results-matrix-2026-07-26.md` §1.2 / §7](./results-matrix-2026-07-26.md);
-> 验尸与 CURRENT DATE 修复见 [`specs/016-longmemeval-crossbench/verdict.md`](../specs/016-longmemeval-crossbench/verdict.md)。
-> **仍未做:全量 500**。以下步骤表中 T1/T2 已完成,T3 双口径判分与 T4 全量 500 仍未做。
-> ⚠️ **n=100 的噪声地板是 ±2–4 分**(同配置重跑就差 2 分),该规模上 <5 分的结论不可判。
+> ✅ **本计划已交付(2026-07-28)**:spec 016 已跑出 **LongMemEval-S(cleaned)全量 500 题**
+> 的正当基线 = **80.80%**(Qwen3.6-35B 答题 / bge-large-en 1024d / deepseek-v4-flash
+> mem0-aligned judge / 3-rep 多数票 / 含 CURRENT DATE 锚点)。**这是首个可正当称「全量」的数**,
+> 取代此前 100 题分层抽样的 80/85(后者 n=100 噪声地板 ±2–4 分,不得简称全量)。
+> 完整数字、G-向量门放行依据、基线声明见
+> [`specs/016-longmemeval-crossbench/verdict.md` US4](../specs/016-longmemeval-crossbench/verdict.md)。
+> 分题型对照见 [`results-matrix-2026-07-26.md` §1.2 / §7](./results-matrix-2026-07-26.md)。
+> **仍排除(FR-026)**:T3 官方分题型 judge 双口径、abstention 子集、`longmemeval_m`、V2 —— 不在本轮范围。
 
 **现状纠偏(写作时,已过期)**:~~`testdata/longmemeval/` 目前只有 2KB 手造 `sample.json`(schema 示例),
 **全量数据集尚未下载**;paper-outline RQ6 标注"engram 一手结果为空"。~~

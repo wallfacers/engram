@@ -507,3 +507,114 @@ LongMemEval-S (cleaned) **分层抽样 100 题**、`deepseek-v4-pro` 答题、3 
 （现最差为 multi-session 81.5% 与 preference 66.7%，后者 n=6 不可判）。
 
 **这不是 engram 变强了，是测量变诚实了。** 检索侧一行未改，引擎一行未改。
+
+---
+
+## US4 · S 臂全量 500（LongMemEval-S cleaned，首次正当「全量」基线）
+
+**日期**: 2026-07-28 · **数据集**: `longmemeval_s_cleaned.json` 官方 cleaned 版 **全 500 题**
+（非抽样、非 oracle）。题型分布 multi-session 133 / temporal-reasoning 133 /
+knowledge-update 78 / single-session-user 70 / single-session-assistant 56 /
+single-session-preference 30。
+
+**配方**:与 016 各臂逐字相同(`--chunks --chunk-quota 12 --top-k 30 --retrieval hybrid
+--force-answer --judge-mem0-aligned`),答题/抽取 = 本机 vllm `Qwen/Qwen3.6-35B-A3B-FP8`,
+embedding = 本机 `bge-large-en-v1.5`(1024d),判分 = `deepseek-v4-flash`(mem0-aligned)。
+**含 `bb99d58` 的 CURRENT DATE 锚点注入**(LongMemEval 恒有 `question_date`,故锚点恒注入)。
+
+### 建库
+
+512,662 条目(其中 chunk 222,832),耗时 **6.0 h**(21,545s)。抽取解析失败 82 次
+(占抽取调用 ~0.3‰,既有引擎行为、非本轮引入)。向量补齐 6 轮收敛在 missing=97
+(见下「G-向量门」)。
+
+### G-向量门:按字面失败,基于「影响面=0」放行
+
+missing 五轮收敛在 **97**(pass1 95211 → pass2 118 → pass3..6 均为 97)。
+97 条全是 `chunk`,打端点实测报 `decoder prompt (length 742) is longer than the
+maximum model length of 512`——**bge-large-en-v1.5 位置编码硬顶 512 token**,而这些
+chunk 是韩文 / markdown 表格 / 坐标数字流,字符→token 膨胀撞顶,**重试多少轮都补不上**。
+
+016 设此门的理由是「带缺向量语料出分会静默偏低」。本门把该失效模式直接量化(工具
+`scripts/oracle-category-coverage.py` 的同型逻辑,离线):
+
+| 口径 | 值 |
+|---|---:|
+| 缺向量条目 / 全部 | 97 / 512,662 = **0.019%** |
+| 缺向量 chunk / 全部 chunk | 97 / 222,832 = 0.044% |
+| **承载 gold 的 chunk 总数** | 894 |
+| **其中缺向量的** | **0** |
+| **受影响题数** | **0 / 500** |
+
+**门要防的事实实测不存在**(894 条压 gold 的 chunk 一条没漏;且缺向量 ≠ 不可检索,
+这些条目仍走 FTS + 实体臂,只丢语义臂,属宪法 V 的按信号降级)。据此放行。
+**这是本会话自立的门、非 016 那种带 SHA256 的注册判据**——「按字面失败 + 放行依据」原样记于此,
+不粉饰、不四舍五入凑进 0。残留的 512-token 截断是 `bge-large-en-v1.5` 的已知能力边界
+(非 engram 引擎缺陷),留作「换更长上下文 embedder」的 future work,不在本轮范围。
+
+### 结果(3-rep 多数票)
+
+| run | 正确率 |
+|---|---:|
+| run-1 | 395/500 = 79.00% |
+| run-2 | 392/500 = 78.40% |
+| run-3 | 402/500 = 80.40% |
+| **多数票** | **404/500 = 80.80%** |
+
+warm-up(丢弃,1 rep)= 390/500 = 78.00%,与主臂 Δ=+2.80pp,落在 temp=1.0 跑间
+噪声带内,**判题 key 与配置无翻车**(gotcha #11 已提前堵:开跑前探 `/v1/messages` HTTP 200)。
+
+| 题型 | 多数票正确率 | n | turn 覆盖率 |
+|---|---:|---:|---:|
+| single-session-user | **100.0%** | 70 | 0.969 |
+| single-session-assistant | 92.9% | 56 | 1.000 |
+| knowledge-update | 80.8% | 78 | 0.917 |
+| temporal-reasoning | **78.2%** | 133 | 0.792 |
+| multi-session | 74.4% | 133 | 0.874 |
+| single-session-preference | **53.3%** | 30 | 0.778 |
+| **OVERALL** | **80.80%** | 500 | 0.879(n=479) |
+
+### 两个跨臂对照(必须带混杂声明)
+
+1. **vs 016 ORACLE-500(76.4%)**:本 S-500 高 **+4.4pp**。但 ORACLE 臂跑于 `bb99d58`
+   锚点修复**之前**(无 CURRENT DATE),本臂在**之后**。temporal-reasoning 从 oracle 的
+   64.7% 升到 78.2%,与 016 arm C(S-100,加锚点后 temporal 66.7%→85.2%)同向。
+   **+4.4pp 里锚点修复的贡献未剥离,不得解读为「S 臂强于 oracle 臂」**——两者还差
+   干扰项密度(oracle 零干扰项 vs S 约 500 会话/题)。
+2. **vs 016 S-100(75/100,Qwen 无锚点)**:口径不同(全量 vs 分层抽样、无锚点 vs 有锚点),
+   **不可直接相减**。本数是首个正当「全量」数。
+
+### 用量(按 usage 插桩)
+
+| 角色 | 调用 | in | out |
+|---|---:|---:|---:|
+| answer | 1500(3 rep) | — | — | 本地 vllm,**零付费** |
+| judge | 1500 | 144,386 | 193,981 | deepseek-v4-flash,**唯一付费口** |
+| embed | 1516 | 30,706 | — | 本地,**零付费** |
+| extract | 0(复用建库抽取) | — | — | — |
+
+answer 上下文均值 **3,322 token**。judge 实付费约 **¥1–2**(338k token,flash 价)。
+建库/答题 box wall-clock 共 **~6.5 h**(含向量补齐)。
+
+### 基线声明(宪法 IV)
+
+**LongMemEval-S (cleaned) 全量 500 的 engram 基线 = 80.80%**(Qwen3.6-35B 答题 /
+bge-large-en 1024d / deepseek-v4-flash mem0-aligned judge / top-k30 chunk-quota12
+hybrid / force-answer / 含 CURRENT DATE 锚点)。
+
+- 这是**独立新基线**,**不替代、不混入** LoCoMo 的 85.71%。两数据集任务形态不同、
+  分母不同(500 vs 1540)、judge regime 虽同但题面不同。
+- 与他人 leaderboard 数字存在 answerer / judge / 数据版本(cleaned vs 旧版)差异,
+  **跨系统直接比较无效**。Mem0 blog 报 94.4、MemOS 论文报 77.8(GPT-4o-mini 统一口径),
+  均与本数**不可直接对比**。
+- eval-config(数据集版本 / 配方 / 锚点)与任何算法改动**分开 commit**(本 verdict 仅记录,
+  无引擎/算法改动——`git diff --name-only -- memory embedding provider store internal` 为空)。
+
+### 处置
+
+- **box 已停**:vllm killed(GPU 0 MiB)、box 上 `judge.env` 已删、本地凭据脚本已清。
+  ⚠️ **实例空转约 12 h**(收尾脚本因 `&` 后台化 bug 未杀 vllm)——「空闲必停」的执行缺口,
+  根因是 `setsid ... & disown` 的收尾 watcher 没活下来;已记教训,后续 box 作业的收尾
+  改为「主进程退出前同步执行 teardown」而非另挂后台 watcher。
+- 产物归档 `.longmemeval-run/`(逐题 jsonl × 3 rep + coverage × 6 pass + regime/cost,
+  gitignored,凭据零命中)。
