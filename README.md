@@ -51,7 +51,7 @@ separately. With `--global`, `skills@1.5.20` writes `~/.claude/skills/engram`
 scan `~/.agents/skills/`, so the package is discovered as-is with no extra step.
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
 Keep the installer's write confirmation; choose `Symlink` (default) or `Copy`

@@ -41,7 +41,7 @@ tags: [documentation, portal, navigation]
 `~/.agents/skills/`，装完即被发现。
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
 默认选择 `Symlink`，受限文件系统选择 `Copy`；安装后重载各客户端，并确认每个客户端

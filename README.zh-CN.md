@@ -48,7 +48,7 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 Codex/OpenCode 会扫描 `~/.agents/skills/`，故装完即被发现，无需额外步骤。
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
 请保留安装器的写入确认；默认选择 `Symlink`，受限文件系统选择 `Copy`。安装后重载

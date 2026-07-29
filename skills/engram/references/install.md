@@ -27,14 +27,14 @@ deliberately keeps the installer's write confirmation; `npx --yes` authorizes
 fetching the pinned installer, not a silent target overwrite.
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
 Choose `Symlink` when the filesystem permits it, or `Copy` on Windows and
 restricted filesystems. A symlink failure may fall back to an equivalent copy.
-The initial release tag will be `engram-skill-v0.1.0`; before a release, the
-placeholder in this source and all user entrypoints is replaced with the
-literal version-derived immutable tag.
+The release tag is derived from `references/contract.json` as
+`engram-skill-v<skill.version>` before package content is frozen; the literal
+tag above is `engram-skill-v0.1.0`.
 
 ## Other scopes and targets
 
@@ -43,7 +43,7 @@ For the current project, omit `--global`. Review
 confirming:
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --agent claude-code --agent codex --agent opencode
 ```
 
 For one client, keep exactly one of `--agent claude-code`, `--agent codex`, or
