@@ -127,10 +127,27 @@ function targetPath(profile, client, scope) {
   if (!supportedScopes.includes(scope)) {
     throw new Error(`unsupported scope: ${scope}`);
   }
-  const scopeRoot = scope === "project" ? profile.project : profile.home;
-  return client === "claude-code"
-    ? join(scopeRoot, ".claude", "skills", "engram")
-    : join(scopeRoot, ".agents", "skills", "engram");
+  if (scope === "project") {
+    // At project scope Codex and OpenCode share .agents/skills/engram, while
+    // Claude Code reads .claude/skills/engram.
+    return client === "claude-code"
+      ? join(profile.project, ".claude", "skills", "engram")
+      : join(profile.project, ".agents", "skills", "engram");
+  }
+  // At user scope the three clients diverge, each resolving its own config
+  // home exactly as skills@1.5.20 does: CLAUDE_CONFIG_DIR, CODEX_HOME, and
+  // XDG_CONFIG_HOME (OpenCode lives under ~/.config/opencode). The isolated
+  // environment sets all three, so user-scope paths track those homes.
+  switch (client) {
+    case "claude-code":
+      return join(profile.claudeConfig, "skills", "engram");
+    case "codex":
+      return join(profile.codexHome, "skills", "engram");
+    case "opencode":
+      return join(profile.xdgConfig, "opencode", "skills", "engram");
+    default:
+      throw new Error(`unsupported client: ${client}`);
+  }
 }
 
 function uniqueTargets(profile, clients, scope) {
@@ -163,16 +180,16 @@ function installPackage({ source, profile, clients, scope, requestedMode, allowR
   }
 
   const modes = {};
-  const agentsTarget = clients.some((client) => client === "codex" || client === "opencode")
-    ? targetPath(profile, "codex", scope)
-    : null;
-  if (agentsTarget !== null) {
-    modes[agentsTarget] = replaceWithSource(source, agentsTarget, requestedMode);
-  }
-  if (clients.includes("claude-code")) {
-    const claudeTarget = targetPath(profile, "claude-code", scope);
-    const claudeSource = agentsTarget !== null && requestedMode === "symlink" ? agentsTarget : source;
-    modes[claudeTarget] = replaceWithSource(claudeSource, claudeTarget, requestedMode);
+  // Symlink mode keeps one canonical copy and points every selected target at
+  // it (the installer's "single source of truth"); copy mode gives each target
+  // an independent copy. The first selected target holds the canonical copy and
+  // later targets symlink to it. This is client-agnostic, so it holds whether
+  // Codex and OpenCode share one path (project scope) or each have their own
+  // (user scope).
+  const canonical = targets[0];
+  for (const target of targets) {
+    const targetSource = requestedMode === "symlink" && target !== canonical ? canonical : source;
+    modes[target] = replaceWithSource(targetSource, target, requestedMode);
   }
   return { status: "installed", existing, modes };
 }
@@ -287,7 +304,7 @@ function runMatrix(options) {
     source_digest: sourceDigest,
     cases: summary,
     host_mutation: "0 by construction: all generated paths are descendants of --scratch",
-    note: "This local matrix validates the frozen target, collision, copy, symlink, and recovery contract. Exact remote installer and real-client smoke remain release gates.",
+    note: "This local matrix validates the frozen target, collision, copy, symlink, and recovery contract, including the user-scope divergence of the Claude Code, Codex, and OpenCode discovery paths. Exact remote installer and real-client smoke remain release gates.",
   };
 }
 

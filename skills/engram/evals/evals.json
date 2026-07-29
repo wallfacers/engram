@@ -87,7 +87,7 @@
     },
     {
       "id": "cli-curate",
-      "prompt": "Run engram curation for namespace preferences; MCP is connected but CLI data directory and namespace were confirmed.",
+      "prompt": "Run engram curation for namespace preferences; MCP is connected but CLI data directory, namespace, and a configured LLM were confirmed.",
       "expected_output": "Uses CLI curate once, explains the MCP-to-CLI switch, and does not claim a merge occurred merely because the pass completed.",
       "files": [],
       "expectations": [
@@ -164,7 +164,7 @@
       "files": [],
       "expectations": [
         "Does not combine results from two stores",
-        "Does not double-write",
+        "Does not present MCP search results as confirmed against the CLI store",
         "Requests store identity confirmation"
       ],
       "tags": ["cross-store-mismatch", "safety", "blocked"]
@@ -195,7 +195,7 @@
     },
     {
       "id": "content-budget-rejection",
-      "prompt": "Remember an engram fact whose content is over the supported entry budget.",
+      "prompt": "Remember an engram fact in namespace notes whose content is over the supported entry budget.",
       "expected_output": "Preserves the content-rejected result and asks to shorten or split non-secret content without truncating it.",
       "files": [],
       "expectations": [

@@ -19,10 +19,13 @@ Pass the selected namespace on every relevant call. Empty input resolves to
 `^[A-Za-z0-9._-]{1,64}$`; reject `.`, `..`, `/`, and `\\` before a call.
 
 `memory_write` is an upsert, so it requires explicit user intent and a clear
-name/content target. Do not silently persist ordinary conversation. Do not send
-likely credentials or secrets in `content` or `trigger`. Content over the
-adapter budget (1,200 Unicode code points) and a trigger over 120 single-line
-code points remain rejected; preserve that error rather than truncating it.
+name/content target. Do not silently persist ordinary conversation. Because the
+upsert is keyed by name, updating an existing entry without passing `pinned`
+resets that entry's pin to unset; re-pass `pinned` when a previously pinned
+memory must stay pinned. Do not send likely credentials or secrets in `content`
+or `trigger`. Content over the adapter budget (1,200 Unicode code points) and a
+trigger over 120 single-line code points remain rejected; preserve that error
+rather than truncating it.
 
 ## Conditional ingest
 

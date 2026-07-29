@@ -20,7 +20,9 @@ Place global flags before the command:
 
 API keys are environment-only (`ENGRAM_EMBED_API_KEY` and
 `ENGRAM_LLM_API_KEY`); never put them in a generated command, memory entry,
-example, or log. `version` is the one command that needs neither a data
+example, or log. `ENGRAM_NAMESPACE` supplies the default namespace when
+`--namespace` is omitted, so report the env-resolved namespace rather than
+assuming `default`. `version` is the one command that needs neither a data
 directory nor a namespace. All other store commands need a known data directory;
 when switching from MCP for a CLI-only intent, first confirm that directory and
 namespace rather than assuming it is the same store.
@@ -35,13 +37,15 @@ namespace rather than assuming it is the same store.
 | list | `engram [global flags] list` | rendered entries, possibly empty |
 | delete | `engram [global flags] delete <name>` | `# deleted` only for an actual deletion |
 | ingest | role-tagged stdin into `engram [global flags] ingest` | explicit request plus LLM; `# ingested` and extracted count |
-| curate | `engram [global flags] curate` | CLI-only, explicit request plus LLM; `completed` is not proof of a merge/eviction |
+| curate | `engram [global flags] curate` | CLI-only, explicit request plus LLM; emits `# curated` with a `completed` status that is not proof of a merge/eviction |
 | stats | `engram [global flags] stats` | CLI-only; data-store identity confirmed |
 | export | `engram [global flags] export` | CLI-only; do not export likely secrets |
 | namespace discovery | `engram --data-dir <dir> namespaces` | CLI-only; explicit data directory |
 | version | `engram version` | no data directory required |
 
-For ingest, provide one turn per line, using only `user:` or `assistant:`:
+For ingest, provide one turn per line, using only `user:` or `assistant:`. A
+blank line is not a separator: every stdin line must be a valid turn, or ingest
+exits with code 2 (`invalid conversation turn`).
 
 ```text
 user: I prefer jasmine tea.

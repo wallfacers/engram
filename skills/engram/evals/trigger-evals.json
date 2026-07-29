@@ -48,6 +48,22 @@
     "should_trigger": true
   },
   {
+    "query": "Remember that my deploy freeze starts every Friday at 5pm so I do not schedule releases then.",
+    "should_trigger": true
+  },
+  {
+    "query": "记住我的紧急联系人是王经理，以后需要时直接问你。",
+    "should_trigger": true
+  },
+  {
+    "query": "Note that this project forbids pushing directly to main; remind me again in future sessions.",
+    "should_trigger": true
+  },
+  {
+    "query": "Recall the rate limit we agreed on for this vendor and apply it here too.",
+    "should_trigger": true
+  },
+  {
     "query": "How much RAM is this process consuming right now?",
     "should_trigger": false
   },
@@ -93,6 +109,22 @@
   },
   {
     "query": "Review this in-memory cache implementation without storing user data.",
+    "should_trigger": false
+  },
+  {
+    "query": "Add this URL to my browser bookmarks so I can reopen it tomorrow.",
+    "should_trigger": false
+  },
+  {
+    "query": "Commit these staged changes to git so the work survives a branch switch.",
+    "should_trigger": false
+  },
+  {
+    "query": "Save my IDE window layout so the editor restores it on next launch.",
+    "should_trigger": false
+  },
+  {
+    "query": "把这个链接存进我的 Notion 工作区方便以后查阅。",
     "should_trigger": false
   }
 ]

@@ -18,11 +18,13 @@ does not require Node, npm, or network access.
 
 ## Quick install: all three clients, user scope
 
-Before confirming, review the possible replacement targets:
-`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` and
-`~/.agents/skills/engram`. The default command deliberately keeps the
-installer's write confirmation; `npx --yes` authorizes fetching the pinned
-installer, not a silent target overwrite.
+Before confirming, review the possible replacement targets. With `--global` and
+all three agents selected, the installer writes one target per client:
+`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram`,
+`${CODEX_HOME:-~/.codex}/skills/engram`, and
+`${XDG_CONFIG_HOME:-~/.config}/opencode/skills/engram`. The default command
+deliberately keeps the installer's write confirmation; `npx --yes` authorizes
+fetching the pinned installer, not a silent target overwrite.
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
@@ -58,13 +60,17 @@ may be user-maintained or of unknown provenance.
 | Client | Project path | User path | Explicit use | Reload |
 |---|---|---|---|---|
 | Claude Code | `.claude/skills/engram` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` | `/engram` | Restart if the top-level skills directory was newly created; otherwise invoke it again or open a new session. |
-| Codex | `.agents/skills/engram` | `~/.agents/skills/engram` | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
-| OpenCode | `.agents/skills/engram` | `~/.agents/skills/engram` | Ask it to load and use the `engram` skill | Restart and open a new session. |
+| Codex | `.agents/skills/engram` | `${CODEX_HOME:-~/.codex}/skills/engram` | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
+| OpenCode | `.agents/skills/engram` | `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/engram` | Ask it to load and use the `engram` skill | Restart and open a new session. |
 
-Codex and OpenCode intentionally share `.agents/skills/engram`; do not create
-extra `.codex/skills` or `.opencode/skills` copies. A discovered skill is not
-proof that MCP or CLI tooling is configured. If neither is available, it must
-report that condition rather than pretending an operation ran.
+At project scope Codex and OpenCode share `.agents/skills/engram`, while Claude
+Code reads `.claude/skills/engram`. At user scope the three clients diverge to
+`~/.claude/skills/engram`, `~/.codex/skills/engram`, and
+`~/.config/opencode/skills/engram` respectively; the installer writes each
+client's own path, so they are independent targets rather than redundant
+copies—do not delete one expecting another client to discover it. A discovered
+skill is not proof that MCP or CLI tooling is configured. If neither is
+available, it must report that condition rather than pretending an operation ran.
 
 ## Upgrade, collisions, and recovery
 
@@ -86,12 +92,12 @@ approval if recovery still fails.
 ## Manual and offline fallback
 
 Use an already obtained copy of this canonical `skills/engram/` directory; do
-not reconstruct files from snippets. Copy it to the desired `.agents/skills/engram`
-path, then symlink or copy the same package to `.claude/skills/engram`:
+not reconstruct files from snippets. Copy or symlink it into each target
+client's discovery path for the chosen scope:
 
 ```text
-project: <repo>/.agents/skills/engram and <repo>/.claude/skills/engram
-user:    ~/.agents/skills/engram and ~/.claude/skills/engram
+project: <repo>/.claude/skills/engram, and <repo>/.agents/skills/engram (shared by Codex and OpenCode)
+user:    ~/.claude/skills/engram, ~/.codex/skills/engram, and ~/.config/opencode/skills/engram
 ```
 
 When `skills@1.5.20` is already cached, a local package can also be installed
