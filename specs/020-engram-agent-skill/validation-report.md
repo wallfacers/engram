@@ -193,25 +193,49 @@ verification result.
   node docs/validation/check-docs.mjs
   ```
 
-- Final source identity remains `engram-package-sha256-v1`
-  `13282abc3e57e41196ffde16c9d19d0d2dabf97db6e28cd2357d566ec7ac8012`.
-  `git diff --check` and the engine-directory diff gate are rerun after this
-  report update before handoff.
-- `node scripts/validate-agent-skill.mjs --release` fails intentionally and
-  correctly while all four user-facing installation references retain
-  `<ENGRAM_SKILL_TAG>`. Its expected tag is `engram-skill-v0.1.0`; replacing
-  it, forming a candidate commit, and publishing a tag require T043/T044's
-  maintainer authorization and are not performed here.
-- The local ref `engram-skill-v0.1.0` is absent. The read-only remote lookup
-  did not establish an existing matching ref (the result was absent or
-  unavailable), so remote tag availability must be rechecked immediately before
-  the authorized candidate-release step.
+- Final source identity is `engram-package-sha256-v1`
+  `2e3ee019f28851082be234a684a6a1b5a294dbd98326952bc8d71e93643f136d` after
+  the T043 candidate freeze (replaces `13282abc…` from the pre-candidate
+  package). `git diff --check` and the engine-directory diff gate are rerun
+  after this report update before handoff.
+- `node scripts/validate-agent-skill.mjs --release` now passes: the four
+  user-facing installation references carry the literal `engram-skill-v0.1.0`
+  tag, with no `<ENGRAM_SKILL_TAG>` placeholder, mutable branch URL, or
+  commit-SHA self-reference. `--source` reports the same digest.
+- The local ref `engram-skill-v0.1.0` is still absent, and the read-only
+  remote lookup found no matching ref. Both must be rechecked immediately
+  before the authorized publication step.
 - No LoCoMo run is required: this feature changes only skill, documentation,
   validation, CI, and adapter contract-test files, not retrieval, extraction,
   curation, storage, embedding, or their algorithms. Existing offline parity
   and full Go tests therefore provide the relevant invariant-by-construction
   evidence. Incremental model cost remains `0`; no provider or reranker was
   configured.
+
+## T043 — Release candidate preparation
+
+- Proposed predeclared tag: `engram-skill-v0.1.0` (derived from
+  `references/contract.json` `skill.version` `0.1.0`). The tag exists neither
+  locally nor on the remote.
+- The `<ENGRAM_SKILL_TAG>` placeholder was replaced with the literal tag in
+  the four user-facing surfaces only (`references/install.md`, `README.md`,
+  `README.zh-CN.md`, `docs/README.md`). Spec-internal placeholders in
+  `specs/020-*/` and `scripts/` are normative process documentation and were
+  intentionally left unchanged; the validator scopes its release gate to the
+  four user-facing files only.
+- Candidate commit: `cb83667bb877111d4507f51e7e8bd0be866c955f` on branch
+  `release/skill-v0.1.0`. The tag is to point at this exact commit.
+- Candidate validation gates all passed on a clean engine-directory diff:
+  `node scripts/validate-agent-skill.mjs --release` (ok) and `--source` (ok,
+  same digest), `node --test scripts/validate-agent-skill.test.mjs` (10/10),
+  `node docs/validation/check-docs.mjs` (passed), `CGO_ENABLED=0 go build
+  ./...`, `go vet ./...`, and `CGO_ENABLED=0 go test -count=1 ./...` (all
+  packages ok). No LoCoMo run was required or run; incremental model cost
+  remains `0`.
+- Not performed (external publication, requires maintainer authorization):
+  merging the candidate to `master`, creating or pushing the
+  `engram-skill-v0.1.0` tag (T044), remote `--list`/install smoke, and
+  real-client discovery (T045).
 
 ## Remaining release gates
 
@@ -222,5 +246,8 @@ verification result.
   evaluation require a documented local or existing-flat-rate runner with zero
   incremental cost.
 - T037/T042: a maintainer must record an approving human-review disposition.
-- T043/T044: a maintainer must authorize the candidate commit and exact
-  `engram-skill-v0.1.0` tag before remote installation validation.
+- T043: candidate commit `cb83667…` is formed on `release/skill-v0.1.0`; it
+  is not yet merged to `master` and the tag is not yet created.
+- T044: a maintainer must authorize merging the candidate, then creating and
+  pushing the exact `engram-skill-v0.1.0` tag at `cb83667…`, before remote
+  installation validation.
