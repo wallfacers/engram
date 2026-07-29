@@ -288,9 +288,10 @@ engram 换用更强的答题模型后，temporal 提升 7.48 个百分点、open
 框架差值是上表唯一有配对统计证据的行。原始 1540 行含 11 组重复问题，按
 `(conv, question)` 折叠后得到 1529 个配对（engram 85.68%，MemOS 82.47%，+3.20pp），
 双侧 exact McNemar 检验 **p=0.002895**，主要由 single-hop 驱动（p=0.000014）。
-v4-pro judge 未保存逐题 verdict，其 +3.51pp 不能声称配对显著。方法与边界
-（MemOS 仅一次答题运行、上下文预算差异）见
-[MemOS 同栈复现报告](docs/evaluation/reports/memos-locomo-reproduction.md)。
+v4-pro judge 未保存逐题 verdict，其 +3.51pp 不能声称配对显著。[上下文预算剥离](docs/evaluation/reports/budget-ablation.md)
+进一步表明该 +3.20pp 完全由预算驱动：将 engram answerer 预算对齐 MemOS 的
+~1059 token（从 3614 降下）后，差距反转为 −5.62pp（p=0.000006）——领先反映的是
+engram ~3.4 倍的上下文预算，而非记忆机制优势。
 
 Mem0 的 92.5% / 94.4% 来自托管平台，其中包含开源 SDK 未提供的优化，并使用
 `top_200` 检索预算，因此无法在同栈条件下复现，对 Mem0 的真实受控差距仍然

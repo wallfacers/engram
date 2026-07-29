@@ -21,7 +21,7 @@ tags: [research, evaluation, reliability]
 
 这些失败共同指向同一风险：把代理指标、单次运行或未对齐的评测栈误读为记忆系统因果改进。端到端回答由写入、检索、answerer、拒答策略、judge 与聚合共同决定；只改变其中一轴时，必须把其余轴固定并记录。
 
-当前最强的跨系统证据是 MemOS 同栈逐题配对复现；[当前结果正本](../evaluation/results.md)记录了总体统计证据。这足以支撑“该固定栈下总体领先具有统计证据”，但 MemOS 单 answer run、显著不同的上下文预算以及 v4-pro 缺逐题标签，仍阻止将结果写成“记忆机制优于 MemOS”。详细方法、数值和复算入口见[MemOS 同栈复现报告](../evaluation/reports/memos-locomo-reproduction.md)。
+当前最强的跨系统证据是 MemOS 同栈逐题配对复现；[当前结果正本](../evaluation/results.md)记录了总体统计证据。这足以支撑“该固定栈下总体领先具有统计证据”，但 MemOS 单 answer run、显著不同的上下文预算以及 v4-pro 缺逐题标签，仍阻止将结果写成“记忆机制优于 MemOS”。事实上[上下文预算剥离](../evaluation/reports/budget-ablation.md) 已证明该 +3.20pp 完全由上下文预算驱动：对齐 MemOS 预算（1083 ≈ 1059 tok）后 engram 极显著落后（−5.62pp，exact p=0.000006），持平交叉点约 2240 tok（2.1 倍 MemOS 预算）。这把“领先”从机制优势降级为预算效应——一个干净的负面证据，也说明“固定其余轴”必须包括上下文预算这一轴。详细方法、数值和复算入口见[MemOS 同栈复现报告](../evaluation/reports/memos-locomo-reproduction.md)。
 
 ## 低成本止损
 

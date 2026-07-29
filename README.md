@@ -306,8 +306,11 @@ The raw 1,540 rows include 11 repeated `(conv, question)` groups; folding
 them yields 1,529 paired items (engram 85.68%, MemOS 82.47%, +3.20pp), and a
 two-sided exact McNemar test gives **p=0.002895**, driven by single-hop
 (p=0.000014). The v4-pro judge saved no per-item verdicts, so its +3.51pp is
-not a paired-significant claim. Method and caveats (MemOS single answer run,
-divergent context budgets) are in the [MemOS reproduction report](docs/evaluation/reports/memos-locomo-reproduction.md).
+not a paired-significant claim. A [context-budget ablation](docs/evaluation/reports/budget-ablation.md)
+shows this +3.20pp is entirely budget-driven: aligning engram's answerer
+budget to MemOS's ~1059 tokens (from 3614) reverses the gap to −5.62pp
+(p=0.000006)—the lead reflects engram's ~3.4× larger context budget, not a
+memory-mechanism advantage.
 
 Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
 that are not present in the open-source SDK, and a `top_200` retrieval budget.

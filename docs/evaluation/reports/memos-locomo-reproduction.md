@@ -40,7 +40,7 @@ overall 的连续性校正 McNemar `χ²=8.828`，双侧 exact `p=0.002895`。�
 该结论仍有三条硬边界：
 
 - MemOS 侧只有一次答题运行，engram 侧是三次运行多数，前者没有 answer-run 误差带。
-- engram 输入 answerer 的上下文约 3262 token/次，MemOS 约 1059 token/次；检索与上下文预算差异尚未剥离。
+- 上下文预算差异（engram ~3614 tok/次 vs MemOS ~1059 tok/次）已由[预算剥离实验](budget-ablation.md) 量化并消除：扫 answerer 预算对齐 MemOS（1083 tok ≈ 1059）后，engram 极显著落后（−5.62pp，exact p=0.000006），领先随预算下降单调消失并反转。即原始 +3.20pp 完全由上下文预算驱动，不是记忆机制优势；engram 需约 2.1 倍 MemOS 预算才持平。
 - deepseek-v4-pro 重判只保存了 MemOS overall 80.26%，没有逐题 verdict；其相对 engram 83.77% 的 +3.51pp 只是原始汇总差，不能声称配对显著。
 
 因而可以声明 v4-flash 受控栈下的总体统计领先，不可将差异归因于记忆机制本身，也不可外推为通用系统排名。
