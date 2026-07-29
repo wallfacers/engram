@@ -232,10 +232,28 @@ verification result.
   ./...`, `go vet ./...`, and `CGO_ENABLED=0 go test -count=1 ./...` (all
   packages ok). No LoCoMo run was required or run; incremental model cost
   remains `0`.
-- Not performed (external publication, requires maintainer authorization):
-  merging the candidate to `master`, creating or pushing the
-  `engram-skill-v0.1.0` tag (T044), remote `--list`/install smoke, and
-  real-client discovery (T045).
+- The candidate was subsequently released under maintainer authorization;
+  see the T044 section below. Real-client discovery (T045) remains blocked.
+
+## T044 — Tag publication and remote smoke
+
+- Maintainer authorized full publication. `release/skill-v0.1.0` was
+  fast-forward merged to `master` (now `1c5c7aff…`); the candidate SHA
+  `cb83667bb877111d4507f51e7e8bd0be866c955f` is unchanged.
+- Annotated tag `engram-skill-v0.1.0` was created at `cb83667…` and pushed to
+  `origin` (remote tag object `2a77a542…`). `git rev-parse
+  engram-skill-v0.1.0^{commit}` equals the candidate SHA, confirming the
+  tag→commit binding. `master` (`132ba99..1c5c7af`) and the tag were both
+  pushed successfully.
+- Remote smoke with pinned `skills@1.5.20` against the public tag URL
+  `https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram`
+  (`npx … add <url> --list`) reported "Found 1 skill" named `engram` with the
+  expected description, exit 0. The installer cloned the tag and resolved the
+  package at `engram-skill-v0.1.0 (skills/engram)`.
+- The published package digest is `engram-package-sha256-v1`
+  `2e3ee019f28851082be234a684a6a1b5a294dbd98326952bc8d71e93643f136d`,
+  matching the candidate. A full commit SHA is not written back into the
+  hashed package.
 
 ## Remaining release gates
 
@@ -246,8 +264,9 @@ verification result.
   evaluation require a documented local or existing-flat-rate runner with zero
   incremental cost.
 - T037/T042: a maintainer must record an approving human-review disposition.
-- T043: candidate commit `cb83667…` is formed on `release/skill-v0.1.0`; it
-  is not yet merged to `master` and the tag is not yet created.
-- T044: a maintainer must authorize merging the candidate, then creating and
-  pushing the exact `engram-skill-v0.1.0` tag at `cb83667…`, before remote
-  installation validation.
+- T043/T044: complete. `engram-skill-v0.1.0` is published at `cb83667…` on
+  `master` (`1c5c7af…`); remote `--list` smoke discovered exactly one
+  `engram` skill with the matching digest.
+- T045: real Claude Code, Codex, and OpenCode discovery plus explicit
+  invocation remain blocked by the unavailable/broken clients and unknown
+  inference cost class (see T002).
