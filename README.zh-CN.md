@@ -45,8 +45,7 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 前置条件：Node.js >=22.20.0、npx/npm、Git 与网络。该命令只安装 skill；CLI
 二进制与 MCP server 仍需分别安装和配置。`--global` 下 `skills@1.5.20` 写入
 `~/.claude/skills/engram`（Claude Code）与 `~/.agents/skills/engram`（Codex/OpenCode）；
-而 Codex/OpenCode 各自从 `~/.codex/skills/`、`~/.config/opencode/skills/` 发现 skill，
-需把包复制到各自目录或改用项目作用域——详见正本。
+Codex/OpenCode 会扫描 `~/.agents/skills/`，故装完即被发现，无需额外步骤。
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode

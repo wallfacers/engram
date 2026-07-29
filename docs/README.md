@@ -37,8 +37,8 @@ tags: [documentation, portal, navigation]
 
 前置条件：Node.js >=22.20.0、npx/npm、Git 与网络。该命令只安装 skill，不安装 CLI
 二进制，也不修改 MCP 配置。`--global` 下 `skills@1.5.20` 写入 `~/.claude/skills/engram`
-（Claude Code）与 `~/.agents/skills/engram`（Codex/OpenCode），并在写入前要求确认；
-Codex/OpenCode 需再复制到各自发现目录或改用项目作用域。
+（Claude Code）与 `~/.agents/skills/engram`（Codex/OpenCode）；Codex/OpenCode 扫描
+`~/.agents/skills/`，装完即被发现。
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
