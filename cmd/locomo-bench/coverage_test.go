@@ -147,6 +147,29 @@ func TestEvidenceRecallAtUngradeableWhenNoParseableEvidence(t *testing.T) {
 	}
 }
 
+func TestEvidenceRecallAtDeduplicatesRepeatedDiaIDFragments(t *testing.T) {
+	qa := locomoQA{Evidence: []string{"D1:1", "D1:2"}}
+	hits := []memory.Result{
+		{Name: "chunk-c0-s1-000", SourceSessionID: "conv0-sess1"},
+		{Name: "chunk-c0-s1-001", SourceSessionID: "conv0-sess1"},
+	}
+	chunkTurns := map[string][]string{
+		"chunk-c0-s1-000": {"D1:1"},
+		"chunk-c0-s1-001": {"D1:1"},
+	}
+
+	turn, session, gradeable := evidenceRecallAt(qa, hits, chunkTurns)
+	if !gradeable {
+		t.Fatal("qa with parseable evidence must be gradeable")
+	}
+	if turn != 0.5 {
+		t.Fatalf("turn recall = %v, want 0.5 after deduplicating repeated D1:1 fragments", turn)
+	}
+	if session != 1 {
+		t.Fatalf("session recall = %v, want 1", session)
+	}
+}
+
 func TestCoverageAccumulatorMeansPerCategoryAndOverall(t *testing.T) {
 	acc := newCoverageAccumulator("hybrid+sweep", 10)
 	acc.add("multi-hop", 0.5, 1.0)

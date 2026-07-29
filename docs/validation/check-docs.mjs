@@ -308,6 +308,21 @@ export function validateRetrieval({root, files, fixtures}) {
   return issues;
 }
 
+export function validateExperimentVerdicts({root, file = 'docs/evaluation/experiment-verdicts.md'}) {
+  if (!isFile(root, file)) return [`${file}: experiment verdict index is missing`];
+  const rows = [...readDocument(root, file).body.matchAll(/^\|\s*(\d{3})\s*\|/gm)];
+  const counts = new Map();
+  for (const [, feature] of rows) counts.set(feature, (counts.get(feature) ?? 0) + 1);
+
+  const issues = [];
+  for (let number = 3; number <= 18; number += 1) {
+    const feature = String(number).padStart(3, '0');
+    if (!counts.has(feature)) issues.push(`${file}: missing feature ${feature} verdict row`);
+    else if (counts.get(feature) !== 1) issues.push(`${file}: feature ${feature} must have exactly one verdict row`);
+  }
+  return issues;
+}
+
 export function validateRelocation({root, files, expectedMappings = EXPECTED_RELOCATIONS}) {
   const issues = [];
   const expectedByLegacy = new Map(expectedMappings.map((mapping) => [mapping.legacy_path, mapping.canonical_path]));
@@ -402,6 +417,7 @@ export function runChecks({root = process.cwd(), modes = ['all']} = {}) {
   if (selected.has('retrieval')) {
     const fixtures = JSON.parse(readFileSync(path.join(root, 'docs/validation/retrieval-fixtures.json'), 'utf8'));
     issues.push(...validateRetrieval({root, files, fixtures}));
+    issues.push(...validateExperimentVerdicts({root}));
     issues.push(...validateScoreConsumers({root}));
     issues.push(...validateCurrentCapabilities({root}));
   }

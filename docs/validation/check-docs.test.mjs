@@ -174,6 +174,36 @@ test('retrieval fixtures locate one current owner for every Q1–Q8 assertion', 
   assert.ok(issues.some((item) => item.includes('Q2')));
 });
 
+test('experiment verdict index covers every delivered feature from 003 through 018', async (t) => {
+  const root = await fixtureRoot();
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const rows = Array.from({length: 16}, (_, index) => {
+    const feature = String(index + 3).padStart(3, '0');
+    return `| ${feature} | closed-no-go | 结论 | 不出货 | [证据](../../specs/${feature}/spec.md) |`;
+  });
+  const file = await writeDoc(root, 'docs/evaluation/experiment-verdicts.md', {
+    title: '实验裁决索引',
+    canonicalFor: '[experiment-verdicts]',
+    body: [
+      '# 实验裁决索引',
+      '',
+      '| Feature | Verdict | 范围及最终结论 | 出货影响 | 证据 |',
+      '|---|---|---|---|---|',
+      ...rows,
+      '',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(validator.validateExperimentVerdicts({root, file}), []);
+  await writeDoc(root, file, {
+    title: '实验裁决索引',
+    canonicalFor: '[experiment-verdicts]',
+    body: '# 实验裁决索引\n\n| Feature | Verdict | 范围及最终结论 | 出货影响 | 证据 |\n|---|---|---|---|---|\n| 003 | closed-no-go | 结论 | 不出货 | 证据 |\n',
+  });
+  const issues = validator.validateExperimentVerdicts({root, file});
+  assert.ok(issues.some((item) => item.includes('missing feature 018')));
+});
+
 test('relocation records, archive evidence, score consumers, and capability boundaries are enforceable', async (t) => {
   const root = await fixtureRoot();
   t.after(() => rm(root, {recursive: true, force: true}));
