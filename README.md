@@ -46,8 +46,10 @@ fact extraction, or memory curation.
 
 Prerequisites: Node.js >=22.20.0, npx/npm, Git, and network access. The command
 installs only the skill; install the CLI and configure the MCP server
-separately. At user scope the installer writes `~/.claude/skills/engram`,
-`~/.codex/skills/engram`, and `~/.config/opencode/skills/engram`.
+separately. With `--global`, `skills@1.5.20` writes `~/.claude/skills/engram`
+(Claude Code) and `~/.agents/skills/engram` (Codex/OpenCode); Codex and OpenCode
+discover skills from their own dirs (`~/.codex/skills/`, `~/.config/opencode/skills/`),
+so copy the package there or use project scope — see the reference for details.
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode

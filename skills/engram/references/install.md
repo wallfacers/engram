@@ -64,13 +64,22 @@ may be user-maintained or of unknown provenance.
 | OpenCode | `.agents/skills/engram` | `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/engram` | Ask it to load and use the `engram` skill | Restart and open a new session. |
 
 At project scope Codex and OpenCode share `.agents/skills/engram`, while Claude
-Code reads `.claude/skills/engram`. At user scope the three clients diverge to
-`~/.claude/skills/engram`, `~/.codex/skills/engram`, and
-`~/.config/opencode/skills/engram` respectively; the installer writes each
-client's own path, so they are independent targets rather than redundant
-copies—do not delete one expecting another client to discover it. A discovered
-skill is not proof that MCP or CLI tooling is configured. If neither is
-available, it must report that condition rather than pretending an operation ran.
+Code reads `.claude/skills/engram` — both scan that project path. At user scope
+each client discovers skills from its own directory: Claude Code
+`~/.claude/skills/`, Codex `~/.codex/skills/`, OpenCode
+`~/.config/opencode/skills/`. Note: the `skills@1.5.20` installer writes the
+Codex and OpenCode user-scope target to `~/.agents/skills/engram`, which neither
+scans at user scope; copy the package into each client's own discovery dir (or
+install at project scope, which both scan):
+
+```bash
+cp -r ~/.agents/skills/engram ~/.codex/skills/engram              # Codex
+cp -r ~/.agents/skills/engram ~/.config/opencode/skills/engram    # OpenCode
+```
+
+A discovered skill is not proof that MCP or CLI tooling is configured. If
+neither is available, it must report that condition rather than pretending an
+operation ran.
 
 ## Upgrade, collisions, and recovery
 
