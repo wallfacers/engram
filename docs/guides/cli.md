@@ -15,7 +15,14 @@ CLI 为 `shipped-default` 的已交付接口，默认命令可直接管理本地
 
 ## 安装与帮助
 
-从仓库构建后使用 `engram --help` 查看本地安装版本支持的完整命令和参数。命令行为以该版本的帮助输出为准，避免复制过期参数到自动化脚本。
+从仓库构建后使用 `engram version` 进行无状态的可执行文件诊断。当前
+`engram --help` 只返回简短 usage 并以 usage code 退出，不能作为完整命令或参数
+参考；稳定命令表以本页和运行时契约测试为准。
+
+如果 Agent 需要在 Claude Code、Codex 或 OpenCode 中编排这些已有命令，安装
+[engram Agent Skill](../../skills/engram/references/install.md)。skill 只提供工作流知识，
+不会安装这个 CLI、修改 `PATH`，也不会注册 MCP server；二进制、数据目录和模型配置仍由
+用户单独管理。
 
 ## 命令
 

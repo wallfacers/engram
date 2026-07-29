@@ -18,7 +18,8 @@ tags: [documentation, portal, navigation]
 | 问题 | 首个正本 | 当前结论 |
 |---|---|---|
 | 如何配置 MCP server？ | [MCP Server 配置指南](guides/mcp-server.md) | stable 使用指南 |
-| CLI 支持哪些命令？ | [CLI 使用指南](guides/cli.md) | CLI 已交付，命令以本地帮助输出为准 |
+| CLI 支持哪些命令？ | [CLI 使用指南](guides/cli.md) | CLI 已交付；完整命令参考不依赖 `engram --help` |
+| 如何让 Agent 使用 engram 长期记忆？ | [skill 安装正本](../skills/engram/references/install.md) | 正式支持 Claude Code、Codex、OpenCode |
 | 何时抽取记忆，curation 如何运行？ | [记忆系统架构](architecture/memory-system.md) | 仅显式 ingest 抽取；curation 为 shipped-opt-in |
 | 当前 LoCoMo 与 LongMemEval-S 结果？ | [当前评测结果](evaluation/results.md) | LongMemEval-S 为 full 500；每行带完整评测口径 |
 | Feature 013 是否出货？ | [实验裁决索引](evaluation/experiment-verdicts.md) | closed-no-go，不在当前路线 |
@@ -28,8 +29,22 @@ tags: [documentation, portal, navigation]
 
 ## 使用指南
 
+- [engram Agent Skill](../skills/engram/references/install.md)：安装、发现、重载与恢复的唯一详细正本；只正式支持 Claude Code、Codex、OpenCode。
 - [CLI 使用指南](guides/cli.md)：安装、命令、离线与模型边界。
 - [MCP Server 配置指南](guides/mcp-server.md)：MCP 配置、工具、namespace 与 curation。
+
+### 安装 Agent Skill
+
+确认前检查 `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` 与
+`~/.agents/skills/engram` 是否已有同名 skill。下列命令仅安装 skill，不安装 CLI 二进制，
+也不修改 MCP 配置；安装器会在写入前继续要求确认。
+
+```bash
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+```
+
+项目作用域、单客户端、离线后备与升级说明只维护在
+[skill 安装正本](../skills/engram/references/install.md)。
 
 ## 架构
 

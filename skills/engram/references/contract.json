@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "skill": {
+    "name": "engram",
+    "version": "0.1.0"
+  },
+  "mcp": {
+    "always": [
+      "memory_delete",
+      "memory_get",
+      "memory_list",
+      "memory_search",
+      "memory_write"
+    ],
+    "conditional": {
+      "memory_ingest": "llm"
+    }
+  },
+  "cli": {
+    "commands": [
+      "add",
+      "curate",
+      "delete",
+      "export",
+      "get",
+      "ingest",
+      "list",
+      "namespaces",
+      "search",
+      "stats",
+      "version"
+    ]
+  },
+  "intents": [
+    {
+      "name": "write",
+      "mutating": true,
+      "mcp": "memory_write",
+      "cli": "add",
+      "condition": "explicit user intent"
+    },
+    {
+      "name": "search",
+      "mutating": false,
+      "mcp": "memory_search",
+      "cli": "search",
+      "condition": null
+    },
+    {
+      "name": "get",
+      "mutating": false,
+      "mcp": "memory_get",
+      "cli": "get",
+      "condition": null
+    },
+    {
+      "name": "list",
+      "mutating": false,
+      "mcp": "memory_list",
+      "cli": "list",
+      "condition": null
+    },
+    {
+      "name": "delete",
+      "mutating": true,
+      "mcp": "memory_delete",
+      "cli": "delete",
+      "condition": "explicit user intent"
+    },
+    {
+      "name": "ingest",
+      "mutating": true,
+      "mcp": "memory_ingest",
+      "cli": "ingest",
+      "condition": "explicit intent + LLM"
+    },
+    {
+      "name": "curate",
+      "mutating": true,
+      "mcp": null,
+      "cli": "curate",
+      "condition": "explicit intent + LLM"
+    },
+    {
+      "name": "stats",
+      "mutating": false,
+      "mcp": null,
+      "cli": "stats",
+      "condition": "CLI store identity confirmed"
+    },
+    {
+      "name": "export",
+      "mutating": false,
+      "mcp": null,
+      "cli": "export",
+      "condition": "CLI store identity confirmed"
+    },
+    {
+      "name": "namespace-discovery",
+      "mutating": false,
+      "mcp": null,
+      "cli": "namespaces",
+      "condition": "CLI data dir confirmed"
+    },
+    {
+      "name": "version",
+      "mutating": false,
+      "mcp": null,
+      "cli": "version",
+      "condition": null
+    }
+  ]
+}

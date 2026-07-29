@@ -8,6 +8,32 @@ permissions:
   contents: read
 
 jobs:
+  skill-and-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Validate Agent Skill package
+        env:
+          ENGRAM_SKILL_TEST_SCRATCH: ${{ runner.temp }}/engram-skill-validator
+        run: |
+          node --test scripts/validate-agent-skill.test.mjs
+          node scripts/validate-agent-skill.mjs --source
+
+      - name: Run isolated local installation matrix
+        run: node scripts/test-agent-skill-install.mjs --scratch "${RUNNER_TEMP}/engram-skill-install" --source ./skills/engram --installer-version 1.5.20
+
+      - name: Validate documentation
+        run: |
+          node --test docs/validation/check-docs.test.mjs
+          node docs/validation/check-docs.mjs
+
   go:
     runs-on: ubuntu-latest
     steps:

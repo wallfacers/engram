@@ -34,9 +34,18 @@ engram MCP server 提供面向客户端的本地记忆接入。配置文件应�
 
 MCP 工具用于显式搜索、读取、写入和 ingest。只有客户端显式调用 ingest 才会触发抽取；`write` 或 `add` 直接保存给定内容。不要假定普通聊天内容会被自动持久化。
 
+[engram Agent Skill](../../skills/engram/references/install.md) 可在 Claude Code、Codex 和
+OpenCode 中选择这些已经连接的工具；它不会安装 `engram-mcp`、编辑 MCP 配置或赋予工具
+权限。skill 激活后仍应优先检查实际 `tools/list`，每次调用只使用一个明确 namespace，并在
+MCP 不可用时才考虑独立配置的 CLI 路径。
+
 ## Curation
 
 curation 是 `shipped-opt-in`：它已交付，但仅在显式开启或调用时运行。启用前请先确认 namespace、模型依赖和审计需求；它不是默认后台进程。完整生命周期与检索边界见[记忆系统架构](../architecture/memory-system.md)。
+
+缺少 LLM 时，基础 MCP CRUD 仍可离线工作，条件 `memory_ingest` 不会出现；skill 也不得把
+缺失的模型能力报告为成功。namespace 默认是 `default`，但项目、用户或数据目录切换必须显式
+确认，不能以同名 namespace 推断跨 adapter 的同一存储。
 
 ## 故障排查
 

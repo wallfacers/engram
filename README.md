@@ -42,7 +42,23 @@ fact extraction, or memory curation.
 
 ## Quick start
 
-### 1. Build and use the CLI offline
+### 1. Install the agent skill
+
+The `engram` Agent Skill is formally supported in Claude Code, Codex, and
+OpenCode. It only installs the skill: install the CLI and configure the MCP
+server separately. Before confirming, review the possible replacement targets
+`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` and `~/.agents/skills/engram`.
+
+```bash
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+```
+
+The command keeps the installer's write confirmation. Choose `Symlink` when
+available or `Copy` on restricted filesystems. See the canonical [skill
+installation reference](skills/engram/references/install.md) for project scope,
+one-client installs, upgrades, manual/offline fallback, reload, and recovery.
+
+### 2. Build and use the CLI offline
 
 Requires Go 1.25 or newer.
 
@@ -81,7 +97,7 @@ Common commands:
 See the [CLI guide](docs/guides/cli.md) for ingest, curation, namespaces, and
 automation behavior.
 
-### 2. Connect an MCP client
+### 3. Connect an MCP client
 
 Build the stdio server:
 
@@ -298,6 +314,7 @@ reproduce the canonical recipe.
 | Goal | Document |
 |---|---|
 | Browse all current docs | [Documentation portal](docs/README.md) |
+| Install the Claude Code, Codex, or OpenCode skill | [Skill installation reference](skills/engram/references/install.md) |
 | Use the CLI | [CLI guide](docs/guides/cli.md) |
 | Connect an MCP client | [MCP server guide](docs/guides/mcp-server.md) |
 | Understand the runtime | [Memory-system architecture](docs/architecture/memory-system.md) |

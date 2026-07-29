@@ -1,0 +1,98 @@
+[
+  {
+    "query": "Use engram to remember that I prefer jasmine tea.",
+    "should_trigger": true
+  },
+  {
+    "query": "请用 engram 记住我的工作时区是 Asia/Shanghai。",
+    "should_trigger": true
+  },
+  {
+    "query": "Search my engram memories for the editor I chose last month.",
+    "should_trigger": true
+  },
+  {
+    "query": "Delete the saved engram fact named old-address.",
+    "should_trigger": true
+  },
+  {
+    "query": "Keep this preference available when I return in a later session.",
+    "should_trigger": true
+  },
+  {
+    "query": "Save this recurring travel constraint so future conversations can retrieve it.",
+    "should_trigger": true
+  },
+  {
+    "query": "What durable facts have I stored about my project workflow?",
+    "should_trigger": true
+  },
+  {
+    "query": "从之前保存的长期记忆里召回我的饮食偏好。",
+    "should_trigger": true
+  },
+  {
+    "query": "Please ingest this conversation into long-term memory after I confirm it.",
+    "should_trigger": true
+  },
+  {
+    "query": "Run a cleanup pass over the memories in my current namespace.",
+    "should_trigger": true
+  },
+  {
+    "query": "Show memory statistics and export my persistent notes.",
+    "should_trigger": true
+  },
+  {
+    "query": "Which saved namespace and engram version am I using?",
+    "should_trigger": true
+  },
+  {
+    "query": "How much RAM is this process consuming right now?",
+    "should_trigger": false
+  },
+  {
+    "query": "Clear the browser cache before opening the page.",
+    "should_trigger": false
+  },
+  {
+    "query": "Design a PostgreSQL database schema for customer orders.",
+    "should_trigger": false
+  },
+  {
+    "query": "Keep this only in the current chat context; do not save it.",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain CPU cache locality in Go.",
+    "should_trigger": false
+  },
+  {
+    "query": "What is the memory layout of a Go struct?",
+    "should_trigger": false
+  },
+  {
+    "query": "Tune Redis cache eviction for this service.",
+    "should_trigger": false
+  },
+  {
+    "query": "Summarize this conversation, but do not retain any information.",
+    "should_trigger": false
+  },
+  {
+    "query": "Compare database index types for a reporting workload.",
+    "should_trigger": false
+  },
+  {
+    "query": "How can I free memory on a Linux server?",
+    "should_trigger": false
+  },
+  {
+    "query": "在本次对话里临时记住这句话，不要写入长期存储。",
+    "should_trigger": false
+  },
+  {
+    "query": "Review this in-memory cache implementation without storing user data.",
+    "should_trigger": false
+  }
+]

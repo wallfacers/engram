@@ -40,7 +40,21 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 
 ## 快速开始
 
-### 1. 构建并离线使用 CLI
+### 1. 安装 Agent Skill
+
+`engram` Agent Skill 正式支持 Claude Code、Codex 和 OpenCode。它只安装 skill；CLI
+二进制与 MCP server 仍需分别安装和配置。确认前请检查可能被替换的
+`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` 与 `~/.agents/skills/engram`。
+
+```bash
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
+```
+
+该命令会保留安装器的写入确认。可用时选择 `Symlink`，受限文件系统选择 `Copy`。
+项目作用域、单客户端安装、升级、离线手动后备、重载与恢复，请以唯一的
+[skill 安装正本](skills/engram/references/install.md) 为准。
+
+### 2. 构建并离线使用 CLI
 
 需要 Go 1.25 或更高版本。
 
@@ -78,7 +92,7 @@ export ENGRAM_DATA_DIR="$PWD/data"
 对话抽取、curation、命名空间及自动化行为详见
 [CLI 使用指南](docs/guides/cli.md)。
 
-### 2. 接入 MCP 客户端
+### 3. 接入 MCP 客户端
 
 构建 stdio server：
 
@@ -283,6 +297,7 @@ canonical recipe 的复现步骤见
 | 目标 | 文档 |
 |---|---|
 | 浏览全部当前文档 | [文档门户](docs/README.md) |
+| 安装 Claude Code、Codex 或 OpenCode skill | [skill 安装正本](skills/engram/references/install.md) |
 | 使用 CLI | [CLI 使用指南](docs/guides/cli.md) |
 | 接入 MCP 客户端 | [MCP Server 配置指南](docs/guides/mcp-server.md) |
 | 理解运行架构 | [记忆系统架构](docs/architecture/memory-system.md) |
