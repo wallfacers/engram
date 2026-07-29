@@ -44,19 +44,20 @@ fact extraction, or memory curation.
 
 ### 1. Install the agent skill
 
-The `engram` Agent Skill is formally supported in Claude Code, Codex, and
-OpenCode. It only installs the skill: install the CLI and configure the MCP
-server separately. Before confirming, review the possible replacement targets
-`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` and `~/.agents/skills/engram`.
+Prerequisites: Node.js >=22.20.0, npx/npm, Git, and network access. The command
+installs only the skill; install the CLI and configure the MCP server
+separately. At user scope the installer writes `~/.claude/skills/engram`,
+`~/.codex/skills/engram`, and `~/.config/opencode/skills/engram`.
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
-The command keeps the installer's write confirmation. Choose `Symlink` when
-available or `Copy` on restricted filesystems. See the canonical [skill
-installation reference](skills/engram/references/install.md) for project scope,
-one-client installs, upgrades, manual/offline fallback, reload, and recovery.
+Keep the installer's write confirmation; choose `Symlink` (default) or `Copy`
+on restricted filesystems. After install, reload each client and verify it
+discovers exactly one `engram` skill. For project scope, one-client installs,
+offline/manual fallback, upgrades, and recovery, see the canonical [skill
+installation reference](skills/engram/references/install.md).
 
 ### 2. Build and use the CLI offline
 

@@ -35,15 +35,16 @@ tags: [documentation, portal, navigation]
 
 ### 安装 Agent Skill
 
-确认前检查 `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` 与
-`~/.agents/skills/engram` 是否已有同名 skill。下列命令仅安装 skill，不安装 CLI 二进制，
-也不修改 MCP 配置；安装器会在写入前继续要求确认。
+前置条件：Node.js >=22.20.0、npx/npm、Git 与网络。该命令只安装 skill，不安装 CLI
+二进制，也不修改 MCP 配置。用户作用域下，安装器会写入 `~/.claude/skills/engram`、
+`~/.codex/skills/engram` 与 `~/.config/opencode/skills/engram`，并在写入前要求确认。
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
-项目作用域、单客户端、离线后备与升级说明只维护在
+默认选择 `Symlink`，受限文件系统选择 `Copy`；安装后重载各客户端，并确认每个客户端
+恰好发现一个 `engram` skill。项目作用域、单客户端、离线后备与升级说明只维护在
 [skill 安装正本](../skills/engram/references/install.md)。
 
 ## 架构

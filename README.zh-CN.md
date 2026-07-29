@@ -42,17 +42,18 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 
 ### 1. 安装 Agent Skill
 
-`engram` Agent Skill 正式支持 Claude Code、Codex 和 OpenCode。它只安装 skill；CLI
-二进制与 MCP server 仍需分别安装和配置。确认前请检查可能被替换的
-`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` 与 `~/.agents/skills/engram`。
+前置条件：Node.js >=22.20.0、npx/npm、Git 与网络。该命令只安装 skill；CLI
+二进制与 MCP server 仍需分别安装和配置。用户作用域下，安装器会写入
+`~/.claude/skills/engram`、`~/.codex/skills/engram` 与
+`~/.config/opencode/skills/engram`。
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/<ENGRAM_SKILL_TAG>/skills/engram --global --agent claude-code --agent codex --agent opencode
 ```
 
-该命令会保留安装器的写入确认。可用时选择 `Symlink`，受限文件系统选择 `Copy`。
-项目作用域、单客户端安装、升级、离线手动后备、重载与恢复，请以唯一的
-[skill 安装正本](skills/engram/references/install.md) 为准。
+请保留安装器的写入确认；默认选择 `Symlink`，受限文件系统选择 `Copy`。安装后重载
+各客户端，并确认每个客户端恰好发现一个 `engram` skill。项目作用域、单客户端安装、
+离线/手动后备、升级与恢复，请以唯一的 [skill 安装正本](skills/engram/references/install.md) 为准。
 
 ### 2. 构建并离线使用 CLI
 
