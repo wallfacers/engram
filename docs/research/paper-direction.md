@@ -21,6 +21,8 @@ tags: [research, evaluation, reliability]
 
 这些失败共同指向同一风险：把代理指标、单次运行或未对齐的评测栈误读为记忆系统因果改进。端到端回答由写入、检索、answerer、拒答策略、judge 与聚合共同决定；只改变其中一轴时，必须把其余轴固定并记录。
 
+当前最强的跨系统证据是 MemOS 同栈逐题配对复现；[当前结果正本](../evaluation/results.md)记录了总体统计证据。这足以支撑“该固定栈下总体领先具有统计证据”，但 MemOS 单 answer run、显著不同的上下文预算以及 v4-pro 缺逐题标签，仍阻止将结果写成“记忆机制优于 MemOS”。详细方法、数值和复算入口见[MemOS 同栈复现报告](../evaluation/reports/memos-locomo-reproduction.md)。
+
 ## 低成本止损
 
 在投入实现前先做低成本、可复现的覆盖检查、同配置重复与冻结 transcript 重判；若效应没有超过噪声标尺，或没有兑现到端到端回答，就停止扩展该方向。该止损规则优先于为新机制补叙事。

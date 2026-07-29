@@ -19,10 +19,40 @@ MemOS 使用其自家代码与 LoCoMo cat 1–4（1540 题），答题模型固�
 
 ## 结果与可声明范围
 
-在该栈下 MemOS 得到 82.40%，而 engram 同口径参考为 85.71%，差为 +3.31 个百分点。MemOS 公开 88.83 的数字不能与本结果直接混用；两者的 answerer 与 judge regime 不同。
+在原始 1540 行汇总中，MemOS 得到 1269/1540（82.40%），engram 同口径参考为 85.71%，差为 +3.31 个百分点。MemOS 公开 88.83 的数字不能与本结果直接混用；两者的 answerer 与 judge regime 不同。
 
-该结论的限制同样重要：MemOS 侧只有一次答题运行，未做逐题配对 McNemar，且 engram 输入 answerer 的上下文预算更高。因而可声明“此受控栈下的点估计差”，不可声明记忆机制的通用优劣。
+### 逐题配对检验
+
+原始数据的 1540 行含 11 组重复问题。以 `(conv, question)` 对齐，每个 engram run 对重复组保留首条后再取三次运行多数，MemOS 侧同样折叠，得到 1529 个唯一配对：
+
+| 类别 | n | engram | MemOS | b | c | 双侧 exact p |
+|---|---:|---:|---:|---:|---:|---:|
+| single-hop | 830 | 737/830（88.80%） | 687/830（82.77%） | 90 | 40 | 0.000014 |
+| open-domain | 96 | 63/96（65.62%） | 57/96（59.38%） | 16 | 10 | 0.326940 |
+| multi-hop | 282 | 247/282（87.59%） | 252/282（89.36%） | 15 | 20 | 0.499560 |
+| temporal | 321 | 263/321（81.93%） | 265/321（82.55%） | 34 | 36 | 0.904975 |
+| **overall** | **1529** | **1310/1529（85.68%）** | **1261/1529（82.47%）** | **155** | **106** | **0.002895** |
+
+overall 的连续性校正 McNemar `χ²=8.828`，双侧 exact `p=0.002895`。因此结果从“两个点估计之差”升级为“固定 v4-flash 同栈下总体领先具有配对统计证据”；显著差异由 single-hop 驱动。
+
+### 解释边界
+
+该结论仍有三条硬边界：
+
+- MemOS 侧只有一次答题运行，engram 侧是三次运行多数，前者没有 answer-run 误差带。
+- engram 输入 answerer 的上下文约 3262 token/次，MemOS 约 1059 token/次；检索与上下文预算差异尚未剥离。
+- deepseek-v4-pro 重判只保存了 MemOS overall 80.26%，没有逐题 verdict；其相对 engram 83.77% 的 +3.51pp 只是原始汇总差，不能声称配对显著。
+
+因而可以声明 v4-flash 受控栈下的总体统计领先，不可将差异归因于记忆机制本身，也不可外推为通用系统排名。
 
 ## 复现资产
 
-可重建但代价高的逐题产物、脚本与 manifest 存放在受控私有评测资产位置。资产必须在使用前核对数据版本、模型 revision 和凭据清理状态；不得将私有数据、令牌或远端连接信息复制到本仓库。
+配对统计入口为 [`scripts/mcnemar.py`](../../../scripts/mcnemar.py)。从受控评测资产取得 `009-eval-runs/009-full-A-base/run-*/results-hybrid.jsonl` 与 `memos-parity/memos_judged_detail.json` 后运行：
+
+```bash
+python3 scripts/mcnemar.py \
+  '009-eval-runs/009-full-A-base/run-*/results-hybrid.jsonl' \
+  memos-parity/memos_judged_detail.json
+```
+
+可重建但代价高的逐题产物与 manifest 存放在受控评测资产位置。资产必须在使用前核对数据版本、模型 revision 和凭据清理状态；不得将私有数据、令牌或远端连接信息复制到本仓库。

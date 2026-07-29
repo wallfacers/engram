@@ -30,9 +30,21 @@ tags: [evaluation, locomo, longmemeval, results]
 
 ## 同栈竞品对照
 
-唯一已完成的同栈对照固定 Qwen3.6-35B-A3B-FP8 answerer、bge-large-en-v1.5 embedding、同一 judge prompt 与同一 judge：LoCoMo 上 engram 为 85.71%，MemOS 为 82.40%。更换为 deepseek-v4-pro judge 后，engram 为 83.77%，MemOS 为 80.26%。
+唯一已完成的同栈对照固定 Qwen3.6-35B-A3B-FP8 answerer、bge-large-en-v1.5 embedding、同一 judge prompt 与同一 judge：LoCoMo 原始 1540 行汇总中 engram 为 85.71%，MemOS 为 82.40%。
 
-这说明在该受控栈中 engram 相对 MemOS 的差为 +3.31 至 +3.51 个百分点；它不证明通用的“记忆机制领先”，因为两侧仍使用各自的默认检索预算与上下文预算。厂商自报榜单仅供[竞品口径](competitors.md)追溯，不能横向相减。
+原始数据含 11 组重复问题。按唯一 `(conv, question)` 折叠并复现 bench 的三次运行多数票后，得到 1529 个完整配对：engram 为 1310/1529（85.68%），MemOS 为 1261/1529（82.47%），差为 +3.20 个百分点；不一致对 `b=155`（engram 对、MemOS 错）、`c=106`（反向），双侧 McNemar exact `p=0.002895`。分类别结果如下：
+
+| 类别 | n | engram | MemOS | 差值 | exact p |
+|---|---:|---:|---:|---:|---:|
+| single-hop | 830 | 88.80% | 82.77% | +6.02pp | 0.000014 |
+| open-domain | 96 | 65.62% | 59.38% | +6.25pp | 0.326940 |
+| multi-hop | 282 | 87.59% | 89.36% | -1.77pp | 0.499560 |
+| temporal | 321 | 81.93% | 82.55% | -0.62pp | 0.904975 |
+| **overall** | **1529** | **85.68%** | **82.47%** | **+3.20pp** | **0.002895** |
+
+因此可以声明“固定 v4-flash 同栈下 engram 的总体领先具有配对统计证据”，且领先主要由 single-hop 驱动。更换为 deepseek-v4-pro judge 后，原始汇总为 engram 83.77%、MemOS 80.26%，但 MemOS 没有保存逐题 verdict，+3.51pp 仍不得写成“配对显著”。
+
+这些结果不证明通用的“记忆机制领先”：MemOS 侧只有一次 answer run，两侧仍使用各自的默认检索与上下文预算。完整方法、诚实项和复算入口见[MemOS LoCoMo 同栈复现报告](reports/memos-locomo-reproduction.md)；厂商自报榜单仅供[竞品口径](competitors.md)追溯，不能横向相减。
 
 ## 结果维护要求
 

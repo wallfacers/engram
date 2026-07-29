@@ -281,9 +281,16 @@ engram 换用更强的答题模型后，temporal 提升 7.48 个百分点、open
 
 | 轴 | 受控变化 | 净效应 | 解读 |
 |---|---|---:|---|
-| **框架** | engram − MemOS，LoCoMo 1540 | **+3.31pp**（v4-flash judge）/ **+3.51pp**（v4-pro judge） | 两个 judge 下方向一致 |
+| **框架** | engram − MemOS，LoCoMo 1540 | **+3.31pp**（v4-flash judge）/ **+3.51pp**（v4-pro judge） | 两个 judge 下方向一致；1529 个去重配对的配对 McNemar exact **p=0.002895** |
 | **答题模型** | Qwen → v4-pro | **+3.32pp**（LoCoMo）/ **+5.20pp**（LongMemEval-S，p=0.0049） | 强答题模型主要改善 temporal 和 open-domain |
 | **判题模型** | v4-flash → v4-pro | **−2 至 −3pp** | 产生加性偏移，但框架差值方向不变 |
+
+框架差值是上表唯一有配对统计证据的行。原始 1540 行含 11 组重复问题，按
+`(conv, question)` 折叠后得到 1529 个配对（engram 85.68%，MemOS 82.47%，+3.20pp），
+双侧 exact McNemar 检验 **p=0.002895**，主要由 single-hop 驱动（p=0.000014）。
+v4-pro judge 未保存逐题 verdict，其 +3.51pp 不能声称配对显著。方法与边界
+（MemOS 仅一次答题运行、上下文预算差异）见
+[MemOS 同栈复现报告](docs/evaluation/reports/memos-locomo-reproduction.md)。
 
 Mem0 的 92.5% / 94.4% 来自托管平台，其中包含开源 SDK 未提供的优化，并使用
 `top_200` 检索预算，因此无法在同栈条件下复现，对 Mem0 的真实受控差距仍然

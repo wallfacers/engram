@@ -297,9 +297,17 @@ categories are more answerer-bound.
 
 | Axis | Controlled change | Net effect | Interpretation |
 |---|---|---:|---|
-| **Framework** | engram − MemOS, LoCoMo 1540 | **+3.31pp** (v4-flash judge) / **+3.51pp** (v4-pro judge) | Direction holds under both judges |
+| **Framework** | engram − MemOS, LoCoMo 1540 | **+3.31pp** (v4-flash judge) / **+3.51pp** (v4-pro judge) | Direction holds under both judges; paired McNemar exact **p=0.002895** on 1,529 de-duplicated pairs |
 | **Answerer** | Qwen → v4-pro | **+3.32pp** (LoCoMo) / **+5.20pp** (LongMemEval-S, p=0.0049) | Stronger answering primarily improves temporal and open-domain |
 | **Judge** | v4-flash → v4-pro | **−2 to −3pp** | Additive shift; the framework delta keeps the same direction |
+
+The framework delta is the only row backed by paired statistical evidence.
+The raw 1,540 rows include 11 repeated `(conv, question)` groups; folding
+them yields 1,529 paired items (engram 85.68%, MemOS 82.47%, +3.20pp), and a
+two-sided exact McNemar test gives **p=0.002895**, driven by single-hop
+(p=0.000014). The v4-pro judge saved no per-item verdicts, so its +3.51pp is
+not a paired-significant claim. Method and caveats (MemOS single answer run,
+divergent context budgets) are in the [MemOS reproduction report](docs/evaluation/reports/memos-locomo-reproduction.md).
 
 Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
 that are not present in the open-source SDK, and a `top_200` retrieval budget.
