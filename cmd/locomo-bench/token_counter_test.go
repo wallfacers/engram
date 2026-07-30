@@ -2,11 +2,53 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
+
+func TestVLLMTokenCounterUsesChatTemplateEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/tokenize" {
+			t.Fatalf("tokenizer path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer local-only" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var request vllmTokenizeRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode tokenizer request: %v", err)
+		}
+		if request.Model != "answerer-r1" || !request.AddGenerationPrompt || len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[1].Content != "question plus evidence" {
+			t.Fatalf("tokenizer request = %+v", request)
+		}
+		_, _ = w.Write([]byte(`{"count":17}`))
+	}))
+	defer server.Close()
+
+	counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
+		BaseURL:     server.URL + "/v1",
+		APIKey:      "local-only",
+		Fingerprint: "sha256:answerer-template-r1",
+		HTTPClient:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new counter: %v", err)
+	}
+	got, err := counter.CountInput(context.Background(), evidencecompiler.AnswerInput{
+		Model: "answerer-r1", System: "system rules", User: "question plus evidence",
+	})
+	if err != nil {
+		t.Fatalf("count input: %v", err)
+	}
+	if got.InputTokens != 17 || got.Fingerprint != "sha256:answerer-template-r1" {
+		t.Fatalf("token count = %+v", got)
+	}
+}
 
 type fixtureTokenCounter struct {
 	counts      map[string]int

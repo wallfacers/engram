@@ -1,12 +1,112 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"strings"
 
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
+
+// vllmTokenCounter calls vLLM's chat-aware /tokenize endpoint. It uses the
+// same system+user message shape as the OpenAI provider adapter and asks vLLM
+// to include the generation prompt, so the preflight count includes chat
+// template boundary tokens rather than only evidence text.
+type vllmTokenCounter struct {
+	baseURL     string
+	apiKey      string
+	fingerprint string
+	httpClient  *http.Client
+}
+
+type vllmTokenCounterConfig struct {
+	BaseURL     string
+	APIKey      string
+	Fingerprint string
+	HTTPClient  *http.Client
+}
+
+type vllmChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type vllmTokenizeRequest struct {
+	Model               string            `json:"model"`
+	Messages            []vllmChatMessage `json:"messages"`
+	AddGenerationPrompt bool              `json:"add_generation_prompt"`
+}
+
+type vllmTokenizeResponse struct {
+	Count  int               `json:"count"`
+	Tokens []json.RawMessage `json:"tokens"`
+}
+
+func newVLLMTokenCounter(config vllmTokenCounterConfig) (*vllmTokenCounter, error) {
+	if strings.TrimSpace(config.BaseURL) == "" || strings.TrimSpace(config.Fingerprint) == "" {
+		return nil, fmt.Errorf("vLLM token counter requires base URL and fingerprint")
+	}
+	if config.HTTPClient == nil {
+		config.HTTPClient = http.DefaultClient
+	}
+	return &vllmTokenCounter{
+		baseURL:     strings.TrimRight(config.BaseURL, "/"),
+		apiKey:      config.APIKey,
+		fingerprint: config.Fingerprint,
+		httpClient:  config.HTTPClient,
+	}, nil
+}
+
+func (counter *vllmTokenCounter) CountInput(ctx context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	if counter == nil || strings.TrimSpace(input.Model) == "" {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token count requires a configured counter and answerer model")
+	}
+	body, err := json.Marshal(vllmTokenizeRequest{
+		Model: input.Model,
+		Messages: []vllmChatMessage{
+			{Role: "system", Content: input.System},
+			{Role: "user", Content: input.User},
+		},
+		AddGenerationPrompt: true,
+	})
+	if err != nil {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("encode vLLM token request: %w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, counter.baseURL+"/tokenize", bytes.NewReader(body))
+	if err != nil {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("build vLLM token request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if counter.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+counter.apiKey)
+	}
+	response, err := counter.httpClient.Do(request)
+	if err != nil {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token request: %w", err)
+	}
+	defer response.Body.Close() //nolint:errcheck
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
+		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token request failed with status %d", response.StatusCode)
+	}
+	var decoded vllmTokenizeResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&decoded); err != nil {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("decode vLLM token response: %w", err)
+	}
+	count := decoded.Count
+	if count == 0 {
+		count = len(decoded.Tokens)
+	}
+	if count < 1 {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token response has no positive count")
+	}
+	return evidencecompiler.TokenCount{InputTokens: count, Fingerprint: counter.fingerprint}, nil
+}
 
 type evalTokenCalibrationFixture struct {
 	Name            string

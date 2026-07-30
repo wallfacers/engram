@@ -212,23 +212,27 @@ func runEvalArtifactValidateCLI(runDir string) error {
 }
 
 func readFrozenEvalProtocol(runDir string) (evalProtocol, error) {
-	raw, err := os.ReadFile(filepath.Join(runDir, evalProtocolArtifactFile)) //nolint:gosec // run artifact is operator-selected
+	return readEvalProtocolFile(filepath.Join(runDir, evalProtocolArtifactFile))
+}
+
+func readEvalProtocolFile(path string) (evalProtocol, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // run artifact is operator-selected
 	if err != nil {
-		return evalProtocol{}, fmt.Errorf("read frozen protocol: %w", err)
+		return evalProtocol{}, fmt.Errorf("read protocol: %w", err)
 	}
 	var protocol evalProtocol
 	if err := json.Unmarshal(raw, &protocol); err != nil {
-		return evalProtocol{}, fmt.Errorf("decode frozen protocol: %w", err)
+		return evalProtocol{}, fmt.Errorf("decode protocol: %w", err)
 	}
 	if err := validateEvalProtocol(protocol, evalRunFormal); err != nil {
-		return evalProtocol{}, fmt.Errorf("validate frozen protocol: %w", err)
+		return evalProtocol{}, fmt.Errorf("validate protocol: %w", err)
 	}
 	hash, err := evalProtocolFingerprint(protocol)
 	if err != nil {
 		return evalProtocol{}, err
 	}
 	if protocol.ProtocolHash != hash {
-		return evalProtocol{}, fmt.Errorf("frozen protocol hash mismatch; use a fresh --run-dir")
+		return evalProtocol{}, fmt.Errorf("protocol hash mismatch; use a fresh --run-dir")
 	}
 	return protocol, nil
 }
