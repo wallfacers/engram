@@ -69,6 +69,10 @@ type options struct {
 	compareSpec          string
 	evalValidate         string
 	evalProtocolPath     string
+	evalFreezeProtocol   string
+	evalBudgetProfile    string
+	answerInputTokenCap  int
+	counterFingerprint   string
 	tokenCounterBaseURL  string
 	formalProtocol       *evalProtocol
 	formalCounter        evidencecompiler.TokenCounter
@@ -154,6 +158,10 @@ func run() error {
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
 	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (no dataset or model calls)")
 	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
+	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 protocol manifest and exit (no model calls)")
+	flag.StringVar(&opt.evalBudgetProfile, "eval-budget-profile", "", "formal protocol budget profile: low | high (required with --eval-freeze-protocol)")
+	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
+	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
 	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
@@ -349,6 +357,9 @@ func run() error {
 		if err := verifyFormalDataset(*opt.formalProtocol, opt.dataPath, opt.datasetFormat, convs); err != nil {
 			return err
 		}
+	}
+	if opt.evalFreezeProtocol != "" {
+		return freezeFormalB1Protocol(opt, convs)
 	}
 	sampledConversations := 0
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {

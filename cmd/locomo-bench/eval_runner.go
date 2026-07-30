@@ -12,6 +12,7 @@ import (
 
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
+	"github.com/wallfacers/engram/memory/prompt"
 	"github.com/wallfacers/engram/provider"
 )
 
@@ -459,4 +460,142 @@ func verifyFormalGitProvenance(protocol evalProtocol) error {
 		return fmt.Errorf("formal evaluation refuses dirty worktree")
 	}
 	return nil
+}
+
+// freezeFormalB1Protocol is the no-model half of T020.  It derives the two
+// dataset fingerprints and all current harness knobs from the actual command
+// line/environment, then refuses to write a manifest from a dirty worktree.
+// It deliberately writes only the manifest: scores and per-question artifacts
+// belong to a later immutable run directory.
+func freezeFormalB1Protocol(opt options, convs []conversation) error {
+	if strings.TrimSpace(opt.evalProtocolPath) != "" {
+		return fmt.Errorf("--eval-freeze-protocol cannot be combined with --eval-protocol")
+	}
+	if opt.evalBudgetProfile != "low" && opt.evalBudgetProfile != "high" {
+		return fmt.Errorf("--eval-budget-profile must be low or high")
+	}
+	if opt.answerInputTokenCap < 1 || !isDigest(opt.counterFingerprint) {
+		return fmt.Errorf("--answer-input-cap and --counter-fingerprint are required for formal protocol freeze")
+	}
+	if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
+		return fmt.Errorf("formal protocol freeze refuses dataset/question sampling")
+	}
+	arms, err := armsFor(opt.retrieval)
+	if err != nil {
+		return err
+	}
+	if len(arms) != 1 || opt.multiQuery || opt.filterPool > 0 || opt.iris || opt.rerank {
+		return fmt.Errorf("formal B1 freeze requires one non-adaptive retrieval arm with IRIS and rerank disabled")
+	}
+	raw, err := os.ReadFile(opt.dataPath) //nolint:gosec // operator-selected benchmark is frozen by digest
+	if err != nil {
+		return fmt.Errorf("read benchmark for protocol freeze: %w", err)
+	}
+	questionIDs := make([]string, 0)
+	for _, conv := range convs {
+		for _, qa := range conv.QA {
+			questionIDs = append(questionIDs, qa.QuestionID)
+		}
+	}
+	benchmarkName, split := "", ""
+	switch opt.datasetFormat {
+	case "locomo":
+		benchmarkName, split = "locomo", "category_1_4"
+	case "longmemeval":
+		benchmarkName, split = "longmemeval_s", "cleaned_full_500"
+	default:
+		return fmt.Errorf("unsupported formal benchmark format %q", opt.datasetFormat)
+	}
+	git, err := currentCleanGitProvenance()
+	if err != nil {
+		return err
+	}
+	answerModel := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
+	extractModel := envOr("EXTRACT_MODEL", answerModel)
+	judge := resolveJudgeConfig(os.Getenv)
+	answerPromptDigest := evalJSONDigest([]string{
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		currentDateRule,
+	})
+	protocol := evalProtocol{
+		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b1-%s", benchmarkName, opt.evalBudgetProfile), CreatedAt: time.Now().UTC(), Git: git,
+		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
+		Store:     evalStoreProvenance{SchemaVersion: 6, IngestionRecipe: "lossless_chunks_v1", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{}},
+		Models: evalModelProvenance{
+			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
+			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), PromptDigest: answerPromptDigest},
+			Judge:     evalModelFingerprint{ID: judge.Model, Revision: envOr("JUDGE_MODEL_REVISION", judge.Model), PromptDigest: evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode()))},
+			Planner:   evalPlannerFingerprint{Enabled: false},
+		},
+		Retrieval:      evalRetrievalProvenance{Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled", CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]})},
+		Budget:         evalBudgetProtocol{Profile: opt.evalBudgetProfile, AnswerInputTokenCap: opt.answerInputTokenCap, CandidateLimit: opt.topK, RetrievalCallLimit: 1, AnswerCallLimit: 1, CounterFingerprint: opt.counterFingerprint},
+		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
+		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:concordant-stratified-plan:freeze-before-treatment"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
+		CoverageStrata: evalCoverageStrataProtocol{Boundaries: []float64{0, 0.5, 0.9, 1}, SelectionDigest: evalTextDigest("022.v1:coverage-strata:0,0.5,0.9,1")},
+		Experiment:     evalExperimentProtocol{Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all", MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false}},
+	}
+	if !opt.chunks {
+		return fmt.Errorf("formal B1 freeze requires --chunks for lossless source identity")
+	}
+	if _, err := freezeEvalProtocolFile(opt.evalFreezeProtocol, protocol, evalRunFormal); err != nil {
+		return err
+	}
+	fmt.Printf("eval-freeze: protocol=%s output=%s questions=%d cap=%d\n", protocol.ProtocolID, opt.evalFreezeProtocol, len(questionIDs), opt.answerInputTokenCap)
+	return nil
+}
+
+type evalFreezeIngestion struct {
+	Chunks        bool `json:"chunks"`
+	ImageCaptions bool `json:"image_captions"`
+	OpinionPass   bool `json:"opinion_pass"`
+}
+
+type evalFreezeCandidateRules struct {
+	TopK       int    `json:"top_k"`
+	ChunkQuota int    `json:"chunk_quota"`
+	Chunks     bool   `json:"chunks"`
+	Retrieval  string `json:"retrieval"`
+}
+
+func evalEmbeddingFingerprint() string {
+	if fingerprint := strings.TrimSpace(os.Getenv("EMBED_FINGERPRINT")); isDigest(fingerprint) {
+		return fingerprint
+	}
+	return evalTextDigest("embedding-model=" + envOr("EMBED_MODEL", "qwen3-embedding:0.6b"))
+}
+
+func currentCleanGitProvenance() (evalGitProvenance, error) {
+	head, err := exec.Command("git", "rev-parse", "HEAD").Output() //nolint:gosec // fixed git subcommand
+	if err != nil {
+		return evalGitProvenance{}, fmt.Errorf("read git commit for protocol freeze: %w", err)
+	}
+	status, err := exec.Command("git", "status", "--porcelain").Output() //nolint:gosec // fixed git subcommand
+	if err != nil {
+		return evalGitProvenance{}, fmt.Errorf("read git status for protocol freeze: %w", err)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		return evalGitProvenance{}, fmt.Errorf("formal protocol freeze refuses dirty worktree")
+	}
+	return evalGitProvenance{Commit: strings.TrimSpace(string(head)), Dirty: false}, nil
+}
+
+func freezeEvalProtocolFile(path string, protocol evalProtocol, mode evalRunMode) (evalProtocol, error) {
+	if err := validateEvalProtocol(protocol, mode); err != nil {
+		return evalProtocol{}, err
+	}
+	hash, err := evalProtocolFingerprint(protocol)
+	if err != nil {
+		return evalProtocol{}, err
+	}
+	protocol.ProtocolHash = hash
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return evalProtocol{}, fmt.Errorf("create protocol directory: %w", err)
+	}
+	if err := writeJSON(path, protocol); err != nil {
+		return evalProtocol{}, fmt.Errorf("write protocol: %w", err)
+	}
+	return protocol, nil
 }
