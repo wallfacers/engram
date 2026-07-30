@@ -138,15 +138,15 @@ func holmNegativeCategoryGate(comparisons []evalCategoryComparison, alpha float6
 }
 
 type evalArtifactValidity struct {
-	Valid                    bool
-	Complete                 bool
-	CandidateIdentityRate    float64
-	SourceValidationRate     float64
-	SpanRecoveryRate         float64
-	CitationCoverageRate     float64
-	WithinCapRate            float64
-	AnswerCallComplianceRate float64
-	UnattributedAddCount     int
+	Valid                    bool    `json:"valid"`
+	Complete                 bool    `json:"complete"`
+	CandidateIdentityRate    float64 `json:"candidate_identity_rate"`
+	SourceValidationRate     float64 `json:"source_validation_rate"`
+	SpanRecoveryRate         float64 `json:"span_recovery_rate"`
+	CitationCoverageRate     float64 `json:"citation_coverage_rate"`
+	WithinCapRate            float64 `json:"within_cap_rate"`
+	AnswerCallComplianceRate float64 `json:"per_instance_answer_call_compliance"`
+	UnattributedAddCount     int     `json:"unattributed_add_count"`
 }
 
 func (validity evalArtifactValidity) isComplete() bool {

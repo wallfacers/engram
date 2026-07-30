@@ -59,7 +59,7 @@ projection 是条件阶段；未满足前置 residual-cohort gate 时以 STOP ve
 - [X] T015 [P] 实现预注册 judge audit 采样、盲标导入、adjudication 和 raw/corrected summary 到 `cmd/locomo-bench/judge_audit.go`
 - [X] T016 [P] 实现 source-ID 解析、互斥 miss attribution 和不进入正式分数的 fixed-gold oracle 到 `cmd/locomo-bench/miss_attribution.go`
 - [X] T017 实现与实际本地 answerer tokenizer/chat template 同栈的 counter、calibration 和 fail-closed fingerprint 到 `cmd/locomo-bench/token_counter.go`
-- [ ] T018 为 protocol→candidate→classification→summary 的完整/缺失/篡改 artifact 流写失败集成测试到 `cmd/locomo-bench/eval_protocol_integration_test.go`
+- [X] T018 为 protocol→candidate→classification→summary 的完整/缺失/篡改 artifact 流写失败集成测试到 `cmd/locomo-bench/eval_protocol_integration_test.go`
 - [ ] T019 在 `cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/journal.go`、`cmd/locomo-bench/jsonio.go`、`cmd/locomo-bench/stats.go` 和薄接线 `cmd/locomo-bench/main.go` 中集成 `022.v1`，并结构性关闭正式 arm 的 IRIS 与 legacy IDK retry
 
 ### Freeze and baseline
