@@ -9,11 +9,12 @@ import (
 	"testing"
 
 	"github.com/wallfacers/engram/memory/evidencecompiler"
+	"github.com/wallfacers/engram/provider"
 )
 
 func TestVLLMTokenCounterUsesChatTemplateEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/tokenize" {
+		if r.URL.Path != "/tokenize" {
 			t.Fatalf("tokenizer path = %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer local-only" {
@@ -99,5 +100,33 @@ func TestTokenCounterRejectsCapAndFingerprintDrift(t *testing.T) {
 	}
 	if err := validateEvalTokenCount(evidencecompiler.TokenCount{InputTokens: 0, Fingerprint: "sha256:stable"}, 100, "sha256:stable"); err == nil {
 		t.Fatal("non-positive token count unexpectedly accepted")
+	}
+}
+
+func TestTokenCounterRuntimeCalibrationRejectsProviderUsageDrift(t *testing.T) {
+	fixture := evalTokenCalibrationFixture{
+		Name:  "chat-boundary",
+		Input: evidencecompiler.AnswerInput{Model: "local", System: "system", User: "user"},
+	}
+	counter := fixtureTokenCounter{
+		counts:      map[string]int{"system\x00user": 17},
+		fingerprint: "sha256:counter",
+	}
+	matching := func(_ context.Context, _, _ string) (string, provider.Usage, error) {
+		return "ok", provider.Usage{InputTokens: 17}, nil
+	}
+	report, err := calibrateEvalTokenCounterAgainstRuntime(context.Background(), counter, matching, []evalTokenCalibrationFixture{fixture}, "sha256:counter")
+	if err != nil {
+		t.Fatalf("matching runtime calibration: %v", err)
+	}
+	if !report.Complete || len(report.Fixtures) != 1 || report.Fixtures[0].PreflightInputTokens != 17 || report.Fixtures[0].RuntimeInputTokens != 17 {
+		t.Fatalf("runtime calibration report = %+v", report)
+	}
+
+	drifting := func(_ context.Context, _, _ string) (string, provider.Usage, error) {
+		return "ok", provider.Usage{InputTokens: 18}, nil
+	}
+	if _, err := calibrateEvalTokenCounterAgainstRuntime(context.Background(), counter, drifting, []evalTokenCalibrationFixture{fixture}, "sha256:counter"); err == nil {
+		t.Fatal("runtime input-token drift unexpectedly accepted")
 	}
 }

@@ -77,7 +77,12 @@ func (counter *vllmTokenCounter) CountInput(ctx context.Context, input evidencec
 	if err != nil {
 		return evidencecompiler.TokenCount{}, fmt.Errorf("encode vLLM token request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, counter.baseURL+"/tokenize", bytes.NewReader(body))
+	// vLLM exposes tokenization helpers at the server root, while its OpenAI
+	// chat-completions endpoint conventionally lives under /v1. Accept the
+	// latter base URL because it is shared with the answer provider, then strip
+	// only that terminal API prefix for the tokenizer call.
+	tokenizeBase := strings.TrimSuffix(counter.baseURL, "/v1")
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenizeBase+"/tokenize", bytes.NewReader(body))
 	if err != nil {
 		return evidencecompiler.TokenCount{}, fmt.Errorf("build vLLM token request: %w", err)
 	}
@@ -120,6 +125,18 @@ type evalTokenCalibrationReport struct {
 	CounterFingerprint string
 }
 
+type evalRuntimeTokenCalibrationFixture struct {
+	Name                 string `json:"name"`
+	PreflightInputTokens int    `json:"preflight_input_tokens"`
+	RuntimeInputTokens   int    `json:"runtime_input_tokens"`
+}
+
+type evalRuntimeTokenCalibrationReport struct {
+	Complete           bool                                 `json:"complete"`
+	CounterFingerprint string                               `json:"counter_fingerprint"`
+	Fixtures           []evalRuntimeTokenCalibrationFixture `json:"fixtures"`
+}
+
 // calibrateEvalTokenCounter checks counts on complete answer inputs, including
 // system/user chat boundaries. It never derives a total by summing parts.
 func calibrateEvalTokenCounter(ctx context.Context, counter evidencecompiler.TokenCounter, fixtures []evalTokenCalibrationFixture, expectedFingerprint string) (evalTokenCalibrationReport, error) {
@@ -150,6 +167,44 @@ func calibrateEvalTokenCounter(ctx context.Context, counter evidencecompiler.Tok
 	}
 	if report.MaxDelta != 0 {
 		return evalTokenCalibrationReport{}, fmt.Errorf("token counter calibration drift: max delta %d", report.MaxDelta)
+	}
+	return report, nil
+}
+
+// calibrateEvalTokenCounterAgainstRuntime proves that the preflight counter
+// and the configured answerer agree on the full chat-template input. Unlike a
+// self-recorded fixture, this fails if a server-side template or tokenizer
+// revision changes between counting and generation.
+func calibrateEvalTokenCounterAgainstRuntime(ctx context.Context, counter evidencecompiler.TokenCounter, answerCall usageModelCaller, fixtures []evalTokenCalibrationFixture, expectedFingerprint string) (evalRuntimeTokenCalibrationReport, error) {
+	if counter == nil || answerCall == nil || len(fixtures) == 0 || expectedFingerprint == "" {
+		return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("counter, answer caller, fixtures, and expected fingerprint are required")
+	}
+	report := evalRuntimeTokenCalibrationReport{Complete: true, CounterFingerprint: expectedFingerprint, Fixtures: make([]evalRuntimeTokenCalibrationFixture, 0, len(fixtures))}
+	seen := map[string]bool{}
+	for _, fixture := range fixtures {
+		if fixture.Name == "" || fixture.Input.Model == "" || seen[fixture.Name] {
+			return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("runtime calibration fixtures require unique names and answerer models")
+		}
+		seen[fixture.Name] = true
+		count, err := counter.CountInput(ctx, fixture.Input)
+		if err != nil {
+			return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("count runtime calibration fixture %q: %w", fixture.Name, err)
+		}
+		if err := validateEvalTokenCount(count, math.MaxInt, expectedFingerprint); err != nil {
+			return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("validate runtime calibration fixture %q: %w", fixture.Name, err)
+		}
+		_, usage, err := answerCall(ctx, fixture.Input.System, fixture.Input.User)
+		if err != nil {
+			return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("answer runtime calibration fixture %q: %w", fixture.Name, err)
+		}
+		report.Fixtures = append(report.Fixtures, evalRuntimeTokenCalibrationFixture{
+			Name:                 fixture.Name,
+			PreflightInputTokens: count.InputTokens,
+			RuntimeInputTokens:   usage.InputTokens,
+		})
+		if usage.InputTokens != count.InputTokens {
+			return evalRuntimeTokenCalibrationReport{}, fmt.Errorf("runtime input-token drift for fixture %q: preflight=%d runtime=%d", fixture.Name, count.InputTokens, usage.InputTokens)
+		}
 	}
 	return report, nil
 }
