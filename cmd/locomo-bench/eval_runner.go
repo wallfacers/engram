@@ -172,7 +172,7 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 		artifact.InvalidReasons = []string{"retriever_unavailable"}
 		return false, "", provider.Usage{}, artifact
 	}
-	hits, err := retriever.Search(ctx, qa.Question, protocol.Retrieval.CandidateLimit)
+	hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
 	if err != nil {
 		artifact.InvalidReasons = []string{"retrieval_failed"}
 		return false, "", provider.Usage{}, artifact
@@ -598,4 +598,55 @@ func freezeEvalProtocolFile(path string, protocol evalProtocol, mode evalRunMode
 		return evalProtocol{}, fmt.Errorf("write protocol: %w", err)
 	}
 	return protocol, nil
+}
+
+// runFormalTokenCalibrationCLI proves that the preflight counter and the
+// actual answer runtime see identical complete chat inputs before a protocol
+// is frozen. It needs no benchmark data and writes no credentials.
+func runFormalTokenCalibrationCLI(opt options) error {
+	if strings.TrimSpace(opt.runDir) == "" || strings.TrimSpace(opt.tokenCounterBaseURL) == "" || !isDigest(opt.counterFingerprint) {
+		return fmt.Errorf("--token-counter-calibrate requires --run-dir, --token-counter-base-url, and --counter-fingerprint")
+	}
+	apiKey := os.Getenv("LOCOMO_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("LOCOMO_API_KEY is required for token calibration")
+	}
+	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
+	baseURL := envOr("LOCOMO_BASE_URL", "")
+	if strings.TrimSpace(baseURL) == "" {
+		return fmt.Errorf("LOCOMO_BASE_URL is required for token calibration")
+	}
+	prov, err := buildBenchProvider(envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider), apiKey, baseURL, 32, "LOCOMO_PROVIDER")
+	if err != nil {
+		return err
+	}
+	counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.counterFingerprint})
+	if err != nil {
+		return err
+	}
+	report, err := calibrateEvalTokenCounterAgainstRuntime(context.Background(), counter, newUsageModelCaller(prov, model, 32, 0, "calibration", nil), formalCalibrationFixtures(model), opt.counterFingerprint)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(opt.runDir, "counter-calibration.json"), report); err != nil {
+		return err
+	}
+	fmt.Printf("token-counter-calibrate: fixtures=%d max_delta=0 fingerprint=%s\n", len(report.Fixtures), report.CounterFingerprint)
+	return nil
+}
+
+func formalCalibrationFixtures(model string) []evalTokenCalibrationFixture {
+	return []evalTokenCalibrationFixture{
+		{Name: "cjk-ja-en", Input: evidencecompiler.AnswerInput{Model: model, System: "Use only the evidence.", User: "中文、日本語、English: 张三 met 花子."}, WantInputTokens: 1},
+		{Name: "emoji-codepoints", Input: evidencecompiler.AnswerInput{Model: model, System: "Be concise.", User: "coffee ☕️ then family 👨‍👩‍👧‍👦."}, WantInputTokens: 1},
+		{Name: "numbers-time", Input: evidencecompiler.AnswerInput{Model: model, System: "UTC.", User: "1234567890 -0.125 2026-07-30T12:34:56.789Z."}, WantInputTokens: 1},
+		{Name: "empty-evidence", Input: evidencecompiler.AnswerInput{Model: model, System: "SYSTEM\n<rules/>", User: "EVIDENCE:\n(none)\nQUESTION: why?"}, WantInputTokens: 1},
+		{Name: "multi-source-boundary", Input: evidencecompiler.AnswerInput{Model: model, System: "SYSTEM\n<rules>no guessing</rules>", User: "<evidence id=\"a\">one</evidence>\n<evidence id=\"b\">two</evidence>\nQUESTION: combine?"}, WantInputTokens: 1},
+		{Name: "cap-minus-one", Input: evidencecompiler.AnswerInput{Model: model, System: "cap test", User: strings.Repeat("x", 255)}, WantInputTokens: 1},
+		{Name: "cap-exact", Input: evidencecompiler.AnswerInput{Model: model, System: "cap test", User: strings.Repeat("x", 256)}, WantInputTokens: 1},
+		{Name: "cap-plus-one", Input: evidencecompiler.AnswerInput{Model: model, System: "cap test", User: strings.Repeat("x", 257)}, WantInputTokens: 1},
+	}
 }

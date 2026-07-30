@@ -57,90 +57,91 @@ import (
 )
 
 type options struct {
-	dataPath             string
-	runDir               string
-	storeDir             string
-	aliasShadow          string
-	aliasShadowPrepared  bool
-	doc2query            string
-	doc2queryPrepared    bool
-	doc2queryBuild       bool
-	datasetFormat        string
-	compareSpec          string
-	evalValidate         string
-	evalProtocolPath     string
-	evalFreezeProtocol   string
-	evalBudgetProfile    string
-	answerInputTokenCap  int
-	counterFingerprint   string
-	tokenCounterBaseURL  string
-	formalProtocol       *evalProtocol
-	formalCounter        evidencecompiler.TokenCounter
-	formalRunIndex       int
-	repeats              int
-	estimate             bool
-	noIDKRetry           bool
-	budgetBaseline       float64
-	retrieval            string
-	multiQuery           bool
-	mqMaxSubqueries      int
-	recallDiagnostic     bool
-	maxConvs             int
-	maxQuestions         int
-	onlyCategory         int
-	onlyEnumeration      bool
-	topK                 int
-	maxTokens            int
-	concurrency          int
-	chunks               bool
-	chunkQuota           int
-	filterPool           int
-	assoc                bool
-	assocDepth           int
-	clusterSweep         bool
-	temporalScore        bool
-	temporalHardFilter   bool
-	conflictResolution   bool
-	supersededPenalty    float64
-	abstainPrompt        bool
-	abstainHard          bool
-	abstainSoft          bool
-	forceAnswer          bool
-	imageCaptions        bool
-	temporalAnswerPrompt bool
-	temporalDateScaffold bool
-	iris                 bool
-	irisDepth            int
-	judgeMem0Aligned     bool
-	answerModel          string
-	judgeModel           string
-	rerank               bool
-	pcic                 bool
-	oracle               bool
-	pcicAnnotate         bool
-	pcicFillTurns        string
-	pcicMetaPath         string
-	pcicMeta             *PCICMeta
-	abstainProbe         bool
-	abstainProbeOut      string
-	abstainGateSpec      string
-	abstainGate          AbstainGate
-	selector             chunkSelector
-	opinionPass          bool
-	adversarial          int
-	catTopKSpec          string
-	catQuotaSpec         string
-	catTopK              map[int]int
-	catQuota             map[int]int
-	coverageOnly         bool
-	temporalDiagnostic   bool
-	attributionTrace     bool
-	joinResults          string
-	embedProbe           bool
-	outrankCap           int
-	widePool             int
-	factCoverageTau      float64
-	contextParity        *contextParityJournal
+	dataPath              string
+	runDir                string
+	storeDir              string
+	aliasShadow           string
+	aliasShadowPrepared   bool
+	doc2query             string
+	doc2queryPrepared     bool
+	doc2queryBuild        bool
+	datasetFormat         string
+	compareSpec           string
+	evalValidate          string
+	evalProtocolPath      string
+	evalFreezeProtocol    string
+	evalBudgetProfile     string
+	answerInputTokenCap   int
+	counterFingerprint    string
+	tokenCounterCalibrate bool
+	tokenCounterBaseURL   string
+	formalProtocol        *evalProtocol
+	formalCounter         evidencecompiler.TokenCounter
+	formalRunIndex        int
+	repeats               int
+	estimate              bool
+	noIDKRetry            bool
+	budgetBaseline        float64
+	retrieval             string
+	multiQuery            bool
+	mqMaxSubqueries       int
+	recallDiagnostic      bool
+	maxConvs              int
+	maxQuestions          int
+	onlyCategory          int
+	onlyEnumeration       bool
+	topK                  int
+	maxTokens             int
+	concurrency           int
+	chunks                bool
+	chunkQuota            int
+	filterPool            int
+	assoc                 bool
+	assocDepth            int
+	clusterSweep          bool
+	temporalScore         bool
+	temporalHardFilter    bool
+	conflictResolution    bool
+	supersededPenalty     float64
+	abstainPrompt         bool
+	abstainHard           bool
+	abstainSoft           bool
+	forceAnswer           bool
+	imageCaptions         bool
+	temporalAnswerPrompt  bool
+	temporalDateScaffold  bool
+	iris                  bool
+	irisDepth             int
+	judgeMem0Aligned      bool
+	answerModel           string
+	judgeModel            string
+	rerank                bool
+	pcic                  bool
+	oracle                bool
+	pcicAnnotate          bool
+	pcicFillTurns         string
+	pcicMetaPath          string
+	pcicMeta              *PCICMeta
+	abstainProbe          bool
+	abstainProbeOut       string
+	abstainGateSpec       string
+	abstainGate           AbstainGate
+	selector              chunkSelector
+	opinionPass           bool
+	adversarial           int
+	catTopKSpec           string
+	catQuotaSpec          string
+	catTopK               map[int]int
+	catQuota              map[int]int
+	coverageOnly          bool
+	temporalDiagnostic    bool
+	attributionTrace      bool
+	joinResults           string
+	embedProbe            bool
+	outrankCap            int
+	widePool              int
+	factCoverageTau       float64
+	contextParity         *contextParityJournal
 }
 
 func main() {
@@ -162,6 +163,7 @@ func run() error {
 	flag.StringVar(&opt.evalBudgetProfile, "eval-budget-profile", "", "formal protocol budget profile: low | high (required with --eval-freeze-protocol)")
 	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
 	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
+	flag.BoolVar(&opt.tokenCounterCalibrate, "token-counter-calibrate", false, "compare formal /tokenize preflight with local answer-runtime usage and write a calibration artifact")
 	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
@@ -248,6 +250,9 @@ func run() error {
 	}
 	if opt.evalValidate != "" {
 		return runEvalArtifactValidateCLI(opt.evalValidate)
+	}
+	if opt.tokenCounterCalibrate {
+		return runFormalTokenCalibrationCLI(opt)
 	}
 	if opt.dataPath == "" {
 		flag.Usage()
