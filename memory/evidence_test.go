@@ -237,3 +237,77 @@ func TestLedgerTombstoneAndRestoreChangeSourceAvailability(t *testing.T) {
 		t.Fatalf("restored evidence = %+v, want active revision 3", restored)
 	}
 }
+
+func TestLedgerLifecycleInvalidatesProjectionAndPurgeDeletesDirectClosure(t *testing.T) {
+	ledger, db := newLedgerStore(t)
+	entries := memory.NewEntryStore(db)
+	ctx := context.Background()
+	appended, err := ledger.AppendBatch(ctx, []memory.EvidenceInput{{
+		ExternalSourceID: "turn-1",
+		SourceType:       memory.EvidenceMessage,
+		SourceSessionID:  "session-a",
+		Speaker:          "user",
+		Ordinal:          0,
+		Content:          "Alice moved to Berlin on Monday.",
+		RecordedAt:       time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("append source: %v", err)
+	}
+	fact := &memory.Entry{Name: "alice-move", Content: "Alice moved to Berlin on Monday."}
+	if err := entries.UpsertWithSources(ctx, fact, []memory.EvidenceRef{{EvidenceID: appended[0].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+		t.Fatalf("write sourced fact: %v", err)
+	}
+	if err := ledger.Tombstone(ctx, memory.LifecycleRequest{EvidenceID: appended[0].ID, RequestID: "tombstone-1", ReasonCode: "user_delete"}); err != nil {
+		t.Fatalf("tombstone source: %v", err)
+	}
+	var state string
+	if err := db.QueryRowContext(ctx, `
+		SELECT state FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, fact.ID).Scan(&state); err != nil {
+		t.Fatalf("read stale projection: %v", err)
+	}
+	if state != "stale" {
+		t.Fatalf("projection state after tombstone = %q, want stale", state)
+	}
+	if err := ledger.Restore(ctx, memory.LifecycleRequest{EvidenceID: appended[0].ID, RequestID: "restore-1", ReasonCode: "user_restore"}); err != nil {
+		t.Fatalf("restore source: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT state FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, fact.ID).Scan(&state); err != nil {
+		t.Fatalf("read stale projection after restore: %v", err)
+	}
+	if state != "stale" {
+		t.Fatalf("restore reactivated projection state %q, want stale", state)
+	}
+
+	purged, err := ledger.Purge(ctx, memory.LifecycleRequest{EvidenceID: appended[0].ID, RequestID: "purge-1", ReasonCode: "privacy_purge"})
+	if err != nil {
+		t.Fatalf("purge source: %v", err)
+	}
+	if !purged.Purged || purged.CheckpointPending {
+		t.Fatalf("purge result = %+v, want complete purge", purged)
+	}
+	if _, err := ledger.Get(ctx, appended[0].ID); !errors.Is(err, memory.ErrEvidencePurged) {
+		t.Fatalf("get purged source error = %v, want ErrEvidencePurged", err)
+	}
+	if _, err := entries.GetByName(ctx, fact.Name); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("purge retained direct fact projection: %v", err)
+	}
+	var evidenceCount, projectionCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_evidence WHERE id = ?`, appended[0].ID).Scan(&evidenceCount); err != nil {
+		t.Fatalf("count purged content: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, fact.ID).Scan(&projectionCount); err != nil {
+		t.Fatalf("count purged projection: %v", err)
+	}
+	if evidenceCount != 0 || projectionCount != 0 {
+		t.Fatalf("purge closure left evidence=%d projections=%d", evidenceCount, projectionCount)
+	}
+	var secureDelete int
+	if err := db.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&secureDelete); err != nil {
+		t.Fatalf("read secure_delete pragma: %v", err)
+	}
+	if secureDelete != 1 {
+		t.Fatalf("secure_delete = %d, want 1 after purge", secureDelete)
+	}
+}

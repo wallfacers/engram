@@ -50,6 +50,10 @@ var (
 	// ErrEvidenceState reports an invalid lifecycle transition that is not an
 	// idempotent retry of the same lifecycle request.
 	ErrEvidenceState = errors.New("memory: invalid evidence lifecycle state")
+	// ErrPurgeIncomplete reports a completed logical purge whose final WAL
+	// checkpoint did not finish. The source remains purged and retrying Purge
+	// performs only the physical checkpoint step.
+	ErrPurgeIncomplete = errors.New("memory: evidence purge checkpoint incomplete")
 )
 
 // EvidenceInput is caller-provided canonical source material. AppendBatch
@@ -526,8 +530,199 @@ func (s *LedgerStore) transition(ctx context.Context, req LifecycleRequest, acti
 	if changed != 1 {
 		return fmt.Errorf("%w: concurrent transition for evidence %q", ErrEvidenceState, req.EvidenceID)
 	}
+	if action == "tombstone" {
+		if err := markProjectionsStaleWithoutActiveSourcesTx(ctx, tx, []string{req.EvidenceID}); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("memory: commit evidence %s: %w", action, err)
+	}
+	return nil
+}
+
+// Purge removes canonical content and every projection directly derived from
+// it. Unlike tombstone, a purge is irreversible: its Evidence head remains as
+// content-free audit state solely to prevent ID reuse and explain the result.
+func (s *LedgerStore) Purge(ctx context.Context, req LifecycleRequest) (PurgeResult, error) {
+	if s == nil || s.db == nil {
+		return PurgeResult{}, fmt.Errorf("%w: nil ledger store", ErrEvidenceState)
+	}
+	if req.EvidenceID == "" {
+		return PurgeResult{}, fmt.Errorf("%w: missing evidence ID", ErrEvidenceState)
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: enable secure delete: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: begin evidence purge: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	state, revision, sourceType, err := lifecycleHead(ctx, tx, req.EvidenceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PurgeResult{}, store.ErrNotFound
+	}
+	if err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: load evidence %q for purge: %w", req.EvidenceID, err)
+	}
+	if state == EvidencePurged {
+		if err := tx.Commit(); err != nil {
+			return PurgeResult{}, fmt.Errorf("memory: commit idempotent purge: %w", err)
+		}
+		return s.finishPurgeCheckpoint(ctx, req.EvidenceID)
+	}
+	if req.RequestID != "" {
+		previousAction, err := lifecycleActionByRequestID(ctx, tx, req.EvidenceID, req.RequestID)
+		if err == nil {
+			if previousAction == "purge" {
+				if err := tx.Commit(); err != nil {
+					return PurgeResult{}, fmt.Errorf("memory: commit idempotent purge: %w", err)
+				}
+				return s.finishPurgeCheckpoint(ctx, req.EvidenceID)
+			}
+			return PurgeResult{}, fmt.Errorf("%w: request %q already recorded as %q", ErrEvidenceState, req.RequestID, previousAction)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return PurgeResult{}, fmt.Errorf("memory: read purge request %q: %w", req.RequestID, err)
+		}
+	}
+	if sourceType == "" {
+		return PurgeResult{}, fmt.Errorf("%w: active evidence %q has no source type", ErrEvidenceState, req.EvidenceID)
+	}
+	if err := purgeProjectionClosureTx(ctx, tx, req.EvidenceID); err != nil {
+		return PurgeResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM memory_evidence WHERE id = ?`, req.EvidenceID); err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: delete purged evidence content: %w", err)
+	}
+	now := time.Now().UTC().UnixMicro()
+	var eventSeq int64
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO memory_evidence_events(
+			event_id, evidence_id, source_type, action, recorded_at, reason_code, request_id
+		) VALUES (?, ?, ?, 'purge', ?, ?, ?)
+		RETURNING seq`,
+		idgen.NewULID(), req.EvidenceID, string(sourceType), now, req.ReasonCode, req.RequestID,
+	).Scan(&eventSeq); err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: append purge event: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE memory_evidence_heads
+		SET state = 'purged', last_seq = ?, revision = revision + 1, changed_at = ?
+		WHERE evidence_id = ? AND state = ? AND revision = ?`,
+		eventSeq, now, req.EvidenceID, string(state), revision,
+	)
+	if err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: update purged evidence head: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: purge rows affected: %w", err)
+	}
+	if changed != 1 {
+		return PurgeResult{}, fmt.Errorf("%w: concurrent purge for evidence %q", ErrEvidenceState, req.EvidenceID)
+	}
+	if err := tx.Commit(); err != nil {
+		return PurgeResult{}, fmt.Errorf("memory: commit evidence purge: %w", err)
+	}
+	return s.finishPurgeCheckpoint(ctx, req.EvidenceID)
+}
+
+func (s *LedgerStore) finishPurgeCheckpoint(ctx context.Context, evidenceID string) (PurgeResult, error) {
+	if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return PurgeResult{EvidenceID: evidenceID, Purged: true, CheckpointPending: true},
+			fmt.Errorf("%w: %v", ErrPurgeIncomplete, err)
+	}
+	return PurgeResult{EvidenceID: evidenceID, Purged: true}, nil
+}
+
+func markProjectionsStaleWithoutActiveSourcesTx(ctx context.Context, tx *sql.Tx, evidenceIDs []string) error {
+	unique := uniqueNonEmptyStrings(evidenceIDs)
+	for start := 0; start < len(unique); start += 500 {
+		end := start + 500
+		if end > len(unique) {
+			end = len(unique)
+		}
+		batch := unique[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for index, evidenceID := range batch {
+			placeholders[index] = "?"
+			args[index] = evidenceID
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE memory_projections AS p
+			SET state = 'stale', revision = revision + 1
+			WHERE p.state = 'active'
+			  AND p.id IN (
+				SELECT DISTINCT projection_id
+				FROM memory_projection_sources
+				WHERE evidence_id IN (`+strings.Join(placeholders, ",")+`)
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM memory_projection_sources AS ps
+				JOIN memory_evidence_heads AS h ON h.evidence_id = ps.evidence_id
+				WHERE ps.projection_id = p.id AND h.state = 'active'
+			  )`, args...); err != nil {
+			return fmt.Errorf("memory: stale projections after source tombstone: %w", err)
+		}
+	}
+	return nil
+}
+
+func purgeProjectionClosureTx(ctx context.Context, tx *sql.Tx, evidenceID string) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT p.id, p.kind, p.object_key
+		FROM memory_projections AS p
+		JOIN memory_projection_sources AS ps ON ps.projection_id = p.id
+		WHERE ps.evidence_id = ?
+		ORDER BY p.id`, evidenceID)
+	if err != nil {
+		return fmt.Errorf("memory: read purge projection closure: %w", err)
+	}
+	type projectionTarget struct {
+		id, kind, objectKey string
+	}
+	var targets []projectionTarget
+	for rows.Next() {
+		var target projectionTarget
+		if err := rows.Scan(&target.id, &target.kind, &target.objectKey); err != nil {
+			rows.Close() //nolint:errcheck
+			return fmt.Errorf("memory: scan purge projection closure: %w", err)
+		}
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close() //nolint:errcheck
+		return fmt.Errorf("memory: iterate purge projection closure: %w", err)
+	}
+	rows.Close() //nolint:errcheck
+
+	for _, target := range targets {
+		if target.kind == string(ProjectionAtomicFact) {
+			var entryName string
+			err := tx.QueryRowContext(ctx, `SELECT name FROM memory_entries WHERE id = ?`, target.objectKey).Scan(&entryName)
+			if err == nil {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM memory_entries WHERE id = ?`, target.objectKey); err != nil {
+					return fmt.Errorf("memory: delete purged fact %q: %w", entryName, err)
+				}
+				if err := deleteDerivedTx(ctx, tx, entryName); err != nil {
+					return err
+				}
+				if err := clearReverseSupersessionTx(ctx, tx, entryName); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("memory: read purged fact %q: %w", target.objectKey, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM memory_projections WHERE id = ?`, target.id); err != nil {
+			return fmt.Errorf("memory: delete purged projection %q: %w", target.id, err)
+		}
 	}
 	return nil
 }
