@@ -134,3 +134,42 @@ The v6 protocol hashes above are historical pre-Ledger templates and must not
 be used to run B1. A clean v7 `ledger_lossless_chunks_v2` manifest and a fresh
 store are the remaining prerequisites before the first paid B1 slice; the GPU
 remains stopped until those artifacts are ready.
+
+### Post-Ledger B1 execution attempt invalidated (no score)
+
+**Date**: 2026-07-30
+
+The first fresh-store LoCoMo low-cap v7 attempt completed repetitions 1 and 2,
+but repetition 3 became invalid before completion. The candidate artifacts for
+the affected questions retained real, active direct Ledger Evidence refs; the
+apparent `source_lineage_unavailable` label was therefore a runner attribution
+bug triggered after a `/tokenize` preflight failure, not a source-chain break.
+No B1 score, category score, paired result, or gate decision is accepted from
+this run.
+
+Two committed harness corrections follow from that audit:
+
+1. `28da845` reports a counter/budget failure as such and no longer relabels a
+   source-backed candidate as unavailable merely because no context was
+   packed.
+2. `bc43eca` makes each exact `/tokenize` preflight share the answer/judge
+   concurrency gate. This prevents all question goroutines from overwhelming
+   the tokenizer while preserving exact-input counting and fail-closed
+   semantics.
+
+Fresh v8 manifests bind the repaired runner commit and the same frozen model,
+dataset, retrieval, and budget inputs:
+
+| Benchmark | Profile | B1 protocol hash |
+|---|---|---|
+| LoCoMo category 1–4 | low | `sha256:db9e55eb488264173636d19e0fd0747ead5b9d0b96ea5485eb462d9553f21769` |
+| LoCoMo category 1–4 | high | `sha256:c237721214a8454f7ef6a8282bf759d176a8eba0d461f853ea2dea32ceef4d15` |
+| LongMemEval-S cleaned full | low | `sha256:7a8843580237ac5d301b8b29bb7f479420351966ff63830f1d241fee51368e65` |
+| LongMemEval-S cleaned full | high | `sha256:8118dbffd340f934b9f87a62bb60b804183b201c8b0b74077a2ab490c0c771ea` |
+
+The replacement run is currently blocked by evaluation infrastructure, not by
+the harness: the new remote instance has no local snapshot of the frozen Qwen
+answer/extraction model and has no outbound model-download access. At the
+time of this record there are no vLLM processes and GPU memory use is 0 MiB;
+the instance itself still needs the maintainer's provider-console stop action
+if it remains billable.
