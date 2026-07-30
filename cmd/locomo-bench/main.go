@@ -98,6 +98,8 @@ type options struct {
 	imageCaptions        bool
 	temporalAnswerPrompt bool
 	temporalDateScaffold bool
+	iris                 bool
+	irisDepth            int
 	judgeMem0Aligned     bool
 	answerModel          string
 	judgeModel           string
@@ -173,6 +175,8 @@ func run() error {
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
+	flag.BoolVar(&opt.iris, "iris", false, "enable IRIS evidence-gap iterative retrieval for category-2 temporal questions (sufficiency-driven query refinement; fixed MemOS-aligned budget; harness-only, engine untouched)")
+	flag.IntVar(&opt.irisDepth, "iris-depth", 3, "maximum IRIS sufficiency-driven retrieval rounds (including the initial retrieval)")
 	flag.BoolVar(&opt.judgeMem0Aligned, "judge-mem0-aligned", false, "use the Mem0-aligned lenient judge rules")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
@@ -1499,10 +1503,27 @@ func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retrie
 
 func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, searchDiagnostics, retrievalMeta, err := retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
-	if err != nil {
-		logger.Warn("retrieve failed; question scored wrong", "err", err)
-		return false, "", provider.Usage{}, false, nil, retrievalMeta
+	var hits []memory.Result
+	var searchDiagnostics memory.SearchDiagnostics
+	retrievalMeta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
+	if opt.iris && qa.Category == 2 {
+		// Feature 021 US1: IRIS evidence-gap loop for temporal questions. The
+		// loop retrieves, evaluates accumulated sufficiency, diagnoses the gap,
+		// and refines the query — at a fixed topK budget (slot-merged) so the
+		// answerer's context stays aligned with the flat-hybrid baseline.
+		irisHits, irisErr := irisRetrieve(ctx, retriever, filterCall, rewriteCall, answerCall, qa.Question, topK, quota, opt, qa.Category)
+		if irisErr != nil {
+			logger.Warn("iris retrieve failed; question scored wrong", "err", irisErr)
+			return false, "", provider.Usage{}, false, nil, retrievalMeta
+		}
+		hits = irisHits
+	} else {
+		var err error
+		hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
+		if err != nil {
+			logger.Warn("retrieve failed; question scored wrong", "err", err)
+			return false, "", provider.Usage{}, false, nil, retrievalMeta
+		}
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
