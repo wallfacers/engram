@@ -230,6 +230,43 @@ func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
 	if !correct || predicted != "ledger-backed answer" || answerCalls != 1 || judgeCalls != 1 || len(run.InvalidReasons) != 0 || !run.Bundle.SourceValid {
 		t.Fatalf("formal Ledger run = correct=%t predicted=%q answers=%d judges=%d artifact=%+v", correct, predicted, answerCalls, judgeCalls, run)
 	}
+
+	// A counter failure while testing the rendered hit must fail the budget
+	// admission, but it must not be relabeled as missing candidate lineage.
+	// The candidate above has already proved its direct Evidence source.
+	answerCalls, judgeCalls = 0, 0
+	_, _, _, failed := runFormalB1Question(
+		ctx, protocol,
+		options{answerModel: protocol.Models.Answerer.ID, formalCounter: evidenceFailCounter{fingerprint: protocol.Budget.CounterFingerprint}},
+		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil), memory.NewProjectionStore(st.DB()),
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			answerCalls++
+			return "unexpected", provider.Usage{}, nil
+		},
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			judgeCalls++
+			return `{"correct":true}`, provider.Usage{}, nil
+		},
+		qa, map[string][]string{hits[0].Name: {"D1:1"}}, map[string]string{"D1:1": evidence[0].ID}, 0,
+	)
+	if answerCalls != 0 || judgeCalls != 0 {
+		t.Fatalf("budget preflight failure made model calls: answers=%d judges=%d", answerCalls, judgeCalls)
+	}
+	if !hasInvalidReason(failed.InvalidReasons, "answer_input_budget_impossible") || !hasInvalidReason(failed.InvalidReasons, "no_evidence_fits_token_cap") {
+		t.Fatalf("budget preflight failure reasons = %v", failed.InvalidReasons)
+	}
+	if hasInvalidReason(failed.InvalidReasons, "source_lineage_unavailable") {
+		t.Fatalf("valid candidate lineage was mislabeled after budget failure: %v", failed.InvalidReasons)
+	}
+}
+
+func hasInvalidReason(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
 }
 
 type formalCounter struct {
@@ -238,6 +275,8 @@ type formalCounter struct {
 }
 
 type lengthCounter struct{ fingerprint string }
+
+type evidenceFailCounter struct{ fingerprint string }
 
 func (counter lengthCounter) CountInput(_ context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
 	return evidencecompiler.TokenCount{InputTokens: len([]rune(input.System + input.User)), Fingerprint: counter.fingerprint}, nil
@@ -248,4 +287,11 @@ func (counter formalCounter) CountInput(_ context.Context, _ evidencecompiler.An
 		return evidencecompiler.TokenCount{}, fmt.Errorf("counter unavailable")
 	}
 	return evidencecompiler.TokenCount{InputTokens: counter.count, Fingerprint: counter.fingerprint}, nil
+}
+
+func (counter evidenceFailCounter) CountInput(_ context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	if strings.Contains(input.User, "ledger-backed answer") {
+		return evidencecompiler.TokenCount{}, fmt.Errorf("temporary counter failure")
+	}
+	return evidencecompiler.TokenCount{InputTokens: 12, Fingerprint: counter.fingerprint}, nil
 }

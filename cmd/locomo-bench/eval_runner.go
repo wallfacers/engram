@@ -199,9 +199,6 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, packedHits, sourceByCandidate, input)
 	artifact.Bundle.AnswerInputTokens = preflight.InputTokens
 	artifact.Bundle.WithinCap = err == nil
-	if !artifact.Bundle.SourceValid {
-		artifact.InvalidReasons = append(artifact.InvalidReasons, "source_lineage_unavailable")
-	}
 	if len(artifact.Bundle.SourceIDs) == 0 {
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "no_evidence_fits_token_cap")
 	}
