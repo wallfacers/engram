@@ -83,14 +83,17 @@ func TestStructuredGapRefetchAcceptsOnlyValidatedExplicitGaps(t *testing.T) {
 	}
 }
 
-func TestStructuredGapRefetchRejectsLowConfidenceAndFreeText(t *testing.T) {
+// TestStructuredGapRefetchRejectsInvalidOrMissingGap verifies that
+// eligibleStructuredGap rejects: unvalidated trace, missing Need.Gap,
+// and invalid gap fields. Per FR-025, LowConfidence no longer gates
+// refetch eligibility — the compiler trace does not produce it.
+func TestStructuredGapRefetchRejectsInvalidOrMissingGap(t *testing.T) {
 	gap := evidencecompiler.StructuredGap{Kind: evidencecompiler.GapEntity, Entity: "Avery"}
 	tests := []struct {
 		name  string
 		trace gapTrace
 	}{
 		{name: "unvalidated trace", trace: gapTrace{Need: evidencecompiler.EvidenceNeed{Gap: &gap}, RemainingGap: &gap}},
-		{name: "low confidence", trace: gapTrace{Valid: true, LowConfidence: true, Need: evidencecompiler.EvidenceNeed{Gap: &gap}, RemainingGap: &gap}},
 		{name: "free text has no structured gap", trace: gapTrace{Valid: true, FreeTextNeed: "please search more context"}},
 		{name: "missing entity field", trace: gapTrace{Valid: true, Need: evidencecompiler.EvidenceNeed{Gap: &evidencecompiler.StructuredGap{Kind: evidencecompiler.GapEntity}}, RemainingGap: &evidencecompiler.StructuredGap{Kind: evidencecompiler.GapEntity}}},
 	}
@@ -121,6 +124,38 @@ func TestStructuredGapRefetchRejectsLowConfidenceAndFreeText(t *testing.T) {
 				t.Fatalf("ineligible trace changed candidates: got %v want %v", got, want)
 			}
 		})
+	}
+}
+
+// TestStructuredGapRefetchAcceptsLowConfidenceTraceFR025 verifies that,
+// per FR-025, a LowConfidence trace is still eligible for structured gap
+// refetch — the compiler does not produce LowConfidence, and the gate
+// should not reject on it.
+func TestStructuredGapRefetchAcceptsLowConfidenceTraceFR025(t *testing.T) {
+	gap := evidencecompiler.StructuredGap{Kind: evidencecompiler.GapEntity, Entity: "Avery", SourceNeed: "entity:Avery"}
+	trace := gapTrace{
+		Valid:         true,
+		LowConfidence: true,
+		Need:          evidencecompiler.EvidenceNeed{Gap: &gap},
+		RemainingGap:  &gap,
+	}
+
+	budget, err := newGapTreatmentBudget(3, 1, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runOneStructuredGapRefetch(context.Background(), gapRefetchRequest{
+		Trace:             trace,
+		InitialCandidates: projectionTestCandidates(),
+		Budget:            budget,
+	}, gapCandidateRetrieverFunc(func(_ context.Context, _ string, _ int) ([]evidencecompiler.Candidate, error) {
+		return nil, nil
+	}))
+	if err != nil {
+		t.Fatalf("low-confidence trace returned error: %v", err)
+	}
+	if !result.Triggered {
+		t.Fatal("FR-025: low-confidence trace should be eligible for gap refetch")
 	}
 }
 

@@ -153,6 +153,23 @@ type options struct {
 	// used by formal source expansion and the independent pre-answer
 	// span/citation validator. It is runtime-only and is never serialized.
 	formalEvidence formalEvidenceReader
+	// representationArm selects the source-representation renderer for the
+	// formal B1 pipeline. ReprChunk900 is the legacy default and is
+	// byte-identical to the pre-022 split-chunk expansion.
+	representationArm RepresentationKind
+	// compilerArm selects the evidence-compilation strategy for the formal
+	// B1 pipeline. "" means legacy ranked-prefix packer; "extractive" and
+	// "planner" use the evidencecompiler engine (planner Nil →extractive fallback).
+	compilerArm string
+	// eventProjection selects the event-projection shadow mode for
+	// structured-gap refetch (E0/E1/E2/E3). "" means off.
+	eventProjection string
+	// gapRefetch enables structured-gap refetch retrieval. Only valid in
+	// formal B1 runs; requires --event-projection.
+	gapRefetch bool
+	// formalEpisodes is the runtime-only EpisodeStore, required by the
+	// semantic_episode representation renderer. Nil when not available.
+	formalEpisodes *memory.EpisodeStore
 }
 
 func main() {
@@ -179,6 +196,18 @@ func run() error {
 	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
 	flag.BoolVar(&opt.tokenCounterCalibrate, "token-counter-calibrate", false, "compare formal /tokenize preflight with local answer-runtime usage and write a calibration artifact")
 	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
+	flag.Func("representation", "source representation: chunk_900 | raw_turn_window | semantic_episode (default chunk_900)", func(s string) error {
+		switch RepresentationKind(s) {
+		case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode:
+			opt.representationArm = RepresentationKind(s)
+			return nil
+		default:
+			return fmt.Errorf("invalid representation %q: must be chunk_900, raw_turn_window, or semantic_episode", s)
+		}
+	})
+	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner (unset = legacy ranked-prefix packer)")
+	flag.StringVar(&opt.eventProjection, "event-projection", "", "event projection shadow mode for structured-gap refetch: E0 | E1 | E2 | E3")
+	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -249,6 +278,12 @@ func run() error {
 		return err
 	}
 	if err := validateAssocDepth(opt.assocDepth); err != nil {
+		return err
+	}
+	if opt.representationArm == "" {
+		opt.representationArm = ReprChunk900
+	}
+	if err := validateMechanismArms(opt); err != nil {
 		return err
 	}
 
@@ -1263,6 +1298,7 @@ type conversationRuntime struct {
 	store       *store.Store
 	entries     *memory.EntryStore
 	projections *memory.ProjectionStore
+	episodes    *memory.EpisodeStore
 	vectors     *memory.VectorStore
 	embedClient embedding.Client
 	retrievers  map[string]*memory.Retriever
@@ -1313,6 +1349,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	es := memory.NewEntryStore(st.DB())
 	projections := memory.NewProjectionStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
+	episodes := memory.NewEpisodeStore(st.DB(), es.Ledger(), projections)
 	embedder := memory.NewEmbedder(es, vectors, embClient, memory.DefaultEmbedBuffer)
 
 	pipe := pipeline.New(pipeline.Config{
@@ -1439,7 +1476,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, entries: es, projections: projections, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence}, nil
+	return &conversationRuntime{store: st, entries: es, projections: projections, episodes: episodes, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -1564,6 +1601,40 @@ func validateAssocDepth(depth int) error {
 	return nil
 }
 
+func validateMechanismArms(opt options) error {
+	if err := validateRepresentationArm(opt.representationArm); err != nil {
+		return err
+	}
+	switch opt.compilerArm {
+	case "", "extractive", "planner":
+	default:
+		return fmt.Errorf("--compiler-arm must be extractive or planner, got %q", opt.compilerArm)
+	}
+	if opt.eventProjection != "" {
+		switch opt.eventProjection {
+		case "E0", "E1", "E2", "E3":
+		default:
+			return fmt.Errorf("--event-projection must be E0, E1, E2, or E3, got %q", opt.eventProjection)
+		}
+		if !opt.gapRefetch {
+			return fmt.Errorf("--event-projection requires --gap-refetch")
+		}
+	}
+	if opt.gapRefetch && opt.eventProjection == "" {
+		return fmt.Errorf("--gap-refetch requires --event-projection")
+	}
+	return nil
+}
+
+func validateRepresentationArm(arm RepresentationKind) error {
+	switch arm {
+	case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode:
+		return nil
+	default:
+		return fmt.Errorf("invalid representation %q", arm)
+	}
+}
+
 func validatePromptModes(opt options) error {
 	if opt.forceAnswer && opt.abstainPrompt {
 		return fmt.Errorf("--force-answer and --abstain-prompt are mutually exclusive")
@@ -1658,6 +1729,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					}
 					defer release()
 					armOpt.formalEvidence = runtime.entries.Ledger()
+					armOpt.formalEpisodes = runtime.episodes
 					frozen, err := armOpt.formalReplay.getOrMaterialize(key, qa.QuestionID, func() formalFrozenQuestion {
 						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, qa, runtime.chunkTurns, runtime.turnEvidence)
 					})

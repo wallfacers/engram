@@ -11,17 +11,30 @@ import (
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
 
-// gapTrace is the narrow, runner-owned view of the first compiler Trace. The
-// current base exposes Need/StructuredGap but not the compiler's completed
-// GroundedTrace implementation yet, so tests construct this fixture directly.
-// The final runner bridge maps only Valid, Need, and RemainingGap from the
-// public compiler Trace; it must not call Compile or invent a gap here.
+// gapTrace is the narrow, runner-owned view of the compiler Trace. It maps
+// Valid, Need, and RemainingGap from the public evidencecompiler.Trace.
+// LowConfidence and FreeTextNeed are retained for test fixture compatibility
+// but are always false/empty when built from a compiler Trace (FR-025).
+// Use gapTraceFromCompilerTrace to construct it from a compiler Trace.
 type gapTrace struct {
 	Valid         bool
 	LowConfidence bool
 	FreeTextNeed  string
 	Need          evidencecompiler.EvidenceNeed
 	RemainingGap  *evidencecompiler.StructuredGap
+}
+
+// gapTraceFromCompilerTrace adapts the full compiler Trace to the narrow
+// gap-only view. LowConfidence and FreeTextNeed are always false/empty as
+// the US3 compiler trace does not produce them (FR-025).
+func gapTraceFromCompilerTrace(t evidencecompiler.Trace) gapTrace {
+	return gapTrace{
+		Valid:        t.Valid,
+		LowConfidence: false,
+		FreeTextNeed:  "",
+		Need:          t.Need,
+		RemainingGap:  t.RemainingGap,
+	}
 }
 
 type gapCandidateRetriever interface {
@@ -238,7 +251,7 @@ func runOneStructuredGapRefetch(ctx context.Context, request gapRefetchRequest, 
 }
 
 func eligibleStructuredGap(trace gapTrace) (*evidencecompiler.StructuredGap, bool) {
-	if !trace.Valid || trace.LowConfidence || strings.TrimSpace(trace.FreeTextNeed) != "" || trace.Need.Gap == nil || trace.RemainingGap == nil {
+	if !trace.Valid || trace.Need.Gap == nil || trace.RemainingGap == nil {
 		return nil, false
 	}
 	if !sameStructuredGap(*trace.Need.Gap, *trace.RemainingGap) {

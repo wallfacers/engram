@@ -373,6 +373,23 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
 	} else {
 		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, 1)
+		// When a non-chunk_900 representation is selected, re-render the
+		// anchors through the representation renderer so the candidate
+		// artifact records the enriched structure (windows or episodes).
+		// The bundle items remain derived from the canonical source
+		// expansion to preserve formal auditability.
+		if opt.representationArm != ReprChunk900 {
+			renderer, rendererErr := formalRepresentationRendererWithEpisodes(opt.representationArm, projections, opt.formalEvidence, opt.formalEpisodes)
+			if rendererErr == nil {
+				anchors := buildFormalRankedAnchors(expanded)
+				enriched, renderErr := renderer.Render(ctx, anchors)
+				if renderErr == nil && len(enriched) > 0 {
+					frozen.Candidate.RenderedCandidates = enriched
+					frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(enriched)
+					frozen.Candidate.Mode = evalCandidateModeAnchorRendering
+				}
+			}
+		}
 	}
 	if err := validateEvalCandidateArtifact(protocol, frozen.Candidate); err != nil {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
@@ -389,9 +406,43 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	var evidenceTokens int
 	var packErr error
 	if sourceErr == nil {
-		packedSources, input, preflight, evidenceTokens, packErr = packExpandedFormalInput(
-			ctx, protocol, opt.formalCounter, system, qa, expanded, opt.temporalDateScaffold,
-		)
+		if opt.compilerArm != "" {
+			// Compile arm: use the evidencecompiler engine instead of the
+			// legacy ranked-prefix packer. The compiler selects items under
+			// the real token counter and produces an auditable trace.
+			compiledBundle, compiledTrace, compileErr := compileFormalSources(ctx, protocol, opt, qa, expanded)
+			if compileErr != nil {
+				packErr = fmt.Errorf("compile: %w", compileErr)
+			} else {
+				compiledItems := compiledBundle.Items
+				items := compileBundleItems(protocol, compiledItems)
+				rendered := compileRenderedCandidates(compiledItems)
+				// Update candidate artifact with compiler-rendered sources.
+				if len(rendered) > 0 {
+					frozen.Candidate.RenderedCandidates = rendered
+					frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(rendered)
+				}
+				frozen.Trace = buildCompileTrace(protocol, qa.QuestionID, frozen.Candidate, compiledTrace, items)
+				bundle, inputTokens, count, bundleErr := buildCompileBundle(ctx, protocol, opt, qa, frozen.Candidate, frozen.Trace, compiledBundle, compiledItems, items)
+				if bundleErr != nil {
+					packErr = fmt.Errorf("compile bundle: %w", bundleErr)
+				} else {
+					frozen.Bundle = bundle
+					preflight = count
+					evidenceTokens = compiledBundle.EvidenceTokens
+					input = evidencecompiler.AnswerInput{
+						Model:  protocol.Models.Answerer.ID,
+						System: system,
+						User:   bundle.RenderedContext,
+					}
+					_ = inputTokens
+				}
+			}
+		} else {
+			packedSources, input, preflight, evidenceTokens, packErr = packExpandedFormalInput(
+				ctx, protocol, opt.formalCounter, system, qa, expanded, opt.temporalDateScaffold,
+			)
+		}
 	}
 	if packErr != nil {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "answer_input_budget_impossible")
@@ -400,11 +451,13 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	if input.Model == "" {
 		input.Model = protocol.Models.Answerer.ID
 	}
-	items := formalBundleItems(packedSources)
-	frozen.Trace = buildFormalTraceForItems(protocol, qa.QuestionID, frozen.Candidate, items)
-	frozen.Bundle = buildExpandedFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedSources, input)
-	frozen.Bundle.EvidenceTokens = evidenceTokens
-	frozen.Bundle.AnswerInputTokens = preflight.InputTokens
+	if opt.compilerArm == "" {
+		items := formalBundleItems(packedSources)
+		frozen.Trace = buildFormalTraceForItems(protocol, qa.QuestionID, frozen.Candidate, items)
+		frozen.Bundle = buildExpandedFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedSources, input)
+		frozen.Bundle.EvidenceTokens = evidenceTokens
+		frozen.Bundle.AnswerInputTokens = preflight.InputTokens
+	}
 	frozen.Bundle.WithinCap = sourceErr == nil && packErr == nil
 	if sourceErr == nil && len(frozen.Bundle.SourceIDs) == 0 {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "no_evidence_fits_token_cap")
@@ -629,6 +682,58 @@ func buildFormalTrace(protocol evalProtocol, questionID string, candidate evalCa
 		})
 	}
 	return buildFormalTraceForItems(protocol, questionID, candidate, items)
+}
+
+// formalRepresentationRenderer selects and creates the appropriate representation
+// renderer for the formal B1 pipeline. Returns nil renderer + non-nil error
+// when the required dependencies are unavailable; callers should fall back to
+// the chunk_900 path silently.
+func formalRepresentationRenderer(arm RepresentationKind, projections *memory.ProjectionStore, reader formalEvidenceReader) (RepresentationRenderer, error) {
+	fullReader, ok := reader.(evidenceReader)
+	if !ok {
+		return nil, fmt.Errorf("formal evidence reader does not satisfy evidenceReader")
+	}
+	switch arm {
+	case ReprChunk900:
+		return NewChunk900Renderer(projections, fullReader), nil
+	case ReprRawTurnWindow:
+		return NewRawTurnWindowRenderer(projections, fullReader, 0), nil
+	case ReprSemanticEpisode:
+		// The episode store is wired through options; the caller should
+		// ensure it is non-nil before calling this function.
+		return nil, fmt.Errorf("semantic_episode renderer requires an episode store; use formalEpisodes")
+	default:
+		return nil, fmt.Errorf("unsupported representation %q", arm)
+	}
+}
+
+// formalRepresentationRendererWithEpisodes extends formalRepresentationRenderer
+// for renderers that require an EpisodeStore (semantic_episode).
+func formalRepresentationRendererWithEpisodes(arm RepresentationKind, projections *memory.ProjectionStore, reader formalEvidenceReader, episodes *memory.EpisodeStore) (RepresentationRenderer, error) {
+	if arm != ReprSemanticEpisode {
+		return formalRepresentationRenderer(arm, projections, reader)
+	}
+	fullReader, ok := reader.(evidenceReader)
+	if !ok {
+		return nil, fmt.Errorf("formal evidence reader does not satisfy evidenceReader")
+	}
+	return NewSemanticEpisodeRenderer(projections, fullReader, episodes), nil
+}
+
+// buildFormalRankedAnchors converts expanded formal anchors into ranked anchors
+// suitable for representation renderers.
+func buildFormalRankedAnchors(expanded []formalExpandedAnchor) []evalRankedAnchor {
+	anchors := make([]evalRankedAnchor, 0, len(expanded))
+	for index, anchor := range expanded {
+		anchors = append(anchors, evalRankedAnchor{
+			CandidateID: anchor.CandidateID,
+			Rank:        index + 1,
+			Score:       anchor.Hit.Score,
+			TextDigest:  evalTextDigest(anchor.Hit.Content),
+			SourceIDs:   append([]string(nil), anchor.SourceIDs...),
+		})
+	}
+	return anchors
 }
 
 func buildFormalTraceForItems(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, items []evalFormalBundleItem) evalFormalTraceRecord {
