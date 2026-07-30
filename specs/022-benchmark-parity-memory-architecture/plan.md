@@ -3,6 +3,11 @@
 **Branch**: `022-benchmark-parity-memory-architecture` | **Date**: 2026-07-30 |
 **Spec**: [spec.md](./spec.md)
 
+**Implementation base**: rebased on `master` at `d9b8916` (`eval(021): close
+retrieval-side 真实超越 line — IRIS US1 + graph A both NO-GO`) on 2026-07-30. The
+022 branch has no unresolved overlap with 021's `iris.go`, `iris_test.go`, or
+`main.go`.
+
 **Input**: Feature specification from
 `specs/022-benchmark-parity-memory-architecture/spec.md`
 
