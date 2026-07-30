@@ -217,6 +217,73 @@ func TestMaterializeFormalB1ArtifactsRefusesProtocolDenominatorMismatch(t *testi
 	}
 }
 
+// TestMaterializeFormalB1ArtifactsWritesNumericQuestionOrder guards the
+// independent read-back contract. The frozen protocol digest and the no-model
+// validator (runEvalArtifactValidateCLI) derive expected question IDs in
+// dataset numeric order, but materializeFormalB1Artifacts previously iterated
+// lexical map-keys when writing the immutable artifact arrays. With real,
+// zero-padding-free question IDs (conv-0-q-1 ... conv-0-q-11) the two orderings
+// diverge from q=10 onward, so the read-back rejected every multi-digit
+// question set with "expected question ID digest differs from protocol". This
+// test materializes a multi-digit set and asserts the written candidate order
+// matches the numeric protocol order that read-back requires.
+func TestMaterializeFormalB1ArtifactsWritesNumericQuestionOrder(t *testing.T) {
+	runDir := t.TempDir()
+	protocol := testEvalProtocol()
+	protocol.ProtocolHash = "sha256:protocol"
+
+	const questionCount = 11 // q=10 and q=11 force lexical != numeric ordering
+	questionIDs := make([]string, 0, questionCount)
+	for q := 1; q <= questionCount; q++ {
+		questionIDs = append(questionIDs, questionID(0, q))
+	}
+	protocol.Benchmark.QuestionCount = questionCount
+	protocol.Benchmark.QuestionIDsDigest = evalJSONDigest(questionIDs)
+
+	runs := make([][]result, 0, 3)
+	for index := 0; index < 3; index++ {
+		row := make([]result, 0, questionCount)
+		for q := 1; q <= questionCount; q++ {
+			id := questionID(0, q)
+			candidate := testCandidateArtifact()
+			candidate.ProtocolHash = protocol.ProtocolHash
+			candidate.QuestionID = id
+			trace := buildFormalTrace(protocol, id, candidate)
+			bundle := testFormalBundle(protocol, candidate, trace, "evidence", 11, fixtureDigest("system"))
+			row = append(row, result{
+				Conv: 0, Q: q, QuestionID: id, CategoryName: "single-hop", Gold: "gold",
+				Formal022: &evalFormalQuestionRun{
+					Candidate: candidate, Trace: trace, Bundle: bundle,
+					Answer: evalFormalAnswerRun{
+						RunIndex:      index + 1,
+						Answer:        "answer",
+						AnswerDigest:  fixtureDigest("answer"),
+						JudgeCorrect:  true,
+						AnswerCalls:   1,
+						JudgeCalls:    1,
+						InputTokens:   11,
+						CounterSource: protocol.Budget.CounterFingerprint,
+					},
+				},
+			})
+		}
+		runs = append(runs, row)
+	}
+
+	if _, err := materializeFormalB1Artifacts(runDir, protocol, runs); err != nil {
+		t.Fatalf("materialize formal artifacts: %v", err)
+	}
+
+	candidates, err := readEvalCandidateArtifacts(filepath.Join(runDir, evalCandidatesArtifactFile))
+	if err != nil {
+		t.Fatalf("read materialized candidates: %v", err)
+	}
+	writtenIDs := candidateQuestionIDs(candidates)
+	if evalJSONDigest(writtenIDs) != protocol.Benchmark.QuestionIDsDigest {
+		t.Fatalf("materialized candidate order diverges from numeric protocol order:\n  written=%v\n  numeric=%v", writtenIDs, questionIDs)
+	}
+}
+
 func TestFormalRepeatScoresRemainPendingUntilFullValidation(t *testing.T) {
 	protocol := testEvalProtocol()
 	if formalRepeatScoresVisible(options{formalProtocol: &protocol}) {

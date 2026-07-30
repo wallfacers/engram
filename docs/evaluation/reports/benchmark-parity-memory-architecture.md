@@ -584,3 +584,50 @@ Post-report branch verification passed:
 `CGO_ENABLED=0 go build ./...`,
 `CGO_ENABLED=0 go test -count=1 ./...`,
 `CGO_ENABLED=0 go vet ./...`, and `git diff --check`.
+
+## B1 read-back ordering contract repair
+
+**Date**: 2026-07-30
+**Scope**: `cmd/locomo-bench/eval_artifact.go` only.
+
+The HOLD above has a single deterministic cause, now fixed locally. The
+materializer verified the first journal in frozen numeric dataset order
+(matching the protocol digest) but then wrote the immutable
+Candidate/Trace/Bundle/classification arrays using lexical `mapKeys` ordering.
+With real zero-padding-free question IDs (`conv-0-q-1` … `conv-0-q-11`) the two
+orderings diverge from `q=10` onward, so the independent no-model read-back
+derived its expected IDs from a lexically sorted `candidates.jsonl` and failed
+the dataset-order protocol digest for every multi-digit question set — exactly
+the `expected question ID digest differs from protocol` rejection recorded
+above.
+
+The fix writes the artifact arrays in the same dataset numeric order already
+validated against the protocol digest (`orderedQuestionIDs`), instead of
+`mapKeys(expected)`. No path under `memory/`, `embedding/`, `provider/`,
+`store/`, or `internal/` changed.
+
+A regression test reproduces the divergence before the fix.
+`TestMaterializeFormalB1ArtifactsWritesNumericQuestionOrder` materializes an
+11-question multi-digit set and asserts the written candidate order matches the
+numeric protocol order. Before the fix it failed with
+`written=[conv-0-q-1 conv-0-q-10 conv-0-q-11 conv-0-q-2 … conv-0-q-9]`; after
+the fix it passes.
+
+| Verification | Result |
+|---|---|
+| Regression test (red → green) | PASS |
+| `CGO_ENABLED=0 go build ./...` | PASS |
+| `CGO_ENABLED=0 go test -count=1 ./...` | PASS — all packages green |
+| `CGO_ENABLED=0 go vet ./...` | PASS |
+| Engine diff guard | PASS — no changed path under `memory/ embedding/ provider/ store/ internal/` |
+
+This repairs the B1 ruler only. It does **not** itself produce a B0, B1, oracle,
+SC-002, SC-003, or F0 result, and T021/T022 remain unchecked. The previously
+rejected B1-low artifact was materialized by the lexical path and cannot be
+reused: a fresh protocol must be frozen against the repaired commit, a fresh
+run directory opened, and B0 continuity → valid low/high B1 → fixed-gold oracle
+re-executed (LoCoMo and LongMemEval-S each) under the same recipe before the
+two-independent-reviewer judge audit and the unique F0 verdict. That re-run
+still requires the remote-GPU prerequisite noted above — a local snapshot of
+the frozen Qwen answer/extraction model on an instance with no outbound
+download access.

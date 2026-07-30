@@ -273,7 +273,12 @@ func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][
 		return evalArtifactSummary{}, fmt.Errorf("formal question ID digest differs from protocol")
 	}
 
-	questionIDs := mapKeys(expected)
+	// Write the immutable artifact arrays in dataset numeric order, not lexical
+	// map-key order. The protocol question-ID digest and the independent no-model
+	// read-back both derive expected IDs in this order, so a lexical write would
+	// diverge from q=10 onward and make every multi-digit question set fail
+	// read-back with a digest mismatch.
+	questionIDs := orderedQuestionIDs
 	candidates := make([]evalCandidateArtifact, 0, len(questionIDs))
 	traces := make([]evalFormalTraceRecord, 0, len(questionIDs))
 	bundles := make([]evalFormalBundleRecord, 0, len(questionIDs))
