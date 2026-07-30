@@ -640,9 +640,16 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 			}
 		}
 	}
+	mergeRefs, sourceEntryIDs, err := mergeSourceRefsTx(ctx, tx, names)
+	if err != nil {
+		return false, err
+	}
 
 	if err := s.upsert(ctx, tx, into); err != nil {
 		return false, err
+	}
+	if err := replaceAtomicFactProjectionTx(ctx, tx, into.ID, mergeRefs, "curation_merge", "source-union", into.UpdatedAt); err != nil {
+		return false, fmt.Errorf("memory: merge source union: %w", err)
 	}
 	for _, name := range names {
 		if name == into.Name {
@@ -659,6 +666,9 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 		if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
 			return false, err
 		}
+		if err := deleteAtomicFactProjectionTx(ctx, tx, sourceEntryIDs[name]); err != nil {
+			return false, err
+		}
 	}
 	// The merged target's own derived rows are stale (content changed); drop
 	// them so the write-behind embedder re-embeds and the caller re-indexes
@@ -670,6 +680,99 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 		return false, fmt.Errorf("memory: merge commit: %w", err)
 	}
 	return true, nil
+}
+
+func mergeSourceRefsTx(ctx context.Context, tx *sql.Tx, names []string) ([]EvidenceRef, map[string]string, error) {
+	if len(names) == 0 {
+		return nil, nil, fmt.Errorf("%w: merge has no source facts", ErrInvalidEvidenceRef)
+	}
+	refs := make([]EvidenceRef, 0, len(names))
+	entryIDs := make(map[string]string, len(names))
+	seenNames := make(map[string]struct{}, len(names))
+	seenRefs := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, seen := seenNames[name]; seen {
+			continue
+		}
+		seenNames[name] = struct{}{}
+		var entryID, projectionID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT e.id, p.id
+			FROM memory_entries AS e
+			JOIN memory_projections AS p
+			  ON p.kind = 'atomic_fact' AND p.object_key = e.id
+			WHERE e.name = ?`, name).Scan(&entryID, &projectionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("%w: merge source %q has no active projection lineage", ErrInvalidEvidenceRef, name)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("memory: read merge source %q: %w", name, err)
+		}
+		entryIDs[name] = entryID
+
+		rows, err := tx.QueryContext(ctx, `
+			SELECT evidence_id, full_source, start_char, end_char, span_digest
+			FROM memory_projection_sources
+			WHERE projection_id = ?
+			ORDER BY source_order ASC, evidence_id ASC`, projectionID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("memory: read merge sources for %q: %w", name, err)
+		}
+		count := 0
+		for rows.Next() {
+			var ref EvidenceRef
+			var fullSource int
+			var startChar, endChar sql.NullInt64
+			var spanDigest sql.NullString
+			if err := rows.Scan(&ref.EvidenceID, &fullSource, &startChar, &endChar, &spanDigest); err != nil {
+				rows.Close() //nolint:errcheck
+				return nil, nil, fmt.Errorf("memory: scan merge source %q: %w", name, err)
+			}
+			ref.FullSource = fullSource != 0
+			if startChar.Valid {
+				value := int(startChar.Int64)
+				ref.StartChar = &value
+			}
+			if endChar.Valid {
+				value := int(endChar.Int64)
+				ref.EndChar = &value
+			}
+			if spanDigest.Valid {
+				ref.SpanDigest = spanDigest.String
+			}
+			key := evidenceRefKey(ref)
+			if _, seen := seenRefs[key]; seen {
+				continue
+			}
+			seenRefs[key] = struct{}{}
+			ref.SourceOrder = len(refs)
+			refs = append(refs, ref)
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			return nil, nil, fmt.Errorf("memory: iterate merge sources for %q: %w", name, err)
+		}
+		rows.Close() //nolint:errcheck
+		if count == 0 {
+			return nil, nil, fmt.Errorf("%w: merge source %q has empty lineage", ErrInvalidEvidenceRef, name)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, nil, fmt.Errorf("%w: merge has no Evidence sources", ErrInvalidEvidenceRef)
+	}
+	return refs, entryIDs, nil
+}
+
+func evidenceRefKey(ref EvidenceRef) string {
+	start, end := "", ""
+	if ref.StartChar != nil {
+		start = fmt.Sprintf("%d", *ref.StartChar)
+	}
+	if ref.EndChar != nil {
+		end = fmt.Sprintf("%d", *ref.EndChar)
+	}
+	return strings.Join([]string{ref.EvidenceID, fmt.Sprintf("%t", ref.FullSource), start, end, ref.SpanDigest}, "\x00")
 }
 
 // Supersede non-destructively suppresses oldName in favor of newName by setting
