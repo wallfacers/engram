@@ -182,6 +182,73 @@ func TestEmbedderDoesNotRecreateVectorAfterConcurrentDelete(t *testing.T) {
 	}
 }
 
+func TestEmbedderDoesNotPublishVectorAfterEvidenceTombstone(t *testing.T) {
+	ctx := context.Background()
+	es, db := newEntryStore(t)
+	vs := memory.NewVectorStore(db)
+	evidence, err := es.Ledger().AppendBatch(ctx, []memory.EvidenceInput{{
+		ExternalSourceID: "turn-race-evidence",
+		SourceType:       memory.EvidenceMessage,
+		SourceSessionID:  "session-race",
+		Speaker:          "user",
+		Ordinal:          0,
+		Content:          "Alice moved to Berlin on Monday.",
+		RecordedAt:       time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("append evidence: %v", err)
+	}
+	entry := &memory.Entry{Name: "race-evidence", Content: evidence[0].Content}
+	if err := es.UpsertWithSources(ctx, entry, []memory.EvidenceRef{{
+		EvidenceID: evidence[0].ID, SourceOrder: 0, FullSource: true,
+	}}); err != nil {
+		t.Fatalf("write sourced entry: %v", err)
+	}
+	if err := vs.Put(ctx, entry.Name, "blocking-model", []float32{9, 9, 9}, time.Now()); err != nil {
+		t.Fatalf("seed prior vector: %v", err)
+	}
+
+	client := &blockingEmbeddingClient{started: make(chan struct{}), release: make(chan struct{})}
+	emb := memory.NewEmbedder(es, vs, client, 1)
+	emb.Enqueue(entry.Name)
+	select {
+	case <-client.started:
+	case <-time.After(time.Second):
+		t.Fatal("embedding did not start")
+	}
+	if err := es.Ledger().Tombstone(ctx, memory.LifecycleRequest{
+		EvidenceID: evidence[0].ID,
+		RequestID:  "tombstone-race-evidence",
+		ReasonCode: "user_delete",
+	}); err != nil {
+		t.Fatalf("tombstone evidence: %v", err)
+	}
+	close(client.release)
+	emb.Close()
+
+	vectors, err := vs.LoadAllForModel(ctx, client.Model())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := vectors[entry.Name]; exists {
+		t.Fatal("in-flight embedder published a vector for a stale evidence projection")
+	}
+	var stored int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_embeddings WHERE entry_name = ?`, entry.Name).Scan(&stored); err != nil {
+		t.Fatalf("count stale raw vector: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("tombstoned projection retained %d raw vector rows", stored)
+	}
+	hits, err := memory.NewRetriever(es, vs, nil).Search(ctx, "Alice Berlin", 1)
+	if err != nil {
+		t.Fatalf("search after tombstone: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("stale evidence projection remained answer-retrievable: %+v", hits)
+	}
+}
+
 func TestEmbedderDoesNotPublishVectorAfterSameTimestampRewrite(t *testing.T) {
 	ctx := context.Background()
 	es, vs := newStores(t)

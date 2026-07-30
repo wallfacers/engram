@@ -653,9 +653,9 @@ func markProjectionsStaleWithoutActiveSourcesTx(ctx context.Context, tx *sql.Tx,
 			placeholders[index] = "?"
 			args[index] = evidenceID
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE memory_projections AS p
-			SET state = 'stale', revision = revision + 1
+		rows, err := tx.QueryContext(ctx, `
+			SELECT p.id, p.kind, p.object_key
+			FROM memory_projections AS p
 			WHERE p.state = 'active'
 			  AND p.id IN (
 				SELECT DISTINCT projection_id
@@ -667,8 +667,50 @@ func markProjectionsStaleWithoutActiveSourcesTx(ctx context.Context, tx *sql.Tx,
 				FROM memory_projection_sources AS ps
 				JOIN memory_evidence_heads AS h ON h.evidence_id = ps.evidence_id
 				WHERE ps.projection_id = p.id AND h.state = 'active'
-			  )`, args...); err != nil {
-			return fmt.Errorf("memory: stale projections after source tombstone: %w", err)
+			  )
+			ORDER BY p.id`, args...)
+		if err != nil {
+			return fmt.Errorf("memory: find stale projections after source tombstone: %w", err)
+		}
+		type staleProjection struct {
+			id, kind, objectKey string
+		}
+		var targets []staleProjection
+		for rows.Next() {
+			var target staleProjection
+			if err := rows.Scan(&target.id, &target.kind, &target.objectKey); err != nil {
+				rows.Close() //nolint:errcheck
+				return fmt.Errorf("memory: scan stale projection after source tombstone: %w", err)
+			}
+			targets = append(targets, target)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			return fmt.Errorf("memory: iterate stale projections after source tombstone: %w", err)
+		}
+		rows.Close() //nolint:errcheck
+
+		for _, target := range targets {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE memory_projections
+				SET state = 'stale', revision = revision + 1
+				WHERE id = ? AND state = 'active'`, target.id); err != nil {
+				return fmt.Errorf("memory: stale projection %q after source tombstone: %w", target.id, err)
+			}
+			if target.kind != string(ProjectionAtomicFact) {
+				continue
+			}
+			var entryName string
+			err := tx.QueryRowContext(ctx, `SELECT name FROM memory_entries WHERE id = ?`, target.objectKey).Scan(&entryName)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("memory: read stale fact %q: %w", target.objectKey, err)
+			}
+			if err := deleteDerivedTx(ctx, tx, entryName); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

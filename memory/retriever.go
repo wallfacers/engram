@@ -257,6 +257,7 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 		signals = append(signals, r.associativeRanks(ctx, pool, vector.query, vector.stored, cues))
 	}
 	fused := fuseRRF(signals...)
+	fused = r.activeAtomicFactScores(ctx, fused)
 	if len(fused) == 0 {
 		return nil, diagnostics, nil
 	}
@@ -312,6 +313,67 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 	}
 	r.attachProjectionIdentity(ctx, out)
 	return out, diagnostics, nil
+}
+
+// activeAtomicFactScores removes candidates whose facts are no longer an
+// active Evidence-derived projection. This is intentionally fail-closed: an
+// unavailable source must never reach an answer-facing result through FTS,
+// entity, temporal, or semantic fallback while a projection is stale.
+func (r *Retriever) activeAtomicFactScores(ctx context.Context, candidates []embedding.Scored) []embedding.Scored {
+	if r == nil || r.entries == nil || len(candidates) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, candidate.Key)
+	}
+	names = uniqueNonEmptyStrings(names)
+	active := make(map[string]struct{}, len(names))
+	for start := 0; start < len(names); start += 500 {
+		end := start + 500
+		if end > len(names) {
+			end = len(names)
+		}
+		batch := names[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for index, name := range batch {
+			placeholders[index] = "?"
+			args[index] = name
+		}
+		rows, err := r.entries.db.QueryContext(ctx, `
+			SELECT e.name
+			FROM memory_entries AS e
+			JOIN memory_projections AS p
+			  ON p.kind = 'atomic_fact' AND p.object_key = e.id AND p.state = 'active'
+			WHERE e.name IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			slog.Warn("memory: active projection filter failed closed", "err", err)
+			return nil
+		}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close() //nolint:errcheck
+				slog.Warn("memory: active projection filter failed closed", "err", err)
+				return nil
+			}
+			active[name] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			slog.Warn("memory: active projection filter failed closed", "err", err)
+			return nil
+		}
+		rows.Close() //nolint:errcheck
+	}
+	out := make([]embedding.Scored, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := active[candidate.Key]; ok {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 // attachProjectionIdentity batch-loads the rebuildable atomic-fact view IDs

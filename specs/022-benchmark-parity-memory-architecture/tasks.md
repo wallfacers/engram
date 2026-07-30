@@ -98,14 +98,14 @@ purge closure 完整且旧 Search/write parity 不变。
 
 ### Engine implementation — US1
 
-- [ ] T031 [US1] 添加 additive v7 Ledger/projection/episode tables、partial unique/indexes 与 deterministic legacy backfill 到 `store/migrations.go`
-- [ ] T032 [US1] 实现 `LedgerStore`、append-only lifecycle、typed errors、batch reads 和 secure-delete/WAL purge 到 `memory/evidence.go`
-- [ ] T033 [US1] 实现 projection registry、direct N:M lineage、span validation、batch source lookup 和 stale invalidation 到 `memory/projection.go`
+- [X] T031 [US1] 添加 additive v7 Ledger/projection/episode tables、partial unique/indexes 与 deterministic legacy backfill 到 `store/migrations.go`
+- [X] T032 [US1] 实现 `LedgerStore`、append-only lifecycle、typed errors、batch reads 和 secure-delete/WAL purge 到 `memory/evidence.go`
+- [X] T033 [US1] 实现 projection registry、direct N:M lineage、span validation、batch source lookup 和 stale invalidation 到 `memory/projection.go`
 - [X] T034 [US1] 保持现有签名并接入 self Evidence、`UpsertWithSources`、source union 与 projection-only delete 到 `memory/entrystore.go`
 - [X] T035 [P] [US1] 给抽取 prompt 注入稳定 Evidence IDs 并要求每条 fact 返回实际 `source_ids`，更新 `memory/prompt/memory_extraction.go` 与 `memory/prompt/memory_extraction_test.go`
 - [X] T036 [US1] 实现 `IngestDetailed` 的 Ledger-first 两事务流程、兼容 wrapper 和 degraded extraction 结果到 `memory/pipeline/pipeline.go`
 - [X] T037 [US1] 在 curation 调用的 `EntryStore.Merge` 中直连所有实际 Evidence 并拒绝空 lineage 到 `memory/entrystore.go`，以 `memory/curation/dedup_test.go` 验证
-- [ ] T038 [US1] 用 projection/head revision 防止 purge/tombstone 后 embedder 或 side-index stale 回写到 `memory/embedder.go`
+- [X] T038 [US1] 用 active projection guard 防止 purge/tombstone 后 embedder 或 side-index stale 回写到 `memory/embedder.go`、`memory/vectorstore.go` 与 `memory/retriever.go`
 - [X] T039 [P] [US1] 给 `memory.Result` 添加零值安全稳定 ID/projection kind，并保持 Search 排序与信号降级不变到 `memory/retriever.go`
 
 ### Adapter and verification
