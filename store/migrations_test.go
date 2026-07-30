@@ -10,11 +10,37 @@ import (
 )
 
 func TestMigration_FreshDB(t *testing.T) {
-	s, err := store.Open(context.Background(), store.Options{DSN: ":memory:"})
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
 	if err != nil {
 		t.Fatalf("open fresh db: %v", err)
 	}
 	defer s.Close()
+
+	var version int
+	if err := s.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if version != 7 {
+		t.Fatalf("fresh schema version = %d, want 7", version)
+	}
+	for _, table := range []string{
+		"memory_evidence",
+		"memory_evidence_events",
+		"memory_evidence_heads",
+		"memory_projections",
+		"memory_projection_sources",
+		"memory_semantic_episodes",
+	} {
+		var count int
+		if err := s.DB().QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatalf("check table %q: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("v7 table %q missing", table)
+		}
+	}
 }
 
 func TestMigration_IdempotentRerun(t *testing.T) {
@@ -28,8 +54,8 @@ func TestMigration_IdempotentRerun(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 6 {
-		t.Errorf("expected version 6 after first open, got %d", version)
+	if version != 7 {
+		t.Errorf("expected version 7 after first open, got %d", version)
 	}
 	s.Close()
 
@@ -96,8 +122,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected migration v6, got v%d", version)
+	if version != 7 {
+		t.Fatalf("expected migration v7, got v%d", version)
 	}
 
 	db := s.DB()
@@ -135,8 +161,15 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	}
 
 	// Apply the v4/v3 Down contracts, then reopen so normal migration logic
-	// upgrades the same v2 database back to v4.
+	// upgrades the same v2 database back to the current schema.
 	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS memory_semantic_episodes`,
+		`DROP TABLE IF EXISTS memory_projection_sources`,
+		`DROP TABLE IF EXISTS memory_projections`,
+		`DROP TABLE IF EXISTS memory_evidence_heads`,
+		`DROP TABLE IF EXISTS memory_evidence_events`,
+		`DROP TABLE IF EXISTS memory_evidence`,
+		`DELETE FROM schema_version WHERE version = 7`,
 		`ALTER TABLE memory_entries DROP COLUMN revision`,
 		`DELETE FROM schema_version WHERE version = 6`,
 		`DROP TABLE IF EXISTS memory_fact_queries`,
@@ -173,8 +206,8 @@ func TestMigration_V3RoundTrip(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read upgraded schema version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected migration v6 after round trip, got v%d", version)
+	if version != 7 {
+		t.Fatalf("expected migration v7 after round trip, got v%d", version)
 	}
 }
 
@@ -191,8 +224,8 @@ func TestMigration_V5FactQueries(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected migration v6, got v%d", version)
+	if version != 7 {
+		t.Fatalf("expected migration v7, got v%d", version)
 	}
 
 	var count int
@@ -265,6 +298,176 @@ func TestMigration_TemporalEventIndexes(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("index %q missing", index)
+		}
+	}
+}
+
+func TestMigration_V7BackfillsV6EntriesWithoutChangingExistingIndexes(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "v6-to-v7.db")
+	s, err := store.Open(ctx, store.Options{DSN: dsn})
+	if err != nil {
+		t.Fatalf("open current schema: %v", err)
+	}
+	downgradeV7ForMigrationTest(t, ctx, s.DB())
+	if _, err := s.DB().ExecContext(ctx, `
+		INSERT INTO memory_entries(
+			id, name, trigger, content, created_at, updated_at, source_session_id
+		) VALUES ('entry-v6', 'legacy-name', 'legacy trigger', 'legacy evidence', 11, 12, 'session-v6')`); err != nil {
+		t.Fatalf("insert v6 entry: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `
+		INSERT INTO memory_entity_edges(entity_a, entity_b, kind, weight, updated_at)
+		VALUES ('alice', 'bob', 'co', 1, 13)`); err != nil {
+		t.Fatalf("insert 003 edge: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close v6 fixture: %v", err)
+	}
+
+	s, err = store.Open(ctx, store.Options{DSN: dsn})
+	if err != nil {
+		t.Fatalf("upgrade v6 fixture: %v", err)
+	}
+	defer s.Close()
+
+	var version int
+	if err := s.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != 7 {
+		t.Fatalf("schema version = %d, want 7", version)
+	}
+
+	var evidenceID, sourceType, sessionID, content string
+	if err := s.DB().QueryRowContext(ctx, `
+		SELECT id, source_type, source_session_id, content
+		FROM memory_evidence WHERE id = 'legacy:entry-v6'`).Scan(
+		&evidenceID, &sourceType, &sessionID, &content,
+	); err != nil {
+		t.Fatalf("read backfilled evidence: %v", err)
+	}
+	if evidenceID != "legacy:entry-v6" || sourceType != "legacy_entry" || sessionID != "session-v6" || content != "legacy evidence" {
+		t.Fatalf("unexpected backfilled evidence: id=%q type=%q session=%q content=%q", evidenceID, sourceType, sessionID, content)
+	}
+
+	var state, action string
+	if err := s.DB().QueryRowContext(ctx, `
+		SELECT h.state, e.action
+		FROM memory_evidence_heads AS h
+		JOIN memory_evidence_events AS e ON e.evidence_id = h.evidence_id
+		WHERE h.evidence_id = 'legacy:entry-v6'`).Scan(&state, &action); err != nil {
+		t.Fatalf("read backfill lifecycle: %v", err)
+	}
+	if state != "active" || action != "append" {
+		t.Fatalf("backfill lifecycle = state %q action %q, want active/append", state, action)
+	}
+
+	var projectionID, projectionKind, objectKey string
+	if err := s.DB().QueryRowContext(ctx, `
+		SELECT p.id, p.kind, p.object_key
+		FROM memory_projections AS p
+		JOIN memory_projection_sources AS ps ON ps.projection_id = p.id
+		WHERE ps.evidence_id = 'legacy:entry-v6'`).Scan(&projectionID, &projectionKind, &objectKey); err != nil {
+		t.Fatalf("read backfill projection: %v", err)
+	}
+	if projectionID == "" || projectionKind != "atomic_fact" || objectKey != "entry-v6" {
+		t.Fatalf("unexpected backfill projection: id=%q kind=%q key=%q", projectionID, projectionKind, objectKey)
+	}
+
+	var fullSource int
+	var startChar, endChar, spanDigest sql.NullString
+	if err := s.DB().QueryRowContext(ctx, `
+		SELECT full_source, start_char, end_char, span_digest
+		FROM memory_projection_sources
+		WHERE projection_id = ? AND evidence_id = 'legacy:entry-v6'`, projectionID).Scan(
+		&fullSource, &startChar, &endChar, &spanDigest,
+	); err != nil {
+		t.Fatalf("read backfill lineage: %v", err)
+	}
+	if fullSource != 1 || startChar.Valid || endChar.Valid || spanDigest.Valid {
+		t.Fatalf("backfill lineage must be full source without span: full=%d start=%v end=%v digest=%v", fullSource, startChar, endChar, spanDigest)
+	}
+
+	var edgeCount int
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_entity_edges WHERE entity_a = 'alice' AND entity_b = 'bob'`).Scan(&edgeCount); err != nil {
+		t.Fatalf("read 003 edge: %v", err)
+	}
+	if edgeCount != 1 {
+		t.Fatalf("003 edge count = %d, want 1", edgeCount)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close upgraded fixture: %v", err)
+	}
+	s, err = store.Open(ctx, store.Options{DSN: dsn})
+	if err != nil {
+		t.Fatalf("reopen upgraded fixture: %v", err)
+	}
+	defer s.Close()
+	var evidenceCount int
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_evidence WHERE id = 'legacy:entry-v6'`).Scan(&evidenceCount); err != nil {
+		t.Fatalf("count idempotent evidence: %v", err)
+	}
+	if evidenceCount != 1 {
+		t.Fatalf("backfill must be idempotent: got %d evidence rows", evidenceCount)
+	}
+}
+
+func TestMigration_V7BackfillFailureRollsBack(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "v7-rollback.db")
+	s, err := store.Open(ctx, store.Options{DSN: dsn})
+	if err != nil {
+		t.Fatalf("open current schema: %v", err)
+	}
+	downgradeV7ForMigrationTest(t, ctx, s.DB())
+	if _, err := s.DB().ExecContext(ctx, `CREATE TABLE memory_evidence (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create malformed v7 table: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close malformed v6 fixture: %v", err)
+	}
+
+	if _, err := store.Open(ctx, store.Options{DSN: dsn}); err == nil {
+		t.Fatal("v7 migration unexpectedly succeeded with malformed memory_evidence table")
+	}
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open fixture without migrations: %v", err)
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read rollback version: %v", err)
+	}
+	if version != 6 {
+		t.Fatalf("failed migration recorded version %d, want 6", version)
+	}
+	var eventTableCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_evidence_events'`).Scan(&eventTableCount); err != nil {
+		t.Fatalf("check rolled-back v7 table: %v", err)
+	}
+	if eventTableCount != 0 {
+		t.Fatalf("v7 table from failed transaction survived rollback")
+	}
+}
+
+func downgradeV7ForMigrationTest(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS memory_semantic_episodes`,
+		`DROP TABLE IF EXISTS memory_projection_sources`,
+		`DROP TABLE IF EXISTS memory_projections`,
+		`DROP TABLE IF EXISTS memory_evidence_heads`,
+		`DROP TABLE IF EXISTS memory_evidence_events`,
+		`DROP TABLE IF EXISTS memory_evidence`,
+		`DELETE FROM schema_version WHERE version = 7`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("downgrade v7 fixture with %q: %v", stmt, err)
 		}
 	}
 }

@@ -87,7 +87,7 @@ purge closure 完整且旧 Search/write parity 不变。
 
 ### Tests first — US1
 
-- [ ] T023 [P] [US1] 为 fresh v7、v6→v7 deterministic legacy backfill、幂等重跑、失败 rollback 和 003 表不变写失败 migration tests 到 `store/migrations_test.go`
+- [X] T023 [P] [US1] 为 fresh v7、v6→v7 deterministic legacy backfill、幂等重跑、失败 rollback 和 003 表不变写失败 migration tests 到 `store/migrations_test.go`
 - [ ] T024 [P] [US1] 为 Evidence batch 原子性、external ID 幂等/冲突、状态机、UTF-8 content 与稳定 session ordering 写失败测试到 `memory/evidence_test.go`
 - [ ] T025 [P] [US1] 为 projection registry、完整 direct lineage、code-point span/digest、批量 source lookup 和 stale/disabled 状态写失败测试到 `memory/projection_test.go`
 - [ ] T026 [P] [US1] 为现有 Upsert 自动 self Evidence、同内容复用、改内容 append、`UpsertWithSources` 和 Delete-only-projection 写失败测试到 `memory/entrystore_test.go`
