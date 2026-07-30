@@ -338,6 +338,28 @@ relative evidence-fit pressure。另一方面，LoCoMo judge audit 显示强方�
 - 依赖第二个 LLM judge 代替人审：拒绝，只是换一套未知偏差，不能校准 FN/FP 方向。
 - 把 oracle diagnostic 算入正式 accuracy：拒绝，它使用不可部署的 gold evidence。
 
+## R16 — 有效 B1 必须在 Ledger source-chain 后生成
+
+**Decision**: 2026-07-30 的 live formal-runner 验证发现，v6 的 Atomic Fact hit 只有 entry
+name/session，缺少直接 raw Evidence lineage 与可复原 span。正式 runner 对这类 hit 标记
+`source_lineage_unavailable`，零 answer/judge call，并将整次运行标记 INVALID。保留
+calibration、B0 continuity 和 B1 protocol template，但把正式 B1 control 的 candidate freeze、
+legacy-packer run、oracle 与 judge audit 移到 Increment 1 的 source-chain gate 之后。
+
+**Rationale**: 022 的 B1 不只是一个相同 cap 的分数；它还是后续 Compiler 的 answer-facing
+evidence contract。若把 `legacy-entry:*`、session ID 或 raw-chunk quota 当作 fact 的来源，
+会伪造 source/span validity，并把没有证据的题混入可比较 accuracy。Ledger-first B1 仍保持
+control 使用 legacy packer，故表示/Compiler 的 treatment 变量没有提前进入 control。
+
+**Alternatives considered**:
+
+- 接受 synthetic `legacy-entry:*`：拒绝，违反 FR-006、FR-009、FR-014 和 fail-closed
+  compiler contract。
+- 只用 raw-turn candidates 立即跑 B1：拒绝，它改变了 current-product candidate composition；
+  若要作为独立 raw-turn baseline，必须另行 specify，不能替代 022 B1。
+- 把 INVALID run 记为零分或部分分：拒绝，validity failure 不是模型错误，计分会误导
+  baseline 和后续 paired statistics。
+
 ## Unresolved Items
 
 无。Product 默认采用哪一种 representation、是否进入 Event/Scene/Profile/graph 由上述

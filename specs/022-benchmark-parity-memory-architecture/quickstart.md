@@ -119,7 +119,7 @@ go run ./cmd/locomo-bench \
 后回填。每个 protocol 记录 dataset/题目分母、store、answerer/judge/prompt/extractor、
 embedding、candidate rule、tokenizer、cap、repetitions、flags 和 git commit。
 
-## 6. 跑 B0 与 B1
+## 6. 跑 B0 与有效 B1
 
 WSL2 的长任务必须 detach。下面是目标 CLI 形状；凭据只通过运行时 env，绝不写入 command
 示例、log 或 tracked file。
@@ -167,12 +167,18 @@ B0 验收：
 - 三次独立输出与 majority 保存；
 - legacy retry 若发生，真实记录；只作 continuity。
 
+有效 B1 只能在第 3 节 Ledger source-chain 验收通过后运行。v6 运行若输出
+`source_lineage_unavailable`，它是正确的 INVALID 诊断，不是可接受的 B1 score；不得用
+`legacy-entry:*`、session ID 或 raw-chunk quota 代替事实的 source/span。
+
 B1 验收：
 
 - legacy retry 关闭；
 - 每 repetition answerer 一次；
 - ranked anchors/rendered candidates、counter/cap 固定；
 - legacy packer 在新硬 cap 下运行；
+- 每个 candidate 都具有 active Evidence source IDs，所用 span 可从原文复原，且
+  `source_lineage_unavailable=0`；
 - 后续所有 A/B 指向 B1 control hash。
 
 Judge/oracle 诊断：

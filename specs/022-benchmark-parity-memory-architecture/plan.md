@@ -22,9 +22,11 @@ Event/Scene/Profile/graph 定义为可删除、可重建、带完整来源的 pr
 Grounded Trace 与 Evidence Bundle。可选本地 Planner 只能提议动作；无模型时使用确定性
 extractive compiler。正式 answerer 只有在来源和预算验证通过后调用一次。
 
-交付按因果门推进：先刷新无损 B0 基线并建立冻结候选的 B1 尺子；再分别验证表示、
-固定候选 Compiler、Event 组件和一次结构化缺口补检。Scene、Profile、graph 只在剩余
-错误支持且各自通过预注册双基准门时实现和默认启用。达到目标后不为“架构完整”继续扩张。
+交付按因果门推进：先刷新无损 B0 连续性基线并完成 B1 的计数/协议尺子；有效的冻结候选
+B1 必须等待 Ledger 提供真实 source/span 后生成，不能用 v6 的 synthetic legacy source
+冒充来源链。随后分别验证表示、固定候选 Compiler、Event 组件和一次结构化缺口补检。
+Scene、Profile、graph 只在剩余错误支持且各自通过预注册双基准门时实现和默认启用。达到
+目标后不为“架构完整”继续扩张。
 
 ## Technical Context
 
@@ -155,23 +157,23 @@ planner 或实验策略。
 
 ## Delivery Sequence and Gates
 
-### Increment 0 — Measurement protocol and baseline
+### Increment 0 — Measurement protocol, calibration and B0 continuity
 
 1. 先让 021 IRIS 在其工作区提交或暂停，并把 022 rebase 到最新主线；不得覆盖
    `main.go`、`iris.go` 或 `iris_test.go` 的未提交工作。
 2. 固化 `022.v1` artifact、dataset/prompt/model/tokenizer/cap fingerprints、逐题
    candidate ID/lineage、连续 source coverage、judge audit 抽样和 exact paired statistics。
-3. 在 lossless LongMemEval ingestion 上运行 B0：LoCoMo 1,540 与 LongMemEval 500，
-   每题三次独立 answer 后 majority 聚合。
-4. 冻结 ranked candidates 和两个预注册 cap，运行 legacy packer 得到 B1。所有后续
-   机制只和 B1 的同题 control 比较。
-5. 对全部 control/treatment judge-discordant 题和预注册 concordant 分层样本做人审盲标；
-   同时以固定 gold evidence 跑 oracle diagnostic，区分 retrieval、assembly 与 answerer
-   ceiling，但不把 oracle 分数并入正式 accuracy。
+3. 校准本地 answerer tokenizer，并冻结两个预注册 cap、B0 protocol 和待 Ledger 完成后
+   重新 materialize 的 B1 protocol 模板。
+4. 在 lossless LongMemEval ingestion 上运行 B0：LoCoMo 1,540 与 LongMemEval 500，
+   每题三次独立 answer 后 majority 聚合；B0 的 legacy retry 如实记录，只作产品连续性。
+5. v6 的 fact candidate 没有 raw Evidence lineage 时，runner 必须以
+   `source_lineage_unavailable` fail closed，零 answer/judge calls，且不得产出 B1 分数。
+   不得以 `legacy-entry:*`、session ID 或 chunk quota 伪造可验证来源。
 
-**Gate**: 分母、candidate lineage、token/answer-call 记录完整率 100%；恢复运行遇到任一
-fingerprint 变化必须拒绝。Judge audit 未完成、校正改变 verdict 或任一预注册 category
-显著回退时不得 GO。未达到则停止算法实验。
+**Gate**: 分母、protocol、token/answer-call 记录完整率 100%；恢复运行遇到任一 fingerprint
+变化必须拒绝。B0 可独立报告连续性；v6 的 source-lineage failure 是进入 Ledger increment
+的硬前置，而不是可被无效 B1 分数掩盖的算法 STOP。
 
 ### Increment 1 — Evidence Ledger foundation
 
@@ -183,9 +185,15 @@ fingerprint 变化必须拒绝。Judge audit 未完成、校正改变 verdict �
    message provenance。
 4. 验证删除/重建只影响 projection，隐私 purge 一跳清除所有直接依赖内容，并完成
    secure-delete/WAL checkpoint。
+5. 只在上述 source-chain gate 通过后，基于同一 post-Ledger commit 重新 materialize
+   LoCoMo/LongMemEval low/high B1 manifest，冻结 ranked candidates，用 legacy packer
+   运行正式 B1 control，并完成 judge audit 与 fixed-gold oracle diagnostic。后续机制
+   只和这个 B1 的同题 control 比较。
 
 **Gate**: source-chain、purge closure、namespace isolation、既有 Search/write parity
-全部通过；100k fixture 的批量 lineage 路径无 N+1。
+全部通过；100k fixture 的批量 lineage 路径无 N+1；正式 B1 的 candidate lineage、span、
+token/call 字段完整率必须为 100%，并且 `source_lineage_unavailable=0`。Judge audit 未完成、
+校正改变 verdict 或任一预注册 category 显著回退时不得 GO。
 
 ### Increment 2 — Representation bake-off
 
@@ -246,11 +254,12 @@ cohort 和双基准 promotion rule 判定 GO/HOLD/STOP。未过门表示不进�
 提交顺序必须保持因果可审查：
 
 1. measurement schema/protocol；
-2. B0/B1 baseline artifacts 或可复现 manifest；
+2. calibration 与 B0 continuity artifact，及不产生分数的 B1 template；
 3. Ledger schema/API；
-4. 每个独立算法 mechanism；
-5. 仅包含冻结值的 eval config；
-6. 结果与 GO/HOLD/STOP verdict。
+4. post-Ledger valid B1 control artifact；
+5. 每个独立算法 mechanism；
+6. 仅包含冻结值的 eval config；
+7. 结果与 GO/HOLD/STOP verdict。
 
 每个 engine increment 先写失败测试，再实现。编辑后执行：
 

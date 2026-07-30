@@ -34,12 +34,15 @@ projection 是条件阶段；未满足前置 residual-cohort gate 时以 STOP ve
 
 ---
 
-## Phase 2: Foundational（冻结评测尺子，阻塞所有 User Story）
+## Phase 2: Foundational（评测尺子、B0 连续性与 B1 provenance blocker）
 
-**Purpose**: 在 storage/retrieval 算法改变前建立 `022.v1` artifact、实际 token、judge
-审计与 B0/B1 因果尺子。
+**Purpose**: 建立 `022.v1` artifact、实际 token、B0 continuity 和正式 B1 所需的
+provenance validity。B1 的候选/分数必须等 Ledger 提供真实 source/span 后才冻结。
 
-**⚠️ CRITICAL**: T005–T022 完成前不得开始 US1 的 v7 migration 或任何默认算法改动。
+**⚠️ CRITICAL (replanned 2026-07-30)**: T005–T019 是 Ledger 前的评测契约门；live
+验证已证明 v6 fact candidates 没有 B1 所需的 source lineage。因此 T023–T039 是有效 B1
+的硬前置，必须在 T021/T022 的正式 B1 部分之前执行。不得以 synthetic `legacy-entry:*`
+绕过该 gate。
 
 ### Tests first — Foundational
 
@@ -64,12 +67,12 @@ projection 是条件阶段；未满足前置 residual-cohort gate 时以 STOP ve
 
 ### Freeze and baseline
 
-- [ ] T020 校准本地 answerer counter 并冻结 LoCoMo/LongMemEval 的 low/high、B0/B1 protocol manifests，把无 secret 的 hashes/精确 cap 记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T021 依 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 用 WSL2 detach 规则运行 lossless B0 与 frozen-candidate B1（三次独立 answer，正式 B1 每 repetition 一次 answerer），把 immutable artifact hashes 写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T022 完成 B0/B1 judge audit、fixed-gold oracle 和 validity 校验，确认 1,540/500 分母、candidate lineage、token/call 字段完整率 100%，并在 `docs/evaluation/reports/benchmark-parity-memory-architecture.md` 冻结 B1 control hashes
+- [ ] T020 校准本地 answerer counter 并冻结 LoCoMo/LongMemEval 的 low/high、B0 protocol 与待 post-Ledger materialize 的 B1 protocol template；把无 secret 的 hashes/精确 cap 记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [ ] T021 依 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 用 WSL2 detach 规则运行 lossless B0（三次独立 answer）并记录 immutable artifacts；仅在 T039 的 source-chain contract 通过后，才运行 frozen-candidate B1（每 repetition 一次 answerer）
+- [ ] T022 完成 B0 audit；在 T039 后完成 B1 judge audit、fixed-gold oracle 和 validity 校验，确认 1,540/500 分母、candidate lineage、span、token/call 字段完整率 100%，`source_lineage_unavailable=0`，并冻结 B1 control hashes
 
-**Checkpoint**: B0 只用于历史连续性；所有后续机制都有 B1 同题、同 candidate/cap、
-同 answerer/judge control，且 judge 噪声方向已审计。
+**Checkpoint**: B0 只用于历史连续性。v6 source-lineage failure 不产出 B1 分数；完成
+T023–T039 后才有所有后续机制使用的同题、同 candidate/cap、同 answerer/judge B1 control。
 
 ---
 
@@ -277,9 +280,10 @@ gate 的机制有资格进入产品化设计。
 ### Phase Dependencies
 
 - **Phase 1 — Setup**: 无代码依赖；T001 后才能可靠修改 harness。
-- **Phase 2 — Foundational**: 依赖 Phase 1，且阻塞所有 User Story。B0/B1 必须在算法改动前
-  冻结。
-- **Phase 3 — US1**: 依赖 Phase 2；Ledger 是所有 source-aware 表示与 Compiler 的地基。
+- **Phase 2 — Foundational**: 依赖 Phase 1；T005–T019 冻结评测契约，B0 可独立运行。
+  有效 B1 不能在 v6 产生，须等待 US1 的 T023–T039 source-chain 前置完成。
+- **Phase 3 — US1**: 依赖 T005–T019；Ledger 是所有 source-aware 表示与 Compiler 的地基，
+  并阻塞 T021/T022 的正式 B1 部分。
 - **Phase 4 — US2**: 依赖 US1；Episode/raw-window 必须从 Ledger 重建。
 - **Phase 5 — US3**: 实现依赖 US1，正式 candidate replay 依赖 US2 verdict。
 - **Phase 6 — US4**: 依赖 US3 residual；核心已达双目标时以 STOP verdict 结束。
@@ -290,10 +294,13 @@ gate 的机制有资格进入产品化设计。
 ### User Story Dependencies
 
 ```text
-Foundational B0/B1
+Measurement contract + B0 continuity
         │
         ▼
 US1 Evidence Ledger
+        │
+        ▼
+Valid B1 causal control
         │
         ▼
 US2 Representation ──> US3 Fixed-candidate Compiler
@@ -391,31 +398,34 @@ Scene/Profile/graph 可并行，但必须分别运行、分别 verdict。
 
 ### MVP First — Evidence Ledger
 
-1. 完成 Phase 1–2，先获得可信 B0/B1。
+1. 完成 Phase 1 与 T005–T019，先获得可信 measurement contract 与 B0 prerequisites。
 2. 完成 US1 的 tests、v7、Ledger/projection lineage、MCP thin adapter。
-3. 在 T045 停止并独立验收：无 Episode/Compiler 时基础写入搜索仍完整。
-4. US1 未通过 purge/source/parity 门前不得进入表示或 Compiler。
+3. 在 T039 source-chain contract 通过后运行正式 B1 control；在 T045 停止并独立验收：
+   无 Episode/Compiler 时基础写入搜索仍完整。
+4. US1 未通过 purge/source/parity/B1 validity 门前不得进入表示或 Compiler。
 
 ### Incremental Delivery
 
-1. **Measurement foundation** → 可信的候选、预算、judge 与误差分解。
+1. **Measurement foundation + B0** → 可信的 protocol、预算与历史连续性。
 2. **US1 Ledger** → 不可损失、可追踪、可隐私删除的事实地基。
-3. **US2 Representation** → 只选过门表示，允许全部 NO-GO。
-4. **US3 Compiler** → 固定候选证明 answer-facing contract。
-5. **US4/US5** → 只按 residual 缺口引入单变量机制。
-6. **Final gate** → 同一公开 recipe 同时达到双目标才完成；否则 converge，不粉饰结果。
+3. **Valid B1** → post-Ledger 同题 control、judge 与 oracle，作为全部机制的因果尺子。
+4. **US2 Representation** → 只选过门表示，允许全部 NO-GO。
+5. **US3 Compiler** → 固定候选证明 answer-facing contract。
+6. **US4/US5** → 只按 residual 缺口引入单变量机制。
+7. **Final gate** → 同一公开 recipe 同时达到双目标才完成；否则 converge，不粉饰结果。
 
 ### Commit Isolation
 
 按以下顺序分开提交：
 
 1. measurement schema/tests；
-2. frozen protocol/config；
-3. B0/B1 manifest；
-4. 每个单一 mechanism 的 tests+implementation；
-5. 该 mechanism 的 results/verdict；
-6. 默认 recipe promotion；
-7. 最终文档。
+2. frozen protocol/config、calibration 与 B0 manifest；
+3. Ledger schema/API；
+4. post-Ledger B1 manifest/control artifact；
+5. 每个单一 mechanism 的 tests+implementation；
+6. 该 mechanism 的 results/verdict；
+7. 默认 recipe promotion；
+8. 最终文档。
 
 ## Notes
 
