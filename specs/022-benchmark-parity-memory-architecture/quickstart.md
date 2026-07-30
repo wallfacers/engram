@@ -69,12 +69,15 @@ candidate 一次 query 的 N+1。
 实现 [compiler-contract.md](./contracts/compiler-contract.md) 后，先在同一个本地
 answerer runtime 上运行 calibration，不能直接开始正式分数实验。
 
-目标 CLI：
+先通过环境变量提供与正式 answerer 完全相同的 `LOCOMO_PROVIDER`、`LOCOMO_BASE_URL`、
+`LOCOMO_MODEL` 和 `LOCOMO_API_KEY`；secret 不得写进命令、log 或 tracked file。可执行
+CLI 为：
 
 ```bash
 go run ./cmd/locomo-bench \
   --token-counter-calibrate \
-  --answerer-model-dir /absolute/path/to/local-model \
+  --token-counter-base-url "$ENGRAM_022_TOKEN_COUNTER_BASE_URL" \
+  --counter-fingerprint "$ENGRAM_022_COUNTER_FINGERPRINT" \
   --run-dir "$ENGRAM_022_SCRATCH/counter-calibration"
 ```
 
@@ -97,13 +100,16 @@ protocol，不能退化成字段数/字符数。
 ```bash
 go run ./cmd/locomo-bench \
   --eval-freeze-protocol "$ENGRAM_022_SCRATCH/protocol/locomo-low.json" \
+  --eval-budget-profile low \
   --data /absolute/path/to/locomo.json \
   --dataset-format locomo \
-  --retrieval both \
+  --retrieval hybrid \
+  --chunks \
+  --chunk-quota 7 \
   --top-k 30 \
   --repeats 3 \
+  --max-tokens 8000 \
   --no-idk-retry \
-  --eval-stage b1 \
   --answer-input-cap <frozen-low-cap> \
   --counter-fingerprint <calibrated-fingerprint>
 ```
@@ -112,17 +118,30 @@ go run ./cmd/locomo-bench \
 
 - LoCoMo low/high；
 - LongMemEval-S low/high；
-- B0 continuity、B1 causal ruler；
+- 当前可执行的 B1 causal ruler；
 - 每个阶段唯一 primary arm/cohort。
+
+当前冻结器和 formal runner 只实现 B1。B0 continuity 的独立 manifest/runner 仍是
+T111，未完成前不得启动 T021，也不得把旧 legacy run 冒充 `022.v1` B0。
 
 高低 cap 的精确值必须在 treatment 前写入 manifest；`<frozen-low-cap>` 不能在看完结果
 后回填。每个 protocol 记录 dataset/题目分母、store、answerer/judge/prompt/extractor、
 embedding、candidate rule、tokenizer、cap、repetitions、flags 和 git commit。
 
-## 6. 跑 B0 与有效 B1
+## 6. 跑有效 B1（B0 尚由 T111 阻塞）
 
 WSL2 的长任务必须 detach。下面是目标 CLI 形状；凭据只通过运行时 env，绝不写入 command
 示例、log 或 tracked file。
+
+先为该 shell 设置专用变量并创建重定向目标目录：
+
+```bash
+export ENGRAM_022_PROTOCOL="$ENGRAM_022_SCRATCH/protocol/locomo-low.json"
+export ENGRAM_022_DATASET=/absolute/path/to/locomo.json
+export ENGRAM_022_FORMAT=locomo
+export ENGRAM_022_RUN_DIR="$ENGRAM_022_SCRATCH/runs/locomo-b1-low"
+mkdir -p "$ENGRAM_022_RUN_DIR"
+```
 
 ```bash
 setsid bash -c '
@@ -131,20 +150,16 @@ setsid bash -c '
     --data "$ENGRAM_022_DATASET" \
     --dataset-format "$ENGRAM_022_FORMAT" \
     --run-dir "$ENGRAM_022_RUN_DIR" \
-    --retrieval both \
+    --retrieval hybrid \
+    --chunks \
+    --chunk-quota 7 \
+    --top-k 30 \
     --repeats 3 \
+    --max-tokens 8000 \
+    --token-counter-base-url "$ENGRAM_022_TOKEN_COUNTER_BASE_URL" \
     >"$ENGRAM_022_RUN_DIR/run.log" 2>&1
   echo $? >"$ENGRAM_022_RUN_DIR/run.exit"
 ' </dev/null >/dev/null 2>&1 & disown
-```
-
-为该 shell 设置专用变量：
-
-```bash
-export ENGRAM_022_PROTOCOL="$ENGRAM_022_SCRATCH/protocol/locomo-low.json"
-export ENGRAM_022_DATASET=/absolute/path/to/locomo.json
-export ENGRAM_022_FORMAT=locomo
-export ENGRAM_022_RUN_DIR="$ENGRAM_022_SCRATCH/runs/locomo-b1-low"
 ```
 
 轮询只做一次即时检查：
@@ -160,7 +175,7 @@ export ENGRAM_022_RUN_DIR="$ENGRAM_022_SCRATCH/runs/locomo-b1-low"
 每次重启使用现场新凭据，本地 tunnel/runtime 信息不进 repo。正式 stack 不得启用付费
 hosted reranker/recall。
 
-B0 验收：
+B0 的预注册验收要求保留如下，但必须等 T111 提供真实可执行路径后再跑：
 
 - lossless store；
 - 1,540/500 分母完整；
@@ -174,10 +189,15 @@ B0 验收：
 B1 验收：
 
 - legacy retry 关闭；
-- 每 repetition answerer 一次；
-- ranked anchors/rendered candidates、counter/cap 固定；
-- legacy packer 在新硬 cap 下运行；
-- 每个 candidate 都具有 active Evidence source IDs，所用 span 可从原文复原，且
+- 每题 retrieval、Candidate/Trace/Bundle 只物化一次，三次 repetition 只能重放冻结输入；
+- 每 repetition 恰好一次 answer provider attempt 与一次 judge provider attempt，formal
+  wrapper 不透明重试；
+- ingestion、candidate rules、embedding、ranked anchors/rendered candidates、counter/cap
+  均与 manifest 指纹一致；
+- navigation projection 必须在 admission 前展开为 active raw-message Evidence；legacy
+  packer 对完整展开后的 answer input 执行硬 cap；
+- Bundle 的 item、Unicode code-point span、candidate citation、完整-anchor ranked prefix
+  和 source union 由独立 Ledger 重读 validator 验证，且
   `source_lineage_unavailable=0`；
 - 后续所有 A/B 指向 B1 control hash。
 
@@ -188,7 +208,59 @@ Judge/oracle 诊断：
 - fixed-gold Evidence oracle 使用独立 diagnostic arm，不进入正式 accuracy；
 - source coverage 连续报告并按预注册 strata 分层，不把外部 `0.95` 当硬阈值。
 
-## 7. 表示 Bake-off
+## 7. 运行并独立验证 Fixed-gold F0
+
+oracle 使用新的 run directory，只读取 dataset gold 对应的 active raw-message Evidence；
+不构建 extractor、embedding、Retriever 或 projection。它是长任务，仍必须 detach：
+
+```bash
+export ENGRAM_022_ORACLE_RUN_DIR="$ENGRAM_022_SCRATCH/runs/locomo-fixed-gold-low"
+mkdir -p "$ENGRAM_022_ORACLE_RUN_DIR"
+setsid bash -c '
+  go run ./cmd/locomo-bench \
+    --fixed-gold-oracle \
+    --eval-protocol "$ENGRAM_022_PROTOCOL" \
+    --data "$ENGRAM_022_DATASET" \
+    --dataset-format "$ENGRAM_022_FORMAT" \
+    --run-dir "$ENGRAM_022_ORACLE_RUN_DIR" \
+    --retrieval hybrid \
+    --chunks \
+    --chunk-quota 7 \
+    --top-k 30 \
+    --repeats 3 \
+    --max-tokens 8000 \
+    --token-counter-base-url "$ENGRAM_022_TOKEN_COUNTER_BASE_URL" \
+    >"$ENGRAM_022_ORACLE_RUN_DIR/run.log" 2>&1
+  echo $? >"$ENGRAM_022_ORACLE_RUN_DIR/run.exit"
+' </dev/null >/dev/null 2>&1 & disown
+```
+
+任何已有 oracle artifact/journal 都使该命令拒绝覆盖；崩溃后的 run directory 保留为审计
+证据，重跑必须换新目录。完成后使用同一 dataset 做无模型 read-back 验证：
+
+```bash
+go run ./cmd/locomo-bench \
+  --eval-validate "$ENGRAM_022_ORACLE_RUN_DIR" \
+  --data "$ENGRAM_022_DATASET" \
+  --dataset-format "$ENGRAM_022_FORMAT" \
+  --retrieval hybrid \
+  --chunks \
+  --chunk-quota 7 \
+  --top-k 30 \
+  --repeats 3 \
+  --max-tokens 8000
+```
+
+执行命令的 provider/model/revision、output cap、ingestion/candidate/prompt flags 必须逐项
+匹配 manifest；示例中的 quota/cap 只是占位，实际使用冻结值。oracle 保留 control 的
+embedding fingerprint 作为 provenance，但执行和无模型 read-back 都不读取或实例化
+embedding sidecar。`--eval-validate` 也不需要 answer/judge/token-counter endpoint。
+
+只有 LoCoMo `>=1425/1540` 且 LongMemEval-S `>=473/500`、B1/oracle/judge audit 全部有效，
+T022 才能写 `CONTINUE`。任一 artifact 不完整写 `HOLD`；artifact 全部有效但 oracle 未达
+目标写 `STOP`。`HOLD/STOP` 均不得启动后续满量机制。
+
+## 8. 表示 Bake-off
 
 目标 CLI 分开导航和渲染，不把两种实验合成一个分数：
 
@@ -215,7 +287,7 @@ go run ./cmd/locomo-bench \
 - Episode 删除后 Ledger 不变且可确定性重建；
 - verdict 为 GO 才能选进 Compiler stage；否则保留旧表示。
 
-## 8. 固定候选 Compiler
+## 9. 固定候选 Compiler
 
 先冻结获选表示的完整 `rendered_candidates`，再逐字节 replay：
 
@@ -253,7 +325,7 @@ Hard checks：
 - Planner fallback 率单列，不把 fallback 冒充 model treatment。
 - MERGE 仅在 raw over-cap 且 EXTRACT 仍不满足全部 Need 时可进入验证。
 
-## 9. 条件阶段
+## 10. 条件阶段
 
 只有上一阶段 verdict 与 residual cohort 支持时才运行：
 
@@ -267,7 +339,7 @@ Gap treatment 必须首轮 `N-r`、补检最多 `r`、union `<=N`，只接受
 `entity|time_range|second_operand`，最多一次。Scene/Profile/graph 分开 run；003 graph
 合同不改。核心路径已经达到两个数值目标时，后续条件阶段可以停止。
 
-## 10. 生成 Verdict
+## 11. 生成 Verdict
 
 目标 CLI：
 

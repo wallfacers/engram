@@ -63,6 +63,7 @@ type evalStoreProvenance struct {
 type evalModelFingerprint struct {
 	ID           string `json:"id"`
 	Revision     string `json:"revision"`
+	Provider     string `json:"provider"`
 	PromptDigest string `json:"prompt_digest"`
 }
 
@@ -70,6 +71,7 @@ type evalPlannerFingerprint struct {
 	Enabled      bool   `json:"enabled"`
 	ID           string `json:"id"`
 	Revision     string `json:"revision"`
+	Provider     string `json:"provider"`
 	PromptDigest string `json:"prompt_digest"`
 }
 
@@ -91,6 +93,7 @@ type evalRetrievalProvenance struct {
 type evalBudgetProtocol struct {
 	Profile             string `json:"profile"`
 	AnswerInputTokenCap int    `json:"answer_input_token_cap"`
+	MaxOutputTokens     int    `json:"max_output_tokens"`
 	CandidateLimit      int    `json:"candidate_limit"`
 	RetrievalCallLimit  int    `json:"retrieval_call_limit"`
 	AnswerCallLimit     int    `json:"answer_call_limit"`
@@ -171,7 +174,10 @@ func validateEvalProtocol(protocol evalProtocol, mode evalRunMode) error {
 		return err
 	}
 	if protocol.Models.Planner.Enabled {
-		if err := validateModelFingerprint("planner", evalModelFingerprint{ID: protocol.Models.Planner.ID, Revision: protocol.Models.Planner.Revision, PromptDigest: protocol.Models.Planner.PromptDigest}); err != nil {
+		if err := validateModelFingerprint("planner", evalModelFingerprint{
+			ID: protocol.Models.Planner.ID, Revision: protocol.Models.Planner.Revision,
+			Provider: protocol.Models.Planner.Provider, PromptDigest: protocol.Models.Planner.PromptDigest,
+		}); err != nil {
 			return err
 		}
 	}
@@ -219,14 +225,18 @@ func validateEvalBenchmark(benchmark evalBenchmarkProvenance) error {
 }
 
 func validateModelFingerprint(role string, model evalModelFingerprint) error {
-	if strings.TrimSpace(model.ID) == "" || strings.TrimSpace(model.Revision) == "" || !isDigest(model.PromptDigest) {
+	if strings.TrimSpace(model.ID) == "" || strings.TrimSpace(model.Revision) == "" ||
+		strings.TrimSpace(model.Provider) == "" || !isDigest(model.PromptDigest) {
 		return fmt.Errorf("invalid %s model fingerprint", role)
 	}
 	return nil
 }
 
 func validateEvalBudget(budget evalBudgetProtocol, retrievalLimit int) error {
-	if (budget.Profile != "low" && budget.Profile != "high") || budget.AnswerInputTokenCap < 1 || budget.CandidateLimit < 1 || budget.RetrievalCallLimit < 0 || budget.AnswerCallLimit != 1 || !isDigest(budget.CounterFingerprint) {
+	if (budget.Profile != "low" && budget.Profile != "high") ||
+		budget.AnswerInputTokenCap < 1 || budget.MaxOutputTokens < 1 ||
+		budget.CandidateLimit < 1 || budget.RetrievalCallLimit < 0 ||
+		budget.AnswerCallLimit != 1 || !isDigest(budget.CounterFingerprint) {
 		return fmt.Errorf("invalid token/call budget")
 	}
 	if budget.CandidateLimit != retrievalLimit {

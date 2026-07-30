@@ -64,6 +64,14 @@ func TestFixedGoldOracleIsDiagnosticOnly(t *testing.T) {
 	if oracleContributesToPromotion(oracle) {
 		t.Fatal("diagnostic fixed-gold oracle must not contribute to promotion")
 	}
+	if err := validateFixedGoldOracleRequest(evalFixedGoldOracleRequest{
+		Stage:                   evalStageFixedGoldOracle,
+		DiagnosticOnly:          true,
+		ProtocolHash:            "sha256:control",
+		EmptyEvidenceAbstention: true,
+	}); err != nil {
+		t.Fatalf("valid empty-evidence abstention oracle rejected: %v", err)
+	}
 
 	oracle.DiagnosticOnly = false
 	if err := validateFixedGoldOracleRequest(oracle); err == nil {

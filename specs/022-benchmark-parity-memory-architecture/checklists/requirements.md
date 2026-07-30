@@ -37,6 +37,10 @@
   Event, Scene, Profile and graph are conditional, independently gated projections.
 - 003 graph remains unchanged. V1 forbids source-less compiler `ADD`, allows at most one gap retrieval,
   and requires one final answerer call.
+- Revalidated on 2026-07-30 after adding the B1 single-materialization/byte-replay contract and the
+  low/high B1 + same-stack fixed-gold feasibility gate. The fixed final targets remain
+  1,425/1,540 and 473/500; a `HOLD` or `STOP` verdict prevents unbounded projection expansion rather
+  than lowering those targets.
 - No unresolved clarification marker remains. The revised specification is ready for
   `/speckit.clarify` revalidation or, if the maintainer accepts these decisions as final,
   `/speckit.plan`.

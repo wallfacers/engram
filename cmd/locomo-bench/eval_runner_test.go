@@ -32,6 +32,36 @@ func TestPrepareFrozenEvalOptionsRejectsIRISAndForcesOneAnswerPath(t *testing.T)
 	}
 }
 
+func TestGateUsageOnceNeverRetriesFormalProviderAttempt(t *testing.T) {
+	calls := 0
+	caller := func(context.Context, string, string) (string, provider.Usage, error) {
+		calls++
+		if calls == 1 {
+			return "", provider.Usage{}, fmt.Errorf("transient failure")
+		}
+		return "unexpected retry", provider.Usage{}, nil
+	}
+
+	if _, _, err := gateUsageOnce(make(chan struct{}, 1), caller)(
+		context.Background(), "system", "user",
+	); err == nil {
+		t.Fatal("exactly-once formal caller unexpectedly hid the first provider failure")
+	}
+	if calls != 1 {
+		t.Fatalf("formal provider attempts = %d, want exactly 1", calls)
+	}
+
+	calls = 0
+	if got, _, err := gateUsage(make(chan struct{}, 1), caller)(
+		context.Background(), "system", "user",
+	); err != nil || got != "unexpected retry" {
+		t.Fatalf("legacy retrying caller = %q, %v", got, err)
+	}
+	if calls != 2 {
+		t.Fatalf("legacy provider attempts = %d, want 2", calls)
+	}
+}
+
 func TestPrepareFormalEvalRunPinsProtocolAndRefusesResumeDrift(t *testing.T) {
 	manifestDir := t.TempDir()
 	manifest, err := freezeEvalProtocol(manifestDir, testEvalProtocol(), evalRunFormal)
@@ -117,17 +147,91 @@ func TestAdmitFormalQuestionBoundsPackAdmissionAndRespectsCancellation(t *testin
 }
 
 func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
+	t.Setenv("EMBED_FINGERPRINT", "sha256:embedding")
 	protocol := testEvalProtocol()
 	protocol.Retrieval.Recipe = "hybrid"
-	if err := validateFormalRunnerOptions(protocol, options{repeats: 3, topK: 30}, []string{"hybrid"}); err != nil {
+	opt := options{repeats: 3, topK: 30, chunkQuota: 7, chunks: true, maxTokens: 8000}
+	protocol.Store.SchemaVersion = 7
+	protocol.Store.IngestionRecipe = "ledger_lossless_chunks_v2"
+	protocol.Store.IngestionConfigDigest = evalJSONDigest(evalFreezeIngestion{
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+	})
+	protocol.Store.ProjectionBuilderVersions = map[string]string{"atomic_fact": "entry_store_explicit_v1"}
+	protocol.Retrieval.CandidateRulesDigest = evalJSONDigest(evalFreezeCandidateRules{
+		TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: "hybrid",
+	})
+	if err := validateFormalRunnerOptions(protocol, opt, []string{"hybrid"}); err != nil {
 		t.Fatalf("valid formal options rejected: %v", err)
 	}
-	if err := validateFormalRunnerOptions(protocol, options{repeats: 3, topK: 30, multiQuery: true}, []string{"hybrid"}); err == nil {
+	adaptive := opt
+	adaptive.multiQuery = true
+	if err := validateFormalRunnerOptions(protocol, adaptive, []string{"hybrid"}); err == nil {
 		t.Fatal("formal options unexpectedly accepted multi-query")
 	}
-	if err := validateFormalRunnerOptions(protocol, options{repeats: 3, topK: 30}, []string{"fts", "hybrid"}); err == nil {
+	if err := validateFormalRunnerOptions(protocol, opt, []string{"fts", "hybrid"}); err == nil {
 		t.Fatal("formal options unexpectedly accepted multiple arms")
 	}
+	for _, recipe := range []string{"hybrid+rerank", "hybrid+pcic", "hybrid+assoc"} {
+		t.Run("recipe "+recipe, func(t *testing.T) {
+			drifted := protocol
+			drifted.Retrieval.Recipe = recipe
+			drifted.Retrieval.CandidateRulesDigest = evalJSONDigest(evalFreezeCandidateRules{
+				TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: recipe,
+			})
+			if err := validateFormalRunnerOptions(drifted, opt, []string{recipe}); err == nil {
+				t.Fatalf("formal options unexpectedly accepted suffixed recipe %q", recipe)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*options){
+		"chunks":               func(opt *options) { opt.chunks = false },
+		"chunk quota":          func(opt *options) { opt.chunkQuota++ },
+		"image captions":       func(opt *options) { opt.imageCaptions = true },
+		"opinion pass":         func(opt *options) { opt.opinionPass = true },
+		"date scaffold":        func(opt *options) { opt.temporalDateScaffold = true },
+		"category top-k":       func(opt *options) { opt.catTopKSpec = "1=40" },
+		"output cap":           func(opt *options) { opt.maxTokens++ },
+		"filter pool":          func(opt *options) { opt.filterPool = 60 },
+		"association":          func(opt *options) { opt.assoc = true },
+		"cluster sweep":        func(opt *options) { opt.clusterSweep = true },
+		"temporal score":       func(opt *options) { opt.temporalScore = true },
+		"temporal hard filter": func(opt *options) { opt.temporalHardFilter = true },
+		"conflict resolution":  func(opt *options) { opt.conflictResolution = true },
+		"iris":                 func(opt *options) { opt.iris = true },
+		"rerank":               func(opt *options) { opt.rerank = true },
+		"pcic":                 func(opt *options) { opt.pcic = true },
+		"oracle selector":      func(opt *options) { opt.oracle = true },
+		"abstain hard":         func(opt *options) { opt.abstainHard = true },
+		"abstain soft":         func(opt *options) { opt.abstainSoft = true },
+		"alias shadow":         func(opt *options) { opt.aliasShadow = aliasShadowBaseline },
+		"doc2query":            func(opt *options) { opt.doc2query = doc2queryBaseline },
+		"doc2query build":      func(opt *options) { opt.doc2queryBuild = true },
+		"pcic annotate":        func(opt *options) { opt.pcicAnnotate = true },
+		"recall diagnostic":    func(opt *options) { opt.recallDiagnostic = true },
+		"coverage diagnostic":  func(opt *options) { opt.coverageOnly = true },
+		"temporal diagnostic":  func(opt *options) { opt.temporalDiagnostic = true },
+		"attribution trace":    func(opt *options) { opt.attributionTrace = true },
+		"abstention probe":     func(opt *options) { opt.abstainProbe = true },
+		"estimate":             func(opt *options) { opt.estimate = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			drifted := opt
+			mutate(&drifted)
+			if err := validateFormalRunnerOptions(protocol, drifted, []string{"hybrid"}); err == nil {
+				t.Fatalf("formal options unexpectedly accepted %s drift", name)
+			}
+		})
+	}
+	t.Setenv("EMBED_FINGERPRINT", "sha256:different-embedding")
+	if err := validateFormalRunnerOptions(protocol, opt, []string{"hybrid"}); err == nil {
+		t.Fatal("formal options unexpectedly accepted embedding fingerprint drift")
+	}
+	oracleOpt := opt
+	oracleOpt.fixedGoldOracle = true
+	if err := validateFormalRunnerOptions(protocol, oracleOpt, []string{"hybrid"}); err != nil {
+		t.Fatalf("fixed-gold oracle unexpectedly required an unused runtime embedding: %v", err)
+	}
+	t.Setenv("EMBED_FINGERPRINT", "sha256:embedding")
 
 	dataPath := filepath.Join(t.TempDir(), "dataset.json")
 	raw := []byte(`[{"fixture":true}]`)
@@ -150,6 +254,30 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	convs[0].QA[1].QuestionID = "drifted"
 	if err := verifyFormalDataset(protocol, dataPath, "locomo", convs); err == nil {
 		t.Fatal("formal dataset unexpectedly accepted question-id drift")
+	}
+}
+
+func TestFreezeFormalB1ProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *testing.T) {
+	base := options{
+		evalBudgetProfile:   "low",
+		answerInputTokenCap: 1100,
+		counterFingerprint:  "sha256:counter",
+		retrieval:           "hybrid",
+	}
+	for name, mutate := range map[string]func(*options){
+		"suffixed recipe": func(opt *options) { opt.retrieval = "hybrid+rerank" },
+		"build mode":      func(opt *options) { opt.doc2queryBuild = true },
+		"diagnostic mode": func(opt *options) { opt.coverageOnly = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			opt := base
+			mutate(&opt)
+			if err := freezeFormalB1Protocol(opt, nil); err == nil {
+				t.Fatal("formal B1 freeze accepted an alternate recipe or execution mode")
+			} else if strings.Contains(err.Error(), "read benchmark") {
+				t.Fatalf("formal B1 freeze reached dataset I/O before rejecting the mode: %v", err)
+			}
+		})
 	}
 }
 
@@ -235,7 +363,11 @@ func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
 	answerCalls, judgeCalls := 0, 0
 	correct, predicted, _, run := runFormalB1Question(
 		ctx, protocol,
-		options{answerModel: protocol.Models.Answerer.ID, formalCounter: formalCounter{count: 12, fingerprint: protocol.Budget.CounterFingerprint}},
+		options{
+			answerModel:    protocol.Models.Answerer.ID,
+			formalCounter:  formalCounter{count: 12, fingerprint: protocol.Budget.CounterFingerprint},
+			formalEvidence: entries.Ledger(),
+		},
 		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil), memory.NewProjectionStore(st.DB()),
 		func(context.Context, string, string) (string, provider.Usage, error) {
 			answerCalls++
@@ -257,7 +389,11 @@ func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
 	answerCalls, judgeCalls = 0, 0
 	_, _, _, failed := runFormalB1Question(
 		ctx, protocol,
-		options{answerModel: protocol.Models.Answerer.ID, formalCounter: evidenceFailCounter{fingerprint: protocol.Budget.CounterFingerprint}},
+		options{
+			answerModel:    protocol.Models.Answerer.ID,
+			formalCounter:  evidenceFailCounter{fingerprint: protocol.Budget.CounterFingerprint},
+			formalEvidence: entries.Ledger(),
+		},
 		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil), memory.NewProjectionStore(st.DB()),
 		func(context.Context, string, string) (string, provider.Usage, error) {
 			answerCalls++
@@ -287,26 +423,11 @@ func TestAnswerFrozenFormalB1QuestionReplaysExactBytesAndDoesNotMutateFreeze(t *
 	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false, false), qa.QuestionDate)
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, qa.QuestionID, candidate)
-	bundle := evalFormalBundleRecord{
-		evalArtifactRecord: evalArtifactRecord{
-			Schema:       evalProtocolSchema,
-			ProtocolHash: protocol.ProtocolHash,
-			QuestionID:   qa.QuestionID,
-			Kind:         evalBundleArtifactKind,
-			Valid:        true,
-		},
-		CandidateSetDigest: candidate.CandidateSetDigest,
-		TraceDigest:        trace.TraceDigest,
-		SourceIDs:          []string{"e-1"},
-		RenderedContext:    "QUESTION:\nWhen did Alice move?\n\nMEMORIES:\nAlice moved in 2023.",
-		RenderedDigest:     evalTextDigest("QUESTION:\nWhen did Alice move?\n\nMEMORIES:\nAlice moved in 2023."),
-		AnswerInputTokens:  12,
-		TokenCap:           protocol.Budget.AnswerInputTokenCap,
-		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		WithinCap:          true,
-		SourceValid:        true,
-		AnswerPromptDigest: evalTextDigest(system),
-	}
+	bundle := testFormalBundle(
+		protocol, candidate, trace,
+		"QUESTION:\nWhen did Alice move?\n\nMEMORIES:\nAlice moved in 2023.",
+		12, evalTextDigest(system),
+	)
 	frozen := formalFrozenQuestion{Candidate: candidate, Trace: trace, Bundle: bundle}
 	frozenDigest := evalJSONDigest(frozen)
 	answerCalls, judgeCalls := 0, 0

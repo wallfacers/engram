@@ -155,14 +155,84 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 	if arms[0] != protocol.Retrieval.Recipe {
 		return fmt.Errorf("formal retrieval arm %q differs from protocol recipe %q", arms[0], protocol.Retrieval.Recipe)
 	}
-	if opt.multiQuery || opt.filterPool > 0 || opt.clusterSweep || opt.iris || opt.rerank {
-		return fmt.Errorf("formal 022 evaluation refuses adaptive retrieval, filter, IRIS, or rerank switches")
+	if err := validateFormalLegacyRecipe(protocol.Retrieval.Recipe); err != nil {
+		return err
+	}
+	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
+		return err
+	}
+	if strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" ||
+		len(opt.catTopK) != 0 || len(opt.catQuota) != 0 {
+		return fmt.Errorf("formal 022 evaluation refuses category-specific candidate budgets")
 	}
 	if opt.repeats != protocol.Aggregation.AnswerRepetitions {
 		return fmt.Errorf("formal answer repetitions %d differ from protocol %d", opt.repeats, protocol.Aggregation.AnswerRepetitions)
 	}
 	if opt.topK != protocol.Retrieval.CandidateLimit {
 		return fmt.Errorf("formal --top-k %d differs from protocol candidate limit %d", opt.topK, protocol.Retrieval.CandidateLimit)
+	}
+	if opt.maxTokens != protocol.Budget.MaxOutputTokens {
+		return fmt.Errorf("formal --max-tokens %d differs from protocol output cap %d", opt.maxTokens, protocol.Budget.MaxOutputTokens)
+	}
+	ingestionDigest := evalJSONDigest(evalFreezeIngestion{
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+	})
+	if protocol.Store.SchemaVersion != 7 ||
+		protocol.Store.IngestionRecipe != "ledger_lossless_chunks_v2" ||
+		protocol.Store.IngestionConfigDigest != ingestionDigest ||
+		evalJSONDigest(protocol.Store.ProjectionBuilderVersions) != evalJSONDigest(map[string]string{
+			"atomic_fact": "entry_store_explicit_v1",
+		}) {
+		return fmt.Errorf("formal store or ingestion options differ from frozen protocol")
+	}
+	candidateRulesDigest := evalJSONDigest(evalFreezeCandidateRules{
+		TopK:       opt.topK,
+		ChunkQuota: opt.chunkQuota,
+		Chunks:     opt.chunks,
+		Retrieval:  arms[0],
+	})
+	if protocol.Retrieval.CandidateRulesDigest != candidateRulesDigest {
+		return fmt.Errorf("formal candidate rules differ from frozen protocol")
+	}
+	// The fixed-gold oracle retains the control's frozen fingerprint for
+	// provenance but has no embedder or retrieval dependency at runtime.
+	if !opt.fixedGoldOracle && protocol.Retrieval.EmbeddingFingerprint != evalEmbeddingFingerprint() {
+		return fmt.Errorf("formal embedding fingerprint differs from frozen protocol")
+	}
+	if protocol.Models.Answerer.PromptDigest != formalAnswerPromptDigest(opt) ||
+		protocol.Models.Judge.PromptDigest != evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode())) {
+		return fmt.Errorf("formal answer or judge prompt differs from frozen protocol")
+	}
+	return nil
+}
+
+// validateFormalLegacyRecipe keeps B1's registered legacy control from
+// smuggling an unfrozen mechanism through parseArm's "+suffix" syntax. The
+// recipe is deliberately narrower than the general harness grammar.
+func validateFormalLegacyRecipe(recipe string) error {
+	spec, err := parseArm(recipe)
+	if err != nil {
+		return fmt.Errorf("formal B1 retrieval recipe: %w", err)
+	}
+	if spec.overrides || recipe != spec.backend {
+		return fmt.Errorf("formal B1 legacy control requires a plain fts or hybrid recipe, got %q", recipe)
+	}
+	return nil
+}
+
+// validateFormalLegacyMechanismOptions rejects retrieval/store selectors which
+// are not represented in the B1 control contract. Answer and judge prompt
+// variants remain allowed because their exact digests are frozen separately.
+func validateFormalLegacyMechanismOptions(opt options) error {
+	if opt.multiQuery || opt.filterPool > 0 || opt.assoc || opt.clusterSweep ||
+		opt.temporalScore || opt.temporalHardFilter || opt.conflictResolution ||
+		opt.iris || opt.rerank || opt.pcic || opt.oracle ||
+		opt.abstainHard || opt.abstainSoft ||
+		aliasShadowEnabled(opt) || doc2queryEnabled(opt) || opt.doc2queryBuild ||
+		opt.pcicAnnotate || opt.recallDiagnostic || opt.coverageOnly ||
+		opt.temporalDiagnostic || opt.attributionTrace || opt.abstainProbe ||
+		opt.estimate {
+		return fmt.Errorf("formal B1 legacy control refuses unfrozen retrieval, store, selector, shadow, build, or diagnostic modes")
 	}
 	return nil
 }
@@ -198,30 +268,53 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.InvalidReasons = []string{"retrieval_failed"}
 		return frozen
 	}
-	sourceByCandidate, sourceErr := formalCandidateSources(ctx, projections, hits)
+	expanded, sourceErr := expandFormalEvidence(ctx, projections, opt.formalEvidence, hits)
 	if sourceErr != nil {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "source_lineage_unavailable")
+		// Retain the navigation artifact for diagnosis, but never let its
+		// projection text become answer-facing evidence.
+		sourceByCandidate, _ := formalCandidateSources(ctx, projections, hits)
+		frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
+	} else {
+		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, 1)
 	}
-	frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
 	if err := validateEvalCandidateArtifact(protocol, frozen.Candidate); err != nil {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
 	}
 
 	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
-	packedHits, input, preflight, err := packFormalLegacyInput(ctx, protocol, opt.formalCounter, system, qa, hits, opt.temporalDateScaffold)
-	if err != nil {
+	input := evidencecompiler.AnswerInput{
+		Model:  protocol.Models.Answerer.ID,
+		System: system,
+		User:   buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold),
+	}
+	var packedSources []formalExpandedSource
+	var preflight evidencecompiler.TokenCount
+	var evidenceTokens int
+	var packErr error
+	if sourceErr == nil {
+		packedSources, input, preflight, evidenceTokens, packErr = packExpandedFormalInput(
+			ctx, protocol, opt.formalCounter, system, qa, expanded, opt.temporalDateScaffold,
+		)
+	}
+	if packErr != nil {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "answer_input_budget_impossible")
 		input = evidencecompiler.AnswerInput{Model: protocol.Models.Answerer.ID, System: system, User: buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)}
 	}
 	if input.Model == "" {
 		input.Model = protocol.Models.Answerer.ID
 	}
-	frozen.Trace = buildFormalTrace(protocol, qa.QuestionID, frozen.Candidate)
-	frozen.Bundle = buildFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedHits, sourceByCandidate, input)
+	items := formalBundleItems(packedSources)
+	frozen.Trace = buildFormalTraceForItems(protocol, qa.QuestionID, frozen.Candidate, items)
+	frozen.Bundle = buildExpandedFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedSources, input)
+	frozen.Bundle.EvidenceTokens = evidenceTokens
 	frozen.Bundle.AnswerInputTokens = preflight.InputTokens
-	frozen.Bundle.WithinCap = err == nil
-	if len(frozen.Bundle.SourceIDs) == 0 {
+	frozen.Bundle.WithinCap = sourceErr == nil && packErr == nil
+	if sourceErr == nil && len(frozen.Bundle.SourceIDs) == 0 {
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "no_evidence_fits_token_cap")
+	}
+	if sourceErr == nil && packErr == nil && len(frozen.Bundle.Items) > 0 {
+		frozen = revalidateFrozenFormalSources(ctx, protocol, opt, qa, frozen)
 	}
 	frozen.InvalidReasons = stableStrings(frozen.InvalidReasons)
 	if len(frozen.InvalidReasons) > 0 {
@@ -252,6 +345,10 @@ func prepareFrozenFormalB1Answer(ctx context.Context, protocol evalProtocol, opt
 		User:   frozen.Bundle.RenderedContext,
 	}
 	if len(artifact.InvalidReasons) > 0 {
+		return input, evidencecompiler.TokenCount{}, artifact
+	}
+	if err := validateFormalFrozenPayload(protocol, frozen.Candidate, frozen.Trace, frozen.Bundle); err != nil {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "source_span_or_citation_invalid")
 		return input, evidencecompiler.TokenCount{}, artifact
 	}
 	if frozen.Candidate.QuestionID != qa.QuestionID ||
@@ -417,9 +514,46 @@ func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []mem
 }
 
 func buildFormalTrace(protocol evalProtocol, questionID string, candidate evalCandidateArtifact) evalFormalTraceRecord {
+	items := make([]evalFormalBundleItem, 0, len(candidate.RenderedCandidates))
+	for _, rendered := range candidate.RenderedCandidates {
+		if len(rendered.SourceIDs) == 0 {
+			continue
+		}
+		items = append(items, evalFormalBundleItem{
+			ItemID:       formalBundleItemID(rendered.CandidateID),
+			Kind:         "KEEP",
+			Text:         rendered.Text,
+			CandidateIDs: []string{rendered.CandidateID},
+			Sources: []evalFormalSourceSpan{{
+				EvidenceID: rendered.SourceIDs[0],
+				StartChar:  0,
+				EndChar:    len([]rune(rendered.Text)),
+				SpanDigest: evalTextDigest(rendered.Text),
+			}},
+		})
+	}
+	return buildFormalTraceForItems(protocol, questionID, candidate, items)
+}
+
+func buildFormalTraceForItems(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, items []evalFormalBundleItem) evalFormalTraceRecord {
+	actions := make([]string, 0, len(items))
+	var resolved []string
+	for _, item := range items {
+		actions = append(actions, item.Kind)
+		for _, source := range item.Sources {
+			resolved = append(resolved, source.EvidenceID)
+		}
+	}
+	allowed := stableStrings(collectRenderedSources(candidate.RenderedCandidates))
 	trace := evalFormalTraceRecord{
 		evalArtifactRecord: evalArtifactRecord{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: questionID, Kind: evalTraceArtifactKind, Valid: true},
-		Attempt:            1, CandidateSetDigest: candidate.CandidateSetDigest, AppliedActions: []string{"KEEP"},
+		Attempt:            1,
+		CandidateSetDigest: candidate.CandidateSetDigest,
+		AppliedActions:     actions,
+		SourceValidation: evalFormalSourceValidation{
+			AllowedIDsDigest: evalJSONDigest(allowed),
+			ResolvedCount:    len(stableStrings(resolved)),
+		},
 	}
 	trace.TraceDigest = formalTraceDigest(trace)
 	return trace
@@ -427,11 +561,27 @@ func buildFormalTrace(protocol evalProtocol, questionID string, candidate evalCa
 
 func buildFormalBundle(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, trace evalFormalTraceRecord, hits []memory.Result, sourceByCandidate map[string][]string, input evidencecompiler.AnswerInput) evalFormalBundleRecord {
 	var sourceValues []string
+	var items []evalFormalBundleItem
 	for _, hit := range hits {
-		sourceValues = append(sourceValues, formalCandidateSourceIDs(hit, sourceByCandidate)...)
+		candidateID := formalCandidateID(hit)
+		for index, sourceID := range formalCandidateSourceIDs(hit, sourceByCandidate) {
+			sourceValues = append(sourceValues, sourceID)
+			items = append(items, evalFormalBundleItem{
+				ItemID:       formalBundleItemID(candidateID) + ":" + fmt.Sprint(index),
+				Kind:         "KEEP",
+				Text:         hit.Content,
+				CandidateIDs: []string{candidateID},
+				Sources: []evalFormalSourceSpan{{
+					EvidenceID: sourceID,
+					StartChar:  0,
+					EndChar:    len([]rune(hit.Content)),
+					SpanDigest: evalTextDigest(hit.Content),
+				}},
+			})
+		}
 	}
 	sources := stableStrings(sourceValues)
-	sourceValid := len(sources) > 0
+	sourceValid := len(sources) > 0 && len(items) > 0
 	for _, sourceID := range sources {
 		if strings.HasPrefix(sourceID, "legacy-entry:") {
 			sourceValid = false
@@ -440,7 +590,7 @@ func buildFormalBundle(protocol evalProtocol, questionID string, candidate evalC
 	}
 	return evalFormalBundleRecord{
 		evalArtifactRecord: evalArtifactRecord{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: questionID, Kind: evalBundleArtifactKind, Valid: sourceValid},
-		CandidateSetDigest: candidate.CandidateSetDigest, TraceDigest: trace.TraceDigest, SourceIDs: sources,
+		CandidateSetDigest: candidate.CandidateSetDigest, TraceDigest: trace.TraceDigest, Items: items, SourceIDs: sources,
 		RenderedContext: input.User, RenderedDigest: evalTextDigest(input.User), TokenCap: protocol.Budget.AnswerInputTokenCap,
 		CounterFingerprint: protocol.Budget.CounterFingerprint, SourceValid: sourceValid,
 		AnswerPromptDigest: evalTextDigest(input.System),
@@ -608,7 +758,17 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	if err != nil {
 		return err
 	}
-	if len(arms) != 1 || opt.multiQuery || opt.filterPool > 0 || opt.iris || opt.rerank {
+	if len(arms) != 1 {
+		return fmt.Errorf("formal B1 freeze requires exactly one retrieval arm")
+	}
+	if err := validateFormalLegacyRecipe(arms[0]); err != nil {
+		return err
+	}
+	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
+		return err
+	}
+	if len(opt.catTopK) != 0 || len(opt.catQuota) != 0 ||
+		strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" {
 		return fmt.Errorf("formal B1 freeze requires one non-adaptive retrieval arm with IRIS and rerank disabled")
 	}
 	raw, err := os.ReadFile(opt.dataPath) //nolint:gosec // operator-selected benchmark is frozen by digest
@@ -631,26 +791,21 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	}
 	answerModel := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	extractModel := envOr("EXTRACT_MODEL", answerModel)
+	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
 	judge := resolveJudgeConfig(os.Getenv)
-	answerPromptDigest := evalJSONDigest([]string{
-		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		currentDateRule,
-	})
+	answerPromptDigest := formalAnswerPromptDigest(opt)
 	protocol := evalProtocol{
 		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b1-%s", benchmarkName, opt.evalBudgetProfile), CreatedAt: time.Now().UTC(), Git: git,
 		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
 		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
 		Models: evalModelProvenance{
-			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
-			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), PromptDigest: answerPromptDigest},
-			Judge:     evalModelFingerprint{ID: judge.Model, Revision: envOr("JUDGE_MODEL_REVISION", judge.Model), PromptDigest: evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode()))},
+			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), Provider: answerProvider, PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
+			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), Provider: answerProvider, PromptDigest: answerPromptDigest},
+			Judge:     evalModelFingerprint{ID: judge.Model, Revision: envOr("JUDGE_MODEL_REVISION", judge.Model), Provider: judge.Provider, PromptDigest: evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode()))},
 			Planner:   evalPlannerFingerprint{Enabled: false},
 		},
 		Retrieval:      evalRetrievalProvenance{Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled", CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]})},
-		Budget:         evalBudgetProtocol{Profile: opt.evalBudgetProfile, AnswerInputTokenCap: opt.answerInputTokenCap, CandidateLimit: opt.topK, RetrievalCallLimit: 1, AnswerCallLimit: 1, CounterFingerprint: opt.counterFingerprint},
+		Budget:         evalBudgetProtocol{Profile: opt.evalBudgetProfile, AnswerInputTokenCap: opt.answerInputTokenCap, MaxOutputTokens: opt.maxTokens, CandidateLimit: opt.topK, RetrievalCallLimit: 1, AnswerCallLimit: 1, CounterFingerprint: opt.counterFingerprint},
 		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
 		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:concordant-stratified-plan:freeze-before-treatment"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
 		CoverageStrata: evalCoverageStrataProtocol{Boundaries: []float64{0, 0.5, 0.9, 1}, SelectionDigest: evalTextDigest("022.v1:coverage-strata:0,0.5,0.9,1")},
@@ -664,6 +819,17 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	}
 	fmt.Printf("eval-freeze: protocol=%s output=%s questions=%d cap=%d\n", protocol.ProtocolID, opt.evalFreezeProtocol, len(questionIDs), opt.answerInputTokenCap)
 	return nil
+}
+
+func formalAnswerPromptDigest(opt options) string {
+	return evalJSONDigest([]string{
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		currentDateRule,
+		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
+	})
 }
 
 type evalFreezeIngestion struct {

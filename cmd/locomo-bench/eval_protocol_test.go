@@ -30,9 +30,9 @@ func testEvalProtocol() evalProtocol {
 			ProjectionBuilderVersions: map[string]string{"episode": "v1", "fact": "v1"},
 		},
 		Models: evalModelProvenance{
-			Extractor: evalModelFingerprint{ID: "extractor", Revision: "r1", PromptDigest: "sha256:extract"},
-			Answerer:  evalModelFingerprint{ID: "answerer", Revision: "r1", PromptDigest: "sha256:answer"},
-			Judge:     evalModelFingerprint{ID: "judge", Revision: "r1", PromptDigest: "sha256:judge"},
+			Extractor: evalModelFingerprint{ID: "extractor", Revision: "r1", Provider: "openai", PromptDigest: "sha256:extract"},
+			Answerer:  evalModelFingerprint{ID: "answerer", Revision: "r1", Provider: "openai", PromptDigest: formalAnswerPromptDigest(options{})},
+			Judge:     evalModelFingerprint{ID: "judge", Revision: "r1", Provider: "openai", PromptDigest: evalTextDigest(judgeSystemPromptFor("strict"))},
 			Planner:   evalPlannerFingerprint{Enabled: false},
 		},
 		Retrieval: evalRetrievalProvenance{
@@ -45,6 +45,7 @@ func testEvalProtocol() evalProtocol {
 		Budget: evalBudgetProtocol{
 			Profile:             "low",
 			AnswerInputTokenCap: 1100,
+			MaxOutputTokens:     8000,
 			CandidateLimit:      30,
 			RetrievalCallLimit:  1,
 			AnswerCallLimit:     1,
@@ -72,7 +73,7 @@ func testEvalProtocol() evalProtocol {
 			Arm:                 "legacy_count_packer",
 			ControlProtocolHash: "",
 			PrimaryCohort:       "all",
-			MechanismFlags:      map[string]bool{"idk_retry": false, "iris": false},
+			MechanismFlags:      map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
 		},
 	}
 }
@@ -106,7 +107,7 @@ func TestEvalProtocolCanonicalJSONAndFingerprint(t *testing.T) {
 
 	reordered := testEvalProtocol()
 	reordered.Store.ProjectionBuilderVersions = map[string]string{"fact": "v1", "episode": "v1"}
-	reordered.Experiment.MechanismFlags = map[string]bool{"iris": false, "idk_retry": false}
+	reordered.Experiment.MechanismFlags = map[string]bool{"rerank": false, "iris": false, "idk_retry": false}
 	reorderedFingerprint, err := evalProtocolFingerprint(reordered)
 	if err != nil {
 		t.Fatalf("reordered protocol fingerprint: %v", err)
@@ -123,6 +124,24 @@ func TestEvalProtocolCanonicalJSONAndFingerprint(t *testing.T) {
 	}
 	if fingerprint == changedFingerprint {
 		t.Fatal("answer-input cap drift must change protocol fingerprint")
+	}
+	changedOutputCap := testEvalProtocol()
+	changedOutputCap.Budget.MaxOutputTokens++
+	changedOutputFingerprint, err := evalProtocolFingerprint(changedOutputCap)
+	if err != nil {
+		t.Fatalf("changed-output-cap fingerprint: %v", err)
+	}
+	if fingerprint == changedOutputFingerprint {
+		t.Fatal("answer-output cap drift must change protocol fingerprint")
+	}
+	changedProvider := testEvalProtocol()
+	changedProvider.Models.Answerer.Provider = "anthropic"
+	changedProviderFingerprint, err := evalProtocolFingerprint(changedProvider)
+	if err != nil {
+		t.Fatalf("changed-provider fingerprint: %v", err)
+	}
+	if fingerprint == changedProviderFingerprint {
+		t.Fatal("answer provider drift must change protocol fingerprint")
 	}
 }
 

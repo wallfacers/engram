@@ -105,12 +105,7 @@ func TestMaterializeFormalB1ArtifactsKeepsThreeAnswersInOneQuestion(t *testing.T
 	protocol.Benchmark.QuestionCount = 1
 	protocol.Benchmark.QuestionIDsDigest = evalJSONDigest([]string{candidate.QuestionID})
 	trace := buildFormalTrace(protocol, candidate.QuestionID, candidate)
-	bundle := evalFormalBundleRecord{
-		evalArtifactRecord: evalArtifactRecord{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: candidate.QuestionID, Kind: evalBundleArtifactKind, Valid: true},
-		CandidateSetDigest: candidate.CandidateSetDigest, TraceDigest: trace.TraceDigest, SourceIDs: []string{"e-1", "e-2"},
-		RenderedContext: "evidence", RenderedDigest: fixtureDigest("evidence"), AnswerInputTokens: 11, TokenCap: protocol.Budget.AnswerInputTokenCap,
-		CounterFingerprint: protocol.Budget.CounterFingerprint, WithinCap: true, SourceValid: true, AnswerPromptDigest: fixtureDigest("system"),
-	}
+	bundle := testFormalBundle(protocol, candidate, trace, "evidence", 11, fixtureDigest("system"))
 	runs := make([][]result, 0, 3)
 	for index, correct := range []bool{true, false, true} {
 		runs = append(runs, []result{{
@@ -201,26 +196,7 @@ func TestMaterializeFormalB1ArtifactsRefusesProtocolDenominatorMismatch(t *testi
 	protocol.Benchmark.QuestionIDsDigest = evalJSONDigest([]string{"locomo:1:2", "locomo:1:3"})
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, candidate.QuestionID, candidate)
-	bundle := evalFormalBundleRecord{
-		evalArtifactRecord: evalArtifactRecord{
-			Schema:       evalProtocolSchema,
-			ProtocolHash: protocol.ProtocolHash,
-			QuestionID:   candidate.QuestionID,
-			Kind:         evalBundleArtifactKind,
-			Valid:        true,
-		},
-		CandidateSetDigest: candidate.CandidateSetDigest,
-		TraceDigest:        trace.TraceDigest,
-		SourceIDs:          []string{"e-1"},
-		RenderedContext:    "evidence",
-		RenderedDigest:     fixtureDigest("evidence"),
-		AnswerInputTokens:  11,
-		TokenCap:           protocol.Budget.AnswerInputTokenCap,
-		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		WithinCap:          true,
-		SourceValid:        true,
-		AnswerPromptDigest: fixtureDigest("system"),
-	}
+	bundle := testFormalBundle(protocol, candidate, trace, "evidence", 11, fixtureDigest("system"))
 	runs := make([][]result, 3)
 	for index := range runs {
 		runs[index] = []result{{
@@ -255,24 +231,7 @@ func TestFormalQuestionReplayMaterializesOnceAcrossThreeAnswerRuns(t *testing.T)
 	protocol := testEvalProtocol()
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, candidate.QuestionID, candidate)
-	bundle := evalFormalBundleRecord{
-		evalArtifactRecord: evalArtifactRecord{
-			Schema:       evalProtocolSchema,
-			ProtocolHash: protocol.ProtocolHash,
-			QuestionID:   candidate.QuestionID,
-			Kind:         evalBundleArtifactKind,
-			Valid:        true,
-		},
-		CandidateSetDigest: candidate.CandidateSetDigest,
-		TraceDigest:        trace.TraceDigest,
-		RenderedContext:    "frozen evidence",
-		RenderedDigest:     fixtureDigest("frozen evidence"),
-		AnswerInputTokens:  17,
-		TokenCap:           protocol.Budget.AnswerInputTokenCap,
-		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		WithinCap:          true,
-		SourceValid:        true,
-	}
+	bundle := testFormalBundle(protocol, candidate, trace, "frozen evidence", 17, fixtureDigest("system"))
 
 	replay := newFormalQuestionReplay()
 	key := resultKey{Conv: 3, Q: 7}
@@ -350,24 +309,7 @@ func TestFormalQuestionReplayPersistsBeforeAnswerAndResumesWithoutMaterializing(
 	protocol.ProtocolHash = "sha256:protocol"
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, candidate.QuestionID, candidate)
-	bundle := evalFormalBundleRecord{
-		evalArtifactRecord: evalArtifactRecord{
-			Schema:       evalProtocolSchema,
-			ProtocolHash: protocol.ProtocolHash,
-			QuestionID:   candidate.QuestionID,
-			Kind:         evalBundleArtifactKind,
-			Valid:        true,
-		},
-		CandidateSetDigest: candidate.CandidateSetDigest,
-		TraceDigest:        trace.TraceDigest,
-		RenderedContext:    "resume evidence",
-		RenderedDigest:     fixtureDigest("resume evidence"),
-		AnswerInputTokens:  19,
-		TokenCap:           protocol.Budget.AnswerInputTokenCap,
-		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		WithinCap:          true,
-		SourceValid:        true,
-	}
+	bundle := testFormalBundle(protocol, candidate, trace, "resume evidence", 19, fixtureDigest("system"))
 	key := resultKey{Conv: 4, Q: 2}
 
 	runDir := t.TempDir()

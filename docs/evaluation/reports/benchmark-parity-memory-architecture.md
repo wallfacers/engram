@@ -269,3 +269,72 @@ does not make the v12 outcomes valid, and does not unlock T021/T022. Fresh
 protocols must bind the eventual clean replay-fix commit before another formal
 run. No local `locomo-bench`, vLLM, tokenizer tunnel, or evaluation SSH process
 was running at the time of this audit.
+
+### T109/T110 local prerequisite checkpoint: source-grounded B1 and fixed-gold F0
+
+**Date**: 2026-07-30
+
+T020 remains isolated in commit `6ae1aaa` (`fix(022): make formal repetitions
+crash-safe`). This checkpoint contains only the prerequisites requested before
+T021; it does not contain a benchmark run or score.
+
+T109 now makes B1 navigation candidates answer-facing only after batch expansion
+through direct projection lineage into active raw-message Evidence. Admission
+counts the expanded bytes, preserves whole ranked anchor groups, and rejects
+projection text, `direct_write`, `legacy_entry`, inactive sources, partial
+anchors, reordered anchors, or a later anchor that only fits by skipping the
+first. Bundle items carry one candidate plus one Unicode code-point span.
+An independent pre-answer Ledger reread reconstructs source bytes, span digest,
+candidate citation, source union, rendered answer input, and an Evidence state
+receipt bound to ID/type/state/revision/content. Source, span, and citation
+validity remain separate dimensions. Evidence revision drift invalidates replay
+before any answer/judge call.
+
+T110 adds a dedicated `--fixed-gold-oracle` path and dataset-aware no-model
+`--eval-validate` path. The oracle accepts only the frozen three-repetition B1
+`legacy_count_packer` control, with `idk_retry`, IRIS, rerank, and planner
+disabled. The control recipe must be exactly plain `fts` or `hybrid`; arm
+suffixes and equivalent global association, temporal, conflict, PCIC, selector,
+or shadow mechanisms fail closed. It stores benchmark turn IDs as
+`dataset_source_ids`, loads every gold raw-message Evidence into one untruncated
+input, performs no
+retrieval/extraction/embedding call, and preserves the LongMemEval abstention
+empty-Evidence exception only for the registered adversarial type. Provider,
+model ID/revision, prompts, exact input counter/cap, and max output tokens are
+frozen. The control embedding fingerprint remains provenance only and is not a
+runtime oracle dependency.
+
+The oracle artifact, call journal, and pending INVALID summary are created
+exclusively before provider use. Every answer/judge attempt has a synced intent
+and terminal receipt; the formal wrapper makes no transparent retry. The
+result-driven scheduler dispatches at most the configured concurrency and never
+dispatches a replacement after any worker reports INVALID; already dispatched
+calls remain auditable. An INVALID summary suppresses the diagnostic score and
+retains actual answer/judge totals. Independent read-back rebuilds the Ledger
+from the dataset, reconstructs answer and judge inputs, checks raw
+verdict/majority, verifies the call journal, and requires the persisted summary
+to equal the derived summary.
+
+Protocol hardening found during independent review also freezes provider IDs and
+`max_output_tokens`. The oracle is an exclusive mode: compare, calibration,
+protocol freeze, retrieval diagnostics, doc2query/alias-shadow, PCIC,
+abstention, coverage, and other early-return modes are rejected before their
+work can start.
+
+| Verification | Result |
+|---|---|
+| Source/Bundle/Unicode/prefix targeted tests | PASS |
+| Fixed-gold control, overwrite, journal, tamper, full LongMemEval-500 fake-call path, and read-back tests | PASS |
+| Harness package | PASS — `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench` |
+| Cross-platform build | PASS — `CGO_ENABLED=0 go build ./...` |
+| Full offline regression | PASS — `CGO_ENABLED=0 go test -count=1 ./...` |
+| Static analysis | PASS — `CGO_ENABLED=0 go vet ./...` |
+| Diff hygiene | PASS — `git diff --check` |
+| Engine diff guard | PASS — no changed path under `memory/`, `embedding/`, `provider/`, `store/`, or `internal/` |
+| Remote/model/formal execution | NOT RUN — no SSH, GPU, vLLM, tunnel, provider, T021, B1, or F0 score run |
+
+This checkpoint still does not unlock T021. T044 and T045 remain incomplete, and
+the audit found that the current protocol freezer/runner implements only B1
+while T021 also requires a real B0 continuity path. That missing path is now
+tracked explicitly as T111. Until T044, T045, and T111 are complete, no formal
+B0/B1/oracle execution should start.

@@ -24,9 +24,12 @@ extractive compiler。正式 answerer 只有在来源和预算验证通过后调
 
 交付按因果门推进：先刷新无损 B0 连续性基线并完成 B1 的计数/协议尺子；有效的冻结候选
 B1 必须等待 Ledger 提供真实 source/span 后生成，不能用 v6 的 synthetic legacy source
-冒充来源链。随后分别验证表示、固定候选 Compiler、Event 组件和一次结构化缺口补检。
-Scene、Profile、graph 只在剩余错误支持且各自通过预注册双基准门时实现和默认启用。达到
-目标后不为“架构完整”继续扩张。
+冒充来源链。B1 每题只物化一次 Candidate、Trace 和 Bundle，三次 answer repetition
+逐字节重放该冻结输入；任何 digest 漂移都使整轮无效。有效 low/high B1 与同栈
+fixed-gold oracle 先形成可行性 verdict，只有 `CONTINUE` 才进入满量表示与 Compiler
+实验。随后才分别验证表示、固定候选 Compiler、Event 组件和一次结构化缺口补检。
+Scene、Profile、graph 只在剩余错误支持且各自通过预注册双基准门时实现和默认启用。
+达到目标或可行性为 `STOP` 后都不为“架构完整”继续扩张。
 
 ## Technical Context
 
@@ -67,7 +70,7 @@ Evidence/projection 量级；不包含 ANN、集群、跨 namespace 推理或百
 | I. Local-first、offline 默认 | PASS | Ledger、projection、deterministic Compiler 和校验均为纯 Go/SQLite；Planner/embedding/answerer 是可替换本地 sidecar，网络默认非必需 |
 | II. Engine/adapter 分离 | PASS | Ledger、projection 与 Compiler 位于 `memory/`、`store/`；MCP/CLI 只调用公开 API，不复制算法 |
 | III. Contract-first、namespace 隔离 | PASS | [engine-api.md](./contracts/engine-api.md) 与 [compiler-contract.md](./contracts/compiler-contract.md) 先冻结 additive API；namespace 仍由独立 DB 隔离 |
-| IV. Evaluation regression gate | PASS | B0/B1、冻结协议、逐题 artifact、exact McNemar 与双基准 stop/go 在实现前定义；评测尺子、算法、配置、结果分开提交 |
+| IV. Evaluation regression gate | PASS | B0/B1、单次物化多次重放、逐题 artifact、fixed-gold 可行性门、exact McNemar 与双基准 stop/go 在实现前定义；评测尺子、算法、配置、结果分开提交 |
 | V. Graceful degradation、honest scale | PASS | Planner/optional projection 逐能力降级，结构性 counter/source 错误 fail closed；基础 Search 不受影响；保证只到约 100k 量级 |
 
 ### Phase 1 复核
@@ -140,6 +143,12 @@ mcpserver/
 cmd/locomo-bench/
 ├── eval_protocol.go        # frozen protocol and resume fingerprint
 ├── candidate_artifact.go   # ranked anchors/rendered candidate replay
+├── eval_replay.go          # sync-before-answer frozen-question replay journal
+├── eval_runner.go          # one materialization plus answer-only repetitions
+├── eval_artifact.go        # final drift gate; INVALID runs expose no metrics
+├── eval_source_bundle.go   # anchor lineage → active Evidence before token packing
+├── eval_source_validate.go # independent Ledger/span/citation reconstruction gate
+├── eval_fixed_gold_oracle.go # diagnostic-only same-stack all-gold ceiling CLI
 ├── representation_eval.go # navigation/rendering bake-off
 ├── compiler_eval.go        # fixed-candidate compiler arms
 ├── miss_attribution.go     # mutually exclusive source-survival classes
@@ -161,19 +170,30 @@ planner 或实验策略。
 
 1. 先让 021 IRIS 在其工作区提交或暂停，并把 022 rebase 到最新主线；不得覆盖
    `main.go`、`iris.go` 或 `iris_test.go` 的未提交工作。
-2. 固化 `022.v1` artifact、dataset/prompt/model/tokenizer/cap fingerprints、逐题
+2. 固化 `022.v1` artifact、dataset/prompt/provider/model/revision/tokenizer/input/output
+   cap fingerprints、逐题
    candidate ID/lineage、连续 source coverage、judge audit 抽样和 exact paired statistics。
-3. 校准本地 answerer tokenizer，并冻结两个预注册 cap、B0 protocol 和待 Ledger 完成后
-   重新 materialize 的 B1 protocol 模板。
+3. 校准本地 answerer tokenizer，并冻结两个预注册 cap 和待 Ledger 完成后重新
+   materialize 的 B1 protocol 模板；B0 continuity manifest/runner 由 T111 补齐后方可
+   执行，不复用 B1 artifact 冒充。
 4. 在 lossless LongMemEval ingestion 上运行 B0：LoCoMo 1,540 与 LongMemEval 500，
    每题三次独立 answer 后 majority 聚合；B0 的 legacy retry 如实记录，只作产品连续性。
 5. v6 的 fact candidate 没有 raw Evidence lineage 时，runner 必须以
    `source_lineage_unavailable` fail closed，零 answer/judge calls，且不得产出 B1 分数。
    不得以 `legacy-entry:*`、session ID 或 chunk quota 伪造可验证来源。
+6. 为重复作答建立单次物化合同：每题只执行一次 retrieval、Candidate freeze、
+   legacy packing 与 Trace/Bundle 生成，后续 repetition 只能读取冻结 artifact 并调用
+   answerer/judge。候选分数、排序或非 answer 字段的任何变化都不得被“最终文本相同”
+   掩盖。
+7. B1 的 legacy packing 输入必须先把 navigation anchor 的 direct lineage 批量展开为
+   active Evidence 原文或精确 Unicode span；token admission 不得读取较短的 projection
+   text。独立 validator 在 answer 前重新读取 Ledger，并逐项重建 item text、offset、
+   span digest、candidate citation、source union 和完整 answer input。
 
 **Gate**: 分母、protocol、token/answer-call 记录完整率 100%；恢复运行遇到任一 fingerprint
-变化必须拒绝。B0 可独立报告连续性；v6 的 source-lineage failure 是进入 Ledger increment
-的硬前置，而不是可被无效 B1 分数掩盖的算法 STOP。
+变化必须拒绝；三次 repetition 的 Candidate、Trace 和 Bundle digest 一致率必须为
+100%。T111 完成后 B0 可独立报告连续性；v6 的 source-lineage failure 或 repetition drift 是进入
+后续机制前的硬 blocker，而不是可被无效 B1 分数掩盖的算法 STOP。
 
 ### Increment 1 — Evidence Ledger foundation
 
@@ -185,17 +205,41 @@ planner 或实验策略。
    message provenance。
 4. 验证删除/重建只影响 projection，隐私 purge 一跳清除所有直接依赖内容，并完成
    secure-delete/WAL checkpoint。
-5. 只在上述 source-chain gate 通过后，基于同一 post-Ledger commit 重新 materialize
+5. 只在上述 source-chain gate、独立 Bundle validator 和 executable fixed-gold oracle
+   均通过本地测试后，基于同一 post-Ledger commit 重新 materialize
    LoCoMo/LongMemEval low/high B1 manifest，冻结 ranked candidates，用 legacy packer
-   运行正式 B1 control，并完成 judge audit 与 fixed-gold oracle diagnostic。后续机制
-   只和这个 B1 的同题 control 比较。
+   生成每题唯一 Candidate/Trace/Bundle，再以该冻结输入运行三次 answer repetition；
+   完成 judge audit 与 fixed-gold oracle diagnostic。后续机制只和这个 B1 的同题
+   control 比较。
 
 **Gate**: source-chain、purge closure、namespace isolation、既有 Search/write parity
 全部通过；100k fixture 的批量 lineage 路径无 N+1；正式 B1 的 candidate lineage、span、
-token/call 字段完整率必须为 100%，并且 `source_lineage_unavailable=0`。Judge audit 未完成、
-校正改变 verdict 或任一预注册 category 显著回退时不得 GO。
+token/call 字段完整率与 repetition digest identity 必须为 100%，并且
+`source_lineage_unavailable=0`。Judge audit 未完成、校正改变 verdict 或任一预注册
+category 显著回退时不得 GO。
+
+### Feasibility Gate F0 — Same-stack ceiling before mechanism scale-up
+
+1. 在两个 benchmark 上分别完成有效 low/high B1；INVALID 运行只登记基础设施问题，
+   不进入均值、配对统计或 verdict。
+2. 使用同一 provider、answerer/judge model+revision、prompt 与对应 input/output cap，
+   对冻结 gold Evidence 运行
+   diagnostic-only fixed-gold oracle；oracle 不得作为产品分数或 treatment。
+3. 按固定答对题数生成唯一 verdict：
+   - `CONTINUE`：LoCoMo oracle 至少 1,425/1,540，且 LongMemEval-S oracle 至少
+     473/500；允许进入 Increment 2/3 的正式满量评测。
+   - `HOLD`：任一 B1、oracle、judge audit 或 artifact validity 不完整；仅修评测尺子，
+     不启动新机制满量运行。
+   - `STOP`：所有 artifact 有效但任一 oracle 未达目标；022 停止扩建表示、Compiler 与
+     optional projection，并把更换 answerer、训练专用 memory compiler 或改变评测栈
+     作为独立特性重新 specify。
+
+该门不降低 SC-002/SC-003，也不把 oracle 表述为 Mem0 的同栈对照；它只判断当前冻结栈
+是否存在达到最终目标的可验证上界。
 
 ### Increment 2 — Representation bake-off
+
+**Entry gate**: F0 必须为 `CONTINUE`。
 
 1. Navigation 实验让 900-character chunk、raw-turn window、semantic episode 各自检索，
    但冻结同算法、embedding、pool/candidate budget。
@@ -207,6 +251,8 @@ token/call 字段完整率必须为 100%，并且 `source_lineage_unavailable=0`
 cohort 和双基准 promotion rule 判定 GO/HOLD/STOP。未过门表示不进入默认路径。
 
 ### Increment 3 — Fixed-candidate Evidence Compiler
+
+**Entry gate**: F0 必须为 `CONTINUE`，且 Increment 2 已冻结获选/保留表示。
 
 1. 冻结获选表示的完整 rendered candidates，逐字节回放 legacy、exact relevance、
    deterministic extractive 和可选 local Planner 四个臂。
@@ -256,10 +302,11 @@ cohort 和双基准 promotion rule 判定 GO/HOLD/STOP。未过门表示不进�
 1. measurement schema/protocol；
 2. calibration 与 B0 continuity artifact，及不产生分数的 B1 template；
 3. Ledger schema/API；
-4. post-Ledger valid B1 control artifact；
-5. 每个独立算法 mechanism；
-6. 仅包含冻结值的 eval config；
-7. 结果与 GO/HOLD/STOP verdict。
+4. post-Ledger 单次物化/重复重放修复与 valid B1 control artifact；
+5. fixed-gold oracle 与 F0 `CONTINUE | HOLD | STOP` verdict；
+6. 每个独立算法 mechanism；
+7. 仅包含冻结值的 eval config；
+8. 结果与 GO/HOLD/STOP verdict。
 
 每个 engine increment 先写失败测试，再实现。编辑后执行：
 

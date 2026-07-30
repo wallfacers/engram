@@ -58,26 +58,67 @@ type evalArtifactSummary struct {
 // malformed run before any score or paired statistic is interpreted.
 type evalFormalTraceRecord struct {
 	evalArtifactRecord
-	Attempt            int      `json:"attempt"`
-	CandidateSetDigest string   `json:"candidate_set_digest"`
-	AppliedActions     []string `json:"applied_actions"`
-	FallbackReason     string   `json:"fallback_reason,omitempty"`
-	TraceDigest        string   `json:"trace_digest"`
+	Attempt            int                        `json:"attempt"`
+	CandidateSetDigest string                     `json:"candidate_set_digest"`
+	AppliedActions     []string                   `json:"applied_actions"`
+	FallbackReason     string                     `json:"fallback_reason,omitempty"`
+	SourceValidation   evalFormalSourceValidation `json:"source_validation"`
+	TraceDigest        string                     `json:"trace_digest"`
+}
+
+type evalFormalSourceValidation struct {
+	AllowedIDsDigest string `json:"allowed_ids_digest"`
+	ResolvedCount    int    `json:"resolved_count"`
+	InvalidCount     int    `json:"invalid_count"`
+}
+
+type evalFormalSourceSpan struct {
+	EvidenceID string `json:"evidence_id"`
+	StartChar  int    `json:"start_char"`
+	EndChar    int    `json:"end_char"`
+	SpanDigest string `json:"span_digest"`
+}
+
+type evalFormalBundleItem struct {
+	ItemID       string                 `json:"item_id"`
+	Kind         string                 `json:"kind"`
+	Text         string                 `json:"text"`
+	CandidateIDs []string               `json:"candidate_ids"`
+	Sources      []evalFormalSourceSpan `json:"sources"`
 }
 
 type evalFormalBundleRecord struct {
 	evalArtifactRecord
-	CandidateSetDigest string   `json:"candidate_set_digest"`
-	TraceDigest        string   `json:"trace_digest"`
-	SourceIDs          []string `json:"source_ids"`
-	RenderedContext    string   `json:"rendered_context"`
-	RenderedDigest     string   `json:"rendered_context_digest"`
-	AnswerInputTokens  int      `json:"answer_input_tokens"`
-	TokenCap           int      `json:"token_cap"`
-	CounterFingerprint string   `json:"counter_fingerprint"`
-	WithinCap          bool     `json:"within_cap"`
-	SourceValid        bool     `json:"source_valid"`
-	AnswerPromptDigest string   `json:"answer_prompt_digest"`
+	CandidateSetDigest string                     `json:"candidate_set_digest"`
+	TraceDigest        string                     `json:"trace_digest"`
+	Items              []evalFormalBundleItem     `json:"items"`
+	SourceIDs          []string                   `json:"source_ids"`
+	RenderedContext    string                     `json:"rendered_context"`
+	RenderedDigest     string                     `json:"rendered_context_digest"`
+	EvidenceTokens     int                        `json:"evidence_tokens"`
+	AnswerInputTokens  int                        `json:"answer_input_tokens"`
+	TokenCap           int                        `json:"token_cap"`
+	CounterFingerprint string                     `json:"counter_fingerprint"`
+	WithinCap          bool                       `json:"within_cap"`
+	SourceValid        bool                       `json:"source_valid"`
+	AnswerPromptDigest string                     `json:"answer_prompt_digest"`
+	ActiveValidation   evalFormalActiveValidation `json:"active_validation"`
+}
+
+// evalFormalActiveValidation is the durable receipt produced by the
+// independent pre-answer Ledger reread. SourceValid remains a producer-side
+// structural hint for backwards readability; artifact validity and the three
+// reported rates are driven by this receipt.
+type evalFormalActiveValidation struct {
+	Checked             bool   `json:"checked"`
+	AllowedIDsDigest    string `json:"allowed_ids_digest"`
+	EvidenceStateDigest string `json:"evidence_state_digest"`
+	ResolvedCount       int    `json:"resolved_count"`
+	InvalidCount        int    `json:"invalid_count"`
+	SourceValid         bool   `json:"source_valid"`
+	SpanValid           bool   `json:"span_valid"`
+	CitationValid       bool   `json:"citation_valid"`
+	ReceiptDigest       string `json:"receipt_digest"`
 }
 
 type evalFormalClassificationRecord struct {
@@ -394,11 +435,26 @@ func validateFormalFrozenPayload(protocol evalProtocol, candidate evalCandidateA
 	if bundle.Schema != evalProtocolSchema || bundle.ProtocolHash != protocol.ProtocolHash || bundle.QuestionID != candidate.QuestionID ||
 		bundle.Kind != evalBundleArtifactKind || !bundle.Valid ||
 		bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
-		bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.AnswerInputTokens < 1 ||
+		bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.EvidenceTokens < 0 || bundle.AnswerInputTokens < 1 ||
+		bundle.EvidenceTokens > bundle.AnswerInputTokens ||
 		bundle.AnswerInputTokens > protocol.Budget.AnswerInputTokenCap || bundle.TokenCap != protocol.Budget.AnswerInputTokenCap ||
 		bundle.CounterFingerprint != protocol.Budget.CounterFingerprint || !bundle.WithinCap || !bundle.SourceValid ||
 		len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
 		return fmt.Errorf("invalid formal bundle for question %q", candidate.QuestionID)
+	}
+	if err := validateFormalB1AnchorPrefix(candidate, bundle); err != nil {
+		return fmt.Errorf("formal bundle ranked-anchor prefix failed for question %q: %w", candidate.QuestionID, err)
+	}
+	sourceOK, spanOK, citationOK := inspectFormalBundle(candidate, trace, bundle)
+	if !sourceOK || !spanOK || !citationOK {
+		return fmt.Errorf("formal bundle source/span/citation contract failed for question %q", candidate.QuestionID)
+	}
+	activeSourceOK, activeSpanOK, activeCitationOK := inspectFormalActiveValidation(bundle.ActiveValidation)
+	if !activeSourceOK || !activeSpanOK || !activeCitationOK ||
+		bundle.ActiveValidation.AllowedIDsDigest != trace.SourceValidation.AllowedIDsDigest ||
+		bundle.ActiveValidation.ResolvedCount != len(bundle.SourceIDs) ||
+		!bundle.SourceValid {
+		return fmt.Errorf("formal bundle has no valid independent Ledger receipt for question %q", candidate.QuestionID)
 	}
 	return nil
 }
@@ -472,13 +528,23 @@ func formalArtifactValidity(candidates []evalCandidateArtifact, traces []evalFor
 	if total == 0 || len(candidates) != total || len(traces) != total || len(bundles) != total {
 		return evalArtifactValidity{}
 	}
-	var candidateIdentity, sourceValid, withinCap, answerCompliance, fullyValid int
+	var candidateIdentity, sourceValid, spanValid, citationValid, withinCap, answerCompliance, fullyValid int
 	for index, classification := range classifications {
 		if traces[index].CandidateSetDigest == candidates[index].CandidateSetDigest && bundles[index].CandidateSetDigest == candidates[index].CandidateSetDigest {
 			candidateIdentity++
 		}
-		if bundles[index].SourceValid {
+		sourceOK, spanOK, citationOK := inspectFormalBundle(candidates[index], traces[index], bundles[index])
+		activeSourceOK, activeSpanOK, activeCitationOK := inspectFormalActiveValidation(bundles[index].ActiveValidation)
+		activeReceiptBound := bundles[index].ActiveValidation.AllowedIDsDigest == traces[index].SourceValidation.AllowedIDsDigest &&
+			bundles[index].ActiveValidation.ResolvedCount == len(bundles[index].SourceIDs)
+		if sourceOK && activeSourceOK && activeReceiptBound {
 			sourceValid++
+		}
+		if spanOK && activeSpanOK && activeReceiptBound {
+			spanValid++
+		}
+		if citationOK && activeCitationOK && activeReceiptBound {
+			citationValid++
 		}
 		if bundles[index].WithinCap {
 			withinCap++
@@ -501,7 +567,7 @@ func formalArtifactValidity(candidates []evalCandidateArtifact, traces []evalFor
 	rate := func(value int) float64 { return float64(value) / float64(total) }
 	validity := evalArtifactValidity{
 		Complete: fullyValid == total, CandidateIdentityRate: rate(candidateIdentity), SourceValidationRate: rate(sourceValid),
-		SpanRecoveryRate: rate(sourceValid), CitationCoverageRate: rate(sourceValid), WithinCapRate: rate(withinCap),
+		SpanRecoveryRate: rate(spanValid), CitationCoverageRate: rate(citationValid), WithinCapRate: rate(withinCap),
 		AnswerCallComplianceRate: rate(answerCompliance), UnattributedAddCount: 0,
 	}
 	validity.Valid = validity.Complete && validity.CandidateIdentityRate == 1 && validity.SourceValidationRate == 1 && validity.SpanRecoveryRate == 1 && validity.CitationCoverageRate == 1 && validity.WithinCapRate == 1 && validity.AnswerCallComplianceRate == 1
@@ -632,12 +698,11 @@ func validateFormalArtifactPayloads(runDir string, protocol evalProtocol, candid
 	for _, bundle := range bundles {
 		candidate, candidateOK := byID[bundle.QuestionID]
 		trace, traceOK := traceByID[bundle.QuestionID]
-		if !candidateOK || !traceOK || bundle.Schema != evalProtocolSchema || bundle.ProtocolHash != protocol.ProtocolHash ||
-			bundle.Kind != evalBundleArtifactKind || !bundle.Valid ||
-			bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
-			bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.AnswerInputTokens < 1 || bundle.AnswerInputTokens > protocol.Budget.AnswerInputTokenCap ||
-			bundle.TokenCap != protocol.Budget.AnswerInputTokenCap || bundle.CounterFingerprint != protocol.Budget.CounterFingerprint || !bundle.WithinCap || !bundle.SourceValid || len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
+		if !candidateOK || !traceOK {
 			return fmt.Errorf("invalid formal bundle for question %q", bundle.QuestionID)
+		}
+		if err := validateFormalFrozenPayload(protocol, candidate, trace, bundle); err != nil {
+			return err
 		}
 	}
 

@@ -47,15 +47,20 @@ func validCoverage(coverage float64) bool {
 const evalStageFixedGoldOracle = "fixed_gold_oracle"
 
 type evalFixedGoldOracleRequest struct {
-	Stage          string
-	DiagnosticOnly bool
-	ProtocolHash   string
-	CandidateIDs   []string
+	Stage                   string
+	DiagnosticOnly          bool
+	ProtocolHash            string
+	CandidateIDs            []string
+	EmptyEvidenceAbstention bool
 }
 
 func validateFixedGoldOracleRequest(request evalFixedGoldOracleRequest) error {
-	if request.Stage != evalStageFixedGoldOracle || !request.DiagnosticOnly || !isDigest(request.ProtocolHash) || len(request.CandidateIDs) == 0 {
+	if request.Stage != evalStageFixedGoldOracle || !request.DiagnosticOnly || !isDigest(request.ProtocolHash) ||
+		(len(request.CandidateIDs) == 0 && !request.EmptyEvidenceAbstention) {
 		return fmt.Errorf("fixed-gold oracle must be a diagnostic-only run with frozen evidence")
+	}
+	if request.EmptyEvidenceAbstention && len(request.CandidateIDs) != 0 {
+		return fmt.Errorf("fixed-gold oracle abstention cannot mix empty and cited evidence")
 	}
 	seen := map[string]bool{}
 	for _, id := range request.CandidateIDs {

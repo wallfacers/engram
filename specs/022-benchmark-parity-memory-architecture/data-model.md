@@ -358,9 +358,10 @@ Trace 是审计，不是新的 Evidence。
 
 ### Frozen Protocol
 
-一份 `022.v1` manifest 冻结 dataset、denominator、answerer、judge、prompt、extractor、
-embedding、candidate rules/budget、tokenizer/cap、repetition/majority、mechanism flags 与
-git commit。其 canonical JSON SHA-256 是 `protocol_hash`。
+一份 `022.v1` manifest 冻结 dataset、denominator、answerer/extractor/judge 的
+provider/model/revision/prompt、embedding、candidate rules/budget、tokenizer/input cap、
+max output tokens、repetition/majority、mechanism flags 与 git commit。其 canonical
+JSON SHA-256 是 `protocol_hash`。
 
 ### Ranked Anchor
 

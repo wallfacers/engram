@@ -190,6 +190,11 @@ func cloneFormalFrozenQuestion(frozen formalFrozenQuestion) formalFrozenQuestion
 	frozen.Candidate.Gold.ResolvedEvidenceIDs = append([]string(nil), frozen.Candidate.Gold.ResolvedEvidenceIDs...)
 	frozen.Candidate.Gold.UnresolvedIDs = append([]string(nil), frozen.Candidate.Gold.UnresolvedIDs...)
 	frozen.Trace.AppliedActions = append([]string(nil), frozen.Trace.AppliedActions...)
+	frozen.Bundle.Items = append([]evalFormalBundleItem(nil), frozen.Bundle.Items...)
+	for index := range frozen.Bundle.Items {
+		frozen.Bundle.Items[index].CandidateIDs = append([]string(nil), frozen.Bundle.Items[index].CandidateIDs...)
+		frozen.Bundle.Items[index].Sources = append([]evalFormalSourceSpan(nil), frozen.Bundle.Items[index].Sources...)
+	}
 	frozen.Bundle.SourceIDs = append([]string(nil), frozen.Bundle.SourceIDs...)
 	frozen.InvalidReasons = append([]string(nil), frozen.InvalidReasons...)
 	return frozen

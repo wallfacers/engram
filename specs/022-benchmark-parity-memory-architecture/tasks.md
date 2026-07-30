@@ -60,19 +60,24 @@ provenance validity。B1 的候选/分数必须等 Ledger 提供真实 source/sp
 - [X] T013 [P] 实现 ranked anchor、rendered candidate、continuous source coverage、JSONL round-trip 与 digest 校验到 `cmd/locomo-bench/candidate_artifact.go`
 - [X] T014 [P] 实现 majority、exact McNemar、confidence interval、Holm category gate 与 promotion verdict 到 `cmd/locomo-bench/paired_eval.go`
 - [X] T015 [P] 实现预注册 judge audit 采样、盲标导入、adjudication 和 raw/corrected summary 到 `cmd/locomo-bench/judge_audit.go`
-- [X] T016 [P] 实现 source-ID 解析、互斥 miss attribution 和不进入正式分数的 fixed-gold oracle 到 `cmd/locomo-bench/miss_attribution.go`
+- [X] T016 [P] 实现 source-ID 解析、互斥 miss attribution 和 diagnostic-only fixed-gold oracle 请求/不参与 promotion 的基础约束到 `cmd/locomo-bench/miss_attribution.go`
 - [X] T017 实现与实际本地 answerer tokenizer/chat template 同栈的 counter、calibration 和 fail-closed fingerprint 到 `cmd/locomo-bench/token_counter.go`
 - [X] T018 为 protocol→candidate→classification→summary 的完整/缺失/篡改 artifact 流写失败集成测试到 `cmd/locomo-bench/eval_protocol_integration_test.go`
 - [X] T019 在 `cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/journal.go`、`cmd/locomo-bench/jsonio.go`、`cmd/locomo-bench/stats.go` 和薄接线 `cmd/locomo-bench/main.go` 中集成 `022.v1`，并结构性关闭正式 arm 的 IRIS 与 legacy IDK retry
 
 ### Freeze and baseline
 
-- [ ] T020 校准本地 answerer counter 并冻结 LoCoMo/LongMemEval 的 low/high、B0 protocol 与待 post-Ledger materialize 的 B1 protocol template；把无 secret 的 hashes/精确 cap 记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T021 依 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 用 WSL2 detach 规则运行 lossless B0（三次独立 answer）并记录 immutable artifacts；仅在 T039 的 source-chain contract 通过后，才运行 frozen-candidate B1（每 repetition 一次 answerer）
-- [ ] T022 完成 B0 audit；在 T039 后完成 B1 judge audit、fixed-gold oracle 和 validity 校验，确认 1,540/500 分母、candidate lineage、span、token/call 字段完整率 100%，`source_lineage_unavailable=0`，并冻结 B1 control hashes
+- [X] T020 先在 `cmd/locomo-bench/eval_protocol_integration_test.go` 写会复现 repetition candidate-set/trace/bundle drift 的失败测试，再修改 `cmd/locomo-bench/eval_replay.go`、`cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/eval_artifact.go`、`cmd/locomo-bench/journal.go` 和薄接线 `cmd/locomo-bench/main.go`，使每题只物化一次 Candidate/Trace/Bundle、在首个 answer 前持久化、三次 answer repetition 逐字节重放且 drift fail closed；同时完成本地 answerer counter 校准并把测试结果、fingerprint 与既有无效运行登记到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [X] T109 在 `cmd/locomo-bench/eval_source_bundle_test.go` 先覆盖 active/tombstoned Evidence、CJK/emoji code-point span、展开后超 cap、citation/source-union 篡改和 replay 深拷贝，再实现 retrieval anchor→active Evidence 的 pre-pack source expansion、Bundle `items/sources`、Trace source receipt、独立 Ledger 重读 validator 与 source/span/citation 三项真实 validity；不得以 projection text 或 `SourceValid` 布尔代理原文/span/citation
+- [X] T110 实现并测试 `cmd/locomo-bench/eval_fixed_gold_oracle.go` 的 `--fixed-gold-oracle` 独占执行路径：只接受三次 repetition 的冻结 B1 `legacy_count_packer` control，只装载全部 active gold Evidence，以 `dataset_source_ids` 区分 benchmark turn 与 Ledger ID，retrieval/extraction/embedding 调用为 0、整题不截断、同 provider/model/revision/prompt/input-output cap；合法 LongMemEval adversarial abstention 可为空 Evidence，任何分母/题级 artifact 无效时取消后续调度、summary 保留真实 answer/judge 调用数但不得输出部分分数，唯一 diagnostic 字段为 `correct/denominator/target_correct/target_met`
+- [ ] T111 先为 `cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/eval_protocol.go`、对应 integration tests、`specs/022-benchmark-parity-memory-architecture/contracts/evaluation-artifacts.md` 和 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 定义并实现独立 B0 continuity manifest/runner：真实记录 legacy retry，不生成或复用 B1 Candidate/Trace/Bundle，不接受 B1 validity/promotion；当前只支持 B1 的 freeze/runner 在本任务完成前不得被 T021 当作 B0
+- [ ] T021 仅在 T044、T045、T109、T110、T111 均完成后，冻结 LoCoMo/LongMemEval 的 low/high、B0 与 post-Ledger B1 protocols，依 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 用 WSL2 detach 规则运行 lossless B0、有效 B1 low/high 和同栈 diagnostic-only fixed-gold oracle；确认每题 retrieval/compile 只发生一次、每 repetition 只调用一次 answerer，并把 immutable artifacts 与无 secret hashes 记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [ ] T022 完成 B0/B1/oracle validity 与 judge audit，确认 1,540/500 分母、candidate lineage、span、token/call 字段、三次 Candidate/Trace/Bundle digest identity 均为 100%，`source_lineage_unavailable=0`、drift=0；按 SC-002/SC-003 写唯一 F0 `CONTINUE | HOLD | STOP` 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`，只有 `CONTINUE` 才解锁 T046–T098 的正式满量执行
 
 **Checkpoint**: B0 只用于历史连续性。v6 source-lineage failure 不产出 B1 分数；完成
-T023–T039 后才有所有后续机制使用的同题、同 candidate/cap、同 answerer/judge B1 control。
+T023–T045、T020、T109–T111 全部完成后才可生成所有后续机制使用的同题、同
+candidate/cap、同 answerer/judge B1 control。T022 为 `HOLD` 时只修评测尺子；为
+`STOP` 时结束 022 的机制扩张并另开 trained compiler/answerer 特性。
 
 ---
 
@@ -127,6 +132,9 @@ purge closure 完整且旧 Search/write parity 不变。
 **Goal**: 分开测量 navigation 与 answer-facing rendering，在同算法/候选预算/cap 下比较
 900-character chunk、raw-turn window 和可重建 Semantic Episode。
 
+**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`；否则本阶段保持未执行并记录
+`HOLD/STOP`，不得为勾选任务启动正式满量运行。
+
 **Independent Test**: 同一 dataset/query 冻结 ranked anchors，三个 renderer 保存各自
 source expansion、gold-source survival、token truncation 和逐题答案；删除 Episode 后
 Ledger 不变并能确定性重建。
@@ -162,6 +170,9 @@ Ledger 不变并能确定性重建。
 
 **Goal**: 不改变 retrieval、不补检，将冻结 candidates 编译为来源有效、真实 token
 不超 cap 的 Evidence Bundle；Planner 可选，失败时确定性 extractive fallback。
+
+**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`，且 T057 已冻结获选或保留的
+representation；否则不得启动四臂正式满量评测。
 
 **Independent Test**: 对同一 candidate bytes 运行 legacy、exact relevance、
 deterministic extractive、local Planner 四臂；candidate digest 一致率、span 复原、
@@ -271,7 +282,7 @@ gate 的机制有资格进入产品化设计。
 - [ ] T105 运行 100k Evidence/projection 性能、batch lineage 无 N+1、Compiler candidate bounds 和 purge checkpoint 压测，把诚实边界写入 `docs/product/capabilities.md`
 - [ ] T106 [P] 执行 secret/log/artifact 扫描与 privacy purge 恢复性检查，修复范围限于 `mcpserver/secrets_test.go`、`cmd/locomo-bench/testdata/022/README.md` 和相关 engine tests
 - [ ] T107 用冻结 default recipe 完成 LoCoMo 1,540 与 LongMemEval-S 500 full runs、judge audit、逐题 artifacts、exact paired/category gates和成本统计，把最终 hashes/verdict 写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T108 对照 `.specify/memory/constitution.md` 和 `specs/022-benchmark-parity-memory-architecture/spec.md` 审核五项原则与 SC-001–SC-013；若双目标或必需合同仍未满足，使用 `speckit-converge` 把剩余证据支持的工作追加到 `specs/022-benchmark-parity-memory-architecture/tasks.md`，不得把 022 标为完成
+- [ ] T108 对照 `.specify/memory/constitution.md` 和 `specs/022-benchmark-parity-memory-architecture/spec.md` 审核五项原则与 SC-001–SC-015；若双目标或必需合同仍未满足，使用 `speckit-converge` 把剩余证据支持的工作追加到 `specs/022-benchmark-parity-memory-architecture/tasks.md`，不得把 022 标为完成
 
 ---
 
@@ -280,12 +291,14 @@ gate 的机制有资格进入产品化设计。
 ### Phase Dependencies
 
 - **Phase 1 — Setup**: 无代码依赖；T001 后才能可靠修改 harness。
-- **Phase 2 — Foundational**: 依赖 Phase 1；T005–T019 冻结评测契约，B0 可独立运行。
-  有效 B1 不能在 v6 产生，须等待 US1 的 T023–T039 source-chain 前置完成。
+- **Phase 2 — Foundational**: 依赖 Phase 1；T005–T020、T109–T111 冻结评测契约和
+  B1/B0 前置；T111 完成后 B0 才可独立运行。有效 B1 须再等待 US1 的
+  T023–T045 source-chain/checkpoint；
+  T022 F0 是后续满量机制的共同入口门。
 - **Phase 3 — US1**: 依赖 T005–T019；Ledger 是所有 source-aware 表示与 Compiler 的地基，
   并阻塞 T021/T022 的正式 B1 部分。
-- **Phase 4 — US2**: 依赖 US1；Episode/raw-window 必须从 Ledger 重建。
-- **Phase 5 — US3**: 实现依赖 US1，正式 candidate replay 依赖 US2 verdict。
+- **Phase 4 — US2**: 依赖 US1 与 T022=`CONTINUE`；Episode/raw-window 必须从 Ledger 重建。
+- **Phase 5 — US3**: 实现依赖 US1 与 T022=`CONTINUE`，正式 candidate replay 依赖 US2 verdict。
 - **Phase 6 — US4**: 依赖 US3 residual；核心已达双目标时以 STOP verdict 结束。
 - **Phase 7 — US5**: one-refetch 依赖 US3 Trace；窄 projection 依赖 residual cohort，
   可在 US4 STOP 后继续。
@@ -303,6 +316,11 @@ US1 Evidence Ledger
 Valid B1 causal control
         │
         ▼
+F0 low/high + fixed-gold oracle
+        │
+   CONTINUE only
+        │
+        ▼
 US2 Representation ──> US3 Fixed-candidate Compiler
                               │
                      ┌────────┴────────┐
@@ -315,7 +333,8 @@ US2 Representation ──> US3 Fixed-candidate Compiler
 ```
 
 - **US1** 可作为独立 MVP 交付，不要求任何新表示或模型。
-- **US2** 可独立给出三表示 GO/HOLD/STOP；即使全部 STOP，US3 仍可使用 legacy 表示。
+- **US2** 仅在 F0=`CONTINUE` 后可独立给出三表示 GO/HOLD/STOP；即使全部 STOP，US3
+  仍可使用 legacy 表示。
 - **US3** 可独立证明 post-retrieval compilation；Planner unavailable 时 deterministic
   extractive arm 仍完整。
 - **US4**、**US5** 的独立成功是“完成受控实验并遵守 verdict”，不是强制出现 GO。
@@ -400,19 +419,22 @@ Scene/Profile/graph 可并行，但必须分别运行、分别 verdict。
 
 1. 完成 Phase 1 与 T005–T019，先获得可信 measurement contract 与 B0 prerequisites。
 2. 完成 US1 的 tests、v7、Ledger/projection lineage、MCP thin adapter。
-3. 在 T039 source-chain contract 通过后运行正式 B1 control；在 T045 停止并独立验收：
-   无 Episode/Compiler 时基础写入搜索仍完整。
-4. US1 未通过 purge/source/parity/B1 validity 门前不得进入表示或 Compiler。
+3. 完成 T020 单次物化/重复重放，以及 T109 active Evidence/Bundle/validator、T110
+   executable fixed-gold oracle 和 T111 B0 continuity runner 前置。
+4. 在 T045 独立确认无 Episode/Compiler 时基础写入搜索仍完整后，才执行 T021 low/high
+   B1 + fixed-gold oracle。
+5. T022 只有 `CONTINUE` 才进入表示或 Compiler；`HOLD` 只修尺子，`STOP` 结束本特性扩张。
 
 ### Incremental Delivery
 
 1. **Measurement foundation + B0** → 可信的 protocol、预算与历史连续性。
 2. **US1 Ledger** → 不可损失、可追踪、可隐私删除的事实地基。
-3. **Valid B1** → post-Ledger 同题 control、judge 与 oracle，作为全部机制的因果尺子。
-4. **US2 Representation** → 只选过门表示，允许全部 NO-GO。
-5. **US3 Compiler** → 固定候选证明 answer-facing contract。
-6. **US4/US5** → 只按 residual 缺口引入单变量机制。
-7. **Final gate** → 同一公开 recipe 同时达到双目标才完成；否则 converge，不粉饰结果。
+3. **Valid B1** → post-Ledger 单次物化、三次重放的 low/high control。
+4. **F0 ceiling** → same-stack fixed-gold oracle 给出唯一 `CONTINUE | HOLD | STOP`。
+5. **US2 Representation** → 仅在 `CONTINUE` 后选择过门表示，允许全部 NO-GO。
+6. **US3 Compiler** → 固定候选证明 answer-facing contract。
+7. **US4/US5** → 只按 residual 缺口引入单变量机制。
+8. **Final gate** → 同一公开 recipe 同时达到双目标才完成；否则 converge，不粉饰结果。
 
 ### Commit Isolation
 
@@ -421,11 +443,13 @@ Scene/Profile/graph 可并行，但必须分别运行、分别 verdict。
 1. measurement schema/tests；
 2. frozen protocol/config、calibration 与 B0 manifest；
 3. Ledger schema/API；
-4. post-Ledger B1 manifest/control artifact；
-5. 每个单一 mechanism 的 tests+implementation；
-6. 该 mechanism 的 results/verdict；
-7. 默认 recipe promotion；
-8. 最终文档。
+4. repetition replay tests 与实现修复；
+5. post-Ledger B1 manifest/control artifact；
+6. fixed-gold oracle 与 F0 verdict；
+7. 每个单一 mechanism 的 tests+implementation；
+8. 该 mechanism 的 results/verdict；
+9. 默认 recipe promotion；
+10. 最终文档。
 
 ## Notes
 

@@ -29,8 +29,10 @@ promotion validity gate 约束，也不能作为 022 treatment control。B1 及�
 
 - 冻结 ranked anchor candidates、完整 rendered candidate bytes、answerer/judge、
   prompt、extractor、tokenizer 与两个 cap profile。
-- 使用 legacy packer，但按与 treatment 相同的实际 tokenizer 和完整 answer-input cap
-  执行。
+- navigation anchor 保留 projection identity/text digest；answer-facing candidate 必须先
+  通过 direct lineage 批量展开为当前 active Evidence 原文或已验证 span。使用 legacy
+  packer，但 admission 必须基于展开后的完整 answer input，并按与 treatment 相同的实际
+  tokenizer/cap 执行；禁止先用较短 projection text 过 cap 再回填原文。
 - 022 representation/compiler/Event/gap 的 control 都从对应 B1 artifact 派生；不能用 B0
   或历史分数替换。
 
@@ -84,27 +86,30 @@ session scratchpad；artifact 用 dataset digest 和题目 ID 引用。
   },
   "store": {
     "schema_version": 7,
-    "ingestion_recipe": "lossless",
+    "ingestion_recipe": "ledger_lossless_chunks_v2",
     "ingestion_config_digest": "sha256:...",
-    "projection_builder_versions": {}
+    "projection_builder_versions": {
+      "atomic_fact": "entry_store_explicit_v1"
+    }
   },
   "models": {
-    "extractor": {"id": "...", "revision": "...", "prompt_digest": "sha256:..."},
-    "answerer": {"id": "...", "revision": "...", "prompt_digest": "sha256:..."},
-    "judge": {"id": "...", "revision": "...", "prompt_digest": "sha256:..."},
-    "planner": {"enabled": false, "id": "", "revision": "", "prompt_digest": ""}
+    "extractor": {"id": "...", "revision": "...", "provider": "openai|anthropic", "prompt_digest": "sha256:..."},
+    "answerer": {"id": "...", "revision": "...", "provider": "openai|anthropic", "prompt_digest": "sha256:..."},
+    "judge": {"id": "...", "revision": "...", "provider": "openai|anthropic", "prompt_digest": "sha256:..."},
+    "planner": {"enabled": false, "id": "", "revision": "", "provider": "", "prompt_digest": ""}
   },
   "retrieval": {
-    "recipe": "both",
+    "recipe": "hybrid",
     "embedding_fingerprint": "sha256:...",
     "reranker": "disabled",
-    "candidate_limit": 0,
+    "candidate_limit": 30,
     "candidate_rules_digest": "sha256:..."
   },
   "budget": {
-    "profile": "low|high",
-    "answer_input_token_cap": 0,
-    "candidate_limit": 0,
+    "profile": "low",
+    "answer_input_token_cap": 1100,
+    "max_output_tokens": 8000,
+    "candidate_limit": 30,
     "retrieval_call_limit": 1,
     "answer_call_limit": 1,
     "counter_fingerprint": "sha256:..."
@@ -123,15 +128,19 @@ session scratchpad；artifact 用 dataset digest 和题目 ID 引用。
     "adjudication_rule": "independent_then_adjudicate"
   },
   "coverage_strata": {
-    "boundaries": [],
+    "boundaries": [0, 0.5, 0.9, 1],
     "selection_digest": "sha256:..."
   },
   "experiment": {
-    "stage": "b0|b1|representation_navigation|representation_rendering|compiler|event|gap|projection",
-    "arm": "pre_registered-arm-id",
-    "control_protocol_hash": "sha256:...",
-    "primary_cohort": "pre_registered-cohort-id",
-    "mechanism_flags": {}
+    "stage": "b1",
+    "arm": "legacy_count_packer",
+    "control_protocol_hash": "",
+    "primary_cohort": "all",
+    "mechanism_flags": {
+      "idk_retry": false,
+      "iris": false,
+      "rerank": false
+    }
   }
 }
 ```
@@ -141,6 +150,8 @@ session scratchpad；artifact 用 dataset digest 和题目 ID 引用。
 - `question_count` 和 `question_ids_digest` 同时匹配才可 resume/compare。
 - 正式 run 要求 `git.dirty=false`；探索 run 可 dirty，但不能获得 promotion verdict。
 - 正式默认 stack 的 `reranker` 必须 disabled，不能写 hosted diagnostic 结果冒充。
+- answerer/extractor/judge 的 provider、model ID、revision 与 prompt digest 都属于同栈
+  fingerprint；`budget.max_output_tokens` 同样冻结，运行时漂移必须在 provider 调用前拒绝。
 - 模型字段为空也必须以显式 `enabled=false`/空 fingerprint 表达，不能省略产生歧义。
 - `protocol_hash` 计算时排除自身字段，包含其他全部字段。
 
@@ -264,6 +275,8 @@ Evidence，不得把它表述成答案 span 已可见。
 
 Fixed-candidate stage 的 `attempt` 必须恒为 1 且 gap/retrieval 关闭。Gap stage 最多两条
 trace（首轮与补检后），但 answerer 只在第二条或无补检的第一条之后调用。
+Trace 的 `source_validation` 只登记 producer 从 frozen candidates 推导的结构性 allowlist；
+独立 active-Ledger 验证结果以 Bundle 的 `active_validation` 为准。
 
 ## `bundles.jsonl`
 
@@ -291,20 +304,159 @@ trace（首轮与补检后），但 answerer 只在第二条或无补检的第�
     }
   ],
   "source_ids": ["id"],
+  "rendered_context": "exact answer-facing user message",
   "rendered_context_digest": "sha256:...",
   "evidence_tokens": 0,
-  "answer_input_tokens": 0,
+  "answer_input_tokens": 947,
   "token_cap": 0,
   "counter_fingerprint": "sha256:...",
   "within_cap": true,
   "source_valid": true,
-  "answer_prompt_digest": "sha256:..."
+  "answer_prompt_digest": "sha256:...",
+  "active_validation": {
+    "checked": true,
+    "allowed_ids_digest": "sha256:...",
+    "evidence_state_digest": "sha256:...",
+    "resolved_count": 1,
+    "invalid_count": 0,
+    "source_valid": true,
+    "span_valid": true,
+    "citation_valid": true,
+    "receipt_digest": "sha256:..."
+  }
 }
 ```
 
 原文 artifact 的 text 是否保留由 dataset/license/run-dir policy 决定；若不允许保存，
 保存 encrypted local artifact 或 digest+offset，并保证验证器仍能在授权 dataset 上复原。
 正式 summary 必须报告验证结果，不能因不提交原文而跳过校验。
+
+`answer_input_tokens` 是 exact tokenizer 对最终 system+user/chat template 的完整计数；
+`evidence_tokens` 仅是同一 counter 下
+`max(0, final_full_input_tokens - empty_context_full_input_tokens)` 的诊断差值，不是独立
+cap。唯一 admission hard gate 始终是 `answer_input_tokens <= token_cap`。
+
+B1 source/span 规范：
+
+- 每个 `KEEP`/`EXTRACT` item 在 B1 中恰好引用一个 frozen rendered candidate 和一个
+  Evidence span；多 source 的 navigation anchor 作为一个不可拆 admission group，
+  不能因 cap 只装入其部分来源。
+- `full_source=1` 在 artifact 中规范化为 `[0,rune_count(content))`，`KEEP` text 必须
+  等于完整 Evidence；partial ref 保留原 code-point offset 并使用 `EXTRACT`。
+- `span_digest` 对恢复出的 UTF-8 bytes 计算并统一写 `sha256:` 前缀；Ledger 内部裸 hex
+  digest 只在 artifact 边界规范化，不改变 engine schema。
+- `source_ids` 必须精确等于全部 item citations 的去重并集；source order 用
+  projection ref 的 `source_order` 渲染，只有并集字段允许排序。
+- Producer 的 `source_valid=true` 和 Trace 中的结构性 allowlist/count 不是有效性证据。
+  answer 前的独立 validator MUST
+  重新批量读取 active Ledger，验证 lifecycle/content digest、offset、span text/digest、
+  candidate allowlist、完整-anchor ranked prefix、item/source union 和重建后的完整 answer
+  input；结果写入 `active_validation`，其 `evidence_state_digest` 绑定实际读取到的
+  ID/type/state/revision/content digest，`receipt_digest` 绑定整个独立结果。任一失败时
+  answer/judge 调用均为 0。
+
+Summary 的三项来源率必须独立计算：
+
+- `source_validation_rate`：item citation source union 与 Trace allowlist/receipt 合法；
+- `span_recovery_rate`：每个 code-point span 和 digest 能从 source 恢复；
+- `citation_coverage_rate`：每个 item 的 candidate/source 引用均在 frozen lineage 内。
+
+不得把一个 `SourceValid` 布尔同时复制为上述三项结果。
+
+## Fixed-gold Oracle Diagnostic
+
+fixed-gold oracle 从 `stage=b1`、`arm=legacy_count_packer`、空
+`control_protocol_hash`、三次 repetition 且 `idk_retry/iris/rerank=false` 的已冻结
+control protocol 派生。control 的 `retrieval.recipe` 必须精确为无 suffix 的 `fts` 或
+`hybrid`；`hybrid+rerank`、`hybrid+pcic`、`hybrid+assoc` 等 recipe 和等价的全局
+mechanism flag 一律拒绝，不能登记成 legacy control。oracle 使用独立 run directory：
+
+```text
+<oracle-run-dir>/
+├── protocol.json
+├── fixed_gold_oracle.jsonl
+├── fixed_gold_oracle_calls.jsonl
+└── fixed_gold_oracle_summary.json
+```
+
+它不是 B1/treatment artifact，不生成 `metrics`、`paired_vs_control`、`promotion` 或正式
+verdict。每题只能按 dataset gold ID 读取全部 active raw-message Evidence；不暴露
+Retriever、projection、extractor、embedding、filter、rewrite 或 reranker 接口。
+所有 gold source 必须一次进入同一完整 answer input，禁止 prefix pack、截断或补检。
+answerer/judge 的 provider、model/revision、prompt suite、input cap、output cap、token
+counter 和三次 majority policy 必须与 control 一致。control 中的 embedding fingerprint
+继续作为 provenance 保存，但 oracle runtime 不读取、不实例化也不验证 embedding
+sidecar。
+
+每题 artifact 使用 `dataset_source_ids` 保存 benchmark gold turn IDs；该字段不是 B1
+Bundle 中的 Ledger Evidence `source_ids`。独立 read-back 必须从 dataset 重新构建
+`dataset_source_id → active raw-message Evidence` 映射，不能把 artifact 自报 ID 当真。
+
+```json
+{
+  "schema": "022.v1",
+  "stage": "fixed_gold_oracle",
+  "arm": "all_gold_evidence",
+  "diagnostic_only": true,
+  "control_protocol_hash": "sha256:...",
+  "oracle_protocol_hash": "sha256:...",
+  "question_id": "q-id",
+  "retrieval_calls": 0,
+  "dataset_source_ids": ["D1:1", "D2:3"],
+  "answer_input_digest": "sha256:...",
+  "answer_prompt_digest": "sha256:...",
+  "answer_input_tokens": 0,
+  "counter_fingerprint": "sha256:...",
+  "answer_calls": 3,
+  "judge_calls": 3,
+  "valid": true,
+  "repetition_results": [
+    {"run_index": 1, "answer": "...", "answer_digest": "sha256:...", "judge_input_digest": "sha256:...", "judge_verdict": "{\"correct\":true}", "judge_correct": true, "judge_verdict_digest": "sha256:...", "input_tokens": 947, "output_tokens": 12},
+    {"run_index": 2, "answer": "...", "answer_digest": "sha256:...", "judge_input_digest": "sha256:...", "judge_verdict": "{\"correct\":true}", "judge_correct": true, "judge_verdict_digest": "sha256:...", "input_tokens": 947, "output_tokens": 11},
+    {"run_index": 3, "answer": "...", "answer_digest": "sha256:...", "judge_input_digest": "sha256:...", "judge_verdict": "{\"correct\":true}", "judge_correct": true, "judge_verdict_digest": "sha256:...", "input_tokens": 947, "output_tokens": 12}
+  ]
+}
+```
+
+`repetition_results` 每项保存 `run_index`、原 answer 与 digest、judge input digest、原
+judge verdict 与 digest、解析后的 correct、input/output tokens。任一 raw verdict 与
+解析结果不一致即 INVALID。
+
+三个 oracle 文件必须在任何 provider 调用前以 create-exclusive 方式建立，任一已存在即
+拒绝覆盖。`fixed_gold_oracle_calls.jsonl` 对每次 answer/judge provider attempt 在调用前
+fsync `intent`、返回后 fsync `terminal`；orphan、重复、失败或 digest/count 不一致使整轮
+INVALID。失败目录是审计证据，重跑必须使用新目录。formal wrapper 不得在一次已记录
+intent 内透明 retry。
+
+LongMemEval-S 仅 `adversarial=true && question_type=abstention` 可使用空 Evidence；其他空、
+未知、tombstoned、purged、非 raw、digest/mapping 错误或全量 gold 超 cap 均使该题和整轮
+INVALID。首个无效题触发取消，不再调度后续题；已经在途的调用仍按 journal 如实落盘。
+INVALID summary 保留原因及 `answer_calls`/`judge_calls` 总数，但省略
+`oracle_diagnostic`，不得暴露部分正确率。
+
+独立 `--eval-validate` 必须重新读取 dataset、artifact 与 call journal，重建 ordered gold
+source、完整 answer input、judge input 和 raw verdict/majority，并要求落盘 summary 与
+read-back 派生 summary 完全一致；仅检查 artifact 内部 digest 形状不够。
+
+仅当 question count/order/digest、每题 artifact、三次 answer/judge 调用和 token
+fingerprint 全部有效时，summary 才包含：
+
+```json
+{
+  "answer_calls": 4620,
+  "judge_calls": 4620,
+  "valid": true,
+  "oracle_diagnostic": {
+    "correct": 0,
+    "denominator": 1540,
+    "target_correct": 1425,
+    "target_met": false
+  }
+}
+```
+
+LongMemEval-S 使用固定 `denominator=500`、`target_correct=473`。该对象始终
+`diagnostic_only=true`，不能进入 promotion。
 
 ## `classification.jsonl`
 

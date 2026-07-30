@@ -69,6 +69,7 @@ type options struct {
 	compareSpec           string
 	evalValidate          string
 	evalProtocolPath      string
+	fixedGoldOracle       bool
 	evalFreezeProtocol    string
 	evalBudgetProfile     string
 	answerInputTokenCap   int
@@ -145,6 +146,10 @@ type options struct {
 	widePool              int
 	factCoverageTau       float64
 	contextParity         *contextParityJournal
+	// formalEvidence is the active, namespace-local Evidence Ledger reader
+	// used by formal source expansion and the independent pre-answer
+	// span/citation validator. It is runtime-only and is never serialized.
+	formalEvidence formalEvidenceReader
 }
 
 func main() {
@@ -160,8 +165,9 @@ func run() error {
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
-	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (no dataset or model calls)")
+	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (fixed-gold runs also require --data; never makes model calls)")
 	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
+	flag.BoolVar(&opt.fixedGoldOracle, "fixed-gold-oracle", false, "run the diagnostic-only all-gold Evidence ceiling from a frozen B1 protocol (no retrieval/extraction)")
 	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 protocol manifest and exit (no model calls)")
 	flag.StringVar(&opt.evalBudgetProfile, "eval-budget-profile", "", "formal protocol budget profile: low | high (required with --eval-freeze-protocol)")
 	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
@@ -228,6 +234,9 @@ func run() error {
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
+	if err := validateFixedGoldOracleMode(opt); err != nil {
+		return err
+	}
 	if err := validatePromptModes(opt); err != nil {
 		return err
 	}
@@ -252,6 +261,9 @@ func run() error {
 		return nil
 	}
 	if opt.evalValidate != "" {
+		if fixedGoldOracleArtifactsPresent(opt.evalValidate) {
+			return runFixedGoldOracleValidateCLI(context.Background(), opt)
+		}
 		return runEvalArtifactValidateCLI(opt.evalValidate)
 	}
 	if opt.tokenCounterCalibrate {
@@ -298,6 +310,9 @@ func run() error {
 		}
 		opt = prepared
 		opt.formalProtocol = &protocol
+	}
+	if opt.fixedGoldOracle && opt.formalProtocol == nil {
+		return fmt.Errorf("--fixed-gold-oracle requires --eval-protocol")
 	}
 	if opt.multiQuery && !opt.recallDiagnostic && len(arms) != 1 {
 		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
@@ -435,12 +450,25 @@ func run() error {
 	}
 	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	extractModel := envOr("EXTRACT_MODEL", model)
+	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
 	judgeConfig := resolveJudgeConfig(os.Getenv)
 	opt.answerModel = model
 	opt.judgeModel = judgeConfig.Model
 	if opt.formalProtocol != nil {
-		if opt.formalProtocol.Models.Answerer.ID != model || opt.formalProtocol.Models.Judge.ID != judgeConfig.Model || opt.formalProtocol.Models.Extractor.ID != extractModel {
-			return fmt.Errorf("formal model IDs differ from frozen protocol")
+		answerRevision := envOr("LOCOMO_MODEL_REVISION", model)
+		judgeRevision := envOr("JUDGE_MODEL_REVISION", judgeConfig.Model)
+		extractorRevision := envOr("EXTRACT_MODEL_REVISION", extractModel)
+		if opt.formalProtocol.Models.Answerer.ID != model ||
+			opt.formalProtocol.Models.Answerer.Revision != answerRevision ||
+			opt.formalProtocol.Models.Answerer.Provider != answerProvider ||
+			opt.formalProtocol.Models.Judge.ID != judgeConfig.Model ||
+			opt.formalProtocol.Models.Judge.Revision != judgeRevision ||
+			opt.formalProtocol.Models.Judge.Provider != judgeConfig.Provider ||
+			(!opt.fixedGoldOracle &&
+				(opt.formalProtocol.Models.Extractor.ID != extractModel ||
+					opt.formalProtocol.Models.Extractor.Revision != extractorRevision ||
+					opt.formalProtocol.Models.Extractor.Provider != answerProvider)) {
+			return fmt.Errorf("formal model providers, IDs, or revisions differ from frozen protocol")
 		}
 	}
 	if opt.estimate {
@@ -516,7 +544,6 @@ func run() error {
 	// Provider protocol is selectable so the harness can target either an
 	// Anthropic-messages endpoint (default) or an OpenAI-chat-completions one
 	// (LOCOMO_PROVIDER=openai). Both satisfy provider.Provider identically.
-	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
 	prov, err := buildBenchProvider(answerProvider, apiKey, baseURL, opt.maxTokens, "LOCOMO_PROVIDER")
 	if err != nil {
 		return err
@@ -540,11 +567,36 @@ func run() error {
 	recordUsage := func(role, model string, usage provider.Usage) {
 		recordBenchUsage(ledger, role, model, usage)
 	}
-	answerUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
+	answerProviderCall := newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage)
+	judgeProviderCall := newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage)
+	answerUsageCall := gateUsage(sem, answerProviderCall)
+	judgeUsageCall := gateUsage(sem, judgeProviderCall)
+	if opt.formalProtocol != nil {
+		// Formal call counts are provider-attempt counts. Transparent retries
+		// would make the persisted one-call contract untrue.
+		answerUsageCall = gateUsageOnce(sem, answerProviderCall)
+		judgeUsageCall = gateUsageOnce(sem, judgeProviderCall)
+	}
 	filterCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "filter", recordUsage)))
 	rewriteCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "rewrite", recordUsage)))
-	judgeUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage))
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
+
+	if opt.fixedGoldOracle {
+		summary, err := runFixedGoldOracleDataset(
+			context.Background(), *opt.formalProtocol, opt, convs, answerUsageCall, judgeUsageCall,
+		)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"fixed-gold oracle: correct=%d/%d target=%d met=%t diagnostic_only=true\n",
+			summary.OracleDiagnostic.Correct,
+			summary.OracleDiagnostic.Denominator,
+			summary.OracleDiagnostic.TargetCorrect,
+			summary.OracleDiagnostic.TargetMet,
+		)
+		return nil
+	}
 
 	// The embedding client is shared across conversations (safe for concurrent
 	// use) and only built when a hybrid arm is present.
@@ -1519,6 +1571,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 						return
 					}
 					defer release()
+					armOpt.formalEvidence = runtime.entries.Ledger()
 					frozen, err := armOpt.formalReplay.getOrMaterialize(key, qa.QuestionID, func() formalFrozenQuestion {
 						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, qa, runtime.chunkTurns, runtime.turnEvidence)
 					})
@@ -1527,8 +1580,11 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 						logger.Error("formal question freeze failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
 						return
 					}
-					input, count, formal := prepareFrozenFormalB1Answer(ctx, *armOpt.formalProtocol, armOpt, answerCall, judgeCall, qa, frozen, armOpt.formalRunIndex)
-					frozenDigest := formalFrozenPayloadDigest(frozen)
+					revalidated := revalidateFrozenFormalSources(ctx, *armOpt.formalProtocol, armOpt, qa, frozen)
+					input, count, formal := prepareFrozenFormalB1Answer(ctx, *armOpt.formalProtocol, armOpt, answerCall, judgeCall, qa, revalidated, armOpt.formalRunIndex)
+					// Bind the call journal to the exact payload that passed the
+					// active Ledger reread, not the older replay snapshot.
+					frozenDigest := formalFrozenPayloadDigest(revalidated)
 					inputDigest := evalJSONDigest(input)
 					correct := false
 					predicted := ""

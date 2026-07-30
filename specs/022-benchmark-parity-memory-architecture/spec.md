@@ -14,6 +14,13 @@ Event、Scene、Profile、graph 只作为可重建 projection 独立消融。同
 
 ## Clarifications
 
+### Session 2026-07-30
+
+- Q: LoCoMo 最终验收门槛采用哪种定义？ → A: 至少答对 1,425/1,540 题；固定分母下以答对题数为唯一验收真值，并报告 92.53%。
+- Q: 三次 answer repetition 是否可以各自重新检索和编译候选？ → A: 不可以。每题只物化一次 Candidate、Grounded Trace 和 Evidence Bundle，三次 repetition 必须逐字节重放同一冻结输入，只允许 answer/judge 输出不同；任一 digest 漂移使整轮 B1 无效。
+- Q: 当前低 cap 控制臂远低于最终目标时是否继续执行全部 projection？ → A: 不盲目继续。先用有效 low/high B1 与同栈 fixed-gold oracle 作可行性门；目标不降低，但未获得 `CONTINUE` 前不得进入表示、Compiler 或后续 projection 的正式满量评测。
+- Q: 正式 B1 的来源有效性采用哪种规则？ → A: B1 的每个 answer-facing item 必须 source-expand 为 active Evidence 完整原文或可精确复原的 source span，并达到 item-level span/citation 100%；即使这改变 legacy context，也不得用 source ID 存在代理验证。
+
 ### Revision 2026-07-29
 
 本次论文复核后的用户决策取代本特性同日较早的冲突澄清；被取代的结论不再构成
@@ -59,6 +66,12 @@ V1 请求必须经过的层，也不是为了宣告架构完整而必须交付�
 
 本特性不承诺跨 namespace 推理、超大规模语料、在线集群、托管模型默认路径或通过改变
 评测口径取得名义涨分。
+
+数值目标保持为双基准最终验收门，不因低分控制臂而下调；同时它也不是要求无限追加结构
+的授权。进入机制实验前必须先证明冻结 answerer/judge 在同栈 fixed-gold Evidence 上具备
+达到目标的能力。若该上界不成立，本特性记录 `STOP` 并把需要更换 answerer、训练专用
+memory compiler 或改变评测栈的工作移交独立特性，不以 Event/Scene/Profile/graph 堆叠
+掩盖不可达性。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -203,6 +216,9 @@ token cap 和一次 answerer 调用。
 - 原始消息没有产生事实或 episode 时，Evidence 仍被保留，不能伪装成已抽取事实。
 - 同一事实跨 session 获得多个支持来源时，全部实际来源都必须保留。
 - source ID 存在但原文已被 purge 时，Compiler 不得把 tombstone 或审计记录当作证据。
+- source ID 存在但 B1 answer-facing item 无法展开为 active Evidence 完整原文或可精确
+  复原的 source span 时，B1 运行无效且 answerer 不得调用；不得用 source-only lineage
+  代理 span/citation 验证。
 - 字符偏移越界、UTF-8 边界无效或抽取 span 与原文不一致时，该 action 必须失败并降级。
 - `MERGE` 中只有部分句子可验证时，不可验证句子被删除，而不是借共享引用通过校验。
 - list 查询无法确定预期 cardinality 时，Trace 必须标记未知，不能伪造“证据充分”。
@@ -213,6 +229,8 @@ token cap 和一次 answerer 调用。
   Ledger 和基础检索继续工作。
 - 评测数据版本、分母、模型、judge、prompt 或预算 fingerprint 与冻结协议不一致时，
   运行不得进入可比较结果集。
+- 同一正式题目的任意 answer repetition 出现 Candidate、Trace 或 Bundle digest 漂移时，
+  整个正式运行无效；即使最终渲染文本或答案恰好相同，也不得保留其分数。
 - namespace 或 source ID 碰撞时，跨 namespace 可见记录必须为零。
 - 超过单用户约 100k 记忆时，系统必须如实报告超出本特性保证范围。
 
@@ -230,7 +248,10 @@ token cap 和一次 answerer 调用。
 - **FR-003**: 实验 MUST 依次隔离表示、固定候选 Compiler、Event projection、一次补检
   和其他窄用途 projection；后一阶段不得掩盖前一阶段未解释的变化。
 - **FR-004**: 每题 MUST 记录黄金证据是否存在于冻结候选池，并将 candidate miss 与
-  compiler miss 分开报告。
+  compiler miss 分开报告。正式 B1 control 的每个 answer-facing item MUST source-expand
+  为 active Evidence 完整原文或可精确复原的 source span，并验证 item-level span/citation
+  覆盖率为 100%；source ID 存在本身不足以通过该门。该 source expansion 属于 B1 基线
+  归一化，不得申报为机制涨点。
 - **FR-005**: 每个候选机制 MUST 可独立启用、禁用和消融；未通过预注册 stop/go 门的
   机制 MUST 默认关闭。达到双基准目标后，系统 MUST NOT 为“架构完整”强制建设后续
   projection。
@@ -311,8 +332,9 @@ token cap 和一次 answerer 调用。
 
 - **FR-035**: LoCoMo 与 LongMemEval-S MUST 使用同一个公开记忆架构和默认产品 recipe；
   数据集适配差异必须单列，不能用两套私有架构拼接结果。
-- **FR-036**: 机制 A/B 的 answerer、judge、冻结候选条件和 answer-context token cap
-  MUST 相同；仅提高模型能力、judge 宽松度、top-k 或 token 用量不得计作机制收益。
+- **FR-036**: 机制 A/B 的 provider、answerer/judge model+revision、冻结候选条件、
+  answer-context token cap 和 max output tokens MUST 相同；仅提高模型能力、judge
+  宽松度、top-k 或 token 用量不得计作机制收益。
 - **FR-037**: 正式结果 MUST 报告总体与分类别准确率、逐题输出、独立重复或确定性证明、
   置信区间、配对统计、evidence coverage、candidate/compiler miss、平均与 p95 token、
   检索次数、延迟、成本和全部预注册消融。
@@ -320,6 +342,17 @@ token cap 和一次 answerer 调用。
   回退；仅单 benchmark 涨分的机制只能保持实验性。
 - **FR-039**: 达成数值目标不得表述为受控优于 Mem0，除非数据、模型、judge、prompt、
   候选预算、上下文预算和聚合规则均已同栈对齐。
+- **FR-040**: 正式 B1 及后续重复作答实验 MUST 对每题只执行一次候选冻结与上下文编译，
+  并在所有 answer repetitions 中逐字节重放同一 Candidate、Grounded Trace 和
+  Evidence Bundle；任一 candidate-set、trace 或 bundle digest 漂移 MUST 使整个运行
+  无效且不得报告正式分数。
+- **FR-041**: 在表示 bake-off、Compiler 或 optional projection 的正式满量评测前，
+  系统 MUST 对 LoCoMo 与 LongMemEval-S 分别完成有效 low/high B1 和同 provider、
+  answerer/judge model+revision、prompt、input/output cap 的 diagnostic-only
+  fixed-gold oracle，并输出
+  `CONTINUE | HOLD | STOP`。只有两个 benchmark 的 oracle 均达到 SC-002/SC-003 才可
+  `CONTINUE`；任一运行或 audit 不完整为 `HOLD`；有效 oracle 未达任一目标为 `STOP`，
+  此时不得以扩建 projection 继续追分。
 
 ### Key Entities
 
@@ -351,8 +384,8 @@ token cap 和一次 answerer 调用。
 
 - **SC-001**: 无损摄入路径下的 LoCoMo category 1–4 与 LongMemEval-S full 500 基线
   刷新完成，全部题目均有可追溯逐题结果和冻结配置 fingerprint。
-- **SC-002**: 同一默认架构在 LoCoMo category 1–4 上至少答对 1,425/1,540 题，
-  报告准确率不低于 92.6%。
+- **SC-002**: 同一默认架构在 LoCoMo category 1–4 上至少答对 1,425/1,540 题
+  （92.53%）；固定分母下以答对题数为唯一验收真值。
 - **SC-003**: 同一默认架构在 LongMemEval-S full 500 上至少答对 473/500 题，
   报告准确率不低于 94.6%。
 - **SC-004**: SC-002 与 SC-003 均在无付费托管 reranker/recall model、无默认云依赖
@@ -361,10 +394,12 @@ token cap 和一次 answerer 调用。
   逐题答案结果覆盖率为 100%；只有通过预注册双基准门的表示被选为默认。
 - **SC-006**: 固定候选 Compiler 的所有实验臂候选 ID 一致率为 100%，所有 Bundle 的
   实际 token 均不超过对应冻结 cap；candidate miss 与 compiler miss 分开报告率为 100%。
-- **SC-007**: 进入最终 Bundle 的 extractive span 可从 source 原文精确复原率为 100%，
-  生成句有效 source 引用覆盖率为 100%，无来源 `ADD` 接受数为 0。
-- **SC-008**: 每个进入默认路径的机制在同 answerer、judge、候选条件和 token cap 下，
-  相对前一冻结臂具有预注册的端到端配对证据；未过门机制默认启用数为 0。
+- **SC-007**: B1 control 与所有 Compiler arm 进入最终 Bundle 的 extractive span 可从
+  active Evidence 原文精确复原率为 100%，生成句有效 source 引用覆盖率为 100%，
+  source-only 代理验证数和无来源 `ADD` 接受数均为 0。
+- **SC-008**: 每个进入默认路径的机制在同 provider、answerer/judge model+revision、
+  候选条件和 input/output cap 下，相对前一冻结臂具有预注册的端到端配对证据；未过门
+  机制默认启用数为 0。
 - **SC-009**: 每次查询的补检次数不超过 1，answerer 调用次数不超过 1；无结构化 gap
   的补检次数为 0。
 - **SC-010**: 100% 的 active Fact、Episode 和 optional projection 能回到仍有效的
@@ -375,6 +410,12 @@ token cap 和一次 answerer 调用。
   隔离测试全部通过。
 - **SC-013**: 正式结果完整记录两 benchmark 的逐类别分数、逐题产物、统计检验、证据
   错误分类、预算、检索次数、延迟、成本和全部预注册消融，缺失字段数为 0。
+- **SC-014**: 每个正式 B1 题目的三次 answer repetition 之间 Candidate、Grounded Trace
+  和 Evidence Bundle digest 一致率均为 100%；出现漂移的题数为 0，且无效运行被接受为
+  正式分数的次数为 0。
+- **SC-015**: LoCoMo 与 LongMemEval-S 均具有有效 low/high B1、同栈 fixed-gold oracle
+  和唯一可审计的可行性 verdict；在 verdict 不是 `CONTINUE` 时启动后续正式满量机制
+  评测或 optional projection 建设的次数为 0。
 
 ## Assumptions
 
@@ -382,6 +423,8 @@ token cap 和一次 answerer 调用。
   但数据集本体和运行凭据不进入仓库。
 - 当前结果只作为刷新前参考；022 的比较基线必须在冻结协议和无损摄入 store 上重建。
 - Mem0 托管平台的 92.5% / 94.4% 是跨栈数值北极星，不是可同栈复现的科学基线。
+- 诊断运行即使完成全部题目，只要 repetition 间 Candidate、Trace 或 Bundle 漂移，
+  仍不构成 B1 基线；其分数只能用于发现评测基础设施或候选稳定性问题。
 - 原始对话只在调用方显式 ingest 时进入 Ledger；直接 write/add 不隐式抓取宿主会话。
 - 精确 token cap 是预注册实验变量。产品默认值由实验与规划阶段决定，不假设任意单一
   cap 在所有问题和 benchmark 上普遍最优。
