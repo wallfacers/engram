@@ -99,6 +99,73 @@ type memoryIngestOutput struct {
 	Entries        []ingestEntryOutput `json:"entries"`
 }
 
+// memoryIngestV2Input is the lossless ingest contract. Unlike the legacy
+// memory_ingest tool, it is available without an extractor and requires the
+// caller's stable turn identity and session ordering.
+type memoryIngestV2Input struct {
+	Namespace string                  `json:"namespace,omitempty" jsonschema:"target namespace; empty uses default"`
+	SessionID string                  `json:"session_id" jsonschema:"non-empty caller session ID"`
+	Messages  []memoryIngestV2Message `json:"messages" jsonschema:"source-identified conversation turns in ordinal order"`
+	Extract   *bool                   `json:"extract,omitempty" jsonschema:"whether to run optional fact extraction; defaults to true"`
+}
+
+type memoryIngestV2Message struct {
+	SourceID   string     `json:"source_id" jsonschema:"stable caller source ID within the session"`
+	Role       string     `json:"role" jsonschema:"message author: user or assistant"`
+	Text       string     `json:"text" jsonschema:"immutable original message text"`
+	Ordinal    int        `json:"ordinal" jsonschema:"zero-based position in this ingest batch"`
+	OccurredAt *time.Time `json:"occurred_at,omitempty" jsonschema:"optional RFC3339 message timestamp"`
+}
+
+type memoryIngestV2Output struct {
+	Evidence       []evidenceReceiptOutput `json:"evidence"`
+	ExtractedCount int                     `json:"extracted_count"`
+	Entries        []ingestEntryOutput     `json:"entries"`
+	Degraded       []string                `json:"degraded"`
+}
+
+type evidenceReceiptOutput struct {
+	SourceID   string `json:"source_id"`
+	EvidenceID string `json:"evidence_id"`
+	State      string `json:"state"`
+}
+
+type memoryEvidenceGetInput struct {
+	Namespace   string   `json:"namespace,omitempty" jsonschema:"target namespace; empty uses default"`
+	EvidenceIDs []string `json:"evidence_ids" jsonschema:"active evidence IDs in desired output order"`
+}
+
+type memoryEvidenceGetOutput struct {
+	Evidence []evidenceOutput `json:"evidence"`
+}
+
+// evidenceOutput intentionally contains source content only for an active
+// explicit get. Lifecycle events and errors never echo content.
+type evidenceOutput struct {
+	EvidenceID string     `json:"evidence_id"`
+	SourceID   string     `json:"source_id"`
+	SessionID  string     `json:"session_id"`
+	Role       string     `json:"role"`
+	Ordinal    int        `json:"ordinal"`
+	Content    string     `json:"content"`
+	OccurredAt *time.Time `json:"occurred_at"`
+	RecordedAt time.Time  `json:"recorded_at"`
+	State      string     `json:"state"`
+}
+
+type memoryEvidenceLifecycleInput struct {
+	Namespace  string `json:"namespace,omitempty" jsonschema:"target namespace; empty uses default"`
+	EvidenceID string `json:"evidence_id" jsonschema:"evidence ID"`
+	RequestID  string `json:"request_id,omitempty" jsonschema:"optional idempotency request ID"`
+	ReasonCode string `json:"reason_code" jsonschema:"non-empty non-content lifecycle reason code"`
+}
+
+type memoryEvidenceLifecycleOutput struct {
+	EvidenceID        string `json:"evidence_id"`
+	State             string `json:"state"`
+	CheckpointPending bool   `json:"checkpoint_pending,omitempty"`
+}
+
 type ingestEntryOutput struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
@@ -296,6 +363,193 @@ func (a *toolAdapter) memoryIngest(ctx context.Context, _ *mcp.CallToolRequest, 
 		entries = append(entries, ingestEntryOutput{Name: entry.Name, Content: entry.Content})
 	}
 	return nil, memoryIngestOutput{ExtractedCount: count, Entries: entries}, nil
+}
+
+// memoryIngestV2 persists source material even when extraction is unavailable.
+// It delegates all ledger, source validation, and projection semantics to the
+// engine; this adapter only maps the versioned MCP contract to public types.
+func (a *toolAdapter) memoryIngestV2(ctx context.Context, _ *mcp.CallToolRequest, input memoryIngestV2Input) (*mcp.CallToolResult, memoryIngestV2Output, error) {
+	sessionID := strings.TrimSpace(input.SessionID)
+	if sessionID == "" {
+		return nil, memoryIngestV2Output{}, errors.New("session_id is required")
+	}
+	messages := make([]pipeline.Message, 0, len(input.Messages))
+	seenSources := make(map[string]struct{}, len(input.Messages))
+	for index, message := range input.Messages {
+		sourceID := strings.TrimSpace(message.SourceID)
+		if sourceID == "" {
+			return nil, memoryIngestV2Output{}, fmt.Errorf("messages[%d].source_id is required", index)
+		}
+		if _, exists := seenSources[sourceID]; exists {
+			return nil, memoryIngestV2Output{}, fmt.Errorf("messages[%d].source_id duplicates %q", index, sourceID)
+		}
+		seenSources[sourceID] = struct{}{}
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role != "user" && role != "assistant" {
+			return nil, memoryIngestV2Output{}, fmt.Errorf("messages[%d].role must be user or assistant", index)
+		}
+		if message.Ordinal != index {
+			return nil, memoryIngestV2Output{}, fmt.Errorf("messages[%d].ordinal must equal %d", index, index)
+		}
+		messages = append(messages, pipeline.Message{
+			Role:             role,
+			Text:             message.Text,
+			ExternalSourceID: sourceID,
+			Ordinal:          message.Ordinal,
+			OccurredAt:       message.OccurredAt,
+		})
+	}
+	if len(messages) == 0 {
+		return nil, memoryIngestV2Output{}, errors.New("messages must contain at least one turn")
+	}
+
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
+	if err != nil {
+		return nil, memoryIngestV2Output{}, err
+	}
+	defer release()
+	extract := input.Extract == nil || *input.Extract
+	result := pipeline.IngestResult{Degraded: make([]string, 0)}
+	if extract && handle.pipe != nil {
+		result, err = handle.pipe.IngestDetailed(ctx, time.Time{}, sessionID, messages)
+		if err != nil {
+			return nil, memoryIngestV2Output{}, err
+		}
+	} else {
+		inputs := make([]memory.EvidenceInput, 0, len(messages))
+		recordedAt := time.Now().UTC()
+		for _, message := range messages {
+			inputs = append(inputs, memory.EvidenceInput{
+				ExternalSourceID: message.ExternalSourceID,
+				SourceType:       memory.EvidenceMessage,
+				SourceSessionID:  sessionID,
+				Speaker:          message.Role,
+				Ordinal:          message.Ordinal,
+				Content:          message.Text,
+				OccurredAt:       message.OccurredAt,
+				RecordedAt:       recordedAt,
+			})
+		}
+		result.Evidence, err = handle.ledger.AppendBatch(ctx, inputs)
+		if err != nil {
+			return nil, memoryIngestV2Output{}, err
+		}
+		if extract {
+			result.Degraded = append(result.Degraded, "extraction_unavailable")
+		}
+	}
+
+	output := memoryIngestV2Output{
+		Evidence:       make([]evidenceReceiptOutput, 0, len(result.Evidence)),
+		ExtractedCount: len(result.Entries),
+		Entries:        make([]ingestEntryOutput, 0, len(result.Entries)),
+		Degraded:       result.Degraded,
+	}
+	for _, evidence := range result.Evidence {
+		output.Evidence = append(output.Evidence, evidenceReceiptOutput{
+			SourceID: evidence.ExternalSourceID, EvidenceID: evidence.ID, State: string(evidence.State),
+		})
+	}
+	for _, entry := range result.Entries {
+		output.Entries = append(output.Entries, ingestEntryOutput{Name: entry.Name, Content: entry.Content})
+	}
+	return nil, output, nil
+}
+
+func (a *toolAdapter) memoryEvidenceGet(ctx context.Context, _ *mcp.CallToolRequest, input memoryEvidenceGetInput) (*mcp.CallToolResult, memoryEvidenceGetOutput, error) {
+	if len(input.EvidenceIDs) == 0 {
+		return nil, memoryEvidenceGetOutput{}, errors.New("evidence_ids must not be empty")
+	}
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
+	if err != nil {
+		return nil, memoryEvidenceGetOutput{}, err
+	}
+	defer release()
+	items, err := handle.ledger.GetMany(ctx, input.EvidenceIDs)
+	if err != nil {
+		return nil, memoryEvidenceGetOutput{}, err
+	}
+	output := memoryEvidenceGetOutput{Evidence: make([]evidenceOutput, 0, len(input.EvidenceIDs))}
+	for _, evidenceID := range input.EvidenceIDs {
+		output.Evidence = append(output.Evidence, toEvidenceOutput(items[evidenceID]))
+	}
+	return nil, output, nil
+}
+
+func (a *toolAdapter) memoryEvidenceTombstone(ctx context.Context, _ *mcp.CallToolRequest, input memoryEvidenceLifecycleInput) (*mcp.CallToolResult, memoryEvidenceLifecycleOutput, error) {
+	return a.memoryEvidenceTransition(ctx, input, "tombstone")
+}
+
+func (a *toolAdapter) memoryEvidenceRestore(ctx context.Context, _ *mcp.CallToolRequest, input memoryEvidenceLifecycleInput) (*mcp.CallToolResult, memoryEvidenceLifecycleOutput, error) {
+	return a.memoryEvidenceTransition(ctx, input, "restore")
+}
+
+func (a *toolAdapter) memoryEvidenceTransition(ctx context.Context, input memoryEvidenceLifecycleInput, action string) (*mcp.CallToolResult, memoryEvidenceLifecycleOutput, error) {
+	if strings.TrimSpace(input.EvidenceID) == "" {
+		return nil, memoryEvidenceLifecycleOutput{}, errors.New("evidence_id is required")
+	}
+	if strings.TrimSpace(input.ReasonCode) == "" {
+		return nil, memoryEvidenceLifecycleOutput{}, errors.New("reason_code is required")
+	}
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
+	if err != nil {
+		return nil, memoryEvidenceLifecycleOutput{}, err
+	}
+	defer release()
+	req := memory.LifecycleRequest{EvidenceID: input.EvidenceID, RequestID: input.RequestID, ReasonCode: input.ReasonCode}
+	if action == "tombstone" {
+		err = handle.ledger.Tombstone(ctx, req)
+	} else {
+		err = handle.ledger.Restore(ctx, req)
+	}
+	if err != nil {
+		return nil, memoryEvidenceLifecycleOutput{}, err
+	}
+	state := string(memory.EvidenceTombstoned)
+	if action == "restore" {
+		state = string(memory.EvidenceActive)
+	}
+	return nil, memoryEvidenceLifecycleOutput{EvidenceID: input.EvidenceID, State: state}, nil
+}
+
+func (a *toolAdapter) memoryEvidencePurge(ctx context.Context, _ *mcp.CallToolRequest, input memoryEvidenceLifecycleInput) (*mcp.CallToolResult, memoryEvidenceLifecycleOutput, error) {
+	if strings.TrimSpace(input.EvidenceID) == "" {
+		return nil, memoryEvidenceLifecycleOutput{}, errors.New("evidence_id is required")
+	}
+	if strings.TrimSpace(input.ReasonCode) == "" {
+		return nil, memoryEvidenceLifecycleOutput{}, errors.New("reason_code is required")
+	}
+	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
+	if err != nil {
+		return nil, memoryEvidenceLifecycleOutput{}, err
+	}
+	defer release()
+	result, err := handle.ledger.Purge(ctx, memory.LifecycleRequest{
+		EvidenceID: input.EvidenceID, RequestID: input.RequestID, ReasonCode: input.ReasonCode,
+	})
+	if err != nil {
+		if errors.Is(err, memory.ErrPurgeIncomplete) {
+			return nil, memoryEvidenceLifecycleOutput{}, errors.New("evidence purge checkpoint incomplete; retry the same request")
+		}
+		return nil, memoryEvidenceLifecycleOutput{}, err
+	}
+	return nil, memoryEvidenceLifecycleOutput{
+		EvidenceID: result.EvidenceID, State: string(memory.EvidencePurged), CheckpointPending: result.CheckpointPending,
+	}, nil
+}
+
+func toEvidenceOutput(evidence memory.Evidence) evidenceOutput {
+	return evidenceOutput{
+		EvidenceID: evidence.ID,
+		SourceID:   evidence.ExternalSourceID,
+		SessionID:  evidence.SourceSessionID,
+		Role:       evidence.Speaker,
+		Ordinal:    evidence.Ordinal,
+		Content:    evidence.Content,
+		OccurredAt: evidence.OccurredAt,
+		RecordedAt: evidence.RecordedAt,
+		State:      string(evidence.State),
+	}
 }
 
 func toEntryOutput(entry *memory.Entry) entryOutput {

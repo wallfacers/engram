@@ -50,10 +50,13 @@ asked for a sequence such as write then search.
 target, namespace, or destructive scope is ambiguous, ask before calling. A clear
 "remember this" request is explicit write intent; generic conversation is not.
 
-`ingest` and `curate` also require a configured LLM. For MCP ingest, the exact
-`memory_ingest` tool must appear in the live tool list. Missing LLM capability is
-`blocked`, not a successful extraction or curation. Do not enable background
-curation or invent a curation MCP tool.
+`curate` requires a configured LLM. For lossless MCP ingest, use
+`memory_ingest_v2` only when the caller supplies a stable session ID, a stable
+source ID and ordinal for every user/assistant turn. It persists raw Evidence
+offline; a zero extraction count with `degraded: ["extraction_unavailable"]`
+means the source was saved but no facts were extracted. The legacy
+`memory_ingest` remains LLM-only. Do not enable background curation or invent a
+curation MCP tool.
 
 Stop before writing, ingesting, or exporting likely API keys, tokens, passwords,
 private keys, or similar secrets. Do not repeat them in commands or evidence;
@@ -75,7 +78,7 @@ recommend a hosted reranker or recall model as a prerequisite or scoring lever.
 | Intent | Preferred surface | Rule |
 |---|---|---|
 | write, search, get, list, delete | MCP, then CLI | one namespace; preserve actual response |
-| ingest | live `memory_ingest`, then CLI | explicit intent, LLM required, only user/assistant turns |
+| ingest | live `memory_ingest_v2`, then CLI | explicit intent; stable session/source IDs and user/assistant turns required |
 | curate | CLI | explicit intent, LLM and confirmed CLI store |
 | stats, export, namespace discovery | CLI | confirm required data directory; export no secrets |
 | version | CLI | `engram version` needs no data directory |

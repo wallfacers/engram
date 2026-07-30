@@ -30,6 +30,7 @@ type RegistryConfig struct {
 type NamespaceHandle struct {
 	store     *store.Store
 	entries   *memory.EntryStore
+	ledger    *memory.LedgerStore
 	vectors   *memory.VectorStore
 	embedder  *memory.Embedder
 	retriever *memory.Retriever
@@ -192,6 +193,7 @@ func (r *Registry) Acquire(ctx context.Context, namespace string) (*NamespaceHan
 		return nil, nil, fmt.Errorf("open namespace %q: %w", ns, err)
 	}
 	entries := memory.NewEntryStore(st.DB())
+	ledger := entries.Ledger()
 	vectors := memory.NewVectorStore(st.DB())
 	embedder := memory.NewEmbedder(entries, vectors, r.embClient, memory.DefaultEmbedBuffer)
 	retriever := memory.NewRetriever(entries, vectors, r.embClient)
@@ -214,6 +216,7 @@ func (r *Registry) Acquire(ctx context.Context, namespace string) (*NamespaceHan
 	}
 	pipe := pipeline.New(pipeline.Config{
 		Entries:  entries,
+		Ledger:   ledger,
 		Embedder: embedder,
 		Call:     r.llmCaller,
 		Budgets:  memory.DefaultBudgets(),
@@ -222,6 +225,7 @@ func (r *Registry) Acquire(ctx context.Context, namespace string) (*NamespaceHan
 	handle := &NamespaceHandle{
 		store:         st,
 		entries:       entries,
+		ledger:        ledger,
 		vectors:       vectors,
 		embedder:      embedder,
 		retriever:     retriever,

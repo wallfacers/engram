@@ -7,7 +7,12 @@
   "mcp": {
     "always": [
       "memory_delete",
+      "memory_evidence_get",
+      "memory_evidence_purge",
+      "memory_evidence_restore",
+      "memory_evidence_tombstone",
       "memory_get",
+      "memory_ingest_v2",
       "memory_list",
       "memory_search",
       "memory_write"
@@ -70,9 +75,9 @@
     {
       "name": "ingest",
       "mutating": true,
-      "mcp": "memory_ingest",
+      "mcp": "memory_ingest_v2",
       "cli": "ingest",
-      "condition": "explicit intent + LLM"
+      "condition": "explicit intent + stable session and source IDs"
     },
     {
       "name": "curate",

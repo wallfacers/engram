@@ -13,6 +13,11 @@ actually exposes the required engram tool. The authoritative names are in
 | `memory_list` | — | `namespace` | `entries` |
 | `memory_get` | `name` | `namespace` | `entry`, or a tool error when absent |
 | `memory_delete` | `name` | `namespace` | `deleted:true` or `deleted:false` |
+| `memory_ingest_v2` | `session_id`, source-identified ordered `messages` | `namespace`, `extract` (default `true`) | persisted Evidence receipts, extracted entries, degradation |
+| `memory_evidence_get` | ordered `evidence_ids` | `namespace` | requested active Evidence in the same order |
+| `memory_evidence_tombstone` | `evidence_id`, `reason_code` | `namespace`, `request_id` | tombstoned state |
+| `memory_evidence_restore` | `evidence_id`, `reason_code` | `namespace`, `request_id` | active state; derived views stay stale |
+| `memory_evidence_purge` | `evidence_id`, `reason_code` | `namespace`, `request_id` | purged state and checkpoint status |
 
 Pass the selected namespace on every relevant call. Empty input resolves to
 `default`, but report it explicitly. A valid namespace matches
@@ -27,7 +32,15 @@ or `trigger`. Content over the adapter budget (1,200 Unicode code points) and a
 trigger over 120 single-line code points remain rejected; preserve that error
 rather than truncating it.
 
-## Conditional ingest
+## Lossless and conditional ingest
+
+`memory_ingest_v2` is always registered. Use it only after explicit user
+intent and only with caller-provided stable `session_id`, per-turn `source_id`,
+zero-based ordinal, and `user`/`assistant` roles. It saves original source
+content before attempting optional extraction. When no LLM is configured, it
+returns `extracted_count:0` and `degraded:["extraction_unavailable"]`: that is
+a successful source write, not a fact-extraction claim. Do not place secrets in
+source text, source IDs, request IDs, or lifecycle reason codes.
 
 `memory_ingest` exists only when it appears in the current `tools/list`; its
 presence means the server was configured with an LLM caller. It accepts:
@@ -50,11 +63,12 @@ fall back to a different state-changing operation.
 
 ## Offline, errors, and non-tools
 
-The five always-registered tools work without embedding or LLM endpoints.
+The ten always-registered tools work without embedding or LLM endpoints.
 Offline search can return `degraded.semantic:true` with a reason; report that
 returned structural fact, but do not probe engine-internal signal failures.
 An empty search/list, `memory_get` tool error, `deleted:false`, validation
-error, or adapter error stays empty, not-found, blocked, or failed—not success.
+error, unavailable Evidence, or adapter error stays empty, not-found, blocked,
+or failed—not success.
 
 These MCP tools do **not** exist and must never be called:
 

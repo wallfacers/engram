@@ -93,8 +93,8 @@ purge closure 完整且旧 Search/write parity 不变。
 - [X] T026 [P] [US1] 为现有 Upsert 自动 self Evidence、同内容复用、改内容 append、`UpsertWithSources` 和 Delete-only-projection 写失败测试到 `memory/entrystore_test.go`
 - [X] T027 [P] [US1] 为 Evidence-before-extraction、实际 source IDs、unknown/empty source 拒绝、模型失败保留 raw 和 duplicate fact union lineage 写失败测试到 `memory/pipeline/pipeline_test.go`
 - [X] T028 [P] [US1] 为近重复 dedup/curation merge 的 source union、无来源 merge 禁止和 rollback 写失败测试到 `memory/curation/dedup_test.go`
-- [ ] T029 [P] [US1] 为 tombstone/restore、secure-delete purge closure、WAL checkpoint retry、异步 embedder stale-write race 和无内容审计写失败测试到 `memory/evidence_lifecycle_test.go`
-- [ ] T030 [P] [US1] 为 `memory_ingest_v2` 离线保存、Evidence get/lifecycle tools、旧 tool schema parity、同 source ID 跨 namespace 隔离和 secret safety 写失败测试到 `mcpserver/evidence_contract_test.go`
+- [X] T029 [P] [US1] 为 tombstone/restore、secure-delete purge closure、WAL checkpoint retry、异步 embedder stale-write race 和无内容审计写失败测试到 `memory/evidence_lifecycle_test.go`
+- [X] T030 [P] [US1] 为 `memory_ingest_v2` 离线保存、Evidence get/lifecycle tools、旧 tool schema parity、同 source ID 跨 namespace 隔离和 secret safety 写失败测试到 `mcpserver/evidence_contract_test.go`
 
 ### Engine implementation — US1
 
@@ -110,7 +110,7 @@ purge closure 完整且旧 Search/write parity 不变。
 
 ### Adapter and verification
 
-- [ ] T040 [US1] 仅通过 engine API 接入 `memory_ingest_v2`、Evidence get/tombstone/restore/purge tools 到 `mcpserver/tools.go`、`mcpserver/server.go` 和 `mcpserver/registry.go`
+- [X] T040 [US1] 仅通过 engine API 接入 `memory_ingest_v2`、Evidence get/tombstone/restore/purge tools 到 `mcpserver/tools.go`、`mcpserver/server.go` 和 `mcpserver/registry.go`
 - [ ] T041 [P] [US1] 添加 100k Evidence/projection fixture、SQL query counter 和 batch-lineage benchmark，证明无 per-candidate N+1 到 `memory/projection_benchmark_test.go`
 - [ ] T042 [US1] 添加 ingest→fact→merge→tombstone→restore→purge 的离线端到端测试到 `memory/evidence_integration_test.go`
 - [ ] T043 [US1] 运行 US1 touched-package tests、`CGO_ENABLED=0 go build ./...` 和全量 `go test -count=1 ./...`，把结果记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
