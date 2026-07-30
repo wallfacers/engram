@@ -2,7 +2,7 @@
 title: engram vs MemOS 上下文预算剥离
 summary: 固定 store/embed/judge，扫 answerer 上下文预算对齐 MemOS 的 ~1059 tok，分离 engram 同栈领先中"预算"与"记忆机制"的贡献；结论是领先完全由预算驱动。
 status: stable
-audience: [maintainers, researchers]
+audience: [maintainers, agents]
 owner: engram-maintainers
 last_reviewed: 2026-07-29
 canonical_for: [budget-ablation]

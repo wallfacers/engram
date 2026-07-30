@@ -25,7 +25,8 @@ tags: [documentation, portal, navigation]
 | Feature 013 是否出货？ | [实验裁决索引](evaluation/experiment-verdicts.md) | closed-no-go，不在当前路线 |
 | 新鲜度与状态一致性是否实现？ | [当前能力边界](product/capabilities.md) | 尚未实现，见 proposed backlog |
 | SaaS 习惯记忆是否为当前能力？ | [当前能力边界](product/capabilities.md) | 未立项、未实现，见 proposed exploration |
-| 当前论文方向？ | [论文方向](research/paper-direction.md) | 负结果史、共同失败机理与低成本止损 |
+| 当前论文方向？ | [论文方向](research/paper-direction.md) | 评测可靠性与双基准结构研究 |
+| 论文对哪些记忆机制有可靠证据？ | [论文成绩与机制证据](research/high-scoring-memory-systems.md) | 分开登记完整系统成绩、受控机制、依赖成本和待证伪假设 |
 
 ## 使用指南
 
@@ -69,7 +70,9 @@ npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-ski
 - [产品路线图](product/roadmap.md)：当前方向与明确排除项。
 - [记忆新鲜度与状态一致性 Backlog](product/backlog/memory-freshness.md)：未实现的 proposed backlog。
 - [SaaS 习惯记忆探索](product/explorations/habit-memory.md)：未立项、未实现的 proposed 探索。
-- [论文方向](research/paper-direction.md)：评测可靠性研究方向。
+- [长期记忆系统成绩与机制证据登记](research/high-scoring-memory-systems.md)：分开记录 LoCoMo/LongMemEval 完整系统成绩、受控机制证据和工程边界。
+- [查询期证据编译架构探索](product/explorations/benchmark-parity-memory-architecture.md)：未实现的 Mem0 数值目标、Evidence Compiler 合同与分阶段证伪顺序。
+- [论文方向](research/paper-direction.md)：评测可靠性与双基准结构研究方向。
 
 ## AI 检索协议
 

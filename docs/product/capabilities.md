@@ -4,7 +4,7 @@ summary: 本文说明 engram 当前已交付能力及明确未实现的边界；
 status: stable
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-28
+last_reviewed: 2026-07-29
 canonical_for: [current-capabilities]
 tags: [product, capabilities, lifecycle]
 ---
@@ -25,6 +25,11 @@ tags: [product, capabilities, lifecycle]
 记忆新鲜度与状态一致性尚未实现为完整能力；现有 provenance、supersession 或 side table 不能替代这项保证。问题定义和验收边界见[新鲜度 backlog](backlog/memory-freshness.md)，该页面是未实现的 proposed 工作项。
 
 SaaS 习惯记忆未立项，也未实现；它不是当前产品能力。探索假设与停止条件见[习惯记忆探索](explorations/habit-memory.md)，该页面同样是未实现的 proposed 探索。
+
+不可损失 Evidence Ledger、Semantic Episode View、Query-time Evidence Compiler
+和 Grounded Trace 尚未实现，也没有批准进入实施。Event、Scene、Profile 与 graph
+只是须独立消融的可重建 projection，不是当前能力或预定层级。边界和证伪顺序见
+[查询期证据编译架构探索](explorations/benchmark-parity-memory-architecture.md)。
 
 ## 不应由实现痕迹推断的能力
 

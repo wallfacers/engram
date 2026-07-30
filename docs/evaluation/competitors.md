@@ -1,10 +1,10 @@
 ---
 title: 竞品与基准口径
-summary: 本文说明竞品自报与同栈复现的比较边界；不维护 engram 当前分数矩阵的副本。
+summary: 本文说明竞品自报、论文高分和同栈复现的比较边界；不维护 engram 当前分数矩阵的副本。
 status: active
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-28
+last_reviewed: 2026-07-29
 canonical_for: [competitors]
 tags: [evaluation, competitors, methodology]
 ---
@@ -24,3 +24,14 @@ MemOS 已在 engram 的同款 answerer、embedding 与 judge 条件下完成 LoC
 ## 厂商自报边界
 
 Mem0、MemOS 或其他厂商的公开数字可作为外部来源记录，但必须标为自报并保留原始口径链接。它们不能被改写为 engram 的相对排名，也不能取代当前结果正本。
+
+Mem0 2025 论文只报告 LoCoMo，其结果与后续托管平台 New Memory Algorithm 的
+LoCoMo/LongMemEval 自报不是同一套系统和口径。后者不可由开源 SDK 同栈复现，
+因此只能作为数值方向锚。
+
+## 论文成绩与机制记录
+
+LoCoMo/LongMemEval 的完整系统分数、受控机制实验、工程依赖和口径差异统一记录在
+[长期记忆系统成绩与机制证据登记](../research/high-scoring-memory-systems.md)。该记录
+允许未达到 90% 的论文提供机制证据，但不把跨论文 leaderboard 数字或完整 bundle
+写成受控竞品结论。
