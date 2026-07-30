@@ -632,9 +632,14 @@ func (s *LedgerStore) Purge(ctx context.Context, req LifecycleRequest) (PurgeRes
 }
 
 func (s *LedgerStore) finishPurgeCheckpoint(ctx context.Context, evidenceID string) (PurgeResult, error) {
-	if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	var busy, logFrames, checkpointedFrames int
+	if err := s.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
 		return PurgeResult{EvidenceID: evidenceID, Purged: true, CheckpointPending: true},
 			fmt.Errorf("%w: %v", ErrPurgeIncomplete, err)
+	}
+	if busy != 0 {
+		return PurgeResult{EvidenceID: evidenceID, Purged: true, CheckpointPending: true},
+			fmt.Errorf("%w: WAL checkpoint busy", ErrPurgeIncomplete)
 	}
 	return PurgeResult{EvidenceID: evidenceID, Purged: true}, nil
 }
