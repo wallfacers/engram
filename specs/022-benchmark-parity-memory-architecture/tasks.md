@@ -106,7 +106,7 @@ purge closure 完整且旧 Search/write parity 不变。
 - [X] T036 [US1] 实现 `IngestDetailed` 的 Ledger-first 两事务流程、兼容 wrapper 和 degraded extraction 结果到 `memory/pipeline/pipeline.go`
 - [X] T037 [US1] 在 curation 调用的 `EntryStore.Merge` 中直连所有实际 Evidence 并拒绝空 lineage 到 `memory/entrystore.go`，以 `memory/curation/dedup_test.go` 验证
 - [ ] T038 [US1] 用 projection/head revision 防止 purge/tombstone 后 embedder 或 side-index stale 回写到 `memory/embedder.go`
-- [ ] T039 [P] [US1] 给 `memory.Result` 添加零值安全稳定 ID/projection kind，并保持 Search 排序与信号降级不变到 `memory/retriever.go`
+- [X] T039 [P] [US1] 给 `memory.Result` 添加零值安全稳定 ID/projection kind，并保持 Search 排序与信号降级不变到 `memory/retriever.go`
 
 ### Adapter and verification
 

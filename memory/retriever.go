@@ -97,6 +97,9 @@ func (r *Retriever) WithReranker(rr embedding.Reranker) *Retriever {
 // Result is one fused retrieval hit. Content carries the full entry body; the
 // tool layer derives a snippet. EventDate/CreatedAt drive time-aware rendering.
 type Result struct {
+	ID              string
+	ProjectionID    string
+	ProjectionKind  ProjectionKind
 	Name            string
 	Trigger         string
 	Content         string
@@ -183,6 +186,8 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 			continue
 		}
 		out = append(out, Result{
+			ID:              entry.ID,
+			ProjectionKind:  ProjectionAtomicFact,
 			Name:            entry.Name,
 			Trigger:         entry.Trigger,
 			Content:         entry.Content,
@@ -193,6 +198,7 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 			Score:           score.Score,
 		})
 	}
+	r.attachProjectionIdentity(ctx, out)
 	return out, nil
 }
 
@@ -292,6 +298,8 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 			continue // entry removed between ranking and load; skip
 		}
 		out = append(out, Result{
+			ID:              e.ID,
+			ProjectionKind:  ProjectionAtomicFact,
 			Name:            e.Name,
 			Trigger:         e.Trigger,
 			Content:         e.Content,
@@ -302,7 +310,69 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 			Score:           s.Score,
 		})
 	}
+	r.attachProjectionIdentity(ctx, out)
 	return out, diagnostics, nil
+}
+
+// attachProjectionIdentity batch-loads the rebuildable atomic-fact view IDs
+// after ranking. A missing or failed derived view leaves ProjectionID at its
+// documented zero value and never changes Search ordering or signal fallback.
+func (r *Retriever) attachProjectionIdentity(ctx context.Context, results []Result) {
+	if r == nil || r.entries == nil || len(results) == 0 {
+		return
+	}
+	entryIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.ID == "" {
+			continue
+		}
+		if _, exists := seen[result.ID]; exists {
+			continue
+		}
+		seen[result.ID] = struct{}{}
+		entryIDs = append(entryIDs, result.ID)
+	}
+	projectionByEntryID := make(map[string]string, len(entryIDs))
+	for start := 0; start < len(entryIDs); start += 500 {
+		end := start + 500
+		if end > len(entryIDs) {
+			end = len(entryIDs)
+		}
+		batch := entryIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for index, entryID := range batch {
+			placeholders[index] = "?"
+			args[index] = entryID
+		}
+		rows, err := r.entries.db.QueryContext(ctx, `
+			SELECT id, object_key
+			FROM memory_projections
+			WHERE kind = 'atomic_fact' AND object_key IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			slog.Warn("memory: projection identity degraded", "err", err)
+			return
+		}
+		for rows.Next() {
+			var projectionID, entryID string
+			if err := rows.Scan(&projectionID, &entryID); err != nil {
+				rows.Close() //nolint:errcheck
+				slog.Warn("memory: projection identity degraded", "err", err)
+				return
+			}
+			projectionByEntryID[entryID] = projectionID
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			slog.Warn("memory: projection identity degraded", "err", err)
+			return
+		}
+		rows.Close() //nolint:errcheck
+	}
+	for index := range results {
+		results[index].ProjectionID = projectionByEntryID[results[index].ID]
+	}
 }
 
 func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored, window TimeWindow) []embedding.Scored {
