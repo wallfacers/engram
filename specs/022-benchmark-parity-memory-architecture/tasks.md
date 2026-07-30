@@ -43,22 +43,22 @@ projection 是条件阶段；未满足前置 residual-cohort gate 时以 STOP ve
 
 ### Tests first — Foundational
 
-- [ ] T005 [P] 为 canonical protocol JSON、fingerprint、dirty-run policy 和 resume refusal 写失败测试到 `cmd/locomo-bench/eval_protocol_test.go`
-- [ ] T006 [P] 为 ranked anchors、rendered candidate byte replay、source coverage strata 和 candidate-set digest 写失败测试到 `cmd/locomo-bench/candidate_artifact_test.go`
-- [ ] T007 [P] 为 majority 聚合、任意 discordant 数的 two-sided exact McNemar、Holm category non-regression 和 GO/HOLD/STOP 写失败测试到 `cmd/locomo-bench/paired_eval_test.go`
-- [ ] T008 [P] 为全部 discordant + concordant 分层抽样、双 reviewer 盲标、adjudication、FN/FP 与 verdict-change 检测写失败测试到 `cmd/locomo-bench/judge_audit_test.go`
-- [ ] T009 [P] 为 `gold_unresolved|candidate_miss|compiler_miss|answerer_miss|success` 互斥分类和 diagnostic-only fixed-gold oracle 写失败测试到 `cmd/locomo-bench/miss_attribution_test.go`
-- [ ] T010 [P] 为 CJK、emoji、数字、时间、chat-template 边界、cap±1、fingerprint drift 和非加性 tokenizer 写失败测试到 `cmd/locomo-bench/token_counter_test.go`
+- [X] T005 [P] 为 canonical protocol JSON、fingerprint、dirty-run policy 和 resume refusal 写失败测试到 `cmd/locomo-bench/eval_protocol_test.go`
+- [X] T006 [P] 为 ranked anchors、rendered candidate byte replay、source coverage strata 和 candidate-set digest 写失败测试到 `cmd/locomo-bench/candidate_artifact_test.go`
+- [X] T007 [P] 为 majority 聚合、任意 discordant 数的 two-sided exact McNemar、Holm category non-regression 和 GO/HOLD/STOP 写失败测试到 `cmd/locomo-bench/paired_eval_test.go`
+- [X] T008 [P] 为全部 discordant + concordant 分层抽样、双 reviewer 盲标、adjudication、FN/FP 与 verdict-change 检测写失败测试到 `cmd/locomo-bench/judge_audit_test.go`
+- [X] T009 [P] 为 `gold_unresolved|candidate_miss|compiler_miss|answerer_miss|success` 互斥分类和 diagnostic-only fixed-gold oracle 写失败测试到 `cmd/locomo-bench/miss_attribution_test.go`
+- [X] T010 [P] 为 CJK、emoji、数字、时间、chat-template 边界、cap±1、fingerprint drift 和非加性 tokenizer 写失败测试到 `cmd/locomo-bench/token_counter_test.go`
 
 ### Measurement implementation
 
-- [ ] T011 定义供 B1 与 Compiler 共用的 provider-neutral `AnswerInput`、`TokenCounter`、candidate/source/action 基础类型到 `memory/evidencecompiler/types.go`
-- [ ] T012 实现 `022.v1` protocol canonicalization、hash、validation 和 resume refusal 到 `cmd/locomo-bench/eval_protocol.go`
-- [ ] T013 [P] 实现 ranked anchor、rendered candidate、continuous source coverage、JSONL round-trip 与 digest 校验到 `cmd/locomo-bench/candidate_artifact.go`
-- [ ] T014 [P] 实现 majority、exact McNemar、confidence interval、Holm category gate 与 promotion verdict 到 `cmd/locomo-bench/paired_eval.go`
-- [ ] T015 [P] 实现预注册 judge audit 采样、盲标导入、adjudication 和 raw/corrected summary 到 `cmd/locomo-bench/judge_audit.go`
-- [ ] T016 [P] 实现 source-ID 解析、互斥 miss attribution 和不进入正式分数的 fixed-gold oracle 到 `cmd/locomo-bench/miss_attribution.go`
-- [ ] T017 实现与实际本地 answerer tokenizer/chat template 同栈的 counter、calibration 和 fail-closed fingerprint 到 `cmd/locomo-bench/token_counter.go`
+- [X] T011 定义供 B1 与 Compiler 共用的 provider-neutral `AnswerInput`、`TokenCounter`、candidate/source/action 基础类型到 `memory/evidencecompiler/types.go`
+- [X] T012 实现 `022.v1` protocol canonicalization、hash、validation 和 resume refusal 到 `cmd/locomo-bench/eval_protocol.go`
+- [X] T013 [P] 实现 ranked anchor、rendered candidate、continuous source coverage、JSONL round-trip 与 digest 校验到 `cmd/locomo-bench/candidate_artifact.go`
+- [X] T014 [P] 实现 majority、exact McNemar、confidence interval、Holm category gate 与 promotion verdict 到 `cmd/locomo-bench/paired_eval.go`
+- [X] T015 [P] 实现预注册 judge audit 采样、盲标导入、adjudication 和 raw/corrected summary 到 `cmd/locomo-bench/judge_audit.go`
+- [X] T016 [P] 实现 source-ID 解析、互斥 miss attribution 和不进入正式分数的 fixed-gold oracle 到 `cmd/locomo-bench/miss_attribution.go`
+- [X] T017 实现与实际本地 answerer tokenizer/chat template 同栈的 counter、calibration 和 fail-closed fingerprint 到 `cmd/locomo-bench/token_counter.go`
 - [ ] T018 为 protocol→candidate→classification→summary 的完整/缺失/篡改 artifact 流写失败集成测试到 `cmd/locomo-bench/eval_protocol_integration_test.go`
 - [ ] T019 在 `cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/journal.go`、`cmd/locomo-bench/jsonio.go`、`cmd/locomo-bench/stats.go` 和薄接线 `cmd/locomo-bench/main.go` 中集成 `022.v1`，并结构性关闭正式 arm 的 IRIS 与 legacy IDK retry
 
