@@ -373,3 +373,72 @@ fixed-gold artifact appears in its run directory.
 T111 is complete. T044 and T045 remain the two local/acceptance prerequisites
 before T021 may freeze and execute B0, valid low/high B1, and fixed-gold
 oracle artifacts.
+
+### T044 storage/extraction regression slice
+
+**Date**: 2026-07-30
+
+The comparable slice used the first two LoCoMo conversations and all 40 of
+their category 1–4 questions. Both sides used the same Qwen answer/extraction
+model, BGE embedding model, DeepSeek judge, `hybrid`, lossless chunks,
+`chunk-quota=7`, `top-k=30`, force-answer, aligned-judge, and disabled legacy
+IDK retry. The source baseline was `d9b8916`; the Ledger candidate was
+`7ee713b`.
+
+The first baseline attempt was invalid because its session judge credential
+returned HTTP 401. A later candidate diagnostic completed at 36/40 but had one
+extractor JSON parse failure, one extractor transport failure, and recovered
+embedding retries, so it is retained in the scratchpad but excluded from the
+gate. Neither invalid attempt is reported as a comparable score.
+
+The accepted pair completed exactly 40 results on both sides without model,
+judge, retrieval, or store errors:
+
+| Arm | Correct | Accuracy | Gate interpretation |
+|---|---:|---:|---|
+| Pre-Ledger baseline | 37/40 | 92.5% | Frozen comparison |
+| Post-Ledger clean run, raw judge | 38/40 | 95.0% | No raw-score regression |
+| Post-Ledger, conservative identical-answer correction | 37/40 | 92.5% | No regression |
+
+One question (`conv-0-q-11`) received opposite judge labels even though both
+runs produced the identical answer text `her home country`. Treating that
+answer as incorrect on both sides removes the judge-only gain and leaves the
+candidate exactly level with the baseline. This slice therefore establishes
+non-regression; it is not a formal B1 score or a substitute for the T022 judge
+audit.
+
+| Artifact | Baseline SHA-256 | Post-Ledger SHA-256 |
+|---|---|---|
+| `results-hybrid.jsonl` | `eeaa7c6328b103423d58d62cecfbc2cf173617768b407dae5ad75d5b1614fed2` | `e5f991ca76bfdac68456df1d1fc4abe31ce6836185fad5ce269a7734687ad5c5` |
+| `stats.json` | `351f6a45f7308d5bf00b601798826ac5fe9c7e2ab1cbf663853de30188bc0761` | `39f004d1bd1489515357b17ecd584a7557f4894b2edde9007e0632dee5b50a51` |
+| `cost.json` | `04b54a40a1c85ade7231cfd8d75aa550fdaa4f3443494d72fcf9afefdaff15fb` | `0ec6807f6ed65fef4f60442e72c2baa37e772d6a629eed33282793803fcdc421` |
+| `regime.json` | `64050dd583d1d3a7ab4c99b04e88a76402f815efffdf6aad78bcb4b219016461` | `64050dd583d1d3a7ab4c99b04e88a76402f815efffdf6aad78bcb4b219016461` |
+| `context_parity.jsonl` | `dba4307b7567d8bcc9ce477080c71f34f017af46224e02a5ef524fd39a7e5a7f` | `8d9d2dd083cde717fc814c8578847d30e5941de416b7e8829bf6e68e8aaf329d` |
+
+T044 is complete.
+
+### T045 Ledger MVP independent acceptance
+
+**Date**: 2026-07-30
+
+The Ledger was accepted independently of Episode, Compiler, Event, or optional
+projection work. The default EntryStore/Search path, source-backed projection
+lookup, lifecycle closure, MCP namespace boundary, and the existing 003 graph
+contracts all passed with the optional later-stage mechanisms absent.
+
+| Check | Result |
+|---|---|
+| Lifecycle, stale-index, ingest/merge/purge closure, batched projection lookup | PASS — targeted `./memory` tests |
+| Default retrieval parity and 003 graph contracts | PASS — targeted `./memory` tests |
+| Namespace isolation, path containment, Evidence/MCP contract | PASS — targeted `./mcpserver` tests |
+| LongMemEval oversized-turn preservation and repeated-DiaID coverage | PASS — three targeted `./cmd/locomo-bench` tests |
+| 100k source-lineage benchmark | PASS — `373656734 ns/op`, `52998568 B/op`, `1406745 allocs/op`; the fixture asserts exactly 200 batched lookup queries for 100,000 candidates |
+| Comparable answerable slice | PASS — conservative 37/40 equals the 37/40 baseline |
+
+This closes the US1 checkpoint: every accepted active Atomic Fact remains
+source-backed, lifecycle deletion fails closed in projections and side
+indexes, namespace isolation remains adapter-enforced, and default write/search
+continues without any later-stage representation or compiler. T045 is complete.
+Together with T109, T110, and T111, this unlocks T021 protocol freezing and
+formal execution; it does not itself produce B0, B1, oracle, SC-002, SC-003, or
+F0 results.

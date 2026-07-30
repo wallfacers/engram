@@ -119,8 +119,8 @@ purge closure 完整且旧 Search/write parity 不变。
 - [X] T041 [P] [US1] 添加 100k Evidence/projection fixture、SQL query counter 和 batch-lineage benchmark，证明无 per-candidate N+1 到 `memory/projection_benchmark_test.go`
 - [X] T042 [US1] 添加 ingest→fact→merge→tombstone→restore→purge 的离线端到端测试到 `memory/evidence_integration_test.go`
 - [X] T043 [US1] 运行 US1 touched-package tests、`CGO_ENABLED=0 go build ./...` 和全量 `go test -count=1 ./...`，把结果记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T044 [US1] 在 B1 同口径 slice 上运行 storage/extraction regression，确认默认 Search/write、003 graph、namespace 和 answerable mean 不回退，并记录 artifact hashes 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T045 [US1] 按 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 完成 US1 独立验收并在 `docs/evaluation/reports/benchmark-parity-memory-architecture.md` 记录 Ledger MVP checkpoint
+- [X] T044 [US1] 在 B1 同口径 slice 上运行 storage/extraction regression，确认默认 Search/write、003 graph、namespace 和 answerable mean 不回退，并记录 artifact hashes 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [X] T045 [US1] 按 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 完成 US1 独立验收并在 `docs/evaluation/reports/benchmark-parity-memory-architecture.md` 记录 Ledger MVP checkpoint
 
 **Checkpoint**: Evidence Ledger 可独立交付；即使 Episode/Compiler/Event 全未启用，既有写入
 与搜索仍工作且所有 active Atomic Fact 可回到有效 source。
