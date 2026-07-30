@@ -442,3 +442,145 @@ continues without any later-stage representation or compiler. T045 is complete.
 Together with T109, T110, and T111, this unlocks T021 protocol freezing and
 formal execution; it does not itself produce B0, B1, oracle, SC-002, SC-003, or
 F0 results.
+
+## T021/T022 formal acceptance attempt: HOLD on independent B1 read-back
+
+**Date**: 2026-07-30
+**Runner commit**: `9eeec93a2d51ccd6b8784e9f557051ec32a3973b`
+**Formal binary SHA-256**:
+`dd90187b168f650236e5505f70f157b39a32192fe2c2d22e04fc4f17d7ff60b4`
+
+All six manifests were frozen from the same clean worktree, with the calibrated
+counter fingerprint
+`sha256:13dda39a2a9b241cef10ffde7eba02943e77fdbed9c80b39f27b3ed874e66997`,
+`hybrid`, `top-k=30`, `chunk-quota=7`, no reranker, and the
+`ledger_lossless_chunks_v2` ingestion recipe:
+
+| Benchmark / arm | Cap | Protocol hash | Execution status |
+|---|---:|---|---|
+| LoCoMo B0 continuity | unbounded legacy | `sha256:49ba0fa3a53afde56ac3a4a34168aea797375e9fea4bf507f7c2abda779ae41c` | VALID continuity only |
+| LoCoMo B1 low | 1,100 | `sha256:940947283dd4cca3baf53a7fcb62e9cf46f1e720cf32d5e5fadb1f5d695cb883` | INVALID for acceptance: independent read-back rejected |
+| LoCoMo B1 high | 3,600 | `sha256:a8e4c15d11d1dd3314611a0efe38dba9bacaffdf8d48c70bf21ebfe59f1cc929` | NOT RUN after hard validity failure |
+| LongMemEval-S B0 continuity | unbounded legacy | `sha256:eb188aa130fae43615bc6e2358392551e58766a2f7684bbb2c4c585cfc54c82f` | NOT RUN after hard validity failure |
+| LongMemEval-S B1 low | 1,100 | `sha256:81abb6289e787a0173efb6d63888ad40b726e6b953c3891052eb7326eaaa121a` | NOT RUN after hard validity failure |
+| LongMemEval-S B1 high | 3,600 | `sha256:5d99d8bfb7a425efae79ceccb51e311ded0564340c4b4d6a5d3fe886825e778c` | NOT RUN after hard validity failure |
+
+### Shared LoCoMo Ledger prebuild
+
+The one accepted prebuild retained all degradation instead of selecting a
+zero-warning run. Ten of ten SQLite databases returned `integrity_check=ok`.
+The store contains approximately 5,882 Evidence records, 2,758 facts, and
+1,056 chunks. Every fact/chunk has at least one source and every real Entry has
+an embedding; additional embedding rows belong to the deliberate `#alias`
+shadow and are not orphans.
+
+Observed degradation was one extraction JSON parse failure, one extraction
+transport EOF, ten invalid-source fact rejections, twelve embedding retries
+that recovered, and zero write-behind failures. Under the Ledger-first
+pipeline contract, the immutable raw Evidence and verbatim chunks remain
+available when an optional fact projection fails.
+
+| Prebuild artifact | SHA-256 |
+|---|---|
+| `run.log` | `a798e22d78e2f845529f6436bb82afaeb4f7b2ced86054eba38a20ca71bef4a8` |
+| `coverage.json` | `d98e4c5bc738d35e812c1ffc9a9f914bf2269a6ec00e3c875719a9cf515fdd8c` |
+
+### LoCoMo B0 continuity is valid but not promotion-eligible
+
+Independent dataset read-back passed:
+
+```text
+eval-validate-b0: protocol=sha256:49ba0fa3a53afde56ac3a4a34168aea797375e9fea4bf507f7c2abda779ae41c majority_correct=1314/1540 valid=true promotion_eligible=false
+```
+
+The three raw repetitions were 1,297/1,540, 1,313/1,540, and 1,320/1,540.
+Majority correctness was 1,314/1,540 (85.32%). The receipt records 4,627
+answer calls, seven query rewrites, 4,620 judge calls, and seven questions that
+used the legacy retry. B0 is historical continuity only and cannot satisfy
+SC-002 or serve as a B1 control.
+
+| B0 artifact | SHA-256 |
+|---|---|
+| `protocol.json` | `c1bc6852288cc115c1035eac56d55727d25b54cffe6edd5e1c69624676cde41c` |
+| `b0_continuity_summary.json` | `4463576a0b65586d575cf08d09159960dc5bbf2ecc36f6579215cc682146fff8` |
+| repetition 1 | `54720b9620027b1c689abc5fe1eef9ceb6bff6c7496a44d27897d96eca829725` |
+| repetition 2 | `5f81f56714350a5100da3ec329d019193104028a7e11ed0130ddff994a5c36ae` |
+| repetition 3 | `574c0279295082760b00b2cef5d44c5a62e44b319aeefbc06fd1b2e2210ef7ea` |
+
+### LoCoMo B1 low completed provider calls but failed the independent gate
+
+The runner completed all three 1,540-question repetitions. It recorded exactly
+one frozen Candidate/Trace/Bundle per question, 4,620 answer results, and 4,620
+paired `started`/`completed` call-journal records. The materialized artifact
+reported `source_lineage_unavailable=0`, 1,540/1,540 locally valid
+classifications, identical frozen inputs across repetitions, and one
+answer/judge call per repetition.
+
+Those facts do **not** make the result acceptable. The required independent
+command failed:
+
+```text
+locomo-bench: expected question ID digest differs from protocol
+```
+
+The cause is deterministic:
+
+1. `materializeFormalB1Artifacts` verifies the first journal in the frozen
+   numeric dataset order, matching the protocol digest.
+2. It then writes the immutable artifact arrays using lexical `mapKeys`
+   ordering, producing sequences such as `conv-0-q-1`, `conv-0-q-10`,
+   `conv-0-q-100`, … before `conv-0-q-2`.
+3. `runEvalArtifactValidateCLI` derives its expected ordered IDs directly from
+   that lexically sorted `candidates.jsonl` and compares their digest with the
+   dataset-order protocol digest.
+
+Consequently the standalone read-back cannot validate any normal multi-digit
+question set written by this path. The runner-generated raw repetitions
+(957/1,540, 959/1,540, and 964/1,540) and its apparent majority
+967/1,540 (62.79%) are preserved only as rejected diagnostics. They are not a
+B1 score, not SC-002 evidence, and must not be used for comparison or
+promotion.
+
+| Rejected B1-low artifact | SHA-256 |
+|---|---|
+| `protocol.json` | `d36ad6dc071df80119ac7888c038793147a971de057a61233b1eeed385ea6955` |
+| `candidates.jsonl` | `66535db58fddd8c5400e0ae5f998be2f7100d0fe113b71240dc663f829e57cfa` |
+| `compile_trace.jsonl` | `df70ddf995162d1c7f07d662b63e0cd16751afbc2df2703a9757283d6dc0156c` |
+| `bundles.jsonl` | `be74566be4c273323f2854adfeaad675a9f42f9b39ee7483e041f8834c551bbf` |
+| `classification.jsonl` | `e7ef56e4ccc6d6a81566899e31d1235b9386c00ab673ba14856d3b3569b60f39` |
+| `formal_freeze.jsonl` | `6322c7a3563d04d4c535b4412dd13434aa0b4d1b1b628ecd55cbfbb3f7037d65` |
+| `formal_calls.jsonl` | `332092ff44ebc1f2154e253fc64343336cee8da236a2633b2c2887afcd6bfc0a` |
+| rejected `summary.json` | `aa4c10eb93ae5ffd06ce64d68a66783143e49a17ea5bab9a05cc76506eb9459b` |
+| repetition 1 | `fd0deac498cbe3551656891439d26cd8c6abf3872493edfa21cf7cf0b14b72b2` |
+| repetition 2 | `df5ecc8a8b39805d5e72182481b032e625e5f6f473942c62d624f2be0900fa23` |
+| repetition 3 | `94778d59f01304ecb34f43f3756471fa49ed161bc8d3d5611706526a386ae875` |
+
+Per the hard validity rule, the high-cap, fixed-gold, and LongMemEval runs were
+not started after this failure. Continuing would spend model/judge resources
+without producing a valid F0 input. The required two-independent-reviewer
+judge audit is also incomplete: the repository contains selection,
+blinding/adjudication, and summary functions, but no operational CLI or two
+independent reviewer decisions. A single operator must not synthesize them.
+
+### Acceptance status and unique F0 verdict
+
+| Gate | Required | Accepted result |
+|---|---:|---|
+| SC-002 LoCoMo | at least 1,425/1,540 | **NO ACCEPTED RESULT** — B0 is continuity-only; B1 read-back failed |
+| SC-003 LongMemEval-S | at least 473/500 | **NO ACCEPTED RESULT** — stopped before execution on the upstream hard-validity failure |
+| B1 low/high validity | 100% independent read-back | **FAIL / INCOMPLETE** |
+| Fixed-gold oracle | valid on both benchmarks | **NOT RUN** |
+| Judge audit | two independent reviewers | **INCOMPLETE** |
+
+**F0 verdict: `HOLD`.**
+
+This is the only contract-valid verdict while an artifact hard gate and judge
+audit remain incomplete. T021 and T022 remain unchecked. T046–T098 stay
+locked, no mechanism/default is promoted, and the next permissible work is to
+repair the independent B1 ordering contract with a failing regression test
+before generating fresh protocols and fresh run directories.
+
+Post-report branch verification passed:
+`CGO_ENABLED=0 go build ./...`,
+`CGO_ENABLED=0 go test -count=1 ./...`,
+`CGO_ENABLED=0 go vet ./...`, and `git diff --check`.
