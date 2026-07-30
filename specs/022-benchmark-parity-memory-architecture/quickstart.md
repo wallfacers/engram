@@ -121,17 +121,73 @@ go run ./cmd/locomo-bench \
 - 当前可执行的 B1 causal ruler；
 - 每个阶段唯一 primary arm/cohort。
 
-当前冻结器和 formal runner 只实现 B1。B0 continuity 的独立 manifest/runner 仍是
-T111，未完成前不得启动 T021，也不得把旧 legacy run 冒充 `022.v1` B0。
+B0 使用独立 manifest；不得把 B1 manifest 或旧 legacy run 冒充 continuity baseline：
+
+```bash
+go run ./cmd/locomo-bench \
+  --eval-freeze-b0-protocol "$ENGRAM_022_SCRATCH/protocol/locomo-b0.json" \
+  --data /absolute/path/to/locomo.json \
+  --dataset-format locomo \
+  --retrieval hybrid \
+  --chunks \
+  --chunk-quota 12 \
+  --top-k 30 \
+  --repeats 3 \
+  --max-tokens 8000 \
+  --force-answer \
+  --judge-mem0-aligned
+```
+
+LongMemEval-S 使用相同 recipe 单独冻结。B0 不接收
+`--eval-budget-profile`、`--answer-input-cap`、`--counter-fingerprint` 或
+`--no-idk-retry`；其 manifest 固定 `stage=b0` 和 legacy retry。
 
 高低 cap 的精确值必须在 treatment 前写入 manifest；`<frozen-low-cap>` 不能在看完结果
 后回填。每个 protocol 记录 dataset/题目分母、store、answerer/judge/prompt/extractor、
 embedding、candidate rule、tokenizer、cap、repetitions、flags 和 git commit。
 
-## 6. 跑有效 B1（B0 尚由 T111 阻塞）
+## 6. 跑独立 B0 与有效 B1
 
 WSL2 的长任务必须 detach。下面是目标 CLI 形状；凭据只通过运行时 env，绝不写入 command
 示例、log 或 tracked file。
+
+先运行独立 B0 continuity：
+
+```bash
+export ENGRAM_022_B0_PROTOCOL="$ENGRAM_022_SCRATCH/protocol/locomo-b0.json"
+export ENGRAM_022_B0_RUN_DIR="$ENGRAM_022_SCRATCH/runs/locomo-b0"
+mkdir -p "$ENGRAM_022_B0_RUN_DIR"
+setsid bash -c '
+  go run ./cmd/locomo-bench \
+    --eval-b0-protocol "$ENGRAM_022_B0_PROTOCOL" \
+    --data "$ENGRAM_022_DATASET" \
+    --dataset-format "$ENGRAM_022_FORMAT" \
+    --run-dir "$ENGRAM_022_B0_RUN_DIR" \
+    --store-dir "$ENGRAM_022_SCRATCH/stores/locomo-b0" \
+    --retrieval hybrid \
+    --chunks \
+    --chunk-quota 12 \
+    --top-k 30 \
+    --repeats 3 \
+    --max-tokens 8000 \
+    --force-answer \
+    --judge-mem0-aligned \
+    >"$ENGRAM_022_B0_RUN_DIR/run.log" 2>&1
+  echo $? >"$ENGRAM_022_B0_RUN_DIR/run.exit"
+' </dev/null >/dev/null 2>&1 & disown
+```
+
+`b0_continuity_summary.json` 必须覆盖完整 1,540/500 分母，保存三次原始结果与 majority，
+并真实汇总 IDK answer/rewrite/judge calls。其 `promotion_eligible` 永远为 `false`，目录中
+不得出现 Candidate/Trace/Bundle、formal replay/call journal 或 fixed-gold artifact。
+完成后以 dataset 独立重建分母和 summary，不接任何模型：
+
+```bash
+go run ./cmd/locomo-bench \
+  --eval-validate "$ENGRAM_022_B0_RUN_DIR" \
+  --data "$ENGRAM_022_DATASET" \
+  --dataset-format "$ENGRAM_022_FORMAT"
+```
 
 先为该 shell 设置专用变量并创建重定向目标目录：
 
@@ -175,7 +231,7 @@ setsid bash -c '
 每次重启使用现场新凭据，本地 tunnel/runtime 信息不进 repo。正式 stack 不得启用付费
 hosted reranker/recall。
 
-B0 的预注册验收要求保留如下，但必须等 T111 提供真实可执行路径后再跑：
+B0 的预注册验收要求：
 
 - lossless store；
 - 1,540/500 分母完整；

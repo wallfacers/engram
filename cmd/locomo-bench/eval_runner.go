@@ -144,6 +144,102 @@ func prepareFormalEvalRun(manifestPath, runDir string, requested options) (evalP
 	return protocol, prepared, nil
 }
 
+// prepareB0ContinuityEvalRun pins a continuity manifest without turning on
+// any formal B1 machinery. In particular it leaves legacy IDK retry enabled
+// and never opens the Candidate/Trace/Bundle replay journals.
+func prepareB0ContinuityEvalRun(manifestPath, runDir string, requested options) (evalProtocol, options, error) {
+	if strings.TrimSpace(manifestPath) == "" {
+		return evalProtocol{}, options{}, fmt.Errorf("B0 continuity evaluation requires --eval-b0-protocol")
+	}
+	if strings.TrimSpace(runDir) == "" {
+		return evalProtocol{}, options{}, fmt.Errorf("B0 continuity evaluation requires --run-dir")
+	}
+	protocol, err := readEvalProtocolFileMode(manifestPath, evalRunB0Continuity)
+	if err != nil {
+		return evalProtocol{}, options{}, fmt.Errorf("read --eval-b0-protocol: %w", err)
+	}
+	if err := validateEvalProtocol(protocol, evalRunB0Continuity); err != nil {
+		return evalProtocol{}, options{}, fmt.Errorf("invalid B0 continuity protocol: %w", err)
+	}
+	if requested.noIDKRetry {
+		return evalProtocol{}, options{}, fmt.Errorf("B0 continuity requires legacy IDK retry")
+	}
+	arms, err := armsFor(requested.retrieval)
+	if err != nil {
+		return evalProtocol{}, options{}, err
+	}
+	if err := validateB0ContinuityRunnerOptions(protocol, requested, arms); err != nil {
+		return evalProtocol{}, options{}, err
+	}
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return evalProtocol{}, options{}, fmt.Errorf("create B0 run dir: %w", err)
+	}
+	pinnedPath := filepath.Join(runDir, evalProtocolArtifactFile)
+	if _, err := os.Stat(pinnedPath); err == nil {
+		if err := checkEvalProtocolResume(runDir, protocol, evalRunB0Continuity); err != nil {
+			return evalProtocol{}, options{}, err
+		}
+	} else if os.IsNotExist(err) {
+		if err := writeJSON(pinnedPath, protocol); err != nil {
+			return evalProtocol{}, options{}, fmt.Errorf("pin B0 continuity protocol: %w", err)
+		}
+	} else {
+		return evalProtocol{}, options{}, fmt.Errorf("stat pinned B0 protocol: %w", err)
+	}
+	return protocol, requested, nil
+}
+
+func validateB0ContinuityRunnerOptions(protocol evalProtocol, opt options, arms []string) error {
+	if len(arms) != 1 || arms[0] != protocol.Retrieval.Recipe {
+		return fmt.Errorf("B0 continuity requires exactly the frozen retrieval arm %q, got %v", protocol.Retrieval.Recipe, arms)
+	}
+	if err := validateFormalLegacyRecipe(arms[0]); err != nil {
+		return fmt.Errorf("B0 continuity retrieval: %w", err)
+	}
+	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
+		return fmt.Errorf("B0 continuity: %w", err)
+	}
+	if opt.noIDKRetry {
+		return fmt.Errorf("B0 continuity requires legacy IDK retry")
+	}
+	if opt.fixedGoldOracle || strings.TrimSpace(opt.evalProtocolPath) != "" ||
+		strings.TrimSpace(opt.evalFreezeProtocol) != "" {
+		return fmt.Errorf("B0 continuity cannot use B1 or fixed-gold modes")
+	}
+	if opt.repeats != protocol.Aggregation.AnswerRepetitions ||
+		opt.topK != protocol.Retrieval.CandidateLimit ||
+		opt.maxTokens != protocol.Budget.MaxOutputTokens {
+		return fmt.Errorf("B0 repetitions, candidate limit, or output cap differ from the manifest")
+	}
+	if len(opt.catTopK) != 0 || len(opt.catQuota) != 0 ||
+		strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" {
+		return fmt.Errorf("B0 continuity refuses category-specific candidate budgets")
+	}
+	ingestionDigest := evalJSONDigest(evalFreezeIngestion{
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+	})
+	if protocol.Store.SchemaVersion != 7 ||
+		protocol.Store.IngestionRecipe != "ledger_lossless_chunks_v2" ||
+		protocol.Store.IngestionConfigDigest != ingestionDigest ||
+		evalJSONDigest(protocol.Store.ProjectionBuilderVersions) != evalJSONDigest(map[string]string{
+			"atomic_fact": "entry_store_explicit_v1",
+		}) {
+		return fmt.Errorf("B0 store or lossless ingestion differs from the manifest")
+	}
+	candidateRulesDigest := evalJSONDigest(evalFreezeCandidateRules{
+		TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0],
+	})
+	if protocol.Retrieval.CandidateRulesDigest != candidateRulesDigest ||
+		protocol.Retrieval.EmbeddingFingerprint != evalEmbeddingFingerprint() {
+		return fmt.Errorf("B0 retrieval or embedding fingerprint differs from the manifest")
+	}
+	if protocol.Models.Answerer.PromptDigest != formalAnswerPromptDigest(opt) ||
+		protocol.Models.Judge.PromptDigest != evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode())) {
+		return fmt.Errorf("B0 answer or judge prompt differs from the manifest")
+	}
+	return nil
+}
+
 // validateFormalRunnerOptions refuses the legacy adaptive switches which are
 // not represented by a B1 candidate artifact.  A protocol's retrieval recipe
 // describes one arm, so the formal path deliberately requires one backend
@@ -818,6 +914,100 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 		return err
 	}
 	fmt.Printf("eval-freeze: protocol=%s output=%s questions=%d cap=%d\n", protocol.ProtocolID, opt.evalFreezeProtocol, len(questionIDs), opt.answerInputTokenCap)
+	return nil
+}
+
+// freezeB0ContinuityProtocol records the current lossless legacy product path
+// separately from B1. It deliberately has no exact counter/cap contract:
+// runtime usage and adaptive IDK retry calls are recorded in B0 receipts.
+func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
+	if strings.TrimSpace(opt.evalB0ProtocolPath) != "" ||
+		strings.TrimSpace(opt.evalProtocolPath) != "" ||
+		strings.TrimSpace(opt.evalFreezeProtocol) != "" {
+		return fmt.Errorf("--eval-freeze-b0-protocol cannot be combined with another eval protocol mode")
+	}
+	if opt.evalBudgetProfile != "" || opt.answerInputTokenCap != 0 || opt.counterFingerprint != "" {
+		return fmt.Errorf("B0 continuity freeze does not accept B1 profile, exact input cap, or counter fingerprint")
+	}
+	if opt.noIDKRetry {
+		return fmt.Errorf("B0 continuity freeze requires legacy IDK retry")
+	}
+	if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
+		return fmt.Errorf("B0 continuity freeze refuses dataset/question sampling")
+	}
+	arms, err := armsFor(opt.retrieval)
+	if err != nil {
+		return err
+	}
+	if len(arms) != 1 {
+		return fmt.Errorf("B0 continuity freeze requires exactly one retrieval arm")
+	}
+	if err := validateFormalLegacyRecipe(arms[0]); err != nil {
+		return err
+	}
+	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
+		return fmt.Errorf("B0 continuity: %w", err)
+	}
+	if len(opt.catTopK) != 0 || len(opt.catQuota) != 0 ||
+		strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" {
+		return fmt.Errorf("B0 continuity freeze refuses category-specific candidate budgets")
+	}
+	if !opt.chunks {
+		return fmt.Errorf("B0 continuity freeze requires --chunks for lossless ingestion")
+	}
+	raw, err := os.ReadFile(opt.dataPath) //nolint:gosec // operator-selected benchmark is frozen by digest
+	if err != nil {
+		return fmt.Errorf("read benchmark for B0 continuity freeze: %w", err)
+	}
+	questionIDs := formalQuestionIDs(opt.datasetFormat, convs)
+	benchmarkName, split := "", ""
+	switch opt.datasetFormat {
+	case "locomo":
+		benchmarkName, split = "locomo", "category_1_4"
+	case "longmemeval":
+		benchmarkName, split = "longmemeval_s", "cleaned_full_500"
+	default:
+		return fmt.Errorf("unsupported B0 benchmark format %q", opt.datasetFormat)
+	}
+	git, err := currentCleanGitProvenance()
+	if err != nil {
+		return err
+	}
+	answerModel := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
+	extractModel := envOr("EXTRACT_MODEL", answerModel)
+	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
+	judge := resolveJudgeConfig(os.Getenv)
+	protocol := evalProtocol{
+		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b0-continuity", benchmarkName), CreatedAt: time.Now().UTC(), Git: git,
+		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
+		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
+		Models: evalModelProvenance{
+			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), Provider: answerProvider, PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
+			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), Provider: answerProvider, PromptDigest: formalAnswerPromptDigest(opt)},
+			Judge:     evalModelFingerprint{ID: judge.Model, Revision: envOr("JUDGE_MODEL_REVISION", judge.Model), Provider: judge.Provider, PromptDigest: evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode()))},
+			Planner:   evalPlannerFingerprint{Enabled: false},
+		},
+		Retrieval: evalRetrievalProvenance{
+			Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled",
+			CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]}),
+		},
+		Budget: evalBudgetProtocol{
+			Profile: "continuity", MaxOutputTokens: opt.maxTokens, CandidateLimit: opt.topK,
+			RetrievalCallLimit: 3, AnswerCallLimit: 3,
+			CounterFingerprint: evalTextDigest("legacy-runtime-usage-only:no-preflight"),
+		},
+		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
+		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:b0-continuity-audit"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
+		CoverageStrata: evalCoverageStrataProtocol{Boundaries: []float64{0, 0.5, 0.9, 1}, SelectionDigest: evalTextDigest("022.v1:coverage-strata:0,0.5,0.9,1")},
+		Experiment: evalExperimentProtocol{
+			Stage: "b0", Arm: "legacy_product_continuity", PrimaryCohort: "all",
+			MechanismFlags: map[string]bool{"idk_retry": true, "iris": false, "rerank": false},
+		},
+	}
+	if _, err := freezeEvalProtocolFile(opt.evalFreezeB0Protocol, protocol, evalRunB0Continuity); err != nil {
+		return err
+	}
+	fmt.Printf("eval-freeze-b0: protocol=%s output=%s questions=%d\n", protocol.ProtocolID, opt.evalFreezeB0Protocol, len(questionIDs))
 	return nil
 }
 

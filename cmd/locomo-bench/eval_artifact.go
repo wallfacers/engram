@@ -784,6 +784,10 @@ func readFrozenEvalProtocol(runDir string) (evalProtocol, error) {
 }
 
 func readEvalProtocolFile(path string) (evalProtocol, error) {
+	return readEvalProtocolFileMode(path, evalRunFormal)
+}
+
+func readEvalProtocolFileMode(path string, mode evalRunMode) (evalProtocol, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // run artifact is operator-selected
 	if err != nil {
 		return evalProtocol{}, fmt.Errorf("read protocol: %w", err)
@@ -792,7 +796,7 @@ func readEvalProtocolFile(path string) (evalProtocol, error) {
 	if err := json.Unmarshal(raw, &protocol); err != nil {
 		return evalProtocol{}, fmt.Errorf("decode protocol: %w", err)
 	}
-	if err := validateEvalProtocol(protocol, evalRunFormal); err != nil {
+	if err := validateEvalProtocol(protocol, mode); err != nil {
 		return evalProtocol{}, fmt.Errorf("validate protocol: %w", err)
 	}
 	hash, err := evalProtocolFingerprint(protocol)

@@ -68,6 +68,9 @@ type options struct {
 	datasetFormat         string
 	compareSpec           string
 	evalValidate          string
+	evalB0ProtocolPath    string
+	evalFreezeB0Protocol  string
+	b0Protocol            *evalProtocol
 	evalProtocolPath      string
 	fixedGoldOracle       bool
 	evalFreezeProtocol    string
@@ -166,6 +169,8 @@ func run() error {
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
 	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (fixed-gold runs also require --data; never makes model calls)")
+	flag.StringVar(&opt.evalB0ProtocolPath, "eval-b0-protocol", "", "frozen 022.v1 B0 continuity manifest; enables the independent legacy runner")
+	flag.StringVar(&opt.evalFreezeB0Protocol, "eval-freeze-b0-protocol", "", "write a clean-worktree B0 continuity manifest and exit (no model calls)")
 	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
 	flag.BoolVar(&opt.fixedGoldOracle, "fixed-gold-oracle", false, "run the diagnostic-only all-gold Evidence ceiling from a frozen B1 protocol (no retrieval/extraction)")
 	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 protocol manifest and exit (no model calls)")
@@ -237,6 +242,9 @@ func run() error {
 	if err := validateFixedGoldOracleMode(opt); err != nil {
 		return err
 	}
+	if err := validateB0ContinuityMode(opt); err != nil {
+		return err
+	}
 	if err := validatePromptModes(opt); err != nil {
 		return err
 	}
@@ -261,6 +269,9 @@ func run() error {
 		return nil
 	}
 	if opt.evalValidate != "" {
+		if b0ContinuityArtifactsPresent(opt.evalValidate) {
+			return runB0ContinuityValidateCLI(opt)
+		}
 		if fixedGoldOracleArtifactsPresent(opt.evalValidate) {
 			return runFixedGoldOracleValidateCLI(context.Background(), opt)
 		}
@@ -294,7 +305,27 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if opt.evalB0ProtocolPath != "" {
+		if opt.evalProtocolPath != "" || opt.fixedGoldOracle {
+			return fmt.Errorf("--eval-b0-protocol cannot be combined with B1 or fixed-gold modes")
+		}
+		protocol, prepared, err := prepareB0ContinuityEvalRun(opt.evalB0ProtocolPath, opt.runDir, opt)
+		if err != nil {
+			return err
+		}
+		if err := validateB0ContinuityRunnerOptions(protocol, prepared, arms); err != nil {
+			return err
+		}
+		if err := verifyFormalGitProvenance(protocol); err != nil {
+			return err
+		}
+		opt = prepared
+		opt.b0Protocol = &protocol
+	}
 	if opt.evalProtocolPath != "" {
+		if opt.evalFreezeB0Protocol != "" {
+			return fmt.Errorf("--eval-protocol cannot be combined with --eval-freeze-b0-protocol")
+		}
 		protocol, prepared, err := prepareFormalEvalRun(opt.evalProtocolPath, opt.runDir, opt)
 		if err != nil {
 			return err
@@ -373,13 +404,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if opt.formalProtocol != nil {
+	if opt.formalProtocol != nil || opt.b0Protocol != nil {
 		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
-			return fmt.Errorf("formal 022 evaluation refuses dataset/question sampling")
+			return fmt.Errorf("022 B0/B1 evaluation refuses dataset/question sampling")
 		}
-		if err := verifyFormalDataset(*opt.formalProtocol, opt.dataPath, opt.datasetFormat, convs); err != nil {
+		protocol := opt.formalProtocol
+		if protocol == nil {
+			protocol = opt.b0Protocol
+		}
+		if err := verifyFormalDataset(*protocol, opt.dataPath, opt.datasetFormat, convs); err != nil {
 			return err
 		}
+	}
+	if opt.evalFreezeB0Protocol != "" {
+		return freezeB0ContinuityProtocol(opt, convs)
 	}
 	if opt.evalFreezeProtocol != "" {
 		return freezeFormalB1Protocol(opt, convs)
@@ -454,21 +492,25 @@ func run() error {
 	judgeConfig := resolveJudgeConfig(os.Getenv)
 	opt.answerModel = model
 	opt.judgeModel = judgeConfig.Model
-	if opt.formalProtocol != nil {
+	if opt.formalProtocol != nil || opt.b0Protocol != nil {
+		protocol := opt.formalProtocol
+		if protocol == nil {
+			protocol = opt.b0Protocol
+		}
 		answerRevision := envOr("LOCOMO_MODEL_REVISION", model)
 		judgeRevision := envOr("JUDGE_MODEL_REVISION", judgeConfig.Model)
 		extractorRevision := envOr("EXTRACT_MODEL_REVISION", extractModel)
-		if opt.formalProtocol.Models.Answerer.ID != model ||
-			opt.formalProtocol.Models.Answerer.Revision != answerRevision ||
-			opt.formalProtocol.Models.Answerer.Provider != answerProvider ||
-			opt.formalProtocol.Models.Judge.ID != judgeConfig.Model ||
-			opt.formalProtocol.Models.Judge.Revision != judgeRevision ||
-			opt.formalProtocol.Models.Judge.Provider != judgeConfig.Provider ||
+		if protocol.Models.Answerer.ID != model ||
+			protocol.Models.Answerer.Revision != answerRevision ||
+			protocol.Models.Answerer.Provider != answerProvider ||
+			protocol.Models.Judge.ID != judgeConfig.Model ||
+			protocol.Models.Judge.Revision != judgeRevision ||
+			protocol.Models.Judge.Provider != judgeConfig.Provider ||
 			(!opt.fixedGoldOracle &&
-				(opt.formalProtocol.Models.Extractor.ID != extractModel ||
-					opt.formalProtocol.Models.Extractor.Revision != extractorRevision ||
-					opt.formalProtocol.Models.Extractor.Provider != answerProvider)) {
-			return fmt.Errorf("formal model providers, IDs, or revisions differ from frozen protocol")
+				(protocol.Models.Extractor.ID != extractModel ||
+					protocol.Models.Extractor.Revision != extractorRevision ||
+					protocol.Models.Extractor.Provider != answerProvider)) {
+			return fmt.Errorf("022 model providers, IDs, or revisions differ from frozen protocol")
 		}
 	}
 	if opt.estimate {
@@ -828,6 +870,23 @@ func run() error {
 		if err := writePaired(filepath.Join(opt.runDir, "paired.json"), paired); err != nil {
 			return fmt.Errorf("write paired.json: %w", err)
 		}
+	}
+	if opt.b0Protocol != nil {
+		runs, err := loadArmRuns(opt.runDir, arms[0], opt.repeats)
+		if err != nil {
+			return fmt.Errorf("load B0 continuity runs: %w", err)
+		}
+		summary, err := materializeB0ContinuitySummary(
+			opt.runDir, *opt.b0Protocol, runs, formalQuestionIDs(opt.datasetFormat, convs),
+		)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"B0 continuity: majority_correct=%d/%d answer_calls=%d rewrite_calls=%d judge_calls=%d promotion_eligible=false\n",
+			summary.MajorityCorrect, summary.Denominator, summary.AnswerCalls,
+			summary.RewriteCalls, summary.JudgeCalls,
+		)
 	}
 	if opt.formalProtocol != nil {
 		repeatDirs := formalRepeatRunDirs(opt.runDir, opt.repeats)
@@ -1557,6 +1616,33 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
+				if armOpt.b0Protocol != nil {
+					recorder := newB0CallRecorder(armOpt.b0Protocol.ProtocolHash, armOpt.formalRunIndex)
+					countedAnswer := recorder.wrapAnswer(answerCall)
+					countedRewrite := recorder.wrapRewrite(rewriteCall)
+					countedJudge := recorder.wrapJudge(judgeCall)
+					correct, predicted, usage, sweepUsed, evidence, retrievalMeta := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
+						ctx, runtime.retrievers[s.name], countedAnswer, filterCall, countedRewrite,
+						countedJudge, armOpt, qa, runtime.chunkTurns, nil, logger,
+					)
+					receipt := recorder.snapshot()
+					item := result{
+						Conv: key.Conv, Q: key.Q, QuestionID: qa.QuestionID, Category: qa.Category, CategoryName: qa.CategoryName,
+						QuestionType: qa.QuestionType, Adversarial: qa.Adversarial || qa.Category == adversarialCategory,
+						Correct: correct, Question: qa.Question, Gold: goldFor(qa), Predicted: predicted,
+						RetrievalFlags: retrievalFingerprint(armOpt), AnswerRegime: answerRegimeFingerprint(armOpt),
+						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, AnswerContextTokens: usage.InputTokens,
+						SweepUsed: sweepUsed, SweepOverBudget: sweepOverBudget(armOpt, sweepUsed, usage),
+						EvidenceDiagnostics: evidence, B0Continuity: &receipt,
+					}
+					_ = retrievalMeta
+					s.agg.add(qa.Category, correct)
+					if err := s.journal.writeResult(item, true); err != nil {
+						recordFormalErr(err)
+						logger.Error("write B0 continuity result failed", "conversation", key.Conv, "question", key.Q, "err", err)
+					}
+					return
+				}
 				if armOpt.formalProtocol != nil {
 					if armOpt.formalReplay == nil || armOpt.formalCalls == nil {
 						err := fmt.Errorf("formal replay or call journal unavailable")

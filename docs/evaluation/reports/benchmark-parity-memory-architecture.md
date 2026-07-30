@@ -338,3 +338,38 @@ the audit found that the current protocol freezer/runner implements only B1
 while T021 also requires a real B0 continuity path. That missing path is now
 tracked explicitly as T111. Until T044, T045, and T111 are complete, no formal
 B0/B1/oracle execution should start.
+
+### T111 independent B0 continuity checkpoint
+
+**Date**: 2026-07-30
+
+The B0 continuity path now has dedicated `--eval-freeze-b0-protocol` and
+`--eval-b0-protocol` entry points. Its manifest freezes the clean commit,
+dataset denominator, lossless v7 ingestion, current retrieval/packing prompts,
+answerer/extractor/judge identities, three repetitions, and
+`legacy_product_continuity` with IDK retry enabled. It does not accept B1
+profile/cap/counter flags.
+
+Each ordinary result carries a B0-only receipt with logical answer, query
+rewrite, and judge call counts plus an explicit legacy-retry bit. These counts
+measure the adaptive IDK control flow; transport retries remain part of the
+current product wrapper and global cost ledger. The independent read-back path
+rebuilds the denominator and summary from the dataset and three result
+journals. B0 is always `promotion_eligible=false` and fails closed if any
+Candidate, Trace, Bundle, classification, formal replay/call journal, or
+fixed-gold artifact appears in its run directory.
+
+| Verification | Result |
+|---|---|
+| Red test before implementation | PASS as a TDD checkpoint — B0 mode, call recorder, receipt, and summary symbols were absent and the targeted test failed to compile |
+| B0 protocol/runner/summary/read-back integration tests | PASS |
+| Harness package | PASS — `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench` |
+| Cross-platform build | PASS — `CGO_ENABLED=0 go build ./...` |
+| Full offline regression | PASS — `CGO_ENABLED=0 go test -count=1 ./...` |
+| Static analysis | PASS — `CGO_ENABLED=0 go vet ./...` |
+| Diff hygiene | PASS — `git diff --check` |
+| Formal execution | NOT RUN — this checkpoint makes B0 executable but does not create a score |
+
+T111 is complete. T044 and T045 remain the two local/acceptance prerequisites
+before T021 may freeze and execute B0, valid low/high B1, and fixed-gold
+oracle artifacts.

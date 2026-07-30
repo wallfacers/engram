@@ -32,6 +32,7 @@ type result struct {
 	SweepUsed           bool                      `json:"sweep_used,omitempty"`
 	SweepOverBudget     bool                      `json:"sweep_over_budget,omitempty"`
 	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
+	B0Continuity        *evalB0ContinuityRun      `json:"b0_continuity,omitempty"`
 	Formal022           *evalFormalQuestionRun    `json:"formal_022,omitempty"`
 }
 
