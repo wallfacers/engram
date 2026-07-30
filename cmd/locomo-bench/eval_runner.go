@@ -415,15 +415,10 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 				packErr = fmt.Errorf("compile: %w", compileErr)
 			} else {
 				compiledItems := compiledBundle.Items
-				items := compileBundleItems(protocol, compiledItems)
-				rendered := compileRenderedCandidates(compiledItems)
-				// Update candidate artifact with compiler-rendered sources.
-				if len(rendered) > 0 {
-					frozen.Candidate.RenderedCandidates = rendered
-					frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(rendered)
-				}
+				sourceByCandidate := compileSourceByCandidateID(expanded)
+				items := compileBundleItems(protocol, compiledItems, sourceByCandidate)
 				frozen.Trace = buildCompileTrace(protocol, qa.QuestionID, frozen.Candidate, compiledTrace, items)
-				bundle, inputTokens, count, bundleErr := buildCompileBundle(ctx, protocol, opt, qa, frozen.Candidate, frozen.Trace, compiledBundle, compiledItems, items)
+				bundle, inputTokens, count, bundleErr := buildCompileBundle(ctx, protocol, opt, qa, frozen.Candidate, frozen.Trace, compiledBundle, sourceByCandidate, items)
 				if bundleErr != nil {
 					packErr = fmt.Errorf("compile bundle: %w", bundleErr)
 				} else {

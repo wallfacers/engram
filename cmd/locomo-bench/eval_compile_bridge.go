@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
@@ -15,12 +16,14 @@ func buildCompileCandidates(sources []formalExpandedSource) []evidencecompiler.C
 	candidates := make([]evidencecompiler.Candidate, 0, len(sources))
 	for _, source := range sources {
 		candidates = append(candidates, evidencecompiler.Candidate{
-			ID:         source.Candidate.CandidateID,
-			Kind:       evidencecompiler.CandidateKind(source.Candidate.Kind),
-			Rank:       source.Candidate.Rank,
-			Score:      source.Candidate.Score,
-			Text:       source.Result.Content,
-			TextDigest: evalTextDigest(source.Result.Content),
+			ID:   source.Candidate.CandidateID,
+			Kind: evidencecompiler.CandidateKind(source.Candidate.Kind),
+			Rank: source.Candidate.Rank,
+			Score: source.Candidate.Score,
+			Text: source.Result.Content,
+			// evidencecompiler.sameDigest expects a bare 64-char SHA-256 hex (no
+			// "sha256:" prefix); evalTextDigest returns the prefixed artifact form.
+			TextDigest: strings.TrimPrefix(evalTextDigest(source.Result.Content), "sha256:"),
 			SourceIDs:  append([]string(nil), source.Candidate.SourceIDs...),
 		})
 	}
@@ -44,58 +47,43 @@ func (r formalCompileRenderer) RenderAnswerInput(query string, renderedEvidence 
 	}
 }
 
-// compileBundleItems maps the compiler's output BundleItems to eval formal
-// bundle items. Each BundleItem with a single source span is mapped to an
-// evalFormalBundleItem with the same text and source identity.
-func compileBundleItems(protocol evalProtocol, compiledItems []evidencecompiler.BundleItem) []evalFormalBundleItem {
-	items := make([]evalFormalBundleItem, 0, len(compiledItems))
-	for _, item := range compiledItems {
-		if len(item.Sources) == 0 || len(item.CandidateIDs) == 0 {
-			continue
+// compileSourceByCandidateID indexes the canonical formal expansion by rendered
+// candidate ID so compiler-built bundle items can reuse the exact, formal-
+// contract-compatible Evidence span (ref offsets + span text) that expansion
+// already produced. The compiler selects which sources enter the bundle; it
+// does not redefine their spans or answer-facing text.
+func compileSourceByCandidateID(expanded []formalExpandedAnchor) map[string]formalExpandedSource {
+	byID := make(map[string]formalExpandedSource)
+	for _, anchor := range expanded {
+		for _, source := range anchor.Sources {
+			if _, exists := byID[source.Candidate.CandidateID]; !exists {
+				byID[source.Candidate.CandidateID] = source
+			}
 		}
-		source := item.Sources[0]
-		items = append(items, evalFormalBundleItem{
-			ItemID:       formalBundleItemID(item.CandidateIDs[0]),
-			Kind:         string(item.Kind),
-			Text:         item.Text,
-			CandidateIDs: append([]string(nil), item.CandidateIDs...),
-			Sources: []evalFormalSourceSpan{{
-				EvidenceID: source.SourceID,
-				StartChar:  source.StartChar,
-				EndChar:    source.EndChar,
-				SpanDigest: formalArtifactDigest(source.SpanDigest),
-			}},
-		})
 	}
-	return items
+	return byID
 }
 
-// compileRenderedCandidates builds rendered candidates from the compiler's
-// output bundle items. Each item becomes one rendered candidate with the
-// source evidence identity preserved.
-func compileRenderedCandidates(items []evidencecompiler.BundleItem) []evalRenderedCandidate {
-	candidates := make([]evalRenderedCandidate, 0, len(items))
-	rank := 0
-	for _, item := range items {
-		if len(item.CandidateIDs) == 0 || len(item.Sources) == 0 {
+// compileBundleItems maps the compiler's selected items back to the formal
+// bundle item shape. Each compiler item must reference a rendered candidate
+// that expansion already materialized; we reuse expansion's evalFormalBundleItem
+// (verbatim ref span + span text) so the formal source/span/citation contract
+// holds. The compiler's grounded text is a selection signal only.
+func compileBundleItems(protocol evalProtocol, compiledItems []evidencecompiler.BundleItem, sourceByCandidate map[string]formalExpandedSource) []evalFormalBundleItem {
+	items := make([]evalFormalBundleItem, 0, len(compiledItems))
+	for _, compiled := range compiledItems {
+		if len(compiled.CandidateIDs) == 0 || len(compiled.Sources) == 0 {
 			continue
 		}
-		rank++
-		candidateID := item.CandidateIDs[0]
-		source := item.Sources[0]
-		candidates = append(candidates, evalRenderedCandidate{
-			CandidateID:    candidateID,
-			Kind:           string(item.Kind),
-			Rank:           rank,
-			Score:          0,
-			Text:           item.Text,
-			TextDigest:     evalTextDigest(item.Text),
-			SourceIDs:      []string{source.SourceID},
-			ExpandedFrom:   nil,
-			ExpansionCount: 0,
-		})
+		source, ok := sourceByCandidate[compiled.CandidateIDs[0]]
+		if !ok {
+			continue
+		}
+		item := source.Item
+		item.ItemID = formalBundleItemID(compiled.CandidateIDs[0])
+		items = append(items, item)
 	}
-	return candidates
+	return items
 }
 
 // buildCompileTrace maps the compiler's Trace to the formal eval trace record.
@@ -127,18 +115,21 @@ func buildCompileTrace(protocol evalProtocol, questionID string, candidate evalC
 // buildCompileBundle maps the compiler's output Bundle to the formal eval
 // bundle record. It rebuilds the answer input through buildAnswerContextPrompt
 // to maintain byte compatibility with the legacy format.
-func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options, qa locomoQA, candidate evalCandidateArtifact, trace evalFormalTraceRecord, compiledBundle evidencecompiler.Bundle, compiledItems []evidencecompiler.BundleItem, items []evalFormalBundleItem) (evalFormalBundleRecord, int, evidencecompiler.TokenCount, error) {
-	resultHits := make([]memory.Result, 0, len(compiledItems))
-	for _, compiledItem := range compiledItems {
-		if len(compiledItem.Sources) == 0 {
+func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options, qa locomoQA, candidate evalCandidateArtifact, trace evalFormalTraceRecord, compiledBundle evidencecompiler.Bundle, sourceByCandidate map[string]formalExpandedSource, items []evalFormalBundleItem) (evalFormalBundleRecord, int, evidencecompiler.TokenCount, error) {
+	resultHits := make([]memory.Result, 0, len(items))
+	for _, item := range items {
+		if len(item.Sources) == 0 || len(item.CandidateIDs) == 0 {
 			continue
 		}
-		sourceID := compiledItem.Sources[0].SourceID
-		resultHits = append(resultHits, memory.Result{
-			ID:      sourceID,
-			Name:    sourceID,
-			Content: compiledItem.Text,
-		})
+		source, ok := sourceByCandidate[item.CandidateIDs[0]]
+		if !ok {
+			continue
+		}
+		// Match validateActiveFormalBundleReceipt's reconstruction exactly: it
+		// rebuilds each hit via formalEvidenceResult(item.ItemID, item.Text, evidence),
+		// so the stored RenderedContext must be built from the same Result shape
+		// (ID/Name, SourceSessionID, EventDate) — not just bare ID+Content.
+		resultHits = append(resultHits, formalEvidenceResult(item.ItemID, item.Text, source.Evidence))
 	}
 
 	system := withCurrentDateRule(
@@ -221,14 +212,14 @@ func compileFormalSources(
 	}
 
 	return evidencecompiler.Compile(ctx, evidencecompiler.CompileRequest{
-		Query:      qa.Question,
-		Candidates: candidates,
-		TokenCap:           protocol.Budget.AnswerInputTokenCap,
+		Query:             qa.Question,
+		Candidates:        candidates,
+		TokenCap:          protocol.Budget.AnswerInputTokenCap,
 		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		MaxCandidates:      len(candidates),
-		MaxSources:         len(srcIDs),
-		Counter:            opt.formalCounter,
-		Resolver:           resolver,
-		Renderer:           renderer,
+		MaxCandidates:     len(candidates),
+		MaxSources:        len(srcIDs),
+		Counter:           opt.formalCounter,
+		Resolver:          resolver,
+		Renderer:          renderer,
 	})
 }
