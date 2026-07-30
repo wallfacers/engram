@@ -32,6 +32,33 @@ type result struct {
 	SweepUsed           bool                      `json:"sweep_used,omitempty"`
 	SweepOverBudget     bool                      `json:"sweep_over_budget,omitempty"`
 	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
+	Formal022           *evalFormalQuestionRun    `json:"formal_022,omitempty"`
+}
+
+// loadFormalQuestionRuns reads the per-repetition journal records used to
+// produce immutable 022 artifacts.  Unlike ordinary resume, a malformed or
+// missing formal payload is a hard error: silently dropping it would turn a
+// partial answer run into an apparently complete majority denominator.
+func loadFormalQuestionRuns(runDirs []string, arm string) ([][]result, error) {
+	runs := make([][]result, 0, len(runDirs))
+	for _, runDir := range runDirs {
+		path := filepath.Join(runDir, fmt.Sprintf("results-%s.jsonl", arm))
+		var current []result
+		if err := scanResultsJSONLStrict(path, func(item result) error {
+			if item.Formal022 == nil {
+				return fmt.Errorf("formal result %q has no 022 payload", item.QuestionID)
+			}
+			current = append(current, item)
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("read formal journal %s: %w", path, err)
+		}
+		if len(current) == 0 {
+			return nil, fmt.Errorf("formal journal %s has no results", path)
+		}
+		runs = append(runs, current)
+	}
+	return runs, nil
 }
 
 type resultKey struct {

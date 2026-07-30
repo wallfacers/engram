@@ -69,3 +69,31 @@ func scanResultsJSONL(path string, visit func(result)) error {
 	}
 	return nil
 }
+
+// scanResultsJSONLStrict is for formal 022 artifacts only.  Legacy journals
+// intentionally tolerate a torn final line for resume, but formal materialize
+// must never turn a malformed line into a silently smaller denominator.
+func scanResultsJSONLStrict(path string, visit func(result) error) error {
+	f, err := os.Open(path) //nolint:gosec // operator-selected formal run artifact
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var item result
+		if err := json.Unmarshal(scanner.Bytes(), &item); err != nil {
+			return fmt.Errorf("decode %s line %d: %w", path, line, err)
+		}
+		if err := visit(item); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan %s: %w", path, err)
+	}
+	return nil
+}

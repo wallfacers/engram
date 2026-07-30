@@ -70,3 +70,49 @@ func TestRunEvalArtifactValidateCLIUsesFrozenProtocolWithoutDataset(t *testing.T
 		t.Fatal("validate CLI helper accepted missing run directory")
 	}
 }
+
+func TestMaterializeFormalB1ArtifactsKeepsThreeAnswersInOneQuestion(t *testing.T) {
+	runDir := t.TempDir()
+	protocol, err := freezeEvalProtocol(runDir, testEvalProtocol(), evalRunFormal)
+	if err != nil {
+		t.Fatalf("freeze protocol: %v", err)
+	}
+	candidate := testCandidateArtifact()
+	candidate.ProtocolHash = protocol.ProtocolHash
+	trace := buildFormalTrace(protocol, candidate.QuestionID, candidate)
+	bundle := evalFormalBundleRecord{
+		evalArtifactRecord: evalArtifactRecord{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: candidate.QuestionID, Kind: evalBundleArtifactKind, Valid: true},
+		CandidateSetDigest: candidate.CandidateSetDigest, TraceDigest: trace.TraceDigest, SourceIDs: []string{"e-1", "e-2"},
+		RenderedContext: "evidence", RenderedDigest: fixtureDigest("evidence"), AnswerInputTokens: 11, TokenCap: protocol.Budget.AnswerInputTokenCap,
+		CounterFingerprint: protocol.Budget.CounterFingerprint, WithinCap: true, SourceValid: true, AnswerPromptDigest: fixtureDigest("system"),
+	}
+	runs := make([][]result, 0, 3)
+	for index, correct := range []bool{true, false, true} {
+		runs = append(runs, []result{{
+			QuestionID: candidate.QuestionID, CategoryName: "temporal", Gold: "gold",
+			Formal022: &evalFormalQuestionRun{Candidate: candidate, Trace: trace, Bundle: bundle, Answer: evalFormalAnswerRun{
+				RunIndex: index + 1, Answer: "answer", AnswerDigest: fixtureDigest("answer"), JudgeCorrect: correct, AnswerCalls: 1, InputTokens: 11,
+			}},
+		}})
+	}
+	summary, err := materializeFormalB1Artifacts(runDir, protocol, runs)
+	if err != nil {
+		t.Fatalf("materialize formal artifacts: %v", err)
+	}
+	if !summary.Validity.isComplete() {
+		t.Fatalf("formal artifact summary invalid: %+v", summary.Validity)
+	}
+	if _, err := validateEvalArtifactRun(runDir, protocol, []string{candidate.QuestionID}); err != nil {
+		t.Fatalf("formal artifacts failed validator: %v", err)
+	}
+	if summary.Metrics.Questions != 1 || summary.Metrics.Correct != 1 || summary.Metrics.P95InputTokens != 11 {
+		t.Fatalf("formal metrics = %+v, want one correct majority at 11 tokens", summary.Metrics)
+	}
+	var classifications []evalFormalClassificationRecord
+	if err := readEvalJSONL(filepath.Join(runDir, evalClassificationArtifactFile), &classifications); err != nil {
+		t.Fatalf("read classifications: %v", err)
+	}
+	if len(classifications) != 1 || len(classifications[0].AnswerRuns) != 3 || !classifications[0].MajorityCorrect || classifications[0].AnswerCalls != 3 {
+		t.Fatalf("classification = %+v, want one 3-run majority", classifications)
+	}
+}

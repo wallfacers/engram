@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -44,6 +45,59 @@ type evalArtifactSummary struct {
 	ProtocolHash   string               `json:"protocol_hash"`
 	ArtifactHashes map[string]string    `json:"artifact_hashes"`
 	Validity       evalArtifactValidity `json:"validity"`
+	Metrics        evalFormalMetrics    `json:"metrics,omitempty"`
+}
+
+// evalFormalTraceRecord, evalFormalBundleRecord, and
+// evalFormalClassificationRecord are the concrete B1 payloads.  Their common
+// envelope is deliberately retained so the no-model validator can reject a
+// malformed run before any score or paired statistic is interpreted.
+type evalFormalTraceRecord struct {
+	evalArtifactRecord
+	Attempt            int      `json:"attempt"`
+	CandidateSetDigest string   `json:"candidate_set_digest"`
+	AppliedActions     []string `json:"applied_actions"`
+	FallbackReason     string   `json:"fallback_reason,omitempty"`
+	TraceDigest        string   `json:"trace_digest"`
+}
+
+type evalFormalBundleRecord struct {
+	evalArtifactRecord
+	CandidateSetDigest string   `json:"candidate_set_digest"`
+	TraceDigest        string   `json:"trace_digest"`
+	SourceIDs          []string `json:"source_ids"`
+	RenderedContext    string   `json:"rendered_context"`
+	RenderedDigest     string   `json:"rendered_context_digest"`
+	AnswerInputTokens  int      `json:"answer_input_tokens"`
+	TokenCap           int      `json:"token_cap"`
+	CounterFingerprint string   `json:"counter_fingerprint"`
+	WithinCap          bool     `json:"within_cap"`
+	SourceValid        bool     `json:"source_valid"`
+	AnswerPromptDigest string   `json:"answer_prompt_digest"`
+}
+
+type evalFormalClassificationRecord struct {
+	evalArtifactRecord
+	Category         string                `json:"category"`
+	GoldAnswerDigest string                `json:"gold_answer_digest"`
+	AnswerRuns       []evalFormalAnswerRun `json:"answer_runs"`
+	MajorityCorrect  bool                  `json:"majority_correct"`
+	MissClass        evalMissClass         `json:"miss_class"`
+	RetrievalCalls   int                   `json:"retrieval_calls"`
+	AnswerCalls      int                   `json:"answer_calls"`
+	InvalidReasons   []string              `json:"invalid_reasons,omitempty"`
+}
+
+// evalFormalQuestionRun is persisted inside each legacy repeat journal entry.
+// The journal remains the crash-safe source of individual calls; the immutable
+// 022 artifact files are only materialized after all repetitions agree on the
+// frozen candidate and bundle identity.
+type evalFormalQuestionRun struct {
+	Candidate      evalCandidateArtifact  `json:"candidate"`
+	Trace          evalFormalTraceRecord  `json:"trace"`
+	Bundle         evalFormalBundleRecord `json:"bundle"`
+	Answer         evalFormalAnswerRun    `json:"answer"`
+	InvalidReasons []string               `json:"invalid_reasons,omitempty"`
 }
 
 func writeEvalArtifactRecords(path string, records []evalArtifactRecord) error {
@@ -128,6 +182,243 @@ func writeEvalArtifactSummary(runDir string, protocol evalProtocol, questionIDs 
 	})
 }
 
+// materializeFormalB1Artifacts promotes crash-safe, per-repetition journal
+// records into the immutable 022 artifact layout.  It accepts only one frozen
+// candidate/trace/bundle per question and keeps all answer repetitions nested
+// in classification.jsonl so repeated model calls never inflate the question
+// denominator.
+func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][]result) (evalArtifactSummary, error) {
+	if len(runs) != protocol.Aggregation.AnswerRepetitions {
+		return evalArtifactSummary{}, fmt.Errorf("formal runs %d, want protocol repetitions %d", len(runs), protocol.Aggregation.AnswerRepetitions)
+	}
+	byQuestion := make(map[string][]result)
+	var expected map[string]bool
+	for runIndex, run := range runs {
+		seen := make(map[string]bool, len(run))
+		for _, item := range run {
+			id := resultID(item)
+			if strings.TrimSpace(id) == "" || seen[id] || item.Formal022 == nil {
+				return evalArtifactSummary{}, fmt.Errorf("formal run %d contains duplicate, blank, or non-formal result", runIndex+1)
+			}
+			seen[id] = true
+			byQuestion[id] = append(byQuestion[id], item)
+		}
+		if runIndex == 0 {
+			expected = seen
+			continue
+		}
+		if err := validateArtifactQuestionSet("formal journal", mapKeys(seen), expected); err != nil {
+			return evalArtifactSummary{}, err
+		}
+	}
+	if len(expected) == 0 {
+		return evalArtifactSummary{}, fmt.Errorf("formal journal has no question results")
+	}
+
+	questionIDs := mapKeys(expected)
+	candidates := make([]evalCandidateArtifact, 0, len(questionIDs))
+	traces := make([]evalFormalTraceRecord, 0, len(questionIDs))
+	bundles := make([]evalFormalBundleRecord, 0, len(questionIDs))
+	classifications := make([]evalFormalClassificationRecord, 0, len(questionIDs))
+	for _, id := range questionIDs {
+		entries := byQuestion[id]
+		if len(entries) != protocol.Aggregation.AnswerRepetitions {
+			return evalArtifactSummary{}, fmt.Errorf("formal question %q has %d repetitions, want %d", id, len(entries), protocol.Aggregation.AnswerRepetitions)
+		}
+		first := entries[0].Formal022
+		candidate := first.Candidate
+		trace := first.Trace
+		bundle := first.Bundle
+		invalid := append([]string(nil), first.InvalidReasons...)
+		for _, entry := range entries[1:] {
+			current := entry.Formal022
+			if evalJSONDigest(current.Candidate) != evalJSONDigest(candidate) || evalJSONDigest(current.Trace) != evalJSONDigest(trace) || evalJSONDigest(current.Bundle) != evalJSONDigest(bundle) {
+				invalid = append(invalid, "frozen_candidate_trace_or_bundle_drift")
+			}
+			invalid = append(invalid, current.InvalidReasons...)
+		}
+		if err := validateEvalCandidateArtifact(protocol, candidate); err != nil {
+			invalid = append(invalid, "candidate_artifact_invalid")
+		}
+		answerRuns := make([]evalFormalAnswerRun, 0, len(entries))
+		outcomes := make([]bool, 0, len(entries))
+		answerCalls := 0
+		for index, entry := range entries {
+			answer := entry.Formal022.Answer
+			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.InputTokens != bundle.AnswerInputTokens {
+				invalid = append(invalid, "answer_call_or_token_contract_violation")
+			}
+			answerRuns = append(answerRuns, answer)
+			outcomes = append(outcomes, answer.JudgeCorrect)
+			answerCalls += answer.AnswerCalls
+		}
+		majority, err := majorityCorrectness(outcomes)
+		if err != nil {
+			return evalArtifactSummary{}, fmt.Errorf("formal majority %q: %w", id, err)
+		}
+		candidateCoverage := candidate.Gold.RenderedSourceCoverage
+		bundleCoverage := sourceCoverage(candidate.Gold.ResolvedEvidenceIDs, bundle.SourceIDs)
+		miss, err := classifyEvalMiss(evalMissAttributionInput{
+			GoldResolved:      len(candidate.Gold.UnresolvedIDs) == 0,
+			CandidateCoverage: candidateCoverage, BundleCoverage: bundleCoverage, MajorityCorrect: majority,
+		})
+		if err != nil {
+			return evalArtifactSummary{}, fmt.Errorf("formal miss class %q: %w", id, err)
+		}
+		invalid = stableStrings(invalid)
+		valid := len(invalid) == 0 && trace.Valid && bundle.Valid && bundle.WithinCap && bundle.SourceValid
+		trace.Valid = valid
+		trace.TraceDigest = formalTraceDigest(trace)
+		bundle.Valid = valid
+		bundle.TraceDigest = trace.TraceDigest
+		classification := evalFormalClassificationRecord{
+			evalArtifactRecord: evalArtifactRecord{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: id, Kind: evalClassificationArtifactKind, Valid: valid},
+			Category:           entries[0].CategoryName, GoldAnswerDigest: evalTextDigest(entries[0].Gold), AnswerRuns: answerRuns,
+			MajorityCorrect: majority, MissClass: miss, RetrievalCalls: candidate.RetrievalCalls, AnswerCalls: answerCalls, InvalidReasons: invalid,
+		}
+		candidates = append(candidates, candidate)
+		traces = append(traces, trace)
+		bundles = append(bundles, bundle)
+		classifications = append(classifications, classification)
+	}
+	if err := writeEvalCandidateArtifacts(filepath.Join(runDir, evalCandidatesArtifactFile), candidates); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	if err := writeEvalJSONL(filepath.Join(runDir, evalTraceArtifactFile), traces); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	if err := writeEvalJSONL(filepath.Join(runDir, evalBundleArtifactFile), bundles); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	if err := writeEvalJSONL(filepath.Join(runDir, evalClassificationArtifactFile), classifications); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	hashes, err := evalArtifactFileHashes(runDir)
+	if err != nil {
+		return evalArtifactSummary{}, err
+	}
+	validity := formalArtifactValidity(candidates, traces, bundles, classifications)
+	summary := evalArtifactSummary{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, ArtifactHashes: hashes, Validity: validity, Metrics: formalClassificationMetrics(classifications)}
+	if err := writeJSON(filepath.Join(runDir, evalSummaryArtifactFile), summary); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	return summary, nil
+}
+
+func writeEvalJSONL[T any](path string, records []T) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create artifact directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	writer := bufio.NewWriter(tmp)
+	encoder := json.NewEncoder(writer)
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	removeTemp = false
+	return nil
+}
+
+func readEvalJSONL[T any](path string, out *[]T) error {
+	f, err := os.Open(path) //nolint:gosec // operator-selected formal run artifact
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var record T
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			return fmt.Errorf("decode %s line %d: %w", path, line, err)
+		}
+		*out = append(*out, record)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan %s: %w", path, err)
+	}
+	return nil
+}
+
+func formalArtifactValidity(candidates []evalCandidateArtifact, traces []evalFormalTraceRecord, bundles []evalFormalBundleRecord, classifications []evalFormalClassificationRecord) evalArtifactValidity {
+	total := len(classifications)
+	if total == 0 || len(candidates) != total || len(traces) != total || len(bundles) != total {
+		return evalArtifactValidity{}
+	}
+	var candidateIdentity, sourceValid, withinCap, answerCompliance, fullyValid int
+	for index, classification := range classifications {
+		if traces[index].CandidateSetDigest == candidates[index].CandidateSetDigest && bundles[index].CandidateSetDigest == candidates[index].CandidateSetDigest {
+			candidateIdentity++
+		}
+		if bundles[index].SourceValid {
+			sourceValid++
+		}
+		if bundles[index].WithinCap {
+			withinCap++
+		}
+		if len(classification.AnswerRuns) > 0 {
+			compliant := true
+			for _, answer := range classification.AnswerRuns {
+				if answer.AnswerCalls != 1 {
+					compliant = false
+				}
+			}
+			if compliant {
+				answerCompliance++
+			}
+		}
+		if classification.Valid {
+			fullyValid++
+		}
+	}
+	rate := func(value int) float64 { return float64(value) / float64(total) }
+	validity := evalArtifactValidity{
+		Complete: fullyValid == total, CandidateIdentityRate: rate(candidateIdentity), SourceValidationRate: rate(sourceValid),
+		SpanRecoveryRate: rate(sourceValid), CitationCoverageRate: rate(sourceValid), WithinCapRate: rate(withinCap),
+		AnswerCallComplianceRate: rate(answerCompliance), UnattributedAddCount: 0,
+	}
+	validity.Valid = validity.Complete && validity.CandidateIdentityRate == 1 && validity.SourceValidationRate == 1 && validity.SpanRecoveryRate == 1 && validity.CitationCoverageRate == 1 && validity.WithinCapRate == 1 && validity.AnswerCallComplianceRate == 1
+	return validity
+}
+
+func mapKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for value := range values {
+		keys = append(keys, value)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func validateEvalArtifactRun(runDir string, requested evalProtocol, expectedQuestionIDs []string) (evalArtifactSummary, error) {
 	if err := checkEvalProtocolResume(runDir, requested, evalRunFormal); err != nil {
 		return evalArtifactSummary{}, err
@@ -167,6 +458,9 @@ func validateEvalArtifactRun(runDir string, requested evalProtocol, expectedQues
 			return evalArtifactSummary{}, err
 		}
 	}
+	if err := validateFormalArtifactPayloads(runDir, requested, candidates, expected); err != nil {
+		return evalArtifactSummary{}, err
+	}
 	rawSummary, err := os.ReadFile(filepath.Join(runDir, evalSummaryArtifactFile)) //nolint:gosec // run artifact is operator-selected
 	if err != nil {
 		return evalArtifactSummary{}, fmt.Errorf("read summary: %w", err)
@@ -188,6 +482,103 @@ func validateEvalArtifactRun(runDir string, requested evalProtocol, expectedQues
 		}
 	}
 	return summary, nil
+}
+
+// validateFormalArtifactPayloads is intentionally conditional: the T018
+// envelope fixtures remain valid minimal schema tests, while B1's richer
+// records receive the extra cap, counter, trace, and one-answer checks that
+// make their score eligible for interpretation.
+func validateFormalArtifactPayloads(runDir string, protocol evalProtocol, candidates []evalCandidateArtifact, expected map[string]bool) error {
+	var traces []evalFormalTraceRecord
+	if err := readEvalJSONL(filepath.Join(runDir, evalTraceArtifactFile), &traces); err != nil {
+		return err
+	}
+	if len(traces) == 0 || traces[0].TraceDigest == "" {
+		return nil
+	}
+	if err := validateArtifactQuestionSet("formal traces", formalTraceIDs(traces), expected); err != nil {
+		return err
+	}
+	byID := make(map[string]evalCandidateArtifact, len(candidates))
+	for _, candidate := range candidates {
+		byID[candidate.QuestionID] = candidate
+	}
+	for _, trace := range traces {
+		candidate, ok := byID[trace.QuestionID]
+		if !ok || trace.Attempt != 1 || trace.CandidateSetDigest != candidate.CandidateSetDigest || trace.TraceDigest != formalTraceDigest(trace) {
+			return fmt.Errorf("invalid formal trace for question %q", trace.QuestionID)
+		}
+	}
+
+	var bundles []evalFormalBundleRecord
+	if err := readEvalJSONL(filepath.Join(runDir, evalBundleArtifactFile), &bundles); err != nil {
+		return err
+	}
+	if err := validateArtifactQuestionSet("formal bundles", formalBundleIDs(bundles), expected); err != nil {
+		return err
+	}
+	traceByID := make(map[string]evalFormalTraceRecord, len(traces))
+	for _, trace := range traces {
+		traceByID[trace.QuestionID] = trace
+	}
+	for _, bundle := range bundles {
+		candidate, candidateOK := byID[bundle.QuestionID]
+		trace, traceOK := traceByID[bundle.QuestionID]
+		if !candidateOK || !traceOK || bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
+			bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.AnswerInputTokens < 1 || bundle.AnswerInputTokens > protocol.Budget.AnswerInputTokenCap ||
+			bundle.TokenCap != protocol.Budget.AnswerInputTokenCap || bundle.CounterFingerprint != protocol.Budget.CounterFingerprint || !bundle.WithinCap || !bundle.SourceValid || len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
+			return fmt.Errorf("invalid formal bundle for question %q", bundle.QuestionID)
+		}
+	}
+
+	var classifications []evalFormalClassificationRecord
+	if err := readEvalJSONL(filepath.Join(runDir, evalClassificationArtifactFile), &classifications); err != nil {
+		return err
+	}
+	if err := validateArtifactQuestionSet("formal classifications", formalClassificationIDs(classifications), expected); err != nil {
+		return err
+	}
+	for _, classification := range classifications {
+		if len(classification.AnswerRuns) != protocol.Aggregation.AnswerRepetitions || classification.AnswerCalls != len(classification.AnswerRuns) || !classification.Valid {
+			return fmt.Errorf("invalid formal classification for question %q", classification.QuestionID)
+		}
+		outcomes := make([]bool, 0, len(classification.AnswerRuns))
+		for index, answer := range classification.AnswerRuns {
+			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.InputTokens < 1 || !isDigest(answer.AnswerDigest) {
+				return fmt.Errorf("invalid formal answer run for question %q", classification.QuestionID)
+			}
+			outcomes = append(outcomes, answer.JudgeCorrect)
+		}
+		majority, err := majorityCorrectness(outcomes)
+		if err != nil || majority != classification.MajorityCorrect {
+			return fmt.Errorf("invalid formal majority for question %q", classification.QuestionID)
+		}
+	}
+	return nil
+}
+
+func formalTraceIDs(records []evalFormalTraceRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.QuestionID)
+	}
+	return ids
+}
+
+func formalBundleIDs(records []evalFormalBundleRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.QuestionID)
+	}
+	return ids
+}
+
+func formalClassificationIDs(records []evalFormalClassificationRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.QuestionID)
+	}
+	return ids
 }
 
 // runEvalArtifactValidateCLI implements the no-model validation path used by

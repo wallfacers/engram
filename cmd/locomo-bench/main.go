@@ -48,6 +48,7 @@ import (
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/curation"
+	"github.com/wallfacers/engram/memory/evidencecompiler"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/provider"
 	"github.com/wallfacers/engram/provider/anthropic"
@@ -67,6 +68,11 @@ type options struct {
 	datasetFormat        string
 	compareSpec          string
 	evalValidate         string
+	evalProtocolPath     string
+	tokenCounterBaseURL  string
+	formalProtocol       *evalProtocol
+	formalCounter        evidencecompiler.TokenCounter
+	formalRunIndex       int
 	repeats              int
 	estimate             bool
 	noIDKRetry           bool
@@ -147,6 +153,8 @@ func run() error {
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
 	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (no dataset or model calls)")
+	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
+	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -258,6 +266,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if opt.evalProtocolPath != "" {
+		protocol, prepared, err := prepareFormalEvalRun(opt.evalProtocolPath, opt.runDir, opt)
+		if err != nil {
+			return err
+		}
+		if protocol.Experiment.Stage != "b1" {
+			return fmt.Errorf("formal runner currently supports only b1 protocol stage, got %q", protocol.Experiment.Stage)
+		}
+		if err := validateFormalRunnerOptions(protocol, prepared, arms); err != nil {
+			return err
+		}
+		if err := verifyFormalGitProvenance(protocol); err != nil {
+			return err
+		}
+		opt = prepared
+		opt.formalProtocol = &protocol
+	}
 	if opt.multiQuery && !opt.recallDiagnostic && len(arms) != 1 {
 		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
 	}
@@ -316,6 +341,14 @@ func run() error {
 	convs, err := loadBenchmarkDataset(opt.dataPath, opt.datasetFormat, opt.imageCaptions)
 	if err != nil {
 		return err
+	}
+	if opt.formalProtocol != nil {
+		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
+			return fmt.Errorf("formal 022 evaluation refuses dataset/question sampling")
+		}
+		if err := verifyFormalDataset(*opt.formalProtocol, opt.dataPath, opt.datasetFormat, convs); err != nil {
+			return err
+		}
 	}
 	sampledConversations := 0
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
@@ -386,6 +419,11 @@ func run() error {
 	judgeConfig := resolveJudgeConfig(os.Getenv)
 	opt.answerModel = model
 	opt.judgeModel = judgeConfig.Model
+	if opt.formalProtocol != nil {
+		if opt.formalProtocol.Models.Answerer.ID != model || opt.formalProtocol.Models.Judge.ID != judgeConfig.Model || opt.formalProtocol.Models.Extractor.ID != extractModel {
+			return fmt.Errorf("formal model IDs differ from frozen protocol")
+		}
+	}
 	if opt.estimate {
 		return printEstimate(convs, opt, prices, model, extractModel, judgeConfig.Model)
 	}
@@ -440,6 +478,18 @@ func run() error {
 		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
 	}
 	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
+	if opt.formalProtocol != nil {
+		if strings.TrimSpace(opt.tokenCounterBaseURL) == "" {
+			return fmt.Errorf("formal 022 evaluation requires --token-counter-base-url")
+		}
+		counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
+			BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.formalProtocol.Budget.CounterFingerprint,
+		})
+		if err != nil {
+			return fmt.Errorf("configure formal token counter: %w", err)
+		}
+		opt.formalCounter = counter
+	}
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
 		// writes no journal, so it has no regime to protect.
@@ -537,6 +587,7 @@ func run() error {
 
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
 		repeatOpt := opt
+		repeatOpt.formalRunIndex = repeat
 		if opt.repeats > 1 {
 			repeatOpt.runDir = filepath.Join(opt.runDir, fmt.Sprintf("run-%d", repeat))
 		}
@@ -609,6 +660,20 @@ func run() error {
 		}
 		if err := writePaired(filepath.Join(opt.runDir, "paired.json"), paired); err != nil {
 			return fmt.Errorf("write paired.json: %w", err)
+		}
+	}
+	if opt.formalProtocol != nil {
+		repeatDirs := formalRepeatRunDirs(opt.runDir, opt.repeats)
+		formalRuns, err := loadFormalQuestionRuns(repeatDirs, arms[0])
+		if err != nil {
+			return err
+		}
+		summary, err := materializeFormalB1Artifacts(opt.runDir, *opt.formalProtocol, formalRuns)
+		if err != nil {
+			return fmt.Errorf("materialize formal 022 artifacts: %w", err)
+		}
+		if !summary.Validity.isComplete() {
+			return fmt.Errorf("formal 022 artifact validity failed; summary preserved at %s", filepath.Join(opt.runDir, evalSummaryArtifactFile))
 		}
 	}
 	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel, judgeConfig.Model)
@@ -1304,6 +1369,19 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
+				if armOpt.formalProtocol != nil {
+					correct, predicted, usage, formal := runFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], answerCall, judgeCall, qa, runtime.chunkTurns, armOpt.formalRunIndex)
+					s.agg.add(qa.Category, correct)
+					s.journal.write(result{
+						Conv: key.Conv, Q: key.Q, QuestionID: qa.QuestionID, Category: qa.Category, CategoryName: qa.CategoryName,
+						QuestionType: qa.QuestionType, Adversarial: qa.Adversarial || qa.Category == adversarialCategory,
+						Correct: correct, Question: qa.Question, Gold: goldFor(qa), Predicted: predicted,
+						RetrievalFlags: retrievalFingerprint(armOpt), AnswerRegime: answerRegimeFingerprint(armOpt),
+						InputTokens: formal.Answer.InputTokens, OutputTokens: usage.OutputTokens, AnswerContextTokens: formal.Answer.InputTokens,
+						Formal022: &formal,
+					})
+					return
+				}
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
 				var abstainRuntime *abstainRuntimeContext
 				if armOpt.abstainHard || armOpt.abstainSoft {
