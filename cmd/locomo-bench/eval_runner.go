@@ -426,12 +426,7 @@ func verifyFormalDataset(protocol evalProtocol, dataPath, format string, convs [
 	if evalTextDigest(string(raw)) != protocol.Benchmark.DatasetDigest {
 		return fmt.Errorf("formal dataset digest differs from protocol")
 	}
-	questionIDs := make([]string, 0)
-	for _, conv := range convs {
-		for _, qa := range conv.QA {
-			questionIDs = append(questionIDs, qa.QuestionID)
-		}
-	}
+	questionIDs := formalQuestionIDs(format, convs)
 	if len(questionIDs) != protocol.Benchmark.QuestionCount {
 		return fmt.Errorf("formal question count %d differs from protocol %d", len(questionIDs), protocol.Benchmark.QuestionCount)
 	}
@@ -439,6 +434,19 @@ func verifyFormalDataset(protocol evalProtocol, dataPath, format string, convs [
 		return fmt.Errorf("formal question ID digest differs from protocol")
 	}
 	return nil
+}
+
+func formalQuestionIDs(format string, convs []conversation) []string {
+	questionIDs := make([]string, 0)
+	for _, conv := range convs {
+		for _, qa := range conv.QA {
+			if format == "locomo" && qa.Category == adversarialCategory {
+				continue
+			}
+			questionIDs = append(questionIDs, qa.QuestionID)
+		}
+	}
+	return questionIDs
 }
 
 // verifyFormalGitProvenance checks the worktree, not merely a hand-written
@@ -491,12 +499,7 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	if err != nil {
 		return fmt.Errorf("read benchmark for protocol freeze: %w", err)
 	}
-	questionIDs := make([]string, 0)
-	for _, conv := range convs {
-		for _, qa := range conv.QA {
-			questionIDs = append(questionIDs, qa.QuestionID)
-		}
-	}
+	questionIDs := formalQuestionIDs(opt.datasetFormat, convs)
 	benchmarkName, split := "", ""
 	switch opt.datasetFormat {
 	case "locomo":

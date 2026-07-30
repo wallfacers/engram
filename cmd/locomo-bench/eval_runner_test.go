@@ -117,6 +117,7 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	for index := range convs[0].QA {
 		id := fmt.Sprintf("q-%d", index)
 		convs[0].QA[index].QuestionID = id
+		convs[0].QA[index].Category = 1
 		questionIDs = append(questionIDs, id)
 	}
 	protocol.Benchmark.DatasetDigest = evalTextDigest(string(raw))
