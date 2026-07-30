@@ -31,6 +31,33 @@ type vllmTokenCounterConfig struct {
 	HTTPClient  *http.Client
 }
 
+// gateTokenCounter makes token-preflight requests share the benchmark's
+// global remote-call limit. Formal packing counts a complete prompt for every
+// candidate, so leaving it outside the answer/judge gate can otherwise create
+// thousands of concurrent /tokenize calls before any answer admission occurs.
+// Waiting respects the caller context and never substitutes an estimate.
+func gateTokenCounter(sem chan struct{}, counter evidencecompiler.TokenCounter) evidencecompiler.TokenCounter {
+	if counter == nil || sem == nil {
+		return counter
+	}
+	return gatedTokenCounter{sem: sem, counter: counter}
+}
+
+type gatedTokenCounter struct {
+	sem     chan struct{}
+	counter evidencecompiler.TokenCounter
+}
+
+func (counter gatedTokenCounter) CountInput(ctx context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	select {
+	case counter.sem <- struct{}{}:
+		defer func() { <-counter.sem }()
+	case <-ctx.Done():
+		return evidencecompiler.TokenCount{}, fmt.Errorf("formal token counter admission: %w", ctx.Err())
+	}
+	return counter.counter.CountInput(ctx, input)
+}
+
 type vllmChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

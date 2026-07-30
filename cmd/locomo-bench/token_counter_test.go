@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/wallfacers/engram/memory/evidencecompiler"
@@ -48,6 +49,56 @@ func TestVLLMTokenCounterUsesChatTemplateEndpoint(t *testing.T) {
 	}
 	if got.InputTokens != 17 || got.Fingerprint != "sha256:answerer-template-r1" {
 		t.Fatalf("token count = %+v", got)
+	}
+}
+
+func TestGateTokenCounterSharesAdmissionLimit(t *testing.T) {
+	upstream := &blockingTokenCounter{
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		fingerprint: "sha256:counter",
+	}
+	counter := gateTokenCounter(make(chan struct{}, 1), upstream)
+	input := evidencecompiler.AnswerInput{Model: "answerer-r1", System: "system", User: "question"}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := counter.CountInput(context.Background(), input)
+		firstDone <- err
+	}()
+	<-upstream.started
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := counter.CountInput(canceled, input); err == nil {
+		t.Fatal("admission-full token count unexpectedly bypassed canceled context")
+	}
+	if got := upstream.calls.Load(); got != 1 {
+		t.Fatalf("upstream calls while gate was full = %d, want 1", got)
+	}
+
+	close(upstream.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first gated token count: %v", err)
+	}
+}
+
+type blockingTokenCounter struct {
+	started     chan struct{}
+	release     chan struct{}
+	fingerprint string
+	calls       atomic.Int32
+}
+
+func (counter *blockingTokenCounter) CountInput(ctx context.Context, _ evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	if counter.calls.Add(1) == 1 {
+		close(counter.started)
+	}
+	select {
+	case <-counter.release:
+		return evidencecompiler.TokenCount{InputTokens: 7, Fingerprint: counter.fingerprint}, nil
+	case <-ctx.Done():
+		return evidencecompiler.TokenCount{}, ctx.Err()
 	}
 }
 

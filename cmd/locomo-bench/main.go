@@ -498,13 +498,6 @@ func run() error {
 		if strings.TrimSpace(opt.tokenCounterBaseURL) == "" {
 			return fmt.Errorf("formal 022 evaluation requires --token-counter-base-url")
 		}
-		counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
-			BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.formalProtocol.Budget.CounterFingerprint,
-		})
-		if err != nil {
-			return fmt.Errorf("configure formal token counter: %w", err)
-		}
-		opt.formalCounter = counter
 	}
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
@@ -530,6 +523,15 @@ func run() error {
 		return err
 	}
 	sem := make(chan struct{}, opt.concurrency)
+	if opt.formalProtocol != nil {
+		counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
+			BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.formalProtocol.Budget.CounterFingerprint,
+		})
+		if err != nil {
+			return fmt.Errorf("configure formal token counter: %w", err)
+		}
+		opt.formalCounter = gateTokenCounter(sem, counter)
+	}
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
 		recordBenchUsage(ledger, role, model, usage)
