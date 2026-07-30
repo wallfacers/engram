@@ -25,7 +25,7 @@ projection 是条件阶段；未满足前置 residual-cohort gate 时以 STOP ve
 **Purpose**: 先吸收已收口的 021 和经核验的论文审计，避免在过期 harness 上生成实现。
 
 - [X] T001 先提交或以可恢复方式保护当前 `specs/022-benchmark-parity-memory-architecture/` 与 `.specify/feature.json`，再将 022 branch rebase 到包含 `d9b8916` 的最新 `master`，确认 021 的 `cmd/locomo-bench/iris.go`、`cmd/locomo-bench/iris_test.go`、`cmd/locomo-bench/main.go` 无未解决重叠，并把实际 base SHA 记录到 `specs/022-benchmark-parity-memory-architecture/plan.md`
-- [ ] T002 核对并纳入 canonical 文献记录 `docs/research/high-scoring-memory-systems.md` 与 `docs/product/explorations/benchmark-parity-memory-architecture.md`，把 Merge CI 修正为 `[-0.204,-0.013]`，把 `recall>=0.95` 改为连续 coverage 分层而非通用阈值，且不改写另一 agent 的其他判断
+- [X] T002 核对并纳入 canonical 文献记录 `docs/research/high-scoring-memory-systems.md` 与 `docs/product/explorations/benchmark-parity-memory-architecture.md`，把 Merge CI 修正为 `[-0.204,-0.013]`，把 `recall>=0.95` 改为连续 coverage 分层而非通用阈值，且不改写另一 agent 的其他判断
 - [X] T003 [P] 建立不含 dataset/secret 的 022 artifact fixture 说明与最小样例目录 `cmd/locomo-bench/testdata/022/README.md`
 - [X] T004 在算法改动前运行 `CGO_ENABLED=0 go build ./...`、全量 Go tests、003 graph parity 与 namespace isolation，并把 commit、命令和结果记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
 
