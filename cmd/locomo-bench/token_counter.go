@@ -17,6 +17,7 @@ import (
 const (
 	vllmTokenCounterAttempts   = 3
 	vllmTokenCounterRetryDelay = 25 * time.Millisecond
+	formalTokenCounterMaxLimit = 4
 )
 
 // vllmTokenCounter calls vLLM's chat-aware /tokenize endpoint. It uses the
@@ -37,11 +38,23 @@ type vllmTokenCounterConfig struct {
 	HTTPClient  *http.Client
 }
 
-// gateTokenCounter makes token-preflight requests share the benchmark's
-// global remote-call limit. Formal packing counts a complete prompt for every
-// candidate, so leaving it outside the answer/judge gate can otherwise create
-// thousands of concurrent /tokenize calls before any answer admission occurs.
-// Waiting respects the caller context and never substitutes an estimate.
+// formalTokenCounterLimit bounds the distinct tokenizer service without
+// queuing its many per-candidate counts ahead of answer/judge calls. Formal
+// packing can issue one exact count per candidate for every question; sharing
+// the answer semaphore would let that queue starve completed packs. The limit
+// is operational only and does not alter rendered inputs or the protocol.
+func formalTokenCounterLimit(concurrency int) int {
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > formalTokenCounterMaxLimit {
+		return formalTokenCounterMaxLimit
+	}
+	return concurrency
+}
+
+// gateTokenCounter bounds token-preflight requests without substituting an
+// estimate. Waiting respects the caller context.
 func gateTokenCounter(sem chan struct{}, counter evidencecompiler.TokenCounter) evidencecompiler.TokenCounter {
 	if counter == nil || sem == nil {
 		return counter

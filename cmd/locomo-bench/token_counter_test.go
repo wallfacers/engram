@@ -110,6 +110,22 @@ func TestGateTokenCounterSharesAdmissionLimit(t *testing.T) {
 	}
 }
 
+func TestFormalTokenCounterLimitIsBoundedWithoutStarvingAnswerGate(t *testing.T) {
+	for _, test := range []struct {
+		concurrency int
+		want        int
+	}{
+		{concurrency: 0, want: 1},
+		{concurrency: 1, want: 1},
+		{concurrency: 4, want: 4},
+		{concurrency: 16, want: 4},
+	} {
+		if got := formalTokenCounterLimit(test.concurrency); got != test.want {
+			t.Fatalf("formalTokenCounterLimit(%d) = %d, want %d", test.concurrency, got, test.want)
+		}
+	}
+}
+
 type blockingTokenCounter struct {
 	started     chan struct{}
 	release     chan struct{}

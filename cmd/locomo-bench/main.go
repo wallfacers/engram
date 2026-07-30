@@ -530,7 +530,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("configure formal token counter: %w", err)
 		}
-		opt.formalCounter = gateTokenCounter(sem, counter)
+		opt.formalCounter = gateTokenCounter(make(chan struct{}, formalTokenCounterLimit(opt.concurrency)), counter)
 	}
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
