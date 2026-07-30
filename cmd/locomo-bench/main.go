@@ -77,6 +77,7 @@ type options struct {
 	tokenCounterBaseURL   string
 	formalProtocol        *evalProtocol
 	formalCounter         evidencecompiler.TokenCounter
+	formalQuestionGate    chan struct{}
 	formalRunIndex        int
 	repeats               int
 	estimate              bool
@@ -531,6 +532,7 @@ func run() error {
 			return fmt.Errorf("configure formal token counter: %w", err)
 		}
 		opt.formalCounter = gateTokenCounter(make(chan struct{}, formalTokenCounterLimit(opt.concurrency)), counter)
+		opt.formalQuestionGate = make(chan struct{}, opt.concurrency)
 	}
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
@@ -1389,6 +1391,12 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
 				if armOpt.formalProtocol != nil {
+					release, err := admitFormalQuestion(ctx, armOpt.formalQuestionGate)
+					if err != nil {
+						logger.Warn("formal question admission failed", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					defer release()
 					correct, predicted, usage, formal := runFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, answerCall, judgeCall, qa, runtime.chunkTurns, runtime.turnEvidence, armOpt.formalRunIndex)
 					s.agg.add(qa.Category, correct)
 					s.journal.write(result{

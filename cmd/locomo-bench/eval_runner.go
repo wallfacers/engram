@@ -161,6 +161,23 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 	return nil
 }
 
+// admitFormalQuestion limits in-flight retrieve→pack→answer pipelines. It is
+// intentionally above the token counter: without it, every question can queue
+// its next exact count ahead of already-packed questions, delaying answers
+// despite bounded tokenizer concurrency. The gate is runtime-only and does not
+// change candidates, rendered inputs, or any frozen protocol field.
+func admitFormalQuestion(ctx context.Context, gate chan struct{}) (func(), error) {
+	if gate == nil {
+		return func() {}, nil
+	}
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("formal question admission: %w", ctx.Err())
+	}
+}
+
 // runFormalB1Question is intentionally a narrow legacy-packer bridge.  It
 // retrieves exactly once, freezes the returned candidates and the legacy
 // rendered context, preflights the full answer input, then makes one answer

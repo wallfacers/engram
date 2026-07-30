@@ -96,6 +96,26 @@ func TestCallFormalAnswerPreflightsExactInputAndFailsClosedOnDrift(t *testing.T)
 	}
 }
 
+func TestAdmitFormalQuestionBoundsPackAdmissionAndRespectsCancellation(t *testing.T) {
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := admitFormalQuestion(canceled, gate); err == nil {
+		t.Fatal("full formal question gate ignored canceled context")
+	}
+
+	<-gate
+	release, err := admitFormalQuestion(context.Background(), gate)
+	if err != nil {
+		t.Fatalf("admit available formal question gate: %v", err)
+	}
+	release()
+	if len(gate) != 0 {
+		t.Fatalf("formal question gate leaked admission: len=%d", len(gate))
+	}
+}
+
 func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	protocol := testEvalProtocol()
 	protocol.Retrieval.Recipe = "hybrid"
