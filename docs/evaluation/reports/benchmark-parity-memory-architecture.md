@@ -59,10 +59,10 @@ It contains eight fixture counts and all preflight/runtime deltas are zero.
 
 | Benchmark | Denominator | Profile | Exact cap | B1 protocol hash |
 |---|---:|---|---:|---|
-| LoCoMo category 1–4 | 1,540 | low | 1,100 | `sha256:d72e8a9646ec6f582ef0ff0c577faa32e4d785b51236884315621d5b17d59b94` |
-| LoCoMo category 1–4 | 1,540 | high | 3,600 | `sha256:968992bf3592dc929b991109930920443caaba7e6a9873f3614388a37045e2cd` |
-| LongMemEval-S cleaned full | 500 | low | 1,100 | `sha256:db823cc6a65d698a9a9619fe767799f21111eb363a8e5b803f29c1c72c83af77` |
-| LongMemEval-S cleaned full | 500 | high | 3,600 | `sha256:721a95e82c8c3cfd08f764cf8ba1bcd88030fe05b339edee412ad886e59c7368` |
+| LoCoMo category 1–4 | 1,540 | low | 1,100 | `sha256:52c853fb9c3c951329ae270ced3507d0aa2f270281766cd01e5f0174bb52af20` |
+| LoCoMo category 1–4 | 1,540 | high | 3,600 | `sha256:f198ae8582e9bc57fe4ff56e84e85f324213f0d4c925246c5a2fb782275f9b17` |
+| LongMemEval-S cleaned full | 500 | low | 1,100 | `sha256:dd0747bda23cb06df6a350b72d8f428f10779b613f19b8c2b83a70ed2711b298` |
+| LongMemEval-S cleaned full | 500 | high | 3,600 | `sha256:02a3becdd264b6c88d23d37ed9785a473ed398267b16ea218796f6a7be0f6678` |
 
 These manifests are configuration artifacts, not B1 results: no full answer
 run, candidate artifact, score, oracle, or judge audit has been accepted.
@@ -70,3 +70,20 @@ They will be regenerated after the accompanying runner/report commits so their
 clean git provenance remains exact. B0 continuity still needs its separate
 legacy-retry accounting path and is not represented by these causal B1
 manifests.
+
+### B1 execution hold: v6 cannot satisfy source validity
+
+The live formal-runner check exposed a real ordering constraint in the current
+plan. v6 fact hits have stable entry names and session IDs but no direct raw
+Evidence lineage. A chunk quota improves raw-turn presence but does not remove
+fact hits from the frozen candidate set. Treating a synthetic `legacy-entry:*`
+identifier as a source would falsely claim the span/lineage guarantee required
+by 022.
+
+The runner therefore records `source_lineage_unavailable`, makes zero
+answer/judge calls for that question, and emits an INVALID summary rather than
+an apparent B1 score. Full 1,540/500 B1 is intentionally held until the
+Ledger/projection increment makes source IDs and spans verifiable, or a
+separately specified raw-turn-only baseline is approved. The temporary GPU
+services used solely for the calibration were stopped and both local tunnels
+were confirmed closed.
