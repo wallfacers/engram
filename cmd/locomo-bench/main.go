@@ -66,6 +66,7 @@ type options struct {
 	doc2queryBuild       bool
 	datasetFormat        string
 	compareSpec          string
+	evalValidate         string
 	repeats              int
 	estimate             bool
 	noIDKRetry           bool
@@ -145,6 +146,7 @@ func run() error {
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
+	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (no dataset or model calls)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -227,6 +229,9 @@ func run() error {
 		fmt.Printf("compare: n_a=%d n_b=%d flips A→B=%d B→A=%d McNemar p=%.6f CI overlap=%t verdict=%s\n",
 			report.NA, report.NB, report.FlipsAToB, report.FlipsBToA, report.McNemarP, report.CIOverlap, report.Verdict)
 		return nil
+	}
+	if opt.evalValidate != "" {
+		return runEvalArtifactValidateCLI(opt.evalValidate)
 	}
 	if opt.dataPath == "" {
 		flag.Usage()

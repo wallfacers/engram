@@ -60,3 +60,13 @@ func TestEvalArtifactRunValidationAcceptsCompleteAndRefusesMissingOrTampered(t *
 		t.Fatal("tampered artifact unexpectedly accepted")
 	}
 }
+
+func TestRunEvalArtifactValidateCLIUsesFrozenProtocolWithoutDataset(t *testing.T) {
+	runDir, _ := writeValidEvalArtifactRun(t)
+	if err := runEvalArtifactValidateCLI(runDir); err != nil {
+		t.Fatalf("validate CLI helper rejected complete frozen run: %v", err)
+	}
+	if err := runEvalArtifactValidateCLI(filepath.Join(runDir, "missing")); err == nil {
+		t.Fatal("validate CLI helper accepted missing run directory")
+	}
+}

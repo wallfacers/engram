@@ -190,6 +190,49 @@ func validateEvalArtifactRun(runDir string, requested evalProtocol, expectedQues
 	return summary, nil
 }
 
+// runEvalArtifactValidateCLI implements the no-model validation path used by
+// the quickstart. It derives the expected IDs from the frozen candidates, then
+// verifies every companion artifact and digest against that immutable replay
+// set. Full denominator checks are performed when the protocol is frozen.
+func runEvalArtifactValidateCLI(runDir string) error {
+	protocol, err := readFrozenEvalProtocol(runDir)
+	if err != nil {
+		return err
+	}
+	candidates, err := readEvalCandidateArtifacts(filepath.Join(runDir, evalCandidatesArtifactFile))
+	if err != nil {
+		return fmt.Errorf("read candidates for validation: %w", err)
+	}
+	summary, err := validateEvalArtifactRun(runDir, protocol, candidateQuestionIDs(candidates))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("eval-validate: protocol=%s questions=%d valid=%t\n", summary.ProtocolHash, len(candidates), summary.Validity.isComplete())
+	return nil
+}
+
+func readFrozenEvalProtocol(runDir string) (evalProtocol, error) {
+	raw, err := os.ReadFile(filepath.Join(runDir, evalProtocolArtifactFile)) //nolint:gosec // run artifact is operator-selected
+	if err != nil {
+		return evalProtocol{}, fmt.Errorf("read frozen protocol: %w", err)
+	}
+	var protocol evalProtocol
+	if err := json.Unmarshal(raw, &protocol); err != nil {
+		return evalProtocol{}, fmt.Errorf("decode frozen protocol: %w", err)
+	}
+	if err := validateEvalProtocol(protocol, evalRunFormal); err != nil {
+		return evalProtocol{}, fmt.Errorf("validate frozen protocol: %w", err)
+	}
+	hash, err := evalProtocolFingerprint(protocol)
+	if err != nil {
+		return evalProtocol{}, err
+	}
+	if protocol.ProtocolHash != hash {
+		return evalProtocol{}, fmt.Errorf("frozen protocol hash mismatch; use a fresh --run-dir")
+	}
+	return protocol, nil
+}
+
 func candidateQuestionIDs(candidates []evalCandidateArtifact) []string {
 	ids := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
