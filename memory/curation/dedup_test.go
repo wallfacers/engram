@@ -1,9 +1,13 @@
 package curation
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/store"
 )
 
 func TestNormalizeTextCollapsesWhitespaceAndLowercases(t *testing.T) {
@@ -141,6 +145,118 @@ func TestClusterDeterministicOrdering(t *testing.T) {
 		// Clusters ordered by first member name: apple-cluster before lemon-cluster.
 		if clusters[0][0].Name != "apple" || clusters[1][0].Name != "lemon" {
 			t.Fatalf("nondeterministic cluster order: %v / %v", names(clusters[0]), names(clusters[1]))
+		}
+	}
+}
+
+func TestCurationMergeUnionsDirectEvidenceSources(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	entries := memory.NewEntryStore(s.DB())
+	ledger := memory.NewLedgerStore(s.DB())
+	sources, err := ledger.AppendBatch(ctx, []memory.EvidenceInput{
+		{ExternalSourceID: "turn-1", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a", Speaker: "user", Ordinal: 0, Content: "Alice moved to Berlin.", RecordedAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)},
+		{ExternalSourceID: "turn-2", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a", Speaker: "assistant", Ordinal: 1, Content: "The move happened on Monday.", RecordedAt: time.Date(2026, 7, 30, 0, 1, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("append sources: %v", err)
+	}
+	for index, entry := range []*memory.Entry{
+		{Name: "move-place", Content: "Alice moved to Berlin."},
+		{Name: "move-time", Content: "Alice moved on Monday."},
+	} {
+		if err := entries.UpsertWithSources(ctx, entry, []memory.EvidenceRef{{EvidenceID: sources[index].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+			t.Fatalf("write sourced fact %q: %v", entry.Name, err)
+		}
+	}
+	merged := &memory.Entry{Name: "alice-move", Content: "Alice moved to Berlin on Monday."}
+	if err := entries.Merge(ctx, []string{"move-place", "move-time"}, merged); err != nil {
+		t.Fatalf("merge sourced facts: %v", err)
+	}
+	refs, err := entries.SourceRefs(ctx, merged.ID)
+	if err != nil {
+		t.Fatalf("read merged lineage: %v", err)
+	}
+	if len(refs) != 2 || refs[0].EvidenceID != sources[0].ID || refs[1].EvidenceID != sources[1].ID {
+		t.Fatalf("merged lineage = %+v", refs)
+	}
+	for _, source := range sources {
+		if _, err := ledger.Get(ctx, source.ID); err != nil {
+			t.Fatalf("merge removed source evidence %q: %v", source.ID, err)
+		}
+	}
+}
+
+func TestCurationMergeRejectsUnattributedSourceFact(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	entries := memory.NewEntryStore(s.DB())
+	if _, err := s.DB().ExecContext(ctx, `
+		INSERT INTO memory_entries(id, name, content, created_at, updated_at)
+		VALUES ('unattributed-id', 'unattributed', 'legacy raw fact', 1, 1)`); err != nil {
+		t.Fatalf("seed unattributed fact: %v", err)
+	}
+	if err := entries.Merge(ctx, []string{"unattributed"}, &memory.Entry{Name: "merged", Content: "must not persist"}); err == nil {
+		t.Fatal("merge with unattributed source unexpectedly succeeded")
+	}
+	if _, err := entries.GetByName(ctx, "merged"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unattributed merge leaked output entry: %v", err)
+	}
+}
+
+func TestCurationMergeRollsBackSourceUnionWithFactDeletion(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	entries := memory.NewEntryStore(s.DB())
+	ledger := memory.NewLedgerStore(s.DB())
+	sources, err := ledger.AppendBatch(ctx, []memory.EvidenceInput{
+		{ExternalSourceID: "turn-1", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a", Speaker: "user", Ordinal: 0, Content: "first source", RecordedAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)},
+		{ExternalSourceID: "turn-2", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a", Speaker: "assistant", Ordinal: 1, Content: "second source", RecordedAt: time.Date(2026, 7, 30, 0, 1, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("append sources: %v", err)
+	}
+	for index, entry := range []*memory.Entry{
+		{Name: "first", Content: "first fact"},
+		{Name: "second", Content: "second fact"},
+	} {
+		if err := entries.UpsertWithSources(ctx, entry, []memory.EvidenceRef{{EvidenceID: sources[index].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+			t.Fatalf("write sourced fact %q: %v", entry.Name, err)
+		}
+	}
+	if _, err := s.DB().ExecContext(ctx, `
+		CREATE TEMP TRIGGER fail_curation_merge
+		BEFORE DELETE ON memory_entries
+		WHEN OLD.name = 'second'
+		BEGIN SELECT RAISE(ABORT, 'forced merge rollback'); END`); err != nil {
+		t.Fatalf("install merge failure trigger: %v", err)
+	}
+	if err := entries.Merge(ctx, []string{"first", "second"}, &memory.Entry{Name: "merged", Content: "merged fact"}); err == nil {
+		t.Fatal("merge unexpectedly succeeded despite forced delete failure")
+	}
+	if _, err := entries.GetByName(ctx, "merged"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("failed merge leaked target: %v", err)
+	}
+	for index, name := range []string{"first", "second"} {
+		entry, err := entries.GetByName(ctx, name)
+		if err != nil {
+			t.Fatalf("failed merge removed source %q: %v", name, err)
+		}
+		refs, err := entries.SourceRefs(ctx, entry.ID)
+		if err != nil || len(refs) != 1 || refs[0].EvidenceID != sources[index].ID {
+			t.Fatalf("failed merge changed source lineage %q: refs=%+v err=%v", name, refs, err)
 		}
 	}
 }

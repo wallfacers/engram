@@ -154,6 +154,18 @@ func newUsageModelCaller(p provider.Provider, model string, maxTokens int, tempe
 const perCallTimeout = 3 * time.Minute
 
 func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
+	return gateUsageAttempts(sem, c, 2)
+}
+
+// gateUsageOnce retains the common timeout and concurrency gate but performs
+// exactly one provider attempt. Formal B1 and fixed-gold artifacts count
+// provider attempts, not wrapper invocations, so a transparent retry would make
+// their recorded AnswerCalls/JudgeCalls false.
+func gateUsageOnce(sem chan struct{}, c usageModelCaller) usageModelCaller {
+	return gateUsageAttempts(sem, c, 1)
+}
+
+func gateUsageAttempts(sem chan struct{}, c usageModelCaller, attempts int) usageModelCaller {
 	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
 		select {
 		case sem <- struct{}{}:
@@ -165,7 +177,7 @@ func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
 			lastUsage provider.Usage
 			lastErr   error
 		)
-		for attempt := 0; attempt < 2; attempt++ {
+		for attempt := 0; attempt < attempts; attempt++ {
 			callCtx, cancel := context.WithTimeout(ctx, perCallTimeout)
 			text, usage, err := c(callCtx, system, user)
 			cancel()

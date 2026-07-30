@@ -114,9 +114,9 @@ CGO_ENABLED=0 go build -o ./bin/engram-mcp ./cmd/engram-mcp
 }
 ```
 
-未配置模型时，server 暴露 `memory_write`、`memory_search`、`memory_list`、
-`memory_get` 和 `memory_delete`；配置 LLM 后增加 `memory_ingest`。每个工具都可指定
-namespace，不同 namespace 使用相互隔离的数据库文件。
+未配置模型时，server 暴露 CRUD、不可损失的 `memory_ingest_v2` 以及
+`memory_evidence_get`/生命周期工具；配置 LLM 后增加旧版事实抽取 `memory_ingest`。每个工具
+都可指定 namespace，不同 namespace 使用相互隔离的数据库文件。
 
 客户端接入、工具边界与可选 curation 详见
 [MCP Server 配置指南](docs/guides/mcp-server.md)。

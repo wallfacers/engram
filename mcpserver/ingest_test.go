@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,8 +14,8 @@ import (
 
 func TestMemoryIngestIsVisibleOnlyWithConfiguredCaller(t *testing.T) {
 	ctx := context.Background()
-	stub := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
-		return `{"facts":[{"fact":"The user prefers jasmine tea.","entities":["jasmine tea"],"event_date":"","category":"preference","durability":"evergreen"}]}`, nil
+	stub := pipeline.ModelCaller(func(_ context.Context, _, user string) (string, error) {
+		return responseWithPromptSources(`{"facts":[{"fact":"The user prefers jasmine tea.","entities":["jasmine tea"],"event_date":"","category":"preference","durability":"evergreen"}]}`, user), nil
 	})
 
 	withCaller, err := NewRegistry(ctx, RegistryConfig{DataDir: t.TempDir(), LLMCaller: stub})
@@ -74,13 +76,13 @@ func TestMemoryIngestNotifiesCuratorOncePerSuccessfulBatch(t *testing.T) {
 	curationStarted := make(chan struct{})
 	releaseJudge := make(chan struct{})
 	var calls atomic.Int32
-	caller := pipeline.ModelCaller(func(callCtx context.Context, _, _ string) (string, error) {
+	caller := pipeline.ModelCaller(func(callCtx context.Context, _, user string) (string, error) {
 		switch calls.Add(1) {
 		case 1:
-			return `{"facts":[
+			return responseWithPromptSources(`{"facts":[
 				{"fact":"The user likes jasmine tea.","entities":["jasmine tea"],"category":"preference","durability":"evergreen"},
 				{"fact":"The user likes dark mode.","entities":["dark mode"],"category":"preference","durability":"evergreen"}
-			]}`, nil
+			]}`, user), nil
 		case 2:
 			close(curationStarted)
 			select {
@@ -126,9 +128,9 @@ func TestMemoryIngestNotifiesCuratorOncePerSuccessfulBatch(t *testing.T) {
 func TestMemoryIngestDoesNotNotifyCuratorByDefault(t *testing.T) {
 	ctx := context.Background()
 	var calls atomic.Int32
-	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+	caller := pipeline.ModelCaller(func(_ context.Context, _, user string) (string, error) {
 		calls.Add(1)
-		return `{"facts":[{"fact":"The user likes jasmine tea.","entities":["jasmine tea"],"category":"preference","durability":"evergreen"}]}`, nil
+		return responseWithPromptSources(`{"facts":[{"fact":"The user likes jasmine tea.","entities":["jasmine tea"],"category":"preference","durability":"evergreen"}]}`, user), nil
 	})
 	registry, err := NewRegistry(ctx, RegistryConfig{DataDir: t.TempDir(), LLMCaller: caller})
 	if err != nil {
@@ -146,5 +148,34 @@ func TestMemoryIngestDoesNotNotifyCuratorByDefault(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("default mode model calls = %d, want extraction only", got)
+	}
+}
+
+func responseWithPromptSources(response, user string) string {
+	if strings.Contains(response, `"source_ids"`) {
+		return response
+	}
+	sources, err := json.Marshal(promptSourceIDs(user))
+	if err != nil {
+		return response
+	}
+	return strings.ReplaceAll(response, `{"fact":`, `{"source_ids":`+string(sources)+`,"fact":`)
+}
+
+func promptSourceIDs(user string) []string {
+	const marker = "source_id="
+	var ids []string
+	for rest := user; ; {
+		start := strings.Index(rest, marker)
+		if start < 0 {
+			return ids
+		}
+		rest = rest[start+len(marker):]
+		end := strings.IndexByte(rest, ']')
+		if end < 0 {
+			return ids
+		}
+		ids = append(ids, rest[:end])
+		rest = rest[end+1:]
 	}
 }

@@ -22,8 +22,8 @@ tags: [operations, evaluation, locomo, runbook]
 ```bash
 source ~/.config/engram/locomo-vllm.env
 source ~/.config/engram/judge.env
-export EMBED_BASE_URL=http://127.0.0.1:8001/v1
-export EMBED_MODEL=bge-large-en-v1.5
+export EMBED_BASE_URL=http://127.0.0.1:8010/v1
+export EMBED_MODEL=BAAI/bge-large-en-v1.5
 export EMBED_API_KEY=local-eval
 
 locomo-bench \
@@ -35,6 +35,10 @@ locomo-bench \
 ```
 
 `--chunks`、`--chunk-quota 12`、`--force-answer` 和 `--judge-mem0-aligned` 是该 recipe 的必要标志。变更任何一项都必须作为新 recipe 登记，不得与现有基线混合。
+
+远端 vLLM 的 embedding endpoint 监听 8010，且 `EMBED_MODEL` 必须与其
+`/v1/models` 返回的 served model ID 完全一致；使用短名会让 semantic signal
+静默降级，不能作为可比较评测。
 
 ## 运行后验证
 

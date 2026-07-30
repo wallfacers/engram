@@ -8,8 +8,9 @@ import (
 // MemoryExtractionMessage is one conversation turn presented to the extraction
 // model. Plain data so the prompt package stays IO-free and memory-independent.
 type MemoryExtractionMessage struct {
-	Role string // "user" or "assistant"
-	Text string
+	Role     string // "user" or "assistant"
+	Text     string
+	SourceID string // stable Ledger Evidence ID, supplied by the pipeline
 }
 
 // MemoryExtractionSystemPrompt instructs a small model to distill durable facts
@@ -30,6 +31,7 @@ What to extract (one memory per distinct fact):
 - "event_start" and "event_end": for an event range, resolve both bounds to ISO dates against the SESSION DATE. For a point event use the same date for both. Omit either field when the time cannot be resolved; never invent a range.
 - "aliases": short alternate names or paraphrases for the event/object that a future question might use (for example ["step counter", "activity band"]). Omit when there is no useful alias.
 - "category": one of user, agent, preference, event, reference. "durability": "evergreen" for stable traits, "volatile" for datable events and changeable states.
+- "source_ids": the non-empty list of exact source_id labels that directly support this fact. Use only IDs printed beside conversation turns; never invent an ID and never return a fact without at least one source_id.
 
 What NOT to extract:
 - Pure greetings, filler, and questions that assert no fact.
@@ -38,7 +40,7 @@ What NOT to extract:
 Keep it tight: each "fact" is ONE short sentence (no compound clauses — split them). Merge near-duplicates. Cover every distinct event and trait, but do not pad; most sessions yield a handful to ~20 facts.
 
 Output shape (STRICT JSON, no markdown, no prose):
-{"facts":[{"fact":"...","entities":["..."],"event_date":"YYYY-MM-DD","event_start":"YYYY-MM-DD","event_end":"YYYY-MM-DD","aliases":["..."],"category":"event","durability":"volatile"}]}
+{"facts":[{"fact":"...","source_ids":["..."],"entities":["..."],"event_date":"YYYY-MM-DD","event_start":"YYYY-MM-DD","event_end":"YYYY-MM-DD","aliases":["..."],"category":"event","durability":"volatile"}]}
 If there is genuinely nothing to remember, output {"facts":[]}.`
 
 // BuildMemoryExtractionUserPrompt renders the session date and message batch into
@@ -53,6 +55,9 @@ func BuildMemoryExtractionUserPrompt(sessionDate string, messages []MemoryExtrac
 		role := m.Role
 		if role != "assistant" {
 			role = "user"
+		}
+		if m.SourceID != "" {
+			fmt.Fprintf(&b, "[source_id=%s] ", m.SourceID)
 		}
 		fmt.Fprintf(&b, "%s: %s\n", role, oneLine(m.Text))
 	}

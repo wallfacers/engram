@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -77,6 +78,16 @@ type EntryRevision struct {
 // NewEntryStore wraps the shared *sql.DB (obtain via store.Store.DB()).
 func NewEntryStore(db *sql.DB) *EntryStore {
 	return &EntryStore{db: db}
+}
+
+// Ledger returns the Evidence Ledger backed by the same namespace-local
+// database as this entry store. It lets engine subsystems preserve source
+// material without exposing the raw database handle to adapters.
+func (s *EntryStore) Ledger() *LedgerStore {
+	if s == nil {
+		return nil
+	}
+	return NewLedgerStore(s.db)
 }
 
 // ---- time helpers (unix microseconds, consistent with internal/store/sqlite) ----
@@ -199,10 +210,70 @@ func (s *EntryStore) upsert(ctx context.Context, q upsertContext, e *Entry) erro
 	return nil
 }
 
-// Upsert inserts a new entry or updates the existing one keyed by name. char_count
-// is taken verbatim from e (the caller decides the code-point count for this phase).
+// Upsert inserts a new entry or updates the existing one keyed by name. It
+// preserves the existing API while recording the call as direct-write Evidence
+// and replacing only the atomic-fact projection's source lineage. char_count is
+// taken verbatim from e (the caller decides the code-point count for this phase).
 func (s *EntryStore) Upsert(ctx context.Context, e *Entry) error {
-	return s.upsert(ctx, s.db, e)
+	return s.upsertWithSourceMode(ctx, e, nil, false)
+}
+
+// UpsertWithSources writes an atomic fact supported by explicit active Evidence
+// records. It is used by extractors and builders that can name their actual
+// message-level provenance; unknown, unavailable, empty, or invalid spans roll
+// back the entry and projection together.
+func (s *EntryStore) UpsertWithSources(ctx context.Context, e *Entry, sources []EvidenceRef) error {
+	return s.upsertWithSourceMode(ctx, e, sources, true)
+}
+
+func (s *EntryStore) upsertWithSourceMode(ctx context.Context, e *Entry, sources []EvidenceRef, explicitSources bool) error {
+	if e == nil {
+		return errors.New("memory: upsert nil entry")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("memory: upsert with sources begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	if err := s.upsert(ctx, tx, e); err != nil {
+		return err
+	}
+	configHash := "explicit-sources"
+	builder := "entry_store_explicit"
+	if !explicitSources {
+		content := directEvidenceContent(e)
+		digest := sha256.Sum256([]byte(content))
+		selfEvidence, err := appendOrReuseEvidence(ctx, tx, EvidenceInput{
+			ExternalSourceID: fmt.Sprintf("direct:%s:%x", e.ID, digest[:]),
+			SourceType:       EvidenceDirectWrite,
+			Content:          content,
+			RecordedAt:       e.UpdatedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("memory: upsert self evidence: %w", err)
+		}
+		sources = []EvidenceRef{{EvidenceID: selfEvidence.ID, SourceOrder: 0, FullSource: true}}
+		configHash = "direct-write-self-evidence"
+		builder = "entry_store_direct_write"
+	}
+	if err := replaceAtomicFactProjectionTx(ctx, tx, e.ID, sources, builder, configHash, e.UpdatedAt); err != nil {
+		return fmt.Errorf("memory: upsert atomic-fact projection: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: upsert with sources commit: %w", err)
+	}
+	return nil
+}
+
+func directEvidenceContent(e *Entry) string {
+	if e.Content != "" {
+		return e.Content
+	}
+	if e.Name != "" {
+		return e.Name
+	}
+	return "(empty direct write)"
 }
 
 const entrySelectCols = `id, name, trigger, content, pinned, durability, category,
@@ -242,6 +313,15 @@ func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 func (s *EntryStore) GetByName(ctx context.Context, name string) (*Entry, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+entrySelectCols+` FROM memory_entries WHERE name = ?`, name)
+	return scanEntry(row)
+}
+
+// GetByContent returns the first exact-content Atomic Fact. ADD-only pipeline
+// dedup uses it only to union newly observed Evidence onto the existing fact;
+// it never overwrites the fact's canonical projection text.
+func (s *EntryStore) GetByContent(ctx context.Context, content string) (*Entry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+entrySelectCols+` FROM memory_entries WHERE content = ? ORDER BY created_at ASC, id ASC LIMIT 1`, content)
 	return scanEntry(row)
 }
 
@@ -330,6 +410,25 @@ func (s *EntryStore) List(ctx context.Context) ([]*Entry, error) {
 	return out, rows.Err()
 }
 
+// SourceRefs returns the direct Evidence lineage for one atomic-fact entry.
+func (s *EntryStore) SourceRefs(ctx context.Context, entryID string) ([]EvidenceRef, error) {
+	var projectionID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM memory_projections
+		WHERE kind = 'atomic_fact' AND object_key = ?`, entryID).Scan(&projectionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: find atomic-fact projection %q: %w", entryID, err)
+	}
+	refs, err := NewProjectionStore(s.db).SourcesByProjectionIDs(ctx, []string{projectionID})
+	if err != nil {
+		return nil, err
+	}
+	return refs[projectionID], nil
+}
+
 // Delete removes the entry by name, returning store.ErrNotFound when no row
 // matched. All owned derived rows, shadow vectors, and references that would
 // dangle are cleaned in the same transaction.
@@ -351,6 +450,18 @@ func (s *EntryStore) delete(ctx context.Context, name string, expected *EntryRev
 		return false, fmt.Errorf("memory: delete begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	var entryID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM memory_entries WHERE name = ?`, name).Scan(&entryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if expected != nil {
+			return false, nil
+		}
+		return false, store.ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("memory: read entry %q before delete: %w", name, err)
+	}
 
 	query := `DELETE FROM memory_entries WHERE name = ?`
 	args := []any{name}
@@ -378,10 +489,21 @@ func (s *EntryStore) delete(ctx context.Context, name string, expected *EntryRev
 	if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
 		return false, err
 	}
+	if err := deleteAtomicFactProjectionTx(ctx, tx, entryID); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("memory: delete commit: %w", err)
 	}
 	return true, nil
+}
+
+func deleteAtomicFactProjectionTx(ctx context.Context, q execContext, entryID string) error {
+	if _, err := q.ExecContext(ctx,
+		`DELETE FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, entryID); err != nil {
+		return fmt.Errorf("memory: delete atomic-fact projection %q: %w", entryID, err)
+	}
+	return nil
 }
 
 // deleteDerivedTx invalidates every side row derived from one entry. Shadow
@@ -518,9 +640,16 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 			}
 		}
 	}
+	mergeRefs, sourceEntryIDs, err := mergeSourceRefsTx(ctx, tx, names)
+	if err != nil {
+		return false, err
+	}
 
 	if err := s.upsert(ctx, tx, into); err != nil {
 		return false, err
+	}
+	if err := replaceAtomicFactProjectionTx(ctx, tx, into.ID, mergeRefs, "curation_merge", "source-union", into.UpdatedAt); err != nil {
+		return false, fmt.Errorf("memory: merge source union: %w", err)
 	}
 	for _, name := range names {
 		if name == into.Name {
@@ -537,6 +666,9 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 		if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
 			return false, err
 		}
+		if err := deleteAtomicFactProjectionTx(ctx, tx, sourceEntryIDs[name]); err != nil {
+			return false, err
+		}
 	}
 	// The merged target's own derived rows are stale (content changed); drop
 	// them so the write-behind embedder re-embeds and the caller re-indexes
@@ -548,6 +680,99 @@ func (s *EntryStore) merge(ctx context.Context, names []string, into *Entry, exp
 		return false, fmt.Errorf("memory: merge commit: %w", err)
 	}
 	return true, nil
+}
+
+func mergeSourceRefsTx(ctx context.Context, tx *sql.Tx, names []string) ([]EvidenceRef, map[string]string, error) {
+	if len(names) == 0 {
+		return nil, nil, fmt.Errorf("%w: merge has no source facts", ErrInvalidEvidenceRef)
+	}
+	refs := make([]EvidenceRef, 0, len(names))
+	entryIDs := make(map[string]string, len(names))
+	seenNames := make(map[string]struct{}, len(names))
+	seenRefs := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, seen := seenNames[name]; seen {
+			continue
+		}
+		seenNames[name] = struct{}{}
+		var entryID, projectionID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT e.id, p.id
+			FROM memory_entries AS e
+			JOIN memory_projections AS p
+			  ON p.kind = 'atomic_fact' AND p.object_key = e.id
+			WHERE e.name = ?`, name).Scan(&entryID, &projectionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("%w: merge source %q has no active projection lineage", ErrInvalidEvidenceRef, name)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("memory: read merge source %q: %w", name, err)
+		}
+		entryIDs[name] = entryID
+
+		rows, err := tx.QueryContext(ctx, `
+			SELECT evidence_id, full_source, start_char, end_char, span_digest
+			FROM memory_projection_sources
+			WHERE projection_id = ?
+			ORDER BY source_order ASC, evidence_id ASC`, projectionID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("memory: read merge sources for %q: %w", name, err)
+		}
+		count := 0
+		for rows.Next() {
+			var ref EvidenceRef
+			var fullSource int
+			var startChar, endChar sql.NullInt64
+			var spanDigest sql.NullString
+			if err := rows.Scan(&ref.EvidenceID, &fullSource, &startChar, &endChar, &spanDigest); err != nil {
+				rows.Close() //nolint:errcheck
+				return nil, nil, fmt.Errorf("memory: scan merge source %q: %w", name, err)
+			}
+			ref.FullSource = fullSource != 0
+			if startChar.Valid {
+				value := int(startChar.Int64)
+				ref.StartChar = &value
+			}
+			if endChar.Valid {
+				value := int(endChar.Int64)
+				ref.EndChar = &value
+			}
+			if spanDigest.Valid {
+				ref.SpanDigest = spanDigest.String
+			}
+			key := evidenceRefKey(ref)
+			if _, seen := seenRefs[key]; seen {
+				continue
+			}
+			seenRefs[key] = struct{}{}
+			ref.SourceOrder = len(refs)
+			refs = append(refs, ref)
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			return nil, nil, fmt.Errorf("memory: iterate merge sources for %q: %w", name, err)
+		}
+		rows.Close() //nolint:errcheck
+		if count == 0 {
+			return nil, nil, fmt.Errorf("%w: merge source %q has empty lineage", ErrInvalidEvidenceRef, name)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, nil, fmt.Errorf("%w: merge has no Evidence sources", ErrInvalidEvidenceRef)
+	}
+	return refs, entryIDs, nil
+}
+
+func evidenceRefKey(ref EvidenceRef) string {
+	start, end := "", ""
+	if ref.StartChar != nil {
+		start = fmt.Sprintf("%d", *ref.StartChar)
+	}
+	if ref.EndChar != nil {
+		end = fmt.Sprintf("%d", *ref.EndChar)
+	}
+	return strings.Join([]string{ref.EvidenceID, fmt.Sprintf("%t", ref.FullSource), start, end, ref.SpanDigest}, "\x00")
 }
 
 // Supersede non-destructively suppresses oldName in favor of newName by setting

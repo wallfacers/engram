@@ -29,11 +29,16 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantTools := map[string]bool{
-		"memory_write":  true,
-		"memory_search": true,
-		"memory_list":   true,
-		"memory_get":    true,
-		"memory_delete": true,
+		"memory_write":              true,
+		"memory_search":             true,
+		"memory_list":               true,
+		"memory_get":                true,
+		"memory_delete":             true,
+		"memory_ingest_v2":          true,
+		"memory_evidence_get":       true,
+		"memory_evidence_tombstone": true,
+		"memory_evidence_restore":   true,
+		"memory_evidence_purge":     true,
 	}
 	if len(tools.Tools) != len(wantTools) {
 		t.Fatalf("tools/list returned %d tools, want %d", len(tools.Tools), len(wantTools))
@@ -104,9 +109,8 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 }
 
 // TestToolsListExposesFullContractWithLLM is the tools/list smoke test for the
-// LLM-configured server: exactly the six-tool contract (CRUD + memory_ingest),
-// each with a non-empty description and a valid input schema (SC-004). The
-// offline five-tool case is covered by TestMemoryToolsRoundTripOverInMemoryMCP.
+// LLM-configured server: the offline Evidence/CRUD contract plus conditional
+// memory_ingest, each with a non-empty description and a valid input schema.
 func TestToolsListExposesFullContractWithLLM(t *testing.T) {
 	ctx := context.Background()
 	stub := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
@@ -124,12 +128,17 @@ func TestToolsListExposesFullContractWithLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
-		"memory_write":  true,
-		"memory_search": true,
-		"memory_list":   true,
-		"memory_get":    true,
-		"memory_delete": true,
-		"memory_ingest": true,
+		"memory_write":              true,
+		"memory_search":             true,
+		"memory_list":               true,
+		"memory_get":                true,
+		"memory_delete":             true,
+		"memory_ingest":             true,
+		"memory_ingest_v2":          true,
+		"memory_evidence_get":       true,
+		"memory_evidence_tombstone": true,
+		"memory_evidence_restore":   true,
+		"memory_evidence_purge":     true,
 	}
 	if len(tools.Tools) != len(want) {
 		t.Fatalf("tools/list with LLM returned %d tools, want %d", len(tools.Tools), len(want))

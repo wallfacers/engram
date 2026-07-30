@@ -43,9 +43,11 @@ MCP 不可用时才考虑独立配置的 CLI 路径。
 
 curation 是 `shipped-opt-in`：它已交付，但仅在显式开启或调用时运行。启用前请先确认 namespace、模型依赖和审计需求；它不是默认后台进程。完整生命周期与检索边界见[记忆系统架构](../architecture/memory-system.md)。
 
-缺少 LLM 时，基础 MCP CRUD 仍可离线工作，条件 `memory_ingest` 不会出现；skill 也不得把
-缺失的模型能力报告为成功。namespace 默认是 `default`，但项目、用户或数据目录切换必须显式
-确认，不能以同名 namespace 推断跨 adapter 的同一存储。
+缺少 LLM 时，CRUD、`memory_ingest_v2` 与 Evidence 读取/生命周期工具仍可离线工作。
+`memory_ingest_v2` 必须带稳定 session/source ID 和 ordinal；它会先保存原文，随后将
+`extraction_unavailable` 如实报告为“已保存、未抽取”。条件 `memory_ingest` 仍不会出现；
+skill 不得把缺失的模型能力报告为已抽取成功。namespace 默认是 `default`，但项目、用户或
+数据目录切换必须显式确认，不能以同名 namespace 推断跨 adapter 的同一存储。
 
 ## 故障排查
 

@@ -121,10 +121,10 @@ shape varies by client:
 }
 ```
 
-With no model configuration, the server exposes `memory_write`,
-`memory_search`, `memory_list`, `memory_get`, and `memory_delete`. Configure an
-LLM to add `memory_ingest`. Each tool accepts a namespace; namespaces are
-isolated in separate database files.
+With no model configuration, the server exposes CRUD plus lossless
+`memory_ingest_v2` and the `memory_evidence_get`/lifecycle tools. Configure an
+LLM to add legacy `memory_ingest` fact extraction. Each tool accepts a
+namespace; namespaces are isolated in separate database files.
 
 See the [MCP server guide](docs/guides/mcp-server.md) for client integration,
 tool boundaries, and opt-in curation.

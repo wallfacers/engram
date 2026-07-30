@@ -97,6 +97,9 @@ func (r *Retriever) WithReranker(rr embedding.Reranker) *Retriever {
 // Result is one fused retrieval hit. Content carries the full entry body; the
 // tool layer derives a snippet. EventDate/CreatedAt drive time-aware rendering.
 type Result struct {
+	ID              string
+	ProjectionID    string
+	ProjectionKind  ProjectionKind
 	Name            string
 	Trigger         string
 	Content         string
@@ -183,6 +186,8 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 			continue
 		}
 		out = append(out, Result{
+			ID:              entry.ID,
+			ProjectionKind:  ProjectionAtomicFact,
 			Name:            entry.Name,
 			Trigger:         entry.Trigger,
 			Content:         entry.Content,
@@ -193,6 +198,7 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 			Score:           score.Score,
 		})
 	}
+	r.attachProjectionIdentity(ctx, out)
 	return out, nil
 }
 
@@ -251,6 +257,7 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 		signals = append(signals, r.associativeRanks(ctx, pool, vector.query, vector.stored, cues))
 	}
 	fused := fuseRRF(signals...)
+	fused = r.activeAtomicFactScores(ctx, fused)
 	if len(fused) == 0 {
 		return nil, diagnostics, nil
 	}
@@ -292,6 +299,8 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 			continue // entry removed between ranking and load; skip
 		}
 		out = append(out, Result{
+			ID:              e.ID,
+			ProjectionKind:  ProjectionAtomicFact,
 			Name:            e.Name,
 			Trigger:         e.Trigger,
 			Content:         e.Content,
@@ -302,7 +311,130 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 			Score:           s.Score,
 		})
 	}
+	r.attachProjectionIdentity(ctx, out)
 	return out, diagnostics, nil
+}
+
+// activeAtomicFactScores removes candidates whose facts are no longer an
+// active Evidence-derived projection. This is intentionally fail-closed: an
+// unavailable source must never reach an answer-facing result through FTS,
+// entity, temporal, or semantic fallback while a projection is stale.
+func (r *Retriever) activeAtomicFactScores(ctx context.Context, candidates []embedding.Scored) []embedding.Scored {
+	if r == nil || r.entries == nil || len(candidates) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, candidate.Key)
+	}
+	names = uniqueNonEmptyStrings(names)
+	active := make(map[string]struct{}, len(names))
+	for start := 0; start < len(names); start += 500 {
+		end := start + 500
+		if end > len(names) {
+			end = len(names)
+		}
+		batch := names[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for index, name := range batch {
+			placeholders[index] = "?"
+			args[index] = name
+		}
+		rows, err := r.entries.db.QueryContext(ctx, `
+			SELECT e.name
+			FROM memory_entries AS e
+			JOIN memory_projections AS p
+			  ON p.kind = 'atomic_fact' AND p.object_key = e.id AND p.state = 'active'
+			WHERE e.name IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			slog.Warn("memory: active projection filter failed closed", "err", err)
+			return nil
+		}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close() //nolint:errcheck
+				slog.Warn("memory: active projection filter failed closed", "err", err)
+				return nil
+			}
+			active[name] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			slog.Warn("memory: active projection filter failed closed", "err", err)
+			return nil
+		}
+		rows.Close() //nolint:errcheck
+	}
+	out := make([]embedding.Scored, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := active[candidate.Key]; ok {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+// attachProjectionIdentity batch-loads the rebuildable atomic-fact view IDs
+// after ranking. A missing or failed derived view leaves ProjectionID at its
+// documented zero value and never changes Search ordering or signal fallback.
+func (r *Retriever) attachProjectionIdentity(ctx context.Context, results []Result) {
+	if r == nil || r.entries == nil || len(results) == 0 {
+		return
+	}
+	entryIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.ID == "" {
+			continue
+		}
+		if _, exists := seen[result.ID]; exists {
+			continue
+		}
+		seen[result.ID] = struct{}{}
+		entryIDs = append(entryIDs, result.ID)
+	}
+	projectionByEntryID := make(map[string]string, len(entryIDs))
+	for start := 0; start < len(entryIDs); start += 500 {
+		end := start + 500
+		if end > len(entryIDs) {
+			end = len(entryIDs)
+		}
+		batch := entryIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for index, entryID := range batch {
+			placeholders[index] = "?"
+			args[index] = entryID
+		}
+		rows, err := r.entries.db.QueryContext(ctx, `
+			SELECT id, object_key
+			FROM memory_projections
+			WHERE kind = 'atomic_fact' AND object_key IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			slog.Warn("memory: projection identity degraded", "err", err)
+			return
+		}
+		for rows.Next() {
+			var projectionID, entryID string
+			if err := rows.Scan(&projectionID, &entryID); err != nil {
+				rows.Close() //nolint:errcheck
+				slog.Warn("memory: projection identity degraded", "err", err)
+				return
+			}
+			projectionByEntryID[entryID] = projectionID
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck
+			slog.Warn("memory: projection identity degraded", "err", err)
+			return
+		}
+		rows.Close() //nolint:errcheck
+	}
+	for index := range results {
+		results[index].ProjectionID = projectionByEntryID[results[index].ID]
+	}
 }
 
 func (r *Retriever) applyTemporal(ctx context.Context, fused []embedding.Scored, window TimeWindow) []embedding.Scored {

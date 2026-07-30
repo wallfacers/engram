@@ -40,9 +40,11 @@ func (v *VectorStore) Put(ctx context.Context, entryName, model string, vec []fl
 }
 
 // putIfOwnerUnchanged atomically upserts a base or shadow vector only while its
-// source entry is still the same revision that produced the embedding input.
-// This prevents a slow write-behind call from recreating an orphan vector after
-// Delete/Merge, or publishing a stale vector after a same-name rewrite.
+// source entry is still the same revision that produced the embedding input
+// and still owns an active atomic-fact projection. This prevents a slow
+// write-behind call from recreating an orphan vector after Delete/Merge,
+// publishing a stale vector after a same-name rewrite, or restoring a vector
+// after Evidence invalidated the projection.
 func (v *VectorStore) putIfOwnerUnchanged(ctx context.Context, vectorName string, owner *Entry, model string, vec []float32, at time.Time) (bool, error) {
 	if owner == nil {
 		return false, nil
@@ -54,13 +56,17 @@ func (v *VectorStore) putIfOwnerUnchanged(ctx context.Context, vectorName string
 			SELECT 1 FROM memory_entries
 			WHERE name = ? AND id = ? AND revision = ?
 		 )
+		 AND EXISTS (
+			SELECT 1 FROM memory_projections
+			WHERE kind = 'atomic_fact' AND object_key = ? AND state = 'active'
+		 )
 		 ON CONFLICT(entry_name) DO UPDATE SET
 			model      = excluded.model,
 			dims       = excluded.dims,
 			vec        = excluded.vec,
 			updated_at = excluded.updated_at`,
 		vectorName, model, len(vec), embedding.EncodeVector(vec), at.UTC().UnixMicro(),
-		owner.Name, owner.ID, owner.Revision)
+		owner.Name, owner.ID, owner.Revision, owner.ID)
 	if err != nil {
 		return false, fmt.Errorf("memory: put embedding %q if owner unchanged: %w", vectorName, err)
 	}
@@ -75,8 +81,19 @@ func (v *VectorStore) putIfOwnerUnchanged(ctx context.Context, vectorName string
 // model, decoded. Rows for other models are skipped (they are stale and will be
 // rebuilt). Used to assemble the semantic-search candidate set.
 func (v *VectorStore) LoadAllForModel(ctx context.Context, model string) (map[string][]float32, error) {
-	rows, err := v.db.QueryContext(ctx,
-		`SELECT entry_name, vec FROM memory_embeddings WHERE model = ?`, model)
+	rows, err := v.db.QueryContext(ctx, `
+		SELECT m.entry_name, m.vec
+		FROM memory_embeddings AS m
+		WHERE m.model = ?
+		  AND EXISTS (
+			SELECT 1
+			FROM memory_entries AS e
+			JOIN memory_projections AS p
+			  ON p.kind = 'atomic_fact' AND p.object_key = e.id AND p.state = 'active'
+			WHERE m.entry_name = e.name
+			   OR m.entry_name = e.name || '#alias'
+			   OR m.entry_name = e.name || '#query'
+		  )`, model)
 	if err != nil {
 		return nil, fmt.Errorf("memory: load embeddings: %w", err)
 	}
@@ -106,6 +123,8 @@ func (v *VectorStore) NamesMissingModel(ctx context.Context, model string) ([]st
 	rows, err := v.db.QueryContext(ctx,
 		`SELECT e.name
 		   FROM memory_entries e
+		   JOIN memory_projections p
+		     ON p.kind = 'atomic_fact' AND p.object_key = e.id AND p.state = 'active'
 		   LEFT JOIN memory_embeddings m
 		     ON m.entry_name = e.name AND m.model = ?
 		  WHERE m.entry_name IS NULL

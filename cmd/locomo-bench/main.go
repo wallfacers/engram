@@ -48,6 +48,7 @@ import (
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/curation"
+	"github.com/wallfacers/engram/memory/evidencecompiler"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/provider"
 	"github.com/wallfacers/engram/provider/anthropic"
@@ -56,80 +57,99 @@ import (
 )
 
 type options struct {
-	dataPath             string
-	runDir               string
-	storeDir             string
-	aliasShadow          string
-	aliasShadowPrepared  bool
-	doc2query            string
-	doc2queryPrepared    bool
-	doc2queryBuild       bool
-	datasetFormat        string
-	compareSpec          string
-	repeats              int
-	estimate             bool
-	noIDKRetry           bool
-	budgetBaseline       float64
-	retrieval            string
-	multiQuery           bool
-	mqMaxSubqueries      int
-	recallDiagnostic     bool
-	maxConvs             int
-	maxQuestions         int
-	onlyCategory         int
-	onlyEnumeration      bool
-	topK                 int
-	maxTokens            int
-	concurrency          int
-	chunks               bool
-	chunkQuota           int
-	filterPool           int
-	assoc                bool
-	assocDepth           int
-	clusterSweep         bool
-	temporalScore        bool
-	temporalHardFilter   bool
-	conflictResolution   bool
-	supersededPenalty    float64
-	abstainPrompt        bool
-	abstainHard          bool
-	abstainSoft          bool
-	forceAnswer          bool
-	imageCaptions        bool
-	temporalAnswerPrompt bool
-	temporalDateScaffold bool
-	iris                 bool
-	irisDepth            int
-	judgeMem0Aligned     bool
-	answerModel          string
-	judgeModel           string
-	rerank               bool
-	pcic                 bool
-	oracle               bool
-	pcicAnnotate         bool
-	pcicFillTurns        string
-	pcicMetaPath         string
-	pcicMeta             *PCICMeta
-	abstainProbe         bool
-	abstainProbeOut      string
-	abstainGateSpec      string
-	abstainGate          AbstainGate
-	selector             chunkSelector
-	opinionPass          bool
-	adversarial          int
-	catTopKSpec          string
-	catQuotaSpec         string
-	catTopK              map[int]int
-	catQuota             map[int]int
-	coverageOnly         bool
-	temporalDiagnostic   bool
-	attributionTrace     bool
-	joinResults          string
-	embedProbe           bool
-	outrankCap           int
-	widePool             int
-	factCoverageTau      float64
-	contextParity        *contextParityJournal
+	dataPath              string
+	runDir                string
+	storeDir              string
+	aliasShadow           string
+	aliasShadowPrepared   bool
+	doc2query             string
+	doc2queryPrepared     bool
+	doc2queryBuild        bool
+	datasetFormat         string
+	compareSpec           string
+	evalValidate          string
+	evalProtocolPath      string
+	fixedGoldOracle       bool
+	evalFreezeProtocol    string
+	evalBudgetProfile     string
+	answerInputTokenCap   int
+	counterFingerprint    string
+	tokenCounterCalibrate bool
+	tokenCounterBaseURL   string
+	formalProtocol        *evalProtocol
+	formalCounter         evidencecompiler.TokenCounter
+	formalQuestionGate    chan struct{}
+	formalReplay          *formalQuestionReplay
+	formalCalls           *formalCallJournal
+	formalRunIndex        int
+	repeats               int
+	estimate              bool
+	noIDKRetry            bool
+	budgetBaseline        float64
+	retrieval             string
+	multiQuery            bool
+	mqMaxSubqueries       int
+	recallDiagnostic      bool
+	maxConvs              int
+	maxQuestions          int
+	onlyCategory          int
+	onlyEnumeration       bool
+	topK                  int
+	maxTokens             int
+	concurrency           int
+	chunks                bool
+	chunkQuota            int
+	filterPool            int
+	assoc                 bool
+	assocDepth            int
+	clusterSweep          bool
+	temporalScore         bool
+	temporalHardFilter    bool
+	conflictResolution    bool
+	supersededPenalty     float64
+	abstainPrompt         bool
+	abstainHard           bool
+	abstainSoft           bool
+	forceAnswer           bool
+	imageCaptions         bool
+	temporalAnswerPrompt  bool
+	temporalDateScaffold  bool
+	iris                  bool
+	irisDepth             int
+	judgeMem0Aligned      bool
+	answerModel           string
+	judgeModel            string
+	rerank                bool
+	pcic                  bool
+	oracle                bool
+	pcicAnnotate          bool
+	pcicFillTurns         string
+	pcicMetaPath          string
+	pcicMeta              *PCICMeta
+	abstainProbe          bool
+	abstainProbeOut       string
+	abstainGateSpec       string
+	abstainGate           AbstainGate
+	selector              chunkSelector
+	opinionPass           bool
+	adversarial           int
+	catTopKSpec           string
+	catQuotaSpec          string
+	catTopK               map[int]int
+	catQuota              map[int]int
+	coverageOnly          bool
+	temporalDiagnostic    bool
+	attributionTrace      bool
+	joinResults           string
+	embedProbe            bool
+	outrankCap            int
+	widePool              int
+	factCoverageTau       float64
+	contextParity         *contextParityJournal
+	// formalEvidence is the active, namespace-local Evidence Ledger reader
+	// used by formal source expansion and the independent pre-answer
+	// span/citation validator. It is runtime-only and is never serialized.
+	formalEvidence formalEvidenceReader
 }
 
 func main() {
@@ -145,6 +165,15 @@ func run() error {
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
 	flag.StringVar(&opt.compareSpec, "compare", "", "compare two run directories: --compare DIR_A DIR_B")
+	flag.StringVar(&opt.evalValidate, "eval-validate", "", "validate a frozen 022.v1 artifact run directory and exit (fixed-gold runs also require --data; never makes model calls)")
+	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
+	flag.BoolVar(&opt.fixedGoldOracle, "fixed-gold-oracle", false, "run the diagnostic-only all-gold Evidence ceiling from a frozen B1 protocol (no retrieval/extraction)")
+	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 protocol manifest and exit (no model calls)")
+	flag.StringVar(&opt.evalBudgetProfile, "eval-budget-profile", "", "formal protocol budget profile: low | high (required with --eval-freeze-protocol)")
+	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
+	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
+	flag.BoolVar(&opt.tokenCounterCalibrate, "token-counter-calibrate", false, "compare formal /tokenize preflight with local answer-runtime usage and write a calibration artifact")
+	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -205,6 +234,9 @@ func run() error {
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
+	if err := validateFixedGoldOracleMode(opt); err != nil {
+		return err
+	}
 	if err := validatePromptModes(opt); err != nil {
 		return err
 	}
@@ -227,6 +259,15 @@ func run() error {
 		fmt.Printf("compare: n_a=%d n_b=%d flips A→B=%d B→A=%d McNemar p=%.6f CI overlap=%t verdict=%s\n",
 			report.NA, report.NB, report.FlipsAToB, report.FlipsBToA, report.McNemarP, report.CIOverlap, report.Verdict)
 		return nil
+	}
+	if opt.evalValidate != "" {
+		if fixedGoldOracleArtifactsPresent(opt.evalValidate) {
+			return runFixedGoldOracleValidateCLI(context.Background(), opt)
+		}
+		return runEvalArtifactValidateCLI(opt.evalValidate)
+	}
+	if opt.tokenCounterCalibrate {
+		return runFormalTokenCalibrationCLI(opt)
 	}
 	if opt.dataPath == "" {
 		flag.Usage()
@@ -252,6 +293,26 @@ func run() error {
 	arms, err := armsFor(opt.retrieval)
 	if err != nil {
 		return err
+	}
+	if opt.evalProtocolPath != "" {
+		protocol, prepared, err := prepareFormalEvalRun(opt.evalProtocolPath, opt.runDir, opt)
+		if err != nil {
+			return err
+		}
+		if protocol.Experiment.Stage != "b1" {
+			return fmt.Errorf("formal runner currently supports only b1 protocol stage, got %q", protocol.Experiment.Stage)
+		}
+		if err := validateFormalRunnerOptions(protocol, prepared, arms); err != nil {
+			return err
+		}
+		if err := verifyFormalGitProvenance(protocol); err != nil {
+			return err
+		}
+		opt = prepared
+		opt.formalProtocol = &protocol
+	}
+	if opt.fixedGoldOracle && opt.formalProtocol == nil {
+		return fmt.Errorf("--fixed-gold-oracle requires --eval-protocol")
 	}
 	if opt.multiQuery && !opt.recallDiagnostic && len(arms) != 1 {
 		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
@@ -311,6 +372,17 @@ func run() error {
 	convs, err := loadBenchmarkDataset(opt.dataPath, opt.datasetFormat, opt.imageCaptions)
 	if err != nil {
 		return err
+	}
+	if opt.formalProtocol != nil {
+		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
+			return fmt.Errorf("formal 022 evaluation refuses dataset/question sampling")
+		}
+		if err := verifyFormalDataset(*opt.formalProtocol, opt.dataPath, opt.datasetFormat, convs); err != nil {
+			return err
+		}
+	}
+	if opt.evalFreezeProtocol != "" {
+		return freezeFormalB1Protocol(opt, convs)
 	}
 	sampledConversations := 0
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
@@ -378,9 +450,27 @@ func run() error {
 	}
 	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	extractModel := envOr("EXTRACT_MODEL", model)
+	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
 	judgeConfig := resolveJudgeConfig(os.Getenv)
 	opt.answerModel = model
 	opt.judgeModel = judgeConfig.Model
+	if opt.formalProtocol != nil {
+		answerRevision := envOr("LOCOMO_MODEL_REVISION", model)
+		judgeRevision := envOr("JUDGE_MODEL_REVISION", judgeConfig.Model)
+		extractorRevision := envOr("EXTRACT_MODEL_REVISION", extractModel)
+		if opt.formalProtocol.Models.Answerer.ID != model ||
+			opt.formalProtocol.Models.Answerer.Revision != answerRevision ||
+			opt.formalProtocol.Models.Answerer.Provider != answerProvider ||
+			opt.formalProtocol.Models.Judge.ID != judgeConfig.Model ||
+			opt.formalProtocol.Models.Judge.Revision != judgeRevision ||
+			opt.formalProtocol.Models.Judge.Provider != judgeConfig.Provider ||
+			(!opt.fixedGoldOracle &&
+				(opt.formalProtocol.Models.Extractor.ID != extractModel ||
+					opt.formalProtocol.Models.Extractor.Revision != extractorRevision ||
+					opt.formalProtocol.Models.Extractor.Provider != answerProvider)) {
+			return fmt.Errorf("formal model providers, IDs, or revisions differ from frozen protocol")
+		}
+	}
 	if opt.estimate {
 		return printEstimate(convs, opt, prices, model, extractModel, judgeConfig.Model)
 	}
@@ -435,6 +525,11 @@ func run() error {
 		return fmt.Errorf("LOCOMO_API_KEY is required (never passed as a flag so it stays out of process listings)")
 	}
 	baseURL := envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic")
+	if opt.formalProtocol != nil {
+		if strings.TrimSpace(opt.tokenCounterBaseURL) == "" {
+			return fmt.Errorf("formal 022 evaluation requires --token-counter-base-url")
+		}
+	}
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
 		// writes no journal, so it has no regime to protect.
@@ -449,7 +544,6 @@ func run() error {
 	// Provider protocol is selectable so the harness can target either an
 	// Anthropic-messages endpoint (default) or an OpenAI-chat-completions one
 	// (LOCOMO_PROVIDER=openai). Both satisfy provider.Provider identically.
-	answerProvider := envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider)
 	prov, err := buildBenchProvider(answerProvider, apiKey, baseURL, opt.maxTokens, "LOCOMO_PROVIDER")
 	if err != nil {
 		return err
@@ -459,15 +553,50 @@ func run() error {
 		return err
 	}
 	sem := make(chan struct{}, opt.concurrency)
+	if opt.formalProtocol != nil {
+		counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
+			BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.formalProtocol.Budget.CounterFingerprint,
+		})
+		if err != nil {
+			return fmt.Errorf("configure formal token counter: %w", err)
+		}
+		opt.formalCounter = gateTokenCounter(make(chan struct{}, formalTokenCounterLimit(opt.concurrency)), counter)
+		opt.formalQuestionGate = make(chan struct{}, opt.concurrency)
+	}
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
 		recordBenchUsage(ledger, role, model, usage)
 	}
-	answerUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
+	answerProviderCall := newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage)
+	judgeProviderCall := newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage)
+	answerUsageCall := gateUsage(sem, answerProviderCall)
+	judgeUsageCall := gateUsage(sem, judgeProviderCall)
+	if opt.formalProtocol != nil {
+		// Formal call counts are provider-attempt counts. Transparent retries
+		// would make the persisted one-call contract untrue.
+		answerUsageCall = gateUsageOnce(sem, answerProviderCall)
+		judgeUsageCall = gateUsageOnce(sem, judgeProviderCall)
+	}
 	filterCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "filter", recordUsage)))
 	rewriteCall := modelCallerFromUsage(gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "rewrite", recordUsage)))
-	judgeUsageCall := gateUsage(sem, newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage))
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
+
+	if opt.fixedGoldOracle {
+		summary, err := runFixedGoldOracleDataset(
+			context.Background(), *opt.formalProtocol, opt, convs, answerUsageCall, judgeUsageCall,
+		)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"fixed-gold oracle: correct=%d/%d target=%d met=%t diagnostic_only=true\n",
+			summary.OracleDiagnostic.Correct,
+			summary.OracleDiagnostic.Denominator,
+			summary.OracleDiagnostic.TargetCorrect,
+			summary.OracleDiagnostic.TargetMet,
+		)
+		return nil
+	}
 
 	// The embedding client is shared across conversations (safe for concurrent
 	// use) and only built when a hybrid arm is present.
@@ -530,8 +659,32 @@ func run() error {
 		return runCoverage(ctx, opt, convs, runtimes, arms, logger)
 	}
 
+	var formalReplay *formalQuestionReplay
+	var formalCalls *formalCallJournal
+	formalJournalsClosed := false
+	if opt.formalProtocol != nil {
+		formalReplay, err = openFormalQuestionReplay(opt.runDir, opt.formalProtocol.ProtocolHash)
+		if err != nil {
+			return fmt.Errorf("open formal question replay: %w", err)
+		}
+		formalCalls, err = openFormalCallJournal(opt.runDir, opt.formalProtocol.ProtocolHash)
+		if err != nil {
+			_ = formalReplay.Close()
+			return fmt.Errorf("open formal call journal: %w", err)
+		}
+		opt.formalReplay = formalReplay
+		opt.formalCalls = formalCalls
+		defer func() {
+			if !formalJournalsClosed {
+				_ = formalCalls.Close()
+				_ = formalReplay.Close()
+			}
+		}()
+	}
+
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
 		repeatOpt := opt
+		repeatOpt.formalRunIndex = repeat
 		if opt.repeats > 1 {
 			repeatOpt.runDir = filepath.Join(opt.runDir, fmt.Sprintf("run-%d", repeat))
 		}
@@ -552,6 +705,31 @@ func run() error {
 			}
 			states = append(states, &armState{name: name, agg: newAggregator(), journal: j})
 		}
+		if repeatOpt.formalCalls != nil {
+			if len(states) != 1 {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("formal run requires exactly one result journal")
+			}
+			if err := repeatOpt.formalCalls.Reconcile(repeat, states[0].journal); err != nil {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("reconcile formal call journal before repetition %d: %w", repeat, err)
+			}
+		}
+		if repeat == 1 && repeatOpt.formalReplay != nil {
+			if err := seedFormalQuestionReplay(repeatOpt.formalReplay, states[0].journal); err != nil {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("seed formal question replay: %w", err)
+			}
+		}
 		if err := validateContextParityResume(repeatOpt, convs, states); err != nil {
 			for _, state := range states {
 				state.journal.Close()
@@ -560,6 +738,8 @@ func run() error {
 			return err
 		}
 		var wg sync.WaitGroup
+		var repeatErrMu sync.Mutex
+		var repeatErr error
 		for ci := range convs {
 			wg.Add(1)
 			go func(conv conversation, current []*armState) {
@@ -567,25 +747,68 @@ func run() error {
 				index := conv.ID
 				if index < 0 || index >= len(runtimes) || runtimes[index] == nil {
 					logger.Warn("conversation runtime unavailable", "conversation", conv.ID)
+					if repeatOpt.formalProtocol != nil {
+						repeatErrMu.Lock()
+						if repeatErr == nil {
+							repeatErr = fmt.Errorf("conversation %d runtime unavailable", conv.ID)
+						}
+						repeatErrMu.Unlock()
+					}
 					return
 				}
 				if err := answerConversationWithUsage(ctx, repeatOpt, conv, runtimes[index], answerUsageCall, filterCall, rewriteCall, judgeUsageCall, current, logger); err != nil {
 					logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
+					repeatErrMu.Lock()
+					if repeatErr == nil {
+						repeatErr = fmt.Errorf("conversation %d: %w", conv.ID, err)
+					}
+					repeatErrMu.Unlock()
 				}
 			}(convs[ci], states)
 		}
 		wg.Wait()
+		if repeatOpt.formalCalls != nil {
+			if err := repeatOpt.formalCalls.Reconcile(repeat, states[0].journal); err != nil {
+				repeatErrMu.Lock()
+				if repeatErr == nil {
+					repeatErr = fmt.Errorf("reconcile formal call journal after repetition %d: %w", repeat, err)
+				}
+				repeatErrMu.Unlock()
+			}
+		}
 		for _, state := range states {
 			state.journal.Close()
-			report(state, repeatOpt)
+			if formalRepeatScoresVisible(repeatOpt) {
+				report(state, repeatOpt)
+			} else {
+				fmt.Printf("formal repetition=%d recorded=%d/%d score=pending-validation\n",
+					repeat, state.journal.count(), repeatOpt.formalProtocol.Benchmark.QuestionCount)
+			}
 		}
 		if err := parity.Close(); err != nil {
 			return err
+		}
+		repeatErrMu.Lock()
+		currentRepeatErr := repeatErr
+		repeatErrMu.Unlock()
+		if currentRepeatErr != nil {
+			return currentRepeatErr
 		}
 		if len(states) == 2 {
 			reportDelta(states[0], states[1])
 		}
 	}
+	if formalCalls != nil {
+		if err := formalCalls.Close(); err != nil {
+			return err
+		}
+	}
+	if formalReplay != nil {
+		if err := formalReplay.Close(); err != nil {
+			return err
+		}
+	}
+	formalJournalsClosed = true
 	if len(arms) > 2 {
 		warnExtraPairedArms(logger, arms)
 	}
@@ -604,6 +827,28 @@ func run() error {
 		}
 		if err := writePaired(filepath.Join(opt.runDir, "paired.json"), paired); err != nil {
 			return fmt.Errorf("write paired.json: %w", err)
+		}
+	}
+	if opt.formalProtocol != nil {
+		repeatDirs := formalRepeatRunDirs(opt.runDir, opt.repeats)
+		formalRuns, err := loadFormalQuestionRuns(repeatDirs, arms[0])
+		if err != nil {
+			return err
+		}
+		summary, err := materializeFormalB1Artifacts(opt.runDir, *opt.formalProtocol, formalRuns)
+		if err != nil {
+			return fmt.Errorf("materialize formal 022 artifacts: %w", err)
+		}
+		if !summary.Validity.isComplete() {
+			return fmt.Errorf("formal 022 artifact validity failed; summary preserved at %s", filepath.Join(opt.runDir, evalSummaryArtifactFile))
+		}
+		expectedQuestionIDs := formalQuestionIDs(opt.datasetFormat, convs)
+		validated, err := validateEvalArtifactRun(opt.runDir, *opt.formalProtocol, expectedQuestionIDs)
+		if err != nil {
+			return fmt.Errorf("validate formal 022 artifacts: %w", err)
+		}
+		if _, err := publishFormalB1Metrics(opt.runDir, validated, *opt.formalProtocol); err != nil {
+			return fmt.Errorf("publish formal 022 metrics: %w", err)
 		}
 	}
 	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel, judgeConfig.Model)
@@ -958,6 +1203,7 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 type conversationRuntime struct {
 	store       *store.Store
 	entries     *memory.EntryStore
+	projections *memory.ProjectionStore
 	vectors     *memory.VectorStore
 	embedClient embedding.Client
 	retrievers  map[string]*memory.Retriever
@@ -966,6 +1212,9 @@ type conversationRuntime struct {
 	// covers (D<session>:<turn>), enabling exact-turn evidence recall. Empty when
 	// chunks are not ingested.
 	chunkTurns map[string][]string
+	// turnEvidence maps the dataset dialogue ID to its namespace-local Ledger
+	// Evidence ID. It is used only by formal source coverage materialization.
+	turnEvidence map[string]string
 }
 
 func (r *conversationRuntime) Close() {
@@ -1003,6 +1252,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	}()
 
 	es := memory.NewEntryStore(st.DB())
+	projections := memory.NewProjectionStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
 	embedder := memory.NewEmbedder(es, vectors, embClient, memory.DefaultEmbedBuffer)
 
@@ -1032,10 +1282,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			return nil, fmt.Errorf("doc2query requires a prebuilt persisted store for conversation %d; refusing to call extraction", conv.ID)
 		}
 		for _, s := range conv.Sessions {
-			msgs := make([]pipeline.Message, 0, len(s.Turns))
-			for _, tn := range s.Turns {
-				msgs = append(msgs, pipeline.Message{Role: "user", Text: tn.Speaker + ": " + tn.Text})
-			}
+			msgs := benchmarkSessionMessages(conv, s)
 			if _, err := pipe.Ingest(ctx, s.Date, fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index), msgs); err != nil {
 				logger.Warn("ingest session failed", "conversation", conv.ID, "session", s.Index, "err", err)
 			}
@@ -1056,10 +1303,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		})
 		added := 0
 		for _, s := range conv.Sessions {
-			msgs := make([]pipeline.Message, 0, len(s.Turns))
-			for _, tn := range s.Turns {
-				msgs = append(msgs, pipeline.Message{Role: "user", Text: tn.Speaker + ": " + tn.Text})
-			}
+			msgs := benchmarkSessionMessages(conv, s)
 			n, err := opinionPipe.Ingest(ctx, s.Date, fmt.Sprintf("conv%d-sess%d-op", conv.ID, s.Index), msgs)
 			if err != nil {
 				logger.Warn("opinion pass failed", "conversation", conv.ID, "session", s.Index, "err", err)
@@ -1070,11 +1314,13 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		logger.Info("opinion pass done", "conversation", conv.ID, "entries_added", added)
 	}
 	var chunkTurns map[string][]string
+	var turnEvidence map[string]string
 	if opt.chunks {
-		if turns, n, err := ingestChunks(ctx, es, conv); err != nil {
+		if turns, evidence, n, err := ingestChunks(ctx, es, conv); err != nil {
 			logger.Warn("chunk ingest failed", "conversation", conv.ID, "err", err)
 		} else {
 			chunkTurns = turns
+			turnEvidence = evidence
 			logger.Info("verbatim chunks ingested", "conversation", conv.ID, "chunks", n)
 		}
 	}
@@ -1134,7 +1380,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, entries: es, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns}, nil
+	return &conversationRuntime{store: st, entries: es, projections: projections, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -1279,6 +1525,18 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 	}
 
 	var qwg sync.WaitGroup
+	var formalErrMu sync.Mutex
+	var formalErr error
+	recordFormalErr := func(err error) {
+		if err == nil {
+			return
+		}
+		formalErrMu.Lock()
+		if formalErr == nil {
+			formalErr = err
+		}
+		formalErrMu.Unlock()
+	}
 	selected := selectQuestions(conv, opt)
 	var parityState *armState
 	if len(states) > 0 {
@@ -1299,6 +1557,74 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			qwg.Add(1)
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
+				if armOpt.formalProtocol != nil {
+					if armOpt.formalReplay == nil || armOpt.formalCalls == nil {
+						err := fmt.Errorf("formal replay or call journal unavailable")
+						recordFormalErr(err)
+						logger.Error("formal question infrastructure unavailable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					release, err := admitFormalQuestion(ctx, armOpt.formalQuestionGate)
+					if err != nil {
+						recordFormalErr(err)
+						logger.Warn("formal question admission failed", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					defer release()
+					armOpt.formalEvidence = runtime.entries.Ledger()
+					frozen, err := armOpt.formalReplay.getOrMaterialize(key, qa.QuestionID, func() formalFrozenQuestion {
+						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, qa, runtime.chunkTurns, runtime.turnEvidence)
+					})
+					if err != nil {
+						recordFormalErr(err)
+						logger.Error("formal question freeze failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					revalidated := revalidateFrozenFormalSources(ctx, *armOpt.formalProtocol, armOpt, qa, frozen)
+					input, count, formal := prepareFrozenFormalB1Answer(ctx, *armOpt.formalProtocol, armOpt, answerCall, judgeCall, qa, revalidated, armOpt.formalRunIndex)
+					// Bind the call journal to the exact payload that passed the
+					// active Ledger reread, not the older replay snapshot.
+					frozenDigest := formalFrozenPayloadDigest(revalidated)
+					inputDigest := evalJSONDigest(input)
+					correct := false
+					predicted := ""
+					usage := provider.Usage{}
+					if len(formal.InvalidReasons) == 0 {
+						if err := armOpt.formalCalls.Begin(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest); err != nil {
+							recordFormalErr(err)
+							logger.Error("record formal call intent failed", "conversation", key.Conv, "question", key.Q, "err", err)
+							return
+						}
+						correct, predicted, usage, formal = callPreparedFrozenFormalB1Answer(ctx, armOpt, answerCall, judgeCall, qa, input, count, formal)
+					}
+					formal.InvalidReasons = stableStrings(formal.InvalidReasons)
+					item := result{
+						Conv: key.Conv, Q: key.Q, QuestionID: qa.QuestionID, Category: qa.Category, CategoryName: qa.CategoryName,
+						QuestionType: qa.QuestionType, Adversarial: qa.Adversarial || qa.Category == adversarialCategory,
+						Correct: correct, Question: qa.Question, Gold: goldFor(qa), Predicted: predicted,
+						RetrievalFlags: retrievalFingerprint(armOpt), AnswerRegime: answerRegimeFingerprint(armOpt),
+						InputTokens: formal.Answer.InputTokens, OutputTokens: usage.OutputTokens, AnswerContextTokens: formal.Answer.InputTokens,
+						Formal022: &formal,
+					}
+					if len(formal.InvalidReasons) == 0 {
+						err = armOpt.formalCalls.Finish(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					} else if formal.Answer.AnswerCalls > 0 || formal.Answer.JudgeCalls > 0 {
+						err = armOpt.formalCalls.Finish(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					} else {
+						err = armOpt.formalCalls.FailWithoutStart(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					}
+					if err != nil {
+						recordFormalErr(err)
+						logger.Error("record formal call terminal failed", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					s.agg.add(qa.Category, correct)
+					if err := s.journal.writeResult(item, true); err != nil {
+						recordFormalErr(err)
+						logger.Error("write formal result failed; terminal remains replayable", "conversation", key.Conv, "question", key.Q, "err", err)
+					}
+					return
+				}
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
 				var abstainRuntime *abstainRuntimeContext
 				if armOpt.abstainHard || armOpt.abstainSoft {
@@ -1358,7 +1684,9 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 	}
 	qwg.Wait()
 	logger.Info("conversation done", "conversation", conv.ID, "answered", len(selected))
-	return nil
+	formalErrMu.Lock()
+	defer formalErrMu.Unlock()
+	return formalErr
 }
 
 // processConversation remains a one-shot compatibility wrapper for callers
@@ -1869,6 +2197,10 @@ func report(s *armState, opt options) {
 	if opt.maxConvs > 0 || opt.maxQuestions > 0 {
 		fmt.Printf("  (sampled run: conversations=%d questions/conv=%d)\n", opt.maxConvs, opt.maxQuestions)
 	}
+}
+
+func formalRepeatScoresVisible(opt options) bool {
+	return opt.formalProtocol == nil
 }
 
 // reportDelta prints the A-B uplift between two arms (typically fts vs hybrid).

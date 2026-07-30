@@ -314,6 +314,13 @@ func (j *contextParityJournal) Has(conv, q int, arm string) bool {
 }
 
 func validateContextParityResume(opt options, convs []conversation, states []*armState) error {
+	// Formal 022 runs are governed by the frozen Candidate/Trace/Bundle replay
+	// and durable call/result journals. They intentionally never emit the
+	// legacy multi-query context-parity record, so applying that resume gate
+	// would reject every safe formal restart after its first completed result.
+	if opt.formalProtocol != nil {
+		return nil
+	}
 	if opt.contextParity == nil || len(states) == 0 {
 		return nil
 	}

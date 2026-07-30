@@ -32,6 +32,33 @@ type result struct {
 	SweepUsed           bool                      `json:"sweep_used,omitempty"`
 	SweepOverBudget     bool                      `json:"sweep_over_budget,omitempty"`
 	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
+	Formal022           *evalFormalQuestionRun    `json:"formal_022,omitempty"`
+}
+
+// loadFormalQuestionRuns reads the per-repetition journal records used to
+// produce immutable 022 artifacts.  Unlike ordinary resume, a malformed or
+// missing formal payload is a hard error: silently dropping it would turn a
+// partial answer run into an apparently complete majority denominator.
+func loadFormalQuestionRuns(runDirs []string, arm string) ([][]result, error) {
+	runs := make([][]result, 0, len(runDirs))
+	for _, runDir := range runDirs {
+		path := filepath.Join(runDir, fmt.Sprintf("results-%s.jsonl", arm))
+		var current []result
+		if err := scanResultsJSONLStrict(path, func(item result) error {
+			if item.Formal022 == nil {
+				return fmt.Errorf("formal result %q has no 022 payload", item.QuestionID)
+			}
+			current = append(current, item)
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("read formal journal %s: %w", path, err)
+		}
+		if len(current) == 0 {
+			return nil, fmt.Errorf("formal journal %s has no results", path)
+		}
+		runs = append(runs, current)
+	}
+	return runs, nil
 }
 
 type resultKey struct {
@@ -46,6 +73,7 @@ type journal struct {
 	f    *os.File
 	w    *bufio.Writer
 	seen map[resultKey]result
+	path string
 }
 
 // openJournal opens (creating if needed) the run's JSONL file for the given
@@ -60,7 +88,7 @@ func openJournal(runDir, retrieval string) (*journal, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open journal: %w", err)
 	}
-	return &journal{f: f, w: bufio.NewWriter(f), seen: seen}, nil
+	return &journal{f: f, w: bufio.NewWriter(f), seen: seen, path: path}, nil
 }
 
 func loadPrior(path string) (map[resultKey]result, error) {
@@ -86,17 +114,90 @@ func (j *journal) lookup(k resultKey) (result, bool) {
 	return r, ok
 }
 
-func (j *journal) write(r result) {
-	b, err := json.Marshal(r)
-	if err != nil {
-		return
+func (j *journal) count() int {
+	if j == nil {
+		return 0
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	_, _ = j.w.Write(b)
-	_ = j.w.WriteByte('\n')
-	_ = j.w.Flush() // flush each line so an interrupted run resumes cleanly
+	return len(j.seen)
+}
+
+// formalSnapshotStrict re-reads an existing result journal without legacy
+// resume's malformed-line tolerance. Formal replay must refuse a torn,
+// duplicate, or non-formal first repetition before it makes any later answer
+// calls; detecting that only during final artifact materialization is too late.
+func (j *journal) formalSnapshotStrict() (map[resultKey]result, error) {
+	if j == nil {
+		return nil, fmt.Errorf("formal result journal is unavailable")
+	}
+	j.mu.Lock()
+	path := j.path
+	fallback := make(map[resultKey]result, len(j.seen))
+	for key, item := range j.seen {
+		fallback[key] = item
+	}
+	j.mu.Unlock()
+	if path == "" {
+		return fallback, nil
+	}
+
+	prior := make(map[resultKey]result)
+	questionKeys := make(map[string]resultKey)
+	if err := scanResultsJSONLStrict(path, func(item result) error {
+		key := resultKey{Conv: item.Conv, Q: item.Q}
+		if _, duplicate := prior[key]; duplicate {
+			return fmt.Errorf("duplicate formal result conv=%d q=%d", key.Conv, key.Q)
+		}
+		if item.Formal022 == nil {
+			return fmt.Errorf("formal result conv=%d q=%d has no 022 payload", key.Conv, key.Q)
+		}
+		questionID := resultID(item)
+		if questionID == "" {
+			return fmt.Errorf("formal result conv=%d q=%d has no question ID", key.Conv, key.Q)
+		}
+		if previous, duplicate := questionKeys[questionID]; duplicate {
+			return fmt.Errorf("duplicate formal question %q at conv=%d q=%d and conv=%d q=%d", questionID, previous.Conv, previous.Q, key.Conv, key.Q)
+		}
+		prior[key] = item
+		questionKeys[questionID] = key
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return prior, nil
+}
+
+func (j *journal) writeResult(r result, syncFile bool) error {
+	if j == nil {
+		return fmt.Errorf("result journal is unavailable")
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if _, err := j.w.Write(b); err != nil {
+		return err
+	}
+	if err := j.w.WriteByte('\n'); err != nil {
+		return err
+	}
+	if err := j.w.Flush(); err != nil {
+		return err
+	}
+	if syncFile {
+		if err := j.f.Sync(); err != nil {
+			return err
+		}
+	}
 	j.seen[resultKey{Conv: r.Conv, Q: r.Q}] = r
+	return nil
+}
+
+func (j *journal) write(r result) {
+	_ = j.writeResult(r, false)
 }
 
 func (j *journal) Close() {

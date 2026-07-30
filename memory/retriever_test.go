@@ -133,6 +133,23 @@ func TestRetriever_TimeAwareFields(t *testing.T) {
 	}
 }
 
+func TestRetrieverResultCarriesStableProjectionIdentity(t *testing.T) {
+	ctx := context.Background()
+	es, vs := newStores(t)
+	entry := &memory.Entry{Name: "identified", Content: "Alice moved to Berlin."}
+	if err := es.Upsert(ctx, entry); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	results, err := memory.NewRetriever(es, vs, nil).Search(ctx, "Alice Berlin", 1)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("search results=%+v err=%v", results, err)
+	}
+	got := results[0]
+	if got.ID != entry.ID || got.ProjectionID == "" || got.ProjectionKind != memory.ProjectionAtomicFact {
+		t.Fatalf("result identity = %+v, want entry=%q atomic projection", got, entry.ID)
+	}
+}
+
 func TestTemporalScoreUsesSoftExponentialGap(t *testing.T) {
 	windowStart := time.Date(2024, time.May, 10, 0, 0, 0, 0, time.UTC)
 	windowEnd := windowStart

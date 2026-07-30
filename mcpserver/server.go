@@ -56,4 +56,24 @@ func registerTools(server *mcp.Server, adapter *toolAdapter) {
 		Name:        "memory_delete",
 		Description: "Delete one memory entry by name from a namespace.",
 	}, adapter.memoryDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "memory_ingest_v2",
+		Description: "Losslessly save source-identified conversation evidence; extraction is optional.",
+	}, adapter.memoryIngestV2)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "memory_evidence_get",
+		Description: "Get active source evidence by ID from one namespace.",
+	}, adapter.memoryEvidenceGet)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "memory_evidence_tombstone",
+		Description: "Tombstone source evidence and invalidate unsupported projections.",
+	}, adapter.memoryEvidenceTombstone)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "memory_evidence_restore",
+		Description: "Restore tombstoned source evidence without reviving stale projections.",
+	}, adapter.memoryEvidenceRestore)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "memory_evidence_purge",
+		Description: "Permanently purge source evidence and dependent projections.",
+	}, adapter.memoryEvidencePurge)
 }

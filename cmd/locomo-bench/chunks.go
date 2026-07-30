@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/pipeline"
 )
 
 // Verbatim-chunk union store: alongside the extracted facts, each session's raw
@@ -220,16 +221,21 @@ func applyChunkQuota(wide []memory.Result, topK, quota int) []memory.Result {
 	return out
 }
 
-// ingestChunks writes one conversation's verbatim chunks as entries. Upsert is
+// ingestChunks writes one conversation's canonical turns to the Ledger, then
+// writes verbatim chunks as rebuildable projections of those turns. Upsert is
 // keyed by deterministic names, so re-running over a persisted store is
-// idempotent. Returns a map from each chunk entry name to the dialogue ids its
-// text covers (for exact-turn evidence recall) and the number of chunks written.
-func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation) (map[string][]string, int, error) {
+// idempotent. Returns chunk→dataset-turn IDs for recall, dataset-turn→Evidence
+// IDs for formal coverage resolution, and the number of chunks written.
+func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation) (map[string][]string, map[string]string, int, error) {
 	chunkTurns := make(map[string][]string)
+	turnEvidence, err := appendConversationEvidence(ctx, es.Ledger(), conv)
+	if err != nil {
+		return chunkTurns, turnEvidence, 0, err
+	}
 	namePrefix := fmt.Sprintf("chunk-c%d-", conv.ID)
 	entries, err := es.List(ctx)
 	if err != nil {
-		return chunkTurns, 0, fmt.Errorf("list existing chunks for conversation %d: %w", conv.ID, err)
+		return chunkTurns, turnEvidence, 0, fmt.Errorf("list existing chunks for conversation %d: %w", conv.ID, err)
 	}
 	existing := make(map[string]*memory.Entry)
 	for _, entry := range entries {
@@ -260,11 +266,16 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 			}
 			if previous, ok := existing[name]; ok && previous.Content != e.Content {
 				if err := es.Delete(ctx, name); err != nil {
-					return chunkTurns, n, fmt.Errorf("invalidate changed chunk %s: %w", name, err)
+					return chunkTurns, turnEvidence, n, fmt.Errorf("invalidate changed chunk %s: %w", name, err)
 				}
 			}
-			if err := es.Upsert(ctx, e); err != nil {
-				return chunkTurns, n, fmt.Errorf("chunk %s: %w", e.Name, err)
+			refs := chunkEvidenceRefs(chunk.DiaIDs, turnEvidence)
+			if len(refs) == 0 {
+				if err := es.Upsert(ctx, e); err != nil {
+					return chunkTurns, turnEvidence, n, fmt.Errorf("chunk %s: %w", e.Name, err)
+				}
+			} else if err := es.UpsertWithSources(ctx, e, refs); err != nil {
+				return chunkTurns, turnEvidence, n, fmt.Errorf("chunk %s: %w", e.Name, err)
 			}
 			if len(chunk.DiaIDs) > 0 {
 				chunkTurns[name] = chunk.DiaIDs
@@ -277,8 +288,112 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 			continue
 		}
 		if err := es.Delete(ctx, name); err != nil {
-			return chunkTurns, n, fmt.Errorf("delete obsolete chunk %s: %w", name, err)
+			return chunkTurns, turnEvidence, n, fmt.Errorf("delete obsolete chunk %s: %w", name, err)
 		}
 	}
-	return chunkTurns, n, nil
+	return chunkTurns, turnEvidence, n, nil
+}
+
+// benchmarkSessionMessages keeps extraction and the canonical raw Ledger on
+// the identical external-source payload. This makes the pipeline append an
+// idempotent reuse rather than a second, differently shaped source record.
+func benchmarkSessionMessages(conv conversation, s session) []pipeline.Message {
+	messages := make([]pipeline.Message, 0, len(s.Turns))
+	occurredAt := benchmarkSessionOccurredAt(s)
+	for index, t := range s.Turns {
+		messages = append(messages, pipeline.Message{
+			Role:             benchmarkTurnSpeaker(t),
+			Text:             benchmarkTurnContent(t),
+			ExternalSourceID: benchmarkTurnSourceID(conv.ID, s.Index, index, t),
+			Ordinal:          index,
+			OccurredAt:       occurredAt,
+		})
+	}
+	return messages
+}
+
+func appendConversationEvidence(ctx context.Context, ledger *memory.LedgerStore, conv conversation) (map[string]string, error) {
+	if ledger == nil {
+		return nil, fmt.Errorf("conversation %d has no Evidence Ledger", conv.ID)
+	}
+	turnEvidence := make(map[string]string)
+	for _, s := range conv.Sessions {
+		inputs := make([]memory.EvidenceInput, 0, len(s.Turns))
+		keys := make([]string, 0, len(s.Turns))
+		occurredAt := benchmarkSessionOccurredAt(s)
+		for index, t := range s.Turns {
+			if strings.TrimSpace(t.Text) == "" {
+				continue
+			}
+			key := benchmarkTurnSourceID(conv.ID, s.Index, index, t)
+			inputs = append(inputs, memory.EvidenceInput{
+				ExternalSourceID: key,
+				SourceType:       memory.EvidenceMessage,
+				SourceSessionID:  fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index),
+				Speaker:          benchmarkTurnSpeaker(t),
+				Ordinal:          index,
+				Content:          benchmarkTurnContent(t),
+				OccurredAt:       occurredAt,
+				RecordedAt:       time.Now().UTC(),
+			})
+			keys = append(keys, key)
+		}
+		if len(inputs) == 0 {
+			continue
+		}
+		appended, err := ledger.AppendBatch(ctx, inputs)
+		if err != nil {
+			return nil, fmt.Errorf("append conversation %d session %d evidence: %w", conv.ID, s.Index, err)
+		}
+		for index, source := range appended {
+			turnEvidence[keys[index]] = source.ID
+		}
+	}
+	return turnEvidence, nil
+}
+
+func benchmarkTurnSourceID(convID, sessionIndex, turnIndex int, t turn) string {
+	if sourceID := strings.TrimSpace(t.DiaID); sourceID != "" {
+		return sourceID
+	}
+	return fmt.Sprintf("conv%d-sess%d-turn%d", convID, sessionIndex, turnIndex)
+}
+
+func benchmarkTurnContent(t turn) string {
+	if speaker := strings.TrimSpace(t.Speaker); speaker != "" {
+		return speaker + ": " + t.Text
+	}
+	return t.Text
+}
+
+func benchmarkTurnSpeaker(t turn) string {
+	if speaker := strings.TrimSpace(t.Speaker); speaker != "" {
+		return speaker
+	}
+	return "user"
+}
+
+func benchmarkSessionOccurredAt(s session) *time.Time {
+	if s.Date.IsZero() {
+		return nil
+	}
+	occurredAt := s.Date.UTC()
+	return &occurredAt
+}
+
+func chunkEvidenceRefs(turnIDs []string, turnEvidence map[string]string) []memory.EvidenceRef {
+	refs := make([]memory.EvidenceRef, 0, len(turnIDs))
+	seen := make(map[string]struct{}, len(turnIDs))
+	for _, turnID := range turnIDs {
+		evidenceID := turnEvidence[turnID]
+		if evidenceID == "" {
+			continue
+		}
+		if _, exists := seen[evidenceID]; exists {
+			continue
+		}
+		seen[evidenceID] = struct{}{}
+		refs = append(refs, memory.EvidenceRef{EvidenceID: evidenceID, SourceOrder: len(refs), FullSource: true})
+	}
+	return refs
 }

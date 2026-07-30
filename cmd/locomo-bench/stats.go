@@ -29,6 +29,103 @@ type statsReport struct {
 	SweepOverBudgetRate float64                  `json:"sweep_over_budget_rate"`
 }
 
+// evalFormalMetrics is the B1-only counterpart to the legacy repeat report.
+// It operates on one majority label per question and therefore cannot mistake
+// three stochastic answer repetitions for three independent benchmark items.
+type evalFormalMetrics struct {
+	Questions       int                           `json:"questions"`
+	Correct         int                           `json:"correct"`
+	Accuracy        float64                       `json:"accuracy"`
+	ByCategory      map[string]evalFormalCategory `json:"by_category"`
+	MeanInputTokens float64                       `json:"mean_input_tokens"`
+	P95InputTokens  int                           `json:"p95_input_tokens"`
+	MeanLatencyMS   float64                       `json:"mean_latency_ms"`
+	P95LatencyMS    int64                         `json:"p95_latency_ms"`
+}
+
+type evalFormalCategory struct {
+	Questions int     `json:"questions"`
+	Correct   int     `json:"correct"`
+	Accuracy  float64 `json:"accuracy"`
+}
+
+func formalClassificationMetrics(records []evalFormalClassificationRecord) evalFormalMetrics {
+	metrics := evalFormalMetrics{Questions: len(records), ByCategory: map[string]evalFormalCategory{}}
+	var tokenTotal int
+	var latencyTotal int64
+	var tokenSamples []int
+	var latencySamples []int64
+	for _, record := range records {
+		if record.MajorityCorrect {
+			metrics.Correct++
+		}
+		category := record.Category
+		if category == "" {
+			category = "unknown"
+		}
+		categoryMetric := metrics.ByCategory[category]
+		categoryMetric.Questions++
+		if record.MajorityCorrect {
+			categoryMetric.Correct++
+		}
+		metrics.ByCategory[category] = categoryMetric
+		for _, answer := range record.AnswerRuns {
+			tokenTotal += answer.InputTokens
+			latencyTotal += answer.LatencyMS
+			tokenSamples = append(tokenSamples, answer.InputTokens)
+			latencySamples = append(latencySamples, answer.LatencyMS)
+		}
+	}
+	if metrics.Questions > 0 {
+		metrics.Accuracy = float64(metrics.Correct) / float64(metrics.Questions)
+	}
+	for category, categoryMetric := range metrics.ByCategory {
+		if categoryMetric.Questions > 0 {
+			categoryMetric.Accuracy = float64(categoryMetric.Correct) / float64(categoryMetric.Questions)
+		}
+		metrics.ByCategory[category] = categoryMetric
+	}
+	if len(tokenSamples) > 0 {
+		metrics.MeanInputTokens = float64(tokenTotal) / float64(len(tokenSamples))
+		metrics.P95InputTokens = formalPercentileInt(tokenSamples, 0.95)
+		metrics.MeanLatencyMS = float64(latencyTotal) / float64(len(latencySamples))
+		metrics.P95LatencyMS = formalPercentileInt64(latencySamples, 0.95)
+	}
+	return metrics
+}
+
+func formalPercentileInt(values []int, percentile float64) int {
+	if len(values) == 0 {
+		return 0
+	}
+	copyValues := append([]int(nil), values...)
+	sort.Ints(copyValues)
+	index := int(math.Ceil(percentile*float64(len(copyValues)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(copyValues) {
+		index = len(copyValues) - 1
+	}
+	return copyValues[index]
+}
+
+func formalPercentileInt64(values []int64, percentile float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	copyValues := append([]int64(nil), values...)
+	sort.Slice(copyValues, func(left, right int) bool { return copyValues[left] < copyValues[right] })
+	index := int(math.Ceil(percentile*float64(len(copyValues)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(copyValues) {
+		index = len(copyValues) - 1
+	}
+	return copyValues[index]
+}
+
 // summarize computes a two-sided 95% confidence interval using the sample
 // standard deviation and a small built-in Student-t critical-value table.
 func summarize(values []float64) metricSummary {

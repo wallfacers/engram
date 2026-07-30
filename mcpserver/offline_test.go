@@ -29,8 +29,8 @@ func TestOfflineServerStartsAndCompletesCRUDWithDegradedSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
-		t.Fatalf("offline tools/list returned %d tools, want 5", len(tools.Tools))
+	if len(tools.Tools) != 10 {
+		t.Fatalf("offline tools/list returned %d tools, want 10", len(tools.Tools))
 	}
 
 	for _, memory := range []map[string]any{
