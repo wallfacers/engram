@@ -22,18 +22,33 @@ func TestChunkUpsertAndRetrieve(t *testing.T) {
 	conv := conversation{ID: 0, Sessions: []session{{
 		Index: 1,
 		Date:  time.Date(2023, 5, 8, 0, 0, 0, 0, time.UTC),
-		Turns: []turn{{Speaker: "Caroline", Text: "I adopted a golden retriever named Max."}},
+		Turns: []turn{{Speaker: "Caroline", Text: "I adopted a golden retriever named Max.", DiaID: "D1:1"}},
 	}}}
-	_, n, err := ingestChunks(ctx, es, conv)
+	_, turnEvidence, n, err := ingestChunks(ctx, es, conv)
 	if err != nil || n != 1 {
 		t.Fatalf("ingestChunks = %d, %v", n, err)
+	}
+	if turnEvidence["D1:1"] == "" {
+		t.Fatalf("turn evidence = %#v, want D1:1 mapping", turnEvidence)
+	}
+	chunk, err := es.GetByName(ctx, "chunk-c0-s1-000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := es.SourceRefs(ctx, chunk.ID)
+	if err != nil || len(refs) != 1 || refs[0].EvidenceID != turnEvidence["D1:1"] {
+		t.Fatalf("chunk source refs = %#v, err=%v", refs, err)
+	}
+	source, err := es.Ledger().Get(ctx, refs[0].EvidenceID)
+	if err != nil || source.ExternalSourceID != "D1:1" || source.Content != "Caroline: I adopted a golden retriever named Max." {
+		t.Fatalf("chunk source Evidence = %+v, err=%v", source, err)
 	}
 	vectors := memory.NewVectorStore(st.DB())
 	if err := vectors.Put(ctx, "chunk-c0-s1-000", "fixture", []float32{1, 0}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	// idempotent re-run
-	if _, n, err = ingestChunks(ctx, es, conv); err != nil || n != 1 {
+	if _, _, n, err = ingestChunks(ctx, es, conv); err != nil || n != 1 {
 		t.Fatalf("re-run ingestChunks = %d, %v", n, err)
 	}
 	if got := chunkEmbeddingCount(t, ctx, st, "chunk-c0-s1-000"); got != 1 {
@@ -78,7 +93,7 @@ func TestChunkIngestReconcilesChangedAndObsoletePersistedChunks(t *testing.T) {
 			DiaID:   "D1:1",
 		}},
 	}}}
-	_, n, err := ingestChunks(ctx, es, conv)
+	_, _, n, err := ingestChunks(ctx, es, conv)
 	if err != nil {
 		t.Fatal(err)
 	}

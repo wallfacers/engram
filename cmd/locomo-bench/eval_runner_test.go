@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 	"github.com/wallfacers/engram/provider"
+	"github.com/wallfacers/engram/store"
 )
 
 func TestPrepareFrozenEvalOptionsRejectsIRISAndForcesOneAnswerPath(t *testing.T) {
@@ -151,6 +153,82 @@ func TestPackFormalLegacyInputUsesExactCounterBeforeAnswer(t *testing.T) {
 	_, _, _, err = packFormalLegacyInput(context.Background(), protocol, counter, strings.Repeat("s", 100), qa, hits, false)
 	if err == nil {
 		t.Fatal("static over-cap prompt unexpectedly accepted")
+	}
+}
+
+func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	entries := memory.NewEntryStore(st.DB())
+	evidence, err := entries.Ledger().AppendBatch(ctx, []memory.EvidenceInput{{
+		ExternalSourceID: "D1:1",
+		SourceType:       memory.EvidenceMessage,
+		SourceSessionID:  "conv0-sess1",
+		Speaker:          "Caroline",
+		Ordinal:          0,
+		Content:          "Caroline: the ledger-backed answer is retrievable.",
+		RecordedAt:       time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &memory.Entry{
+		Name:            "ledger-backed-fact",
+		Trigger:         "ledger-backed retrievable",
+		Content:         "The ledger-backed answer is retrievable.",
+		Category:        "fact",
+		SourceSessionID: "conv0-sess1",
+	}
+	if err := entries.UpsertWithSources(ctx, entry, []memory.EvidenceRef{{EvidenceID: evidence[0].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil).Search(ctx, "retrievable", 5)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("Search = %#v, %v", hits, err)
+	}
+
+	sources, err := formalCandidateSources(ctx, memory.NewProjectionStore(st.DB()), hits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sources[hits[0].Name]; len(got) != 1 || got[0] != evidence[0].ID {
+		t.Fatalf("candidate source IDs = %#v, want Ledger Evidence %q", got, evidence[0].ID)
+	}
+
+	protocol := testEvalProtocol()
+	qa := locomoQA{QuestionID: "q-source", Question: "retrievable", Evidence: []string{"D1:1"}}
+	candidate := buildFormalCandidateArtifact(protocol, qa, hits, map[string][]string{hits[0].Name: {"D1:1"}}, sources, map[string]string{"D1:1": evidence[0].ID})
+	if got := candidate.Gold.ResolvedEvidenceIDs; len(got) != 1 || got[0] != evidence[0].ID {
+		t.Fatalf("resolved gold evidence = %#v, want Ledger Evidence %q", got, evidence[0].ID)
+	}
+	trace := buildFormalTrace(protocol, qa.QuestionID, candidate)
+	bundle := buildFormalBundle(protocol, qa.QuestionID, candidate, trace, hits, sources, evidencecompiler.AnswerInput{System: "system", User: "question and evidence"})
+	if !bundle.SourceValid || len(bundle.SourceIDs) != 1 || bundle.SourceIDs[0] != evidence[0].ID {
+		t.Fatalf("formal bundle = %+v, want valid Ledger Evidence lineage", bundle)
+	}
+
+	answerCalls, judgeCalls := 0, 0
+	correct, predicted, _, run := runFormalB1Question(
+		ctx, protocol,
+		options{answerModel: protocol.Models.Answerer.ID, formalCounter: formalCounter{count: 12, fingerprint: protocol.Budget.CounterFingerprint}},
+		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil), memory.NewProjectionStore(st.DB()),
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			answerCalls++
+			return "ledger-backed answer", provider.Usage{InputTokens: 12, OutputTokens: 2}, nil
+		},
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			judgeCalls++
+			return `{"correct":true}`, provider.Usage{}, nil
+		},
+		qa, map[string][]string{hits[0].Name: {"D1:1"}}, map[string]string{"D1:1": evidence[0].ID}, 0,
+	)
+	if !correct || predicted != "ledger-backed answer" || answerCalls != 1 || judgeCalls != 1 || len(run.InvalidReasons) != 0 || !run.Bundle.SourceValid {
+		t.Fatalf("formal Ledger run = correct=%t predicted=%q answers=%d judges=%d artifact=%+v", correct, predicted, answerCalls, judgeCalls, run)
 	}
 }
 

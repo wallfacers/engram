@@ -166,7 +166,7 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 // rendered context, preflights the full answer input, then makes one answer
 // call and one judge call.  Later compiler stages replace only the packing
 // portion; they keep this answer-facing counter and journal boundary.
-func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, chunkTurns map[string][]string, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
+func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
 	artifact := evalFormalQuestionRun{}
 	if retriever == nil {
 		artifact.InvalidReasons = []string{"retriever_unavailable"}
@@ -177,7 +177,11 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 		artifact.InvalidReasons = []string{"retrieval_failed"}
 		return false, "", provider.Usage{}, artifact
 	}
-	artifact.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns)
+	sourceByCandidate, sourceErr := formalCandidateSources(ctx, projections, hits)
+	if sourceErr != nil {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "source_lineage_unavailable")
+	}
+	artifact.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
 	if err := validateEvalCandidateArtifact(protocol, artifact.Candidate); err != nil {
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "candidate_invalid")
 	}
@@ -192,7 +196,7 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 		input.Model = opt.answerModel
 	}
 	artifact.Trace = buildFormalTrace(protocol, qa.QuestionID, artifact.Candidate)
-	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, packedHits, chunkTurns, input)
+	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, packedHits, sourceByCandidate, input)
 	artifact.Bundle.AnswerInputTokens = preflight.InputTokens
 	artifact.Bundle.WithinCap = err == nil
 	if !artifact.Bundle.SourceValid {
@@ -294,12 +298,12 @@ func countFormalPackInput(ctx context.Context, protocol evalProtocol, counter ev
 	return count, count.InputTokens <= protocol.Budget.AnswerInputTokenCap, nil
 }
 
-func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []memory.Result, chunkTurns map[string][]string) evalCandidateArtifact {
+func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []memory.Result, chunkTurns map[string][]string, sourceByCandidate map[string][]string, turnEvidence map[string]string) evalCandidateArtifact {
 	anchors := make([]evalRankedAnchor, 0, len(hits))
 	rendered := make([]evalRenderedCandidate, 0, len(hits))
 	for index, hit := range hits {
 		candidateID := formalCandidateID(hit)
-		sourceIDs := formalCandidateSourceIDs(hit, chunkTurns)
+		sourceIDs := formalCandidateSourceIDs(hit, sourceByCandidate)
 		textDigest := evalTextDigest(hit.Content)
 		anchor := evalRankedAnchor{CandidateID: candidateID, Rank: index + 1, Score: hit.Score, TextDigest: textDigest, SourceIDs: sourceIDs}
 		anchors = append(anchors, anchor)
@@ -312,7 +316,7 @@ func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []mem
 			SourceIDs: sourceIDs, ExpandedFrom: []string{candidateID}, ExpansionCount: 0,
 		})
 	}
-	resolved, unresolved, _ := resolveDatasetSourceIDs(qa.Evidence, datasetEvidenceIdentityMap(qa.Evidence))
+	resolved, unresolved, _ := resolveDatasetSourceIDs(qa.Evidence, turnEvidence)
 	artifact := evalCandidateArtifact{
 		Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: qa.QuestionID,
 		QueryDigest: evalTextDigest(qa.Question), Mode: evalCandidateModeAnchorRendering, RetrievalCalls: 1,
@@ -336,13 +340,13 @@ func buildFormalTrace(protocol evalProtocol, questionID string, candidate evalCa
 	return trace
 }
 
-func buildFormalBundle(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, trace evalFormalTraceRecord, hits []memory.Result, chunkTurns map[string][]string, input evidencecompiler.AnswerInput) evalFormalBundleRecord {
+func buildFormalBundle(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, trace evalFormalTraceRecord, hits []memory.Result, sourceByCandidate map[string][]string, input evidencecompiler.AnswerInput) evalFormalBundleRecord {
 	var sourceValues []string
 	for _, hit := range hits {
-		sourceValues = append(sourceValues, formalCandidateSourceIDs(hit, chunkTurns)...)
+		sourceValues = append(sourceValues, formalCandidateSourceIDs(hit, sourceByCandidate)...)
 	}
 	sources := stableStrings(sourceValues)
-	sourceValid := true
+	sourceValid := len(sources) > 0
 	for _, sourceID := range sources {
 		if strings.HasPrefix(sourceID, "legacy-entry:") {
 			sourceValid = false
@@ -364,24 +368,51 @@ func formalTraceDigest(trace evalFormalTraceRecord) string {
 }
 
 func formalCandidateID(hit memory.Result) string {
+	if hit.ProjectionID != "" {
+		return "projection:" + hit.ProjectionID
+	}
+	if hit.ID != "" {
+		return "entry:" + hit.ID
+	}
 	return "legacy-candidate:" + strings.TrimPrefix(evalTextDigest(hit.Name+"\n"+hit.SourceSessionID+"\n"+hit.Content), "sha256:")
 }
 
-func formalCandidateSourceIDs(hit memory.Result, chunkTurns map[string][]string) []string {
-	if ids := stableStrings(chunkTurns[hit.Name]); len(ids) > 0 {
-		return ids
-	}
-	return []string{"legacy-entry:" + strings.TrimPrefix(evalTextDigest(hit.Name+"\n"+hit.Content), "sha256:")}
+func formalCandidateSourceIDs(hit memory.Result, sourceByCandidate map[string][]string) []string {
+	return stableStrings(sourceByCandidate[hit.Name])
 }
 
-func datasetEvidenceIdentityMap(ids []string) map[string]string {
-	identity := make(map[string]string, len(ids))
-	for _, id := range ids {
-		if id = strings.TrimSpace(id); id != "" {
-			identity[id] = id
-		}
+// formalCandidateSources resolves all search-hit lineage in bounded engine
+// batches. A formal candidate never invents a source from its name, session, or
+// chunk bookkeeping: a missing projection ID or direct Evidence ref is a hard
+// validity failure before an answer call.
+func formalCandidateSources(ctx context.Context, projections *memory.ProjectionStore, hits []memory.Result) (map[string][]string, error) {
+	if projections == nil {
+		return nil, fmt.Errorf("formal candidate projections unavailable")
 	}
-	return identity
+	projectionIDs := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		if hit.ProjectionID == "" || hit.ProjectionKind != memory.ProjectionAtomicFact {
+			return nil, fmt.Errorf("candidate %q has no atomic-fact projection", hit.Name)
+		}
+		projectionIDs = append(projectionIDs, hit.ProjectionID)
+	}
+	refsByProjection, err := projections.SourcesByProjectionIDs(ctx, projectionIDs)
+	if err != nil {
+		return nil, err
+	}
+	byCandidate := make(map[string][]string, len(hits))
+	for _, hit := range hits {
+		refs := refsByProjection[hit.ProjectionID]
+		if len(refs) == 0 {
+			return nil, fmt.Errorf("candidate %q has no direct Evidence source", hit.Name)
+		}
+		ids := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			ids = append(ids, ref.EvidenceID)
+		}
+		byCandidate[hit.Name] = stableStrings(ids)
+	}
+	return byCandidate, nil
 }
 
 func stableStrings(values []string) []string {
@@ -526,7 +557,7 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	protocol := evalProtocol{
 		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b1-%s", benchmarkName, opt.evalBudgetProfile), CreatedAt: time.Now().UTC(), Git: git,
 		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
-		Store:     evalStoreProvenance{SchemaVersion: 6, IngestionRecipe: "lossless_chunks_v1", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{}},
+		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
 		Models: evalModelProvenance{
 			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
 			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), PromptDigest: answerPromptDigest},

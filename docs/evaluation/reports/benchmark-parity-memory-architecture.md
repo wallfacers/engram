@@ -71,7 +71,7 @@ clean git provenance remains exact. B0 continuity still needs its separate
 legacy-retry accounting path and is not represented by these causal B1
 manifests.
 
-### B1 execution hold: v6 cannot satisfy source validity
+### Historical B1 execution hold: v6 cannot satisfy source validity
 
 The live formal-runner check exposed a real ordering constraint in the current
 plan. v6 fact hits have stable entry names and session IDs but no direct raw
@@ -87,3 +87,50 @@ Ledger/projection increment makes source IDs and spans verifiable, or a
 separately specified raw-turn-only baseline is approved. The temporary GPU
 services used solely for the calibration were stopped and both local tunnels
 were confirmed closed.
+
+## US1 Ledger implementation verification (not a score)
+
+**Date**: 2026-07-30
+
+Evidence Ledger engine and MCP increments were checked offline after v7
+migration, source-first ingest, merge lineage, lifecycle closure, stale-index
+guards, and the additive MCP tools were added. No model endpoint, remote GPU,
+LoCoMo answer call, LongMemEval answer call, judge call, or benchmark score was
+used in this check.
+
+| Check | Command / assertion | Result |
+|---|---|---|
+| Lifecycle checkpoint retry | `CGO_ENABLED=0 go test -count=1 ./memory -run 'TestLedgerPurgeReportsAndRetriesBusyWALCheckpoint'` | PASS — a held WAL reader yields logical purge + `ErrPurgeIncomplete`; retry checkpoints after the reader releases |
+| Stale-index race | `TestEmbedderDoesNotPublishVectorAfterEvidenceTombstone` | PASS — existing vectors are removed, slow base write is rejected, and stale FTS candidates fail closed |
+| Offline end-to-end closure | `TestEvidenceLifecycleSurvivesIngestMergeAndPurgeClosure` | PASS — ingest → facts → merge → tombstone → restore → purge preserves raw source semantics and deletes the dependent projection |
+| Batch-lineage guard | `TestProjectionSourcesBatchLookupHasNoPerCandidateQueries` | PASS — 1,201 candidates use exactly 3 `QueryContext` calls (500-ID batches) |
+| 100k scalability artifact | `BenchmarkProjectionSourcesBatch100K` | Added, not executed in this verification; it constructs 100,000 Evidence/projection/source rows and asserts exactly 200 lookup queries per iteration |
+| MCP contract | `CGO_ENABLED=0 go test -count=1 ./mcpserver` | PASS — `memory_ingest_v2` stores Evidence offline; get/lifecycle paths preserve namespace isolation and do not leak purged content |
+| Full offline regression | `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test -count=1 ./...` | PASS — all listed packages passed; `internal/version` has no tests |
+
+This closes only the US1 code-health checkpoint. Formal B1 remains unrun until
+the benchmark ingestion/replay path materializes frozen candidates from the
+new source-backed Ledger rather than v6 synthetic lineage.
+
+### Post-Ledger formal source chain (no score yet)
+
+The benchmark ingestion and formal replay path now have that missing source
+chain. Each source turn is appended to the Ledger with its dataset dialogue ID,
+original speaker, session time, and exact turn payload. Extraction reuses that
+same immutable record; verbatim chunks are written with direct source refs.
+The formal runner resolves each returned Atomic Fact projection through the
+batched `ProjectionStore.SourcesByProjectionIDs` lookup and resolves the QA
+gold dialogue IDs to the same Ledger IDs. It rejects a hit with a missing
+projection or source before the answer call; it does not mint `legacy-entry:*`
+identifiers.
+
+| Check | Result |
+|---|---|
+| `TestChunkUpsertAndRetrieve` | PASS — a chunk directly references the raw `D1:1` Ledger record and rerun reuses it idempotently |
+| `TestFormalCandidateSourcesUseLedgerEvidenceIDs` | PASS — ranked candidate, gold resolution, bundle, one answer call, and one judge call all use the same real Ledger Evidence ID |
+| `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench` | PASS |
+
+The v6 protocol hashes above are historical pre-Ledger templates and must not
+be used to run B1. A clean v7 `ledger_lossless_chunks_v2` manifest and a fresh
+store are the remaining prerequisites before the first paid B1 slice; the GPU
+remains stopped until those artifacts are ready.

@@ -1044,6 +1044,7 @@ func gate(sem chan struct{}, c modelCaller) modelCaller {
 type conversationRuntime struct {
 	store       *store.Store
 	entries     *memory.EntryStore
+	projections *memory.ProjectionStore
 	vectors     *memory.VectorStore
 	embedClient embedding.Client
 	retrievers  map[string]*memory.Retriever
@@ -1052,6 +1053,9 @@ type conversationRuntime struct {
 	// covers (D<session>:<turn>), enabling exact-turn evidence recall. Empty when
 	// chunks are not ingested.
 	chunkTurns map[string][]string
+	// turnEvidence maps the dataset dialogue ID to its namespace-local Ledger
+	// Evidence ID. It is used only by formal source coverage materialization.
+	turnEvidence map[string]string
 }
 
 func (r *conversationRuntime) Close() {
@@ -1089,6 +1093,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	}()
 
 	es := memory.NewEntryStore(st.DB())
+	projections := memory.NewProjectionStore(st.DB())
 	vectors := memory.NewVectorStore(st.DB())
 	embedder := memory.NewEmbedder(es, vectors, embClient, memory.DefaultEmbedBuffer)
 
@@ -1118,10 +1123,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			return nil, fmt.Errorf("doc2query requires a prebuilt persisted store for conversation %d; refusing to call extraction", conv.ID)
 		}
 		for _, s := range conv.Sessions {
-			msgs := make([]pipeline.Message, 0, len(s.Turns))
-			for _, tn := range s.Turns {
-				msgs = append(msgs, pipeline.Message{Role: "user", Text: tn.Speaker + ": " + tn.Text})
-			}
+			msgs := benchmarkSessionMessages(conv, s)
 			if _, err := pipe.Ingest(ctx, s.Date, fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index), msgs); err != nil {
 				logger.Warn("ingest session failed", "conversation", conv.ID, "session", s.Index, "err", err)
 			}
@@ -1142,10 +1144,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		})
 		added := 0
 		for _, s := range conv.Sessions {
-			msgs := make([]pipeline.Message, 0, len(s.Turns))
-			for _, tn := range s.Turns {
-				msgs = append(msgs, pipeline.Message{Role: "user", Text: tn.Speaker + ": " + tn.Text})
-			}
+			msgs := benchmarkSessionMessages(conv, s)
 			n, err := opinionPipe.Ingest(ctx, s.Date, fmt.Sprintf("conv%d-sess%d-op", conv.ID, s.Index), msgs)
 			if err != nil {
 				logger.Warn("opinion pass failed", "conversation", conv.ID, "session", s.Index, "err", err)
@@ -1156,11 +1155,13 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		logger.Info("opinion pass done", "conversation", conv.ID, "entries_added", added)
 	}
 	var chunkTurns map[string][]string
+	var turnEvidence map[string]string
 	if opt.chunks {
-		if turns, n, err := ingestChunks(ctx, es, conv); err != nil {
+		if turns, evidence, n, err := ingestChunks(ctx, es, conv); err != nil {
 			logger.Warn("chunk ingest failed", "conversation", conv.ID, "err", err)
 		} else {
 			chunkTurns = turns
+			turnEvidence = evidence
 			logger.Info("verbatim chunks ingested", "conversation", conv.ID, "chunks", n)
 		}
 	}
@@ -1220,7 +1221,7 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, entries: es, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns}, nil
+	return &conversationRuntime{store: st, entries: es, projections: projections, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {
@@ -1386,7 +1387,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
 				if armOpt.formalProtocol != nil {
-					correct, predicted, usage, formal := runFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], answerCall, judgeCall, qa, runtime.chunkTurns, armOpt.formalRunIndex)
+					correct, predicted, usage, formal := runFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, answerCall, judgeCall, qa, runtime.chunkTurns, runtime.turnEvidence, armOpt.formalRunIndex)
 					s.agg.add(qa.Category, correct)
 					s.journal.write(result{
 						Conv: key.Conv, Q: key.Q, QuestionID: qa.QuestionID, Category: qa.Category, CategoryName: qa.CategoryName,
