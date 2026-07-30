@@ -90,7 +90,7 @@ purge closure 完整且旧 Search/write parity 不变。
 - [X] T023 [P] [US1] 为 fresh v7、v6→v7 deterministic legacy backfill、幂等重跑、失败 rollback 和 003 表不变写失败 migration tests 到 `store/migrations_test.go`
 - [X] T024 [P] [US1] 为 Evidence batch 原子性、external ID 幂等/冲突、状态机、UTF-8 content 与稳定 session ordering 写失败测试到 `memory/evidence_test.go`
 - [X] T025 [P] [US1] 为 projection registry、完整 direct lineage、code-point span/digest、批量 source lookup 和 stale/disabled 状态写失败测试到 `memory/projection_test.go`
-- [ ] T026 [P] [US1] 为现有 Upsert 自动 self Evidence、同内容复用、改内容 append、`UpsertWithSources` 和 Delete-only-projection 写失败测试到 `memory/entrystore_test.go`
+- [X] T026 [P] [US1] 为现有 Upsert 自动 self Evidence、同内容复用、改内容 append、`UpsertWithSources` 和 Delete-only-projection 写失败测试到 `memory/entrystore_test.go`
 - [ ] T027 [P] [US1] 为 Evidence-before-extraction、实际 source IDs、unknown/empty source 拒绝、模型失败保留 raw 和 duplicate fact union lineage 写失败测试到 `memory/pipeline/pipeline_test.go`
 - [ ] T028 [P] [US1] 为近重复 dedup/curation merge 的 source union、无来源 merge 禁止和 rollback 写失败测试到 `memory/curation/dedup_test.go`
 - [ ] T029 [P] [US1] 为 tombstone/restore、secure-delete purge closure、WAL checkpoint retry、异步 embedder stale-write race 和无内容审计写失败测试到 `memory/evidence_lifecycle_test.go`

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -199,10 +200,70 @@ func (s *EntryStore) upsert(ctx context.Context, q upsertContext, e *Entry) erro
 	return nil
 }
 
-// Upsert inserts a new entry or updates the existing one keyed by name. char_count
-// is taken verbatim from e (the caller decides the code-point count for this phase).
+// Upsert inserts a new entry or updates the existing one keyed by name. It
+// preserves the existing API while recording the call as direct-write Evidence
+// and replacing only the atomic-fact projection's source lineage. char_count is
+// taken verbatim from e (the caller decides the code-point count for this phase).
 func (s *EntryStore) Upsert(ctx context.Context, e *Entry) error {
-	return s.upsert(ctx, s.db, e)
+	return s.upsertWithSourceMode(ctx, e, nil, false)
+}
+
+// UpsertWithSources writes an atomic fact supported by explicit active Evidence
+// records. It is used by extractors and builders that can name their actual
+// message-level provenance; unknown, unavailable, empty, or invalid spans roll
+// back the entry and projection together.
+func (s *EntryStore) UpsertWithSources(ctx context.Context, e *Entry, sources []EvidenceRef) error {
+	return s.upsertWithSourceMode(ctx, e, sources, true)
+}
+
+func (s *EntryStore) upsertWithSourceMode(ctx context.Context, e *Entry, sources []EvidenceRef, explicitSources bool) error {
+	if e == nil {
+		return errors.New("memory: upsert nil entry")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("memory: upsert with sources begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	if err := s.upsert(ctx, tx, e); err != nil {
+		return err
+	}
+	configHash := "explicit-sources"
+	builder := "entry_store_explicit"
+	if !explicitSources {
+		content := directEvidenceContent(e)
+		digest := sha256.Sum256([]byte(content))
+		selfEvidence, err := appendOrReuseEvidence(ctx, tx, EvidenceInput{
+			ExternalSourceID: fmt.Sprintf("direct:%s:%x", e.ID, digest[:]),
+			SourceType:       EvidenceDirectWrite,
+			Content:          content,
+			RecordedAt:       e.UpdatedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("memory: upsert self evidence: %w", err)
+		}
+		sources = []EvidenceRef{{EvidenceID: selfEvidence.ID, SourceOrder: 0, FullSource: true}}
+		configHash = "direct-write-self-evidence"
+		builder = "entry_store_direct_write"
+	}
+	if err := replaceAtomicFactProjectionTx(ctx, tx, e.ID, sources, builder, configHash, e.UpdatedAt); err != nil {
+		return fmt.Errorf("memory: upsert atomic-fact projection: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: upsert with sources commit: %w", err)
+	}
+	return nil
+}
+
+func directEvidenceContent(e *Entry) string {
+	if e.Content != "" {
+		return e.Content
+	}
+	if e.Name != "" {
+		return e.Name
+	}
+	return "(empty direct write)"
 }
 
 const entrySelectCols = `id, name, trigger, content, pinned, durability, category,
@@ -330,6 +391,25 @@ func (s *EntryStore) List(ctx context.Context) ([]*Entry, error) {
 	return out, rows.Err()
 }
 
+// SourceRefs returns the direct Evidence lineage for one atomic-fact entry.
+func (s *EntryStore) SourceRefs(ctx context.Context, entryID string) ([]EvidenceRef, error) {
+	var projectionID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM memory_projections
+		WHERE kind = 'atomic_fact' AND object_key = ?`, entryID).Scan(&projectionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: find atomic-fact projection %q: %w", entryID, err)
+	}
+	refs, err := NewProjectionStore(s.db).SourcesByProjectionIDs(ctx, []string{projectionID})
+	if err != nil {
+		return nil, err
+	}
+	return refs[projectionID], nil
+}
+
 // Delete removes the entry by name, returning store.ErrNotFound when no row
 // matched. All owned derived rows, shadow vectors, and references that would
 // dangle are cleaned in the same transaction.
@@ -351,6 +431,18 @@ func (s *EntryStore) delete(ctx context.Context, name string, expected *EntryRev
 		return false, fmt.Errorf("memory: delete begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	var entryID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM memory_entries WHERE name = ?`, name).Scan(&entryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if expected != nil {
+			return false, nil
+		}
+		return false, store.ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("memory: read entry %q before delete: %w", name, err)
+	}
 
 	query := `DELETE FROM memory_entries WHERE name = ?`
 	args := []any{name}
@@ -378,10 +470,21 @@ func (s *EntryStore) delete(ctx context.Context, name string, expected *EntryRev
 	if err := clearReverseSupersessionTx(ctx, tx, name); err != nil {
 		return false, err
 	}
+	if err := deleteAtomicFactProjectionTx(ctx, tx, entryID); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("memory: delete commit: %w", err)
 	}
 	return true, nil
+}
+
+func deleteAtomicFactProjectionTx(ctx context.Context, q execContext, entryID string) error {
+	if _, err := q.ExecContext(ctx,
+		`DELETE FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, entryID); err != nil {
+		return fmt.Errorf("memory: delete atomic-fact projection %q: %w", entryID, err)
+	}
+	return nil
 }
 
 // deleteDerivedTx invalidates every side row derived from one entry. Shadow

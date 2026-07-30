@@ -93,6 +93,114 @@ func TestUpsertInsertThenConflictUpdate(t *testing.T) {
 	}
 }
 
+func TestUpsertCreatesSelfEvidenceAndKeepsPriorEvidenceAppendOnly(t *testing.T) {
+	es, db := newEntryStore(t)
+	ledger := memory.NewLedgerStore(db)
+	ctx := context.Background()
+	entry := &memory.Entry{Name: "self-evidence", Content: "first direct fact", CharCount: 17}
+	if err := es.Upsert(ctx, entry); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	firstRefs, err := es.SourceRefs(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("first source refs: %v", err)
+	}
+	if len(firstRefs) != 1 || !firstRefs[0].FullSource {
+		t.Fatalf("first source refs = %+v, want one full self source", firstRefs)
+	}
+	firstEvidence, err := ledger.Get(ctx, firstRefs[0].EvidenceID)
+	if err != nil {
+		t.Fatalf("get first self evidence: %v", err)
+	}
+	if firstEvidence.SourceType != memory.EvidenceDirectWrite || firstEvidence.Content != "first direct fact" {
+		t.Fatalf("first self evidence = %+v", firstEvidence)
+	}
+
+	if err := es.Upsert(ctx, &memory.Entry{Name: "self-evidence", Content: "first direct fact", CharCount: 17}); err != nil {
+		t.Fatalf("same-content upsert: %v", err)
+	}
+	sameRefs, err := es.SourceRefs(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("same-content source refs: %v", err)
+	}
+	if len(sameRefs) != 1 || sameRefs[0].EvidenceID != firstRefs[0].EvidenceID {
+		t.Fatalf("same-content upsert changed self evidence: first=%+v same=%+v", firstRefs, sameRefs)
+	}
+
+	if err := es.Upsert(ctx, &memory.Entry{Name: "self-evidence", Content: "changed direct fact", CharCount: 19}); err != nil {
+		t.Fatalf("changed-content upsert: %v", err)
+	}
+	changedRefs, err := es.SourceRefs(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("changed-content source refs: %v", err)
+	}
+	if len(changedRefs) != 1 || changedRefs[0].EvidenceID == firstRefs[0].EvidenceID {
+		t.Fatalf("changed-content upsert did not append new self evidence: first=%+v changed=%+v", firstRefs, changedRefs)
+	}
+	if _, err := ledger.Get(ctx, firstRefs[0].EvidenceID); err != nil {
+		t.Fatalf("prior direct evidence was not retained: %v", err)
+	}
+
+	if err := es.Delete(ctx, "self-evidence"); err != nil {
+		t.Fatalf("delete fact projection: %v", err)
+	}
+	if _, err := ledger.Get(ctx, changedRefs[0].EvidenceID); err != nil {
+		t.Fatalf("delete fact projection deleted source evidence: %v", err)
+	}
+	var projectionCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM memory_projections WHERE kind = 'atomic_fact' AND object_key = ?`, entry.ID).Scan(&projectionCount); err != nil {
+		t.Fatalf("count deleted fact projection: %v", err)
+	}
+	if projectionCount != 0 {
+		t.Fatalf("deleted fact still has %d projection rows", projectionCount)
+	}
+}
+
+func TestUpsertWithSourcesRequiresActiveSourcesAndPreservesCompleteLineage(t *testing.T) {
+	es, db := newEntryStore(t)
+	ledger := memory.NewLedgerStore(db)
+	ctx := context.Background()
+	inputs := []memory.EvidenceInput{
+		{
+			ExternalSourceID: "turn-1", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a",
+			Speaker: "user", Ordinal: 0, Content: "Alice moved on Monday", RecordedAt: time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			ExternalSourceID: "turn-2", SourceType: memory.EvidenceMessage, SourceSessionID: "session-a",
+			Speaker: "assistant", Ordinal: 1, Content: "The move was to Berlin", RecordedAt: time.Date(2026, 7, 30, 12, 1, 0, 0, time.UTC),
+		},
+	}
+	sources, err := ledger.AppendBatch(ctx, inputs)
+	if err != nil {
+		t.Fatalf("append supporting evidence: %v", err)
+	}
+	entry := &memory.Entry{Name: "alice-move", Content: "Alice moved to Berlin on Monday", CharCount: 32}
+	refs := []memory.EvidenceRef{
+		{EvidenceID: sources[0].ID, SourceOrder: 0, FullSource: true},
+		{EvidenceID: sources[1].ID, SourceOrder: 1, FullSource: true},
+	}
+	if err := es.UpsertWithSources(ctx, entry, refs); err != nil {
+		t.Fatalf("upsert with sources: %v", err)
+	}
+	got, err := es.SourceRefs(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("get explicit source refs: %v", err)
+	}
+	if len(got) != 2 || got[0].EvidenceID != sources[0].ID || got[1].EvidenceID != sources[1].ID {
+		t.Fatalf("explicit direct lineage = %+v, want %+v", got, refs)
+	}
+
+	bad := &memory.Entry{Name: "must-not-exist", Content: "no active evidence"}
+	err = es.UpsertWithSources(ctx, bad, []memory.EvidenceRef{{EvidenceID: "unknown-source", SourceOrder: 0, FullSource: true}})
+	if err == nil {
+		t.Fatal("upsert with unknown source unexpectedly succeeded")
+	}
+	if _, err := es.GetByName(ctx, bad.Name); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown-source write leaked an entry: %v", err)
+	}
+}
+
 func TestRevisionAdvancesWhenTimestampRepeatsAndRejectsStaleDelete(t *testing.T) {
 	es, _ := newEntryStore(t)
 	ctx := context.Background()
