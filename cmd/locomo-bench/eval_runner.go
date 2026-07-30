@@ -26,6 +26,7 @@ type evalFormalAnswerRun struct {
 	AnswerDigest  string         `json:"answer_digest"`
 	JudgeCorrect  bool           `json:"judge_correct"`
 	AnswerCalls   int            `json:"answer_calls"`
+	JudgeCalls    int            `json:"judge_calls"`
 	InputTokens   int            `json:"input_tokens"`
 	OutputTokens  int            `json:"output_tokens"`
 	LatencyMS     int64          `json:"latency_ms"`
@@ -61,21 +62,26 @@ func preflightFormalAnswer(ctx context.Context, protocol evalProtocol, counter e
 // preflight.  A mismatch between the counter and provider-reported input usage
 // invalidates the repetition; it is never papered over by the observed usage.
 func callFormalAnswer(ctx context.Context, protocol evalProtocol, counter evidencecompiler.TokenCounter, input evidencecompiler.AnswerInput, answerCall usageModelCaller) (string, provider.Usage, evidencecompiler.TokenCount, error) {
-	if answerCall == nil {
-		return "", provider.Usage{}, evidencecompiler.TokenCount{}, fmt.Errorf("formal 022 evaluation requires an answer caller")
-	}
 	count, err := preflightFormalAnswer(ctx, protocol, counter, input)
 	if err != nil {
 		return "", provider.Usage{}, evidencecompiler.TokenCount{}, err
 	}
+	answer, usage, err := callPreflightedFormalAnswer(ctx, input, count, answerCall)
+	return answer, usage, count, err
+}
+
+func callPreflightedFormalAnswer(ctx context.Context, input evidencecompiler.AnswerInput, count evidencecompiler.TokenCount, answerCall usageModelCaller) (string, provider.Usage, error) {
+	if answerCall == nil {
+		return "", provider.Usage{}, fmt.Errorf("formal 022 evaluation requires an answer caller")
+	}
 	answer, usage, err := answerCall(ctx, input.System, input.User)
 	if err != nil {
-		return "", usage, count, fmt.Errorf("formal answer call: %w", err)
+		return "", usage, fmt.Errorf("formal answer call: %w", err)
 	}
 	if usage.InputTokens != count.InputTokens {
-		return "", usage, count, fmt.Errorf("formal answer runtime input-token drift: preflight=%d runtime=%d", count.InputTokens, usage.InputTokens)
+		return "", usage, fmt.Errorf("formal answer runtime input-token drift: preflight=%d runtime=%d", count.InputTokens, usage.InputTokens)
 	}
-	return answer, usage, count, nil
+	return answer, usage, nil
 }
 
 // prepareFrozenEvalOptions returns the only option set a formal 022 run may
@@ -178,85 +184,150 @@ func admitFormalQuestion(ctx context.Context, gate chan struct{}) (func(), error
 	}
 }
 
-// runFormalB1Question is intentionally a narrow legacy-packer bridge.  It
-// retrieves exactly once, freezes the returned candidates and the legacy
-// rendered context, preflights the full answer input, then makes one answer
-// call and one judge call.  Later compiler stages replace only the packing
-// portion; they keep this answer-facing counter and journal boundary.
-func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
-	artifact := evalFormalQuestionRun{}
+// materializeFormalB1Question is the sole formal B1 path allowed to retrieve,
+// resolve lineage, or pack evidence. Its output is persisted before the first
+// answer call and then byte-replayed by every repetition.
+func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string) formalFrozenQuestion {
+	frozen := formalFrozenQuestion{}
 	if retriever == nil {
-		artifact.InvalidReasons = []string{"retriever_unavailable"}
-		return false, "", provider.Usage{}, artifact
+		frozen.InvalidReasons = []string{"retriever_unavailable"}
+		return frozen
 	}
 	hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
 	if err != nil {
-		artifact.InvalidReasons = []string{"retrieval_failed"}
-		return false, "", provider.Usage{}, artifact
+		frozen.InvalidReasons = []string{"retrieval_failed"}
+		return frozen
 	}
 	sourceByCandidate, sourceErr := formalCandidateSources(ctx, projections, hits)
 	if sourceErr != nil {
-		artifact.InvalidReasons = append(artifact.InvalidReasons, "source_lineage_unavailable")
+		frozen.InvalidReasons = append(frozen.InvalidReasons, "source_lineage_unavailable")
 	}
-	artifact.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
-	if err := validateEvalCandidateArtifact(protocol, artifact.Candidate); err != nil {
-		artifact.InvalidReasons = append(artifact.InvalidReasons, "candidate_invalid")
+	frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
+	if err := validateEvalCandidateArtifact(protocol, frozen.Candidate); err != nil {
+		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
 	}
 
 	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
 	packedHits, input, preflight, err := packFormalLegacyInput(ctx, protocol, opt.formalCounter, system, qa, hits, opt.temporalDateScaffold)
 	if err != nil {
-		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_input_budget_impossible")
-		input = evidencecompiler.AnswerInput{Model: opt.answerModel, System: system, User: buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)}
+		frozen.InvalidReasons = append(frozen.InvalidReasons, "answer_input_budget_impossible")
+		input = evidencecompiler.AnswerInput{Model: protocol.Models.Answerer.ID, System: system, User: buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)}
 	}
 	if input.Model == "" {
-		input.Model = opt.answerModel
+		input.Model = protocol.Models.Answerer.ID
 	}
-	artifact.Trace = buildFormalTrace(protocol, qa.QuestionID, artifact.Candidate)
-	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, packedHits, sourceByCandidate, input)
-	artifact.Bundle.AnswerInputTokens = preflight.InputTokens
-	artifact.Bundle.WithinCap = err == nil
-	if len(artifact.Bundle.SourceIDs) == 0 {
-		artifact.InvalidReasons = append(artifact.InvalidReasons, "no_evidence_fits_token_cap")
+	frozen.Trace = buildFormalTrace(protocol, qa.QuestionID, frozen.Candidate)
+	frozen.Bundle = buildFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedHits, sourceByCandidate, input)
+	frozen.Bundle.AnswerInputTokens = preflight.InputTokens
+	frozen.Bundle.WithinCap = err == nil
+	if len(frozen.Bundle.SourceIDs) == 0 {
+		frozen.InvalidReasons = append(frozen.InvalidReasons, "no_evidence_fits_token_cap")
 	}
-	if len(artifact.InvalidReasons) > 0 {
-		artifact.Trace.Valid = false
-		artifact.Bundle.Valid = false
-		return false, "", provider.Usage{}, artifact
+	frozen.InvalidReasons = stableStrings(frozen.InvalidReasons)
+	if len(frozen.InvalidReasons) > 0 {
+		frozen.Trace.Valid = false
+		frozen.Bundle.Valid = false
+	}
+	return frozen
+}
+
+// prepareFrozenFormalB1Answer is the last no-call boundary in the formal
+// answer path. It reconstructs the immutable provider input and performs every
+// deterministic identity/token check before the call journal records STARTED.
+// Any invalid result returned here is therefore safe to persist as a terminal
+// pre-call failure without claiming that a provider was invoked.
+func prepareFrozenFormalB1Answer(ctx context.Context, protocol evalProtocol, opt options, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, frozen formalFrozenQuestion, runIndex int) (evidencecompiler.AnswerInput, evidencecompiler.TokenCount, evalFormalQuestionRun) {
+	artifact := evalFormalQuestionRun{
+		Candidate:      frozen.Candidate,
+		Trace:          frozen.Trace,
+		Bundle:         frozen.Bundle,
+		InvalidReasons: append([]string(nil), frozen.InvalidReasons...),
+		Answer:         evalFormalAnswerRun{RunIndex: runIndex},
 	}
 
-	started := time.Now()
-	answer, usage, count, err := callFormalAnswer(ctx, protocol, opt.formalCounter, input, answerCall)
-	artifact.Answer = evalFormalAnswerRun{
-		RunIndex:      runIndex,
-		Answer:        answer,
-		AnswerDigest:  evalTextDigest(answer),
-		AnswerCalls:   0,
-		InputTokens:   count.InputTokens,
-		OutputTokens:  usage.OutputTokens,
-		LatencyMS:     time.Since(started).Milliseconds(),
-		CounterSource: count.Fingerprint,
-		Usage:         usage,
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	input := evidencecompiler.AnswerInput{
+		Model:  protocol.Models.Answerer.ID,
+		System: system,
+		User:   frozen.Bundle.RenderedContext,
 	}
+	if len(artifact.InvalidReasons) > 0 {
+		return input, evidencecompiler.TokenCount{}, artifact
+	}
+	if frozen.Candidate.QuestionID != qa.QuestionID ||
+		frozen.Trace.QuestionID != qa.QuestionID ||
+		frozen.Bundle.QuestionID != qa.QuestionID ||
+		frozen.Trace.CandidateSetDigest != frozen.Candidate.CandidateSetDigest ||
+		frozen.Bundle.CandidateSetDigest != frozen.Candidate.CandidateSetDigest ||
+		frozen.Bundle.TraceDigest != frozen.Trace.TraceDigest ||
+		frozen.Bundle.RenderedDigest != evalTextDigest(input.User) ||
+		frozen.Bundle.AnswerPromptDigest != evalTextDigest(input.System) {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_input_drift")
+		return input, evidencecompiler.TokenCount{}, artifact
+	}
+
+	count, err := preflightFormalAnswer(ctx, protocol, opt.formalCounter, input)
+	artifact.Answer.InputTokens = count.InputTokens
+	artifact.Answer.CounterSource = count.Fingerprint
+	if err != nil || count.InputTokens != frozen.Bundle.AnswerInputTokens {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_preflight_or_runtime_failed")
+		return input, count, artifact
+	}
+	if answerCall == nil {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_preflight_or_runtime_failed")
+	}
+	if judgeCall == nil {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "judge_failed")
+	}
+	artifact.InvalidReasons = stableStrings(artifact.InvalidReasons)
+	return input, count, artifact
+}
+
+// callPreparedFrozenFormalB1Answer is entered only after STARTED is durable.
+// It performs at most one answer call and, after a successful answer, at most
+// one judge call. Call counters record attempts even when the provider returns
+// an error, making terminal failures auditable without permitting a retry.
+func callPreparedFrozenFormalB1Answer(ctx context.Context, opt options, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, input evidencecompiler.AnswerInput, count evidencecompiler.TokenCount, artifact evalFormalQuestionRun) (bool, string, provider.Usage, evalFormalQuestionRun) {
+	if len(artifact.InvalidReasons) > 0 {
+		return false, "", provider.Usage{}, artifact
+	}
+	started := time.Now()
+	answer, usage, err := callPreflightedFormalAnswer(ctx, input, count, answerCall)
+	artifact.Answer.AnswerCalls = 1
+	artifact.Answer.Answer = answer
+	artifact.Answer.AnswerDigest = evalTextDigest(answer)
+	artifact.Answer.OutputTokens = usage.OutputTokens
+	artifact.Answer.LatencyMS = time.Since(started).Milliseconds()
+	artifact.Answer.Usage = usage
 	if err != nil {
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_preflight_or_runtime_failed")
-		artifact.Trace.Valid = false
-		artifact.Bundle.Valid = false
 		return false, answer, usage, artifact
 	}
-	artifact.Answer.AnswerCalls = 1
-	artifact.Bundle.AnswerInputTokens = count.InputTokens
-	artifact.Bundle.WithinCap = true
 	verdict, _, judgeErr := judgeCall(ctx, judgeSystemPromptFor(opt.judgeAlignmentMode()), buildJudgePrompt(qa.Question, goldFor(qa), answer))
+	artifact.Answer.JudgeCalls = 1
 	if judgeErr != nil {
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "judge_failed")
-		artifact.Trace.Valid = false
-		artifact.Bundle.Valid = false
 		return false, answer, usage, artifact
 	}
 	correct := parseJudgeVerdict(verdict)
 	artifact.Answer.JudgeCorrect = correct
 	return correct, answer, usage, artifact
+}
+
+// answerFrozenFormalB1Question is intentionally unable to access a retriever,
+// projection store, source resolver, or packer. It is retained for focused
+// unit tests and one-shot callers; production wraps the prepared call with the
+// durable formal-call state machine.
+func answerFrozenFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, frozen formalFrozenQuestion, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
+	input, count, artifact := prepareFrozenFormalB1Answer(ctx, protocol, opt, answerCall, judgeCall, qa, frozen, runIndex)
+	return callPreparedFrozenFormalB1Answer(ctx, opt, answerCall, judgeCall, qa, input, count, artifact)
+}
+
+// runFormalB1Question remains a narrow compatibility helper for unit tests and
+// one-shot callers. Production repetitions go through formalQuestionReplay.
+func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
+	frozen := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, chunkTurns, turnEvidence)
+	return answerFrozenFormalB1Question(ctx, protocol, opt, answerCall, judgeCall, qa, frozen, runIndex)
 }
 
 // packFormalLegacyInput preserves the legacy rank-order packer while making

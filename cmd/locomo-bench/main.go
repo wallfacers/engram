@@ -78,6 +78,8 @@ type options struct {
 	formalProtocol        *evalProtocol
 	formalCounter         evidencecompiler.TokenCounter
 	formalQuestionGate    chan struct{}
+	formalReplay          *formalQuestionReplay
+	formalCalls           *formalCallJournal
 	formalRunIndex        int
 	repeats               int
 	estimate              bool
@@ -605,6 +607,29 @@ func run() error {
 		return runCoverage(ctx, opt, convs, runtimes, arms, logger)
 	}
 
+	var formalReplay *formalQuestionReplay
+	var formalCalls *formalCallJournal
+	formalJournalsClosed := false
+	if opt.formalProtocol != nil {
+		formalReplay, err = openFormalQuestionReplay(opt.runDir, opt.formalProtocol.ProtocolHash)
+		if err != nil {
+			return fmt.Errorf("open formal question replay: %w", err)
+		}
+		formalCalls, err = openFormalCallJournal(opt.runDir, opt.formalProtocol.ProtocolHash)
+		if err != nil {
+			_ = formalReplay.Close()
+			return fmt.Errorf("open formal call journal: %w", err)
+		}
+		opt.formalReplay = formalReplay
+		opt.formalCalls = formalCalls
+		defer func() {
+			if !formalJournalsClosed {
+				_ = formalCalls.Close()
+				_ = formalReplay.Close()
+			}
+		}()
+	}
+
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
 		repeatOpt := opt
 		repeatOpt.formalRunIndex = repeat
@@ -628,6 +653,31 @@ func run() error {
 			}
 			states = append(states, &armState{name: name, agg: newAggregator(), journal: j})
 		}
+		if repeatOpt.formalCalls != nil {
+			if len(states) != 1 {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("formal run requires exactly one result journal")
+			}
+			if err := repeatOpt.formalCalls.Reconcile(repeat, states[0].journal); err != nil {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("reconcile formal call journal before repetition %d: %w", repeat, err)
+			}
+		}
+		if repeat == 1 && repeatOpt.formalReplay != nil {
+			if err := seedFormalQuestionReplay(repeatOpt.formalReplay, states[0].journal); err != nil {
+				for _, state := range states {
+					state.journal.Close()
+				}
+				_ = parity.Close()
+				return fmt.Errorf("seed formal question replay: %w", err)
+			}
+		}
 		if err := validateContextParityResume(repeatOpt, convs, states); err != nil {
 			for _, state := range states {
 				state.journal.Close()
@@ -636,6 +686,8 @@ func run() error {
 			return err
 		}
 		var wg sync.WaitGroup
+		var repeatErrMu sync.Mutex
+		var repeatErr error
 		for ci := range convs {
 			wg.Add(1)
 			go func(conv conversation, current []*armState) {
@@ -643,25 +695,68 @@ func run() error {
 				index := conv.ID
 				if index < 0 || index >= len(runtimes) || runtimes[index] == nil {
 					logger.Warn("conversation runtime unavailable", "conversation", conv.ID)
+					if repeatOpt.formalProtocol != nil {
+						repeatErrMu.Lock()
+						if repeatErr == nil {
+							repeatErr = fmt.Errorf("conversation %d runtime unavailable", conv.ID)
+						}
+						repeatErrMu.Unlock()
+					}
 					return
 				}
 				if err := answerConversationWithUsage(ctx, repeatOpt, conv, runtimes[index], answerUsageCall, filterCall, rewriteCall, judgeUsageCall, current, logger); err != nil {
 					logger.Warn("conversation failed", "conversation", conv.ID, "err", err)
+					repeatErrMu.Lock()
+					if repeatErr == nil {
+						repeatErr = fmt.Errorf("conversation %d: %w", conv.ID, err)
+					}
+					repeatErrMu.Unlock()
 				}
 			}(convs[ci], states)
 		}
 		wg.Wait()
+		if repeatOpt.formalCalls != nil {
+			if err := repeatOpt.formalCalls.Reconcile(repeat, states[0].journal); err != nil {
+				repeatErrMu.Lock()
+				if repeatErr == nil {
+					repeatErr = fmt.Errorf("reconcile formal call journal after repetition %d: %w", repeat, err)
+				}
+				repeatErrMu.Unlock()
+			}
+		}
 		for _, state := range states {
 			state.journal.Close()
-			report(state, repeatOpt)
+			if formalRepeatScoresVisible(repeatOpt) {
+				report(state, repeatOpt)
+			} else {
+				fmt.Printf("formal repetition=%d recorded=%d/%d score=pending-validation\n",
+					repeat, state.journal.count(), repeatOpt.formalProtocol.Benchmark.QuestionCount)
+			}
 		}
 		if err := parity.Close(); err != nil {
 			return err
+		}
+		repeatErrMu.Lock()
+		currentRepeatErr := repeatErr
+		repeatErrMu.Unlock()
+		if currentRepeatErr != nil {
+			return currentRepeatErr
 		}
 		if len(states) == 2 {
 			reportDelta(states[0], states[1])
 		}
 	}
+	if formalCalls != nil {
+		if err := formalCalls.Close(); err != nil {
+			return err
+		}
+	}
+	if formalReplay != nil {
+		if err := formalReplay.Close(); err != nil {
+			return err
+		}
+	}
+	formalJournalsClosed = true
 	if len(arms) > 2 {
 		warnExtraPairedArms(logger, arms)
 	}
@@ -694,6 +789,14 @@ func run() error {
 		}
 		if !summary.Validity.isComplete() {
 			return fmt.Errorf("formal 022 artifact validity failed; summary preserved at %s", filepath.Join(opt.runDir, evalSummaryArtifactFile))
+		}
+		expectedQuestionIDs := formalQuestionIDs(opt.datasetFormat, convs)
+		validated, err := validateEvalArtifactRun(opt.runDir, *opt.formalProtocol, expectedQuestionIDs)
+		if err != nil {
+			return fmt.Errorf("validate formal 022 artifacts: %w", err)
+		}
+		if _, err := publishFormalB1Metrics(opt.runDir, validated, *opt.formalProtocol); err != nil {
+			return fmt.Errorf("publish formal 022 metrics: %w", err)
 		}
 	}
 	ledger.EstimatedUSD = estimateDatasetCost(convs, opt, prices, model, extractModel, judgeConfig.Model)
@@ -1370,6 +1473,18 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 	}
 
 	var qwg sync.WaitGroup
+	var formalErrMu sync.Mutex
+	var formalErr error
+	recordFormalErr := func(err error) {
+		if err == nil {
+			return
+		}
+		formalErrMu.Lock()
+		if formalErr == nil {
+			formalErr = err
+		}
+		formalErrMu.Unlock()
+	}
 	selected := selectQuestions(conv, opt)
 	var parityState *armState
 	if len(states) > 0 {
@@ -1391,22 +1506,67 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 			go func(s *armState, qa locomoQA, key resultKey, armOpt options, writeParity bool) {
 				defer qwg.Done()
 				if armOpt.formalProtocol != nil {
+					if armOpt.formalReplay == nil || armOpt.formalCalls == nil {
+						err := fmt.Errorf("formal replay or call journal unavailable")
+						recordFormalErr(err)
+						logger.Error("formal question infrastructure unavailable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
 					release, err := admitFormalQuestion(ctx, armOpt.formalQuestionGate)
 					if err != nil {
+						recordFormalErr(err)
 						logger.Warn("formal question admission failed", "conversation", key.Conv, "question", key.Q, "err", err)
 						return
 					}
 					defer release()
-					correct, predicted, usage, formal := runFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, answerCall, judgeCall, qa, runtime.chunkTurns, runtime.turnEvidence, armOpt.formalRunIndex)
-					s.agg.add(qa.Category, correct)
-					s.journal.write(result{
+					frozen, err := armOpt.formalReplay.getOrMaterialize(key, qa.QuestionID, func() formalFrozenQuestion {
+						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, qa, runtime.chunkTurns, runtime.turnEvidence)
+					})
+					if err != nil {
+						recordFormalErr(err)
+						logger.Error("formal question freeze failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					input, count, formal := prepareFrozenFormalB1Answer(ctx, *armOpt.formalProtocol, armOpt, answerCall, judgeCall, qa, frozen, armOpt.formalRunIndex)
+					frozenDigest := formalFrozenPayloadDigest(frozen)
+					inputDigest := evalJSONDigest(input)
+					correct := false
+					predicted := ""
+					usage := provider.Usage{}
+					if len(formal.InvalidReasons) == 0 {
+						if err := armOpt.formalCalls.Begin(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest); err != nil {
+							recordFormalErr(err)
+							logger.Error("record formal call intent failed", "conversation", key.Conv, "question", key.Q, "err", err)
+							return
+						}
+						correct, predicted, usage, formal = callPreparedFrozenFormalB1Answer(ctx, armOpt, answerCall, judgeCall, qa, input, count, formal)
+					}
+					formal.InvalidReasons = stableStrings(formal.InvalidReasons)
+					item := result{
 						Conv: key.Conv, Q: key.Q, QuestionID: qa.QuestionID, Category: qa.Category, CategoryName: qa.CategoryName,
 						QuestionType: qa.QuestionType, Adversarial: qa.Adversarial || qa.Category == adversarialCategory,
 						Correct: correct, Question: qa.Question, Gold: goldFor(qa), Predicted: predicted,
 						RetrievalFlags: retrievalFingerprint(armOpt), AnswerRegime: answerRegimeFingerprint(armOpt),
 						InputTokens: formal.Answer.InputTokens, OutputTokens: usage.OutputTokens, AnswerContextTokens: formal.Answer.InputTokens,
 						Formal022: &formal,
-					})
+					}
+					if len(formal.InvalidReasons) == 0 {
+						err = armOpt.formalCalls.Finish(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					} else if formal.Answer.AnswerCalls > 0 || formal.Answer.JudgeCalls > 0 {
+						err = armOpt.formalCalls.Finish(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					} else {
+						err = armOpt.formalCalls.FailWithoutStart(key, qa.QuestionID, armOpt.formalRunIndex, frozenDigest, inputDigest, item)
+					}
+					if err != nil {
+						recordFormalErr(err)
+						logger.Error("record formal call terminal failed", "conversation", key.Conv, "question", key.Q, "err", err)
+						return
+					}
+					s.agg.add(qa.Category, correct)
+					if err := s.journal.writeResult(item, true); err != nil {
+						recordFormalErr(err)
+						logger.Error("write formal result failed; terminal remains replayable", "conversation", key.Conv, "question", key.Q, "err", err)
+					}
 					return
 				}
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
@@ -1468,7 +1628,9 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 	}
 	qwg.Wait()
 	logger.Info("conversation done", "conversation", conv.ID, "answered", len(selected))
-	return nil
+	formalErrMu.Lock()
+	defer formalErrMu.Unlock()
+	return formalErr
 }
 
 // processConversation remains a one-shot compatibility wrapper for callers
@@ -1979,6 +2141,10 @@ func report(s *armState, opt options) {
 	if opt.maxConvs > 0 || opt.maxQuestions > 0 {
 		fmt.Printf("  (sampled run: conversations=%d questions/conv=%d)\n", opt.maxConvs, opt.maxQuestions)
 	}
+}
+
+func formalRepeatScoresVisible(opt options) bool {
+	return opt.formalProtocol == nil
 }
 
 // reportDelta prints the A-B uplift between two arms (typically fts vs hybrid).

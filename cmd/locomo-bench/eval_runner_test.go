@@ -280,6 +280,92 @@ func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
 	}
 }
 
+func TestAnswerFrozenFormalB1QuestionReplaysExactBytesAndDoesNotMutateFreeze(t *testing.T) {
+	protocol := testEvalProtocol()
+	protocol.ProtocolHash = "sha256:protocol"
+	qa := locomoQA{QuestionID: "locomo:1:2", Question: "When did Alice move?", Category: 2}
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false, false), qa.QuestionDate)
+	candidate := testCandidateArtifact()
+	trace := buildFormalTrace(protocol, qa.QuestionID, candidate)
+	bundle := evalFormalBundleRecord{
+		evalArtifactRecord: evalArtifactRecord{
+			Schema:       evalProtocolSchema,
+			ProtocolHash: protocol.ProtocolHash,
+			QuestionID:   qa.QuestionID,
+			Kind:         evalBundleArtifactKind,
+			Valid:        true,
+		},
+		CandidateSetDigest: candidate.CandidateSetDigest,
+		TraceDigest:        trace.TraceDigest,
+		SourceIDs:          []string{"e-1"},
+		RenderedContext:    "QUESTION:\nWhen did Alice move?\n\nMEMORIES:\nAlice moved in 2023.",
+		RenderedDigest:     evalTextDigest("QUESTION:\nWhen did Alice move?\n\nMEMORIES:\nAlice moved in 2023."),
+		AnswerInputTokens:  12,
+		TokenCap:           protocol.Budget.AnswerInputTokenCap,
+		CounterFingerprint: protocol.Budget.CounterFingerprint,
+		WithinCap:          true,
+		SourceValid:        true,
+		AnswerPromptDigest: evalTextDigest(system),
+	}
+	frozen := formalFrozenQuestion{Candidate: candidate, Trace: trace, Bundle: bundle}
+	frozenDigest := evalJSONDigest(frozen)
+	answerCalls, judgeCalls := 0, 0
+	var runDigests []string
+	for runIndex := 1; runIndex <= 3; runIndex++ {
+		correct, _, _, run := answerFrozenFormalB1Question(
+			context.Background(), protocol,
+			options{formalCounter: formalCounter{count: 12, fingerprint: protocol.Budget.CounterFingerprint}},
+			func(_ context.Context, gotSystem, gotUser string) (string, provider.Usage, error) {
+				answerCalls++
+				if gotSystem != system || gotUser != bundle.RenderedContext {
+					t.Fatalf("answer input drifted: system=%q user=%q", gotSystem, gotUser)
+				}
+				return fmt.Sprintf("answer-%d", runIndex), provider.Usage{InputTokens: 12, OutputTokens: 2}, nil
+			},
+			func(context.Context, string, string) (string, provider.Usage, error) {
+				judgeCalls++
+				return `{"correct":true}`, provider.Usage{}, nil
+			},
+			qa, frozen, runIndex,
+		)
+		if !correct || run.Answer.RunIndex != runIndex || run.Answer.AnswerCalls != 1 {
+			t.Fatalf("run %d = %+v, correct=%t", runIndex, run, correct)
+		}
+		runDigests = append(runDigests, evalJSONDigest(struct {
+			Candidate evalCandidateArtifact
+			Trace     evalFormalTraceRecord
+			Bundle    evalFormalBundleRecord
+		}{run.Candidate, run.Trace, run.Bundle}))
+	}
+	if answerCalls != 3 || judgeCalls != 3 {
+		t.Fatalf("answer calls=%d judge calls=%d, want 3 each", answerCalls, judgeCalls)
+	}
+	if evalJSONDigest(frozen) != frozenDigest {
+		t.Fatal("answer repetition mutated the frozen question")
+	}
+	for index := 1; index < len(runDigests); index++ {
+		if runDigests[index] != runDigests[0] {
+			t.Fatalf("run %d freeze digest drifted: %q != %q", index+1, runDigests[index], runDigests[0])
+		}
+	}
+
+	_, _, _, failed := answerFrozenFormalB1Question(
+		context.Background(), protocol,
+		options{formalCounter: formalCounter{count: 12, fingerprint: protocol.Budget.CounterFingerprint}},
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			return "", provider.Usage{}, fmt.Errorf("answer unavailable")
+		},
+		func(context.Context, string, string) (string, provider.Usage, error) {
+			t.Fatal("judge called after answer failure")
+			return "", provider.Usage{}, nil
+		},
+		qa, frozen, 1,
+	)
+	if failed.Trace.Valid != trace.Valid || failed.Bundle.Valid != bundle.Valid || evalJSONDigest(frozen) != frozenDigest {
+		t.Fatalf("answer failure mutated frozen validity: trace=%t bundle=%t", failed.Trace.Valid, failed.Bundle.Valid)
+	}
+}
+
 func hasInvalidReason(reasons []string, want string) bool {
 	for _, reason := range reasons {
 		if reason == want {

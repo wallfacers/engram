@@ -173,3 +173,99 @@ answer/extraction model and has no outbound model-download access. At the
 time of this record there are no vLLM processes and GPU memory use is 0 MiB;
 the instance itself still needs the maintainer's provider-console stop action
 if it remains billable.
+
+### Full LoCoMo v12 is INVALID: repetitions rematerialized candidates
+
+**Date**: 2026-07-30
+
+**Protocol hash**:
+`sha256:ae3cd5d2a903890c11dde1ab9d41df4d0b2d66c2b140cf8d4a1dac72990a762a`
+
+**Runner commit**: `7acc71313fd65012d08a44f205b234d74ab0cfae`
+
+The low-cap LoCoMo run completed all three 1,540-question answer passes with
+one answer call per question. Their raw judge outcomes were
+1,052/1,540 (68.31%), 1,085/1,540 (70.45%), and 1,082/1,540 (70.26%).
+These are diagnostic call outcomes only. They are **not B1 scores**, are not
+eligible for a majority metric, and do not enter F0: six questions violated
+FR-040 because the old outer repeat loop re-ran retrieval and packing instead
+of replaying one frozen Candidate/Trace/Bundle:
+
+- `conv-0-q-52`
+- `conv-1-q-11`
+- `conv-1-q-13`
+- `conv-3-q-42`
+- `conv-6-q-57`
+- `conv-9-q-11`
+
+The preserved invalid artifacts are identified by:
+
+| Artifact | SHA-256 |
+|---|---|
+| `protocol.json` file | `5d83c9eded21414ebfb5b44ef4651dcee81d8fc41157bd35bcc8a650265807bc` |
+| `candidates.jsonl` | `d8b8d190446f95608c9bd0604121c8da3cd8baa857ce85cfdc40d4e76a0293b1` |
+| `compile_trace.jsonl` | `c790daa41e6271007f2496d15203a1ff134f4c384032d66bab65161d82b7f097` |
+| `bundles.jsonl` | `d3166a3a88e0282ea6c4e23c181a47ac758abba5f0864e01e418250c7d851f1e` |
+| `classification.jsonl` | `c3e2ce0b7b28969f7d0fc3b3c8d7a11317c33466342bc66a4e88ae9d90f151be` |
+| `summary.json` | `5773f18ee48a6f154aa936948de17a91f4ddc7a1b738966148457893bca610df` |
+
+The correction separates the formal path into one materialization step and an
+answer-only replay step. A strict `formal_freeze.jsonl` staging journal is
+flushed and synced before the first answer call, so a restart after freezing
+cannot silently retrieve again. It uses per-question singleflight rather than
+serializing the 1,540 questions. Resume rejects malformed, duplicate,
+cross-protocol, or digest-conflicting freeze records. Answer/judge failures no
+longer mutate frozen Trace/Bundle validity, and an INVALID summary omits
+`metrics` entirely so the obsolete apparent 69.74% majority cannot be mistaken
+for a paper-eligible result.
+
+External-call replay has a second durable boundary in `formal_calls.jsonl`.
+After exact-input preflight, the runner syncs `STARTED` before the answer call,
+makes at most one answer call and one judge call, then syncs a terminal
+`COMPLETED`/`FAILED` record containing the full result before deriving the
+ordinary repetition journal. Resume replays a terminal result without another
+provider call and refuses an orphan `STARTED`, a result without a terminal, or
+a terminal/result digest conflict. A pre-call failure may omit `STARTED` only
+when both provider-call counters are zero.
+
+The final validity gate also binds the ordered 1,540-question denominator and
+question-ID digest, validates all three repetition journals, and checks the
+full Candidate/Trace/Bundle cap, counter, source, answer-call, and judge-call
+metadata before metrics exist. Materialization always writes a scoreless
+summary; only the independent persisted-artifact validator may publish its
+metrics. Per-repetition output is
+`score=pending-validation`; percentages are not printed before that gate.
+Formal resume also bypasses the unrelated legacy multi-query
+`context_parity.jsonl` gate; its own freeze/call/result journals are the
+authoritative replay contract.
+
+Regression coverage now proves:
+
+- a materializer that would return a different candidate on every invocation
+  is called exactly once across three repetitions;
+- the freeze survives process reopen before any answer result exists;
+- production `answerConversationWithUsage` still completes repetitions 2 and
+  3 after the source Entry is deleted following repetition 1, proving those
+  repetitions do not retrieve again;
+- all three answer calls receive byte-identical system/user inputs;
+- answer failure cannot mutate Candidate/Trace/Bundle; and
+- deliberate repetition drift or malformed frozen metadata produces an
+  INVALID summary with no `metrics`;
+- a stable but incomplete denominator is rejected; and
+- an orphan external-call intent is refused while a synced terminal result can
+  reconstruct its missing ordinary journal without another model call.
+
+| Verification | Result |
+|---|---|
+| Red test before implementation | PASS as a TDD checkpoint — `TestFormalQuestionReplay*` failed to compile because the replay boundary did not exist |
+| Formal replay/package tests | PASS — `CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench` |
+| Cross-platform build | PASS — `CGO_ENABLED=0 go build ./...` |
+| Full offline regression | PASS — `CGO_ENABLED=0 go test -count=1 ./...` |
+| Static analysis | PASS — `CGO_ENABLED=0 go vet ./...` |
+| Engine diff guard | PASS — no changed path under `memory/`, `embedding/`, `provider/`, `store/`, or `internal/` |
+
+This repairs the B1 ruler only. It does not improve retrieval or answer quality,
+does not make the v12 outcomes valid, and does not unlock T021/T022. Fresh
+protocols must bind the eventual clean replay-fix commit before another formal
+run. No local `locomo-bench`, vLLM, tokenizer tunnel, or evaluation SSH process
+was running at the time of this audit.

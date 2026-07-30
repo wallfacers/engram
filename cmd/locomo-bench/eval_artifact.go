@@ -45,7 +45,11 @@ type evalArtifactSummary struct {
 	ProtocolHash   string               `json:"protocol_hash"`
 	ArtifactHashes map[string]string    `json:"artifact_hashes"`
 	Validity       evalArtifactValidity `json:"validity"`
-	Metrics        evalFormalMetrics    `json:"metrics,omitempty"`
+	// Metrics is absent for every INVALID run. Per-question diagnostics remain
+	// available, but an invalid repetition/cap/source run cannot expose an
+	// accuracy object that downstream tooling or a human could mistake for a
+	// formal score.
+	Metrics *evalFormalMetrics `json:"metrics,omitempty"`
 }
 
 // evalFormalTraceRecord, evalFormalBundleRecord, and
@@ -195,12 +199,15 @@ func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][
 	var expected map[string]bool
 	for runIndex, run := range runs {
 		seen := make(map[string]bool, len(run))
+		seenKeys := make(map[resultKey]bool, len(run))
 		for _, item := range run {
 			id := resultID(item)
-			if strings.TrimSpace(id) == "" || seen[id] || item.Formal022 == nil {
+			key := resultKey{Conv: item.Conv, Q: item.Q}
+			if strings.TrimSpace(id) == "" || seen[id] || seenKeys[key] || item.Formal022 == nil {
 				return evalArtifactSummary{}, fmt.Errorf("formal run %d contains duplicate, blank, or non-formal result", runIndex+1)
 			}
 			seen[id] = true
+			seenKeys[key] = true
 			byQuestion[id] = append(byQuestion[id], item)
 		}
 		if runIndex == 0 {
@@ -213,6 +220,16 @@ func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][
 	}
 	if len(expected) == 0 {
 		return evalArtifactSummary{}, fmt.Errorf("formal journal has no question results")
+	}
+	orderedQuestionIDs, err := formalJournalQuestionIDs(runs[0])
+	if err != nil {
+		return evalArtifactSummary{}, err
+	}
+	if len(orderedQuestionIDs) != protocol.Benchmark.QuestionCount {
+		return evalArtifactSummary{}, fmt.Errorf("formal denominator has %d questions, protocol requires %d", len(orderedQuestionIDs), protocol.Benchmark.QuestionCount)
+	}
+	if evalJSONDigest(orderedQuestionIDs) != protocol.Benchmark.QuestionIDsDigest {
+		return evalArtifactSummary{}, fmt.Errorf("formal question ID digest differs from protocol")
 	}
 
 	questionIDs := mapKeys(expected)
@@ -240,12 +257,17 @@ func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][
 		if err := validateEvalCandidateArtifact(protocol, candidate); err != nil {
 			invalid = append(invalid, "candidate_artifact_invalid")
 		}
+		if err := validateFormalFrozenPayload(protocol, candidate, trace, bundle); err != nil {
+			invalid = append(invalid, "frozen_payload_invalid")
+		}
 		answerRuns := make([]evalFormalAnswerRun, 0, len(entries))
 		outcomes := make([]bool, 0, len(entries))
 		answerCalls := 0
 		for index, entry := range entries {
 			answer := entry.Formal022.Answer
-			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.InputTokens != bundle.AnswerInputTokens {
+			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.JudgeCalls != 1 ||
+				answer.InputTokens != bundle.AnswerInputTokens || answer.CounterSource != protocol.Budget.CounterFingerprint ||
+				answer.AnswerDigest != evalTextDigest(answer.Answer) {
 				invalid = append(invalid, "answer_call_or_token_contract_violation")
 			}
 			answerRuns = append(answerRuns, answer)
@@ -298,11 +320,87 @@ func materializeFormalB1Artifacts(runDir string, protocol evalProtocol, runs [][
 		return evalArtifactSummary{}, err
 	}
 	validity := formalArtifactValidity(candidates, traces, bundles, classifications)
-	summary := evalArtifactSummary{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, ArtifactHashes: hashes, Validity: validity, Metrics: formalClassificationMetrics(classifications)}
+	summary := evalArtifactSummary{Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, ArtifactHashes: hashes, Validity: validity}
 	if err := writeJSON(filepath.Join(runDir, evalSummaryArtifactFile), summary); err != nil {
 		return evalArtifactSummary{}, err
 	}
 	return summary, nil
+}
+
+// publishFormalB1Metrics is deliberately separate from materialization.
+// Materialization may discover only a subset of malformed payloads; the score
+// becomes visible only after validateEvalArtifactRun has independently checked
+// every persisted artifact and hash against the frozen protocol.
+func publishFormalB1Metrics(runDir string, validated evalArtifactSummary, protocol evalProtocol) (evalArtifactSummary, error) {
+	if !validated.Validity.isComplete() || validated.ProtocolHash != protocol.ProtocolHash || validated.Metrics != nil {
+		return evalArtifactSummary{}, fmt.Errorf("formal metrics require one complete, unpublished validated summary")
+	}
+	var classifications []evalFormalClassificationRecord
+	if err := readEvalJSONL(filepath.Join(runDir, evalClassificationArtifactFile), &classifications); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	if len(classifications) != protocol.Benchmark.QuestionCount {
+		return evalArtifactSummary{}, fmt.Errorf("formal metric denominator %d, want %d", len(classifications), protocol.Benchmark.QuestionCount)
+	}
+	for _, classification := range classifications {
+		if !classification.Valid || classification.ProtocolHash != protocol.ProtocolHash ||
+			classification.Kind != evalClassificationArtifactKind ||
+			len(classification.AnswerRuns) != protocol.Aggregation.AnswerRepetitions ||
+			classification.AnswerCalls != protocol.Aggregation.AnswerRepetitions {
+			return evalArtifactSummary{}, fmt.Errorf("formal metrics require valid classifications")
+		}
+	}
+	metrics := formalClassificationMetrics(classifications)
+	validated.Metrics = &metrics
+	if err := writeJSON(filepath.Join(runDir, evalSummaryArtifactFile), validated); err != nil {
+		return evalArtifactSummary{}, err
+	}
+	return validated, nil
+}
+
+func formalJournalQuestionIDs(run []result) ([]string, error) {
+	ordered := append([]result(nil), run...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Conv != ordered[j].Conv {
+			return ordered[i].Conv < ordered[j].Conv
+		}
+		return ordered[i].Q < ordered[j].Q
+	})
+	ids := make([]string, 0, len(ordered))
+	seen := make(map[string]bool, len(ordered))
+	seenKeys := make(map[resultKey]bool, len(ordered))
+	for _, item := range ordered {
+		id := resultID(item)
+		key := resultKey{Conv: item.Conv, Q: item.Q}
+		if strings.TrimSpace(id) == "" || seen[id] || seenKeys[key] {
+			return nil, fmt.Errorf("formal journal contains duplicate or blank question identity")
+		}
+		seen[id] = true
+		seenKeys[key] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func validateFormalFrozenPayload(protocol evalProtocol, candidate evalCandidateArtifact, trace evalFormalTraceRecord, bundle evalFormalBundleRecord) error {
+	if candidate.RetrievalCalls != protocol.Budget.RetrievalCallLimit {
+		return fmt.Errorf("retrieval calls %d differ from protocol %d", candidate.RetrievalCalls, protocol.Budget.RetrievalCallLimit)
+	}
+	if trace.Schema != evalProtocolSchema || trace.ProtocolHash != protocol.ProtocolHash || trace.QuestionID != candidate.QuestionID ||
+		trace.Kind != evalTraceArtifactKind || !trace.Valid || trace.Attempt != 1 ||
+		trace.CandidateSetDigest != candidate.CandidateSetDigest || trace.TraceDigest != formalTraceDigest(trace) {
+		return fmt.Errorf("invalid formal trace for question %q", candidate.QuestionID)
+	}
+	if bundle.Schema != evalProtocolSchema || bundle.ProtocolHash != protocol.ProtocolHash || bundle.QuestionID != candidate.QuestionID ||
+		bundle.Kind != evalBundleArtifactKind || !bundle.Valid ||
+		bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
+		bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.AnswerInputTokens < 1 ||
+		bundle.AnswerInputTokens > protocol.Budget.AnswerInputTokenCap || bundle.TokenCap != protocol.Budget.AnswerInputTokenCap ||
+		bundle.CounterFingerprint != protocol.Budget.CounterFingerprint || !bundle.WithinCap || !bundle.SourceValid ||
+		len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
+		return fmt.Errorf("invalid formal bundle for question %q", candidate.QuestionID)
+	}
+	return nil
 }
 
 func writeEvalJSONL[T any](path string, records []T) error {
@@ -388,7 +486,7 @@ func formalArtifactValidity(candidates []evalCandidateArtifact, traces []evalFor
 		if len(classification.AnswerRuns) > 0 {
 			compliant := true
 			for _, answer := range classification.AnswerRuns {
-				if answer.AnswerCalls != 1 {
+				if answer.AnswerCalls != 1 || answer.JudgeCalls != 1 {
 					compliant = false
 				}
 			}
@@ -425,6 +523,12 @@ func validateEvalArtifactRun(runDir string, requested evalProtocol, expectedQues
 	}
 	if len(expectedQuestionIDs) == 0 {
 		return evalArtifactSummary{}, fmt.Errorf("expected question IDs are required")
+	}
+	if len(expectedQuestionIDs) != requested.Benchmark.QuestionCount {
+		return evalArtifactSummary{}, fmt.Errorf("expected %d question IDs, protocol requires %d", len(expectedQuestionIDs), requested.Benchmark.QuestionCount)
+	}
+	if evalJSONDigest(expectedQuestionIDs) != requested.Benchmark.QuestionIDsDigest {
+		return evalArtifactSummary{}, fmt.Errorf("expected question ID digest differs from protocol")
 	}
 	expected := stringSet(expectedQuestionIDs)
 	if len(expected) != len(expectedQuestionIDs) {
@@ -501,11 +605,15 @@ func validateFormalArtifactPayloads(runDir string, protocol evalProtocol, candid
 	}
 	byID := make(map[string]evalCandidateArtifact, len(candidates))
 	for _, candidate := range candidates {
+		if candidate.RetrievalCalls != protocol.Budget.RetrievalCallLimit {
+			return fmt.Errorf("invalid formal retrieval call count for question %q", candidate.QuestionID)
+		}
 		byID[candidate.QuestionID] = candidate
 	}
 	for _, trace := range traces {
 		candidate, ok := byID[trace.QuestionID]
-		if !ok || trace.Attempt != 1 || trace.CandidateSetDigest != candidate.CandidateSetDigest || trace.TraceDigest != formalTraceDigest(trace) {
+		if !ok || trace.Schema != evalProtocolSchema || trace.ProtocolHash != protocol.ProtocolHash || trace.Kind != evalTraceArtifactKind ||
+			!trace.Valid || trace.Attempt != 1 || trace.CandidateSetDigest != candidate.CandidateSetDigest || trace.TraceDigest != formalTraceDigest(trace) {
 			return fmt.Errorf("invalid formal trace for question %q", trace.QuestionID)
 		}
 	}
@@ -524,7 +632,9 @@ func validateFormalArtifactPayloads(runDir string, protocol evalProtocol, candid
 	for _, bundle := range bundles {
 		candidate, candidateOK := byID[bundle.QuestionID]
 		trace, traceOK := traceByID[bundle.QuestionID]
-		if !candidateOK || !traceOK || bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
+		if !candidateOK || !traceOK || bundle.Schema != evalProtocolSchema || bundle.ProtocolHash != protocol.ProtocolHash ||
+			bundle.Kind != evalBundleArtifactKind || !bundle.Valid ||
+			bundle.CandidateSetDigest != candidate.CandidateSetDigest || bundle.TraceDigest != trace.TraceDigest ||
 			bundle.RenderedDigest != evalTextDigest(bundle.RenderedContext) || bundle.AnswerInputTokens < 1 || bundle.AnswerInputTokens > protocol.Budget.AnswerInputTokenCap ||
 			bundle.TokenCap != protocol.Budget.AnswerInputTokenCap || bundle.CounterFingerprint != protocol.Budget.CounterFingerprint || !bundle.WithinCap || !bundle.SourceValid || len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
 			return fmt.Errorf("invalid formal bundle for question %q", bundle.QuestionID)
@@ -544,7 +654,9 @@ func validateFormalArtifactPayloads(runDir string, protocol evalProtocol, candid
 		}
 		outcomes := make([]bool, 0, len(classification.AnswerRuns))
 		for index, answer := range classification.AnswerRuns {
-			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.InputTokens < 1 || !isDigest(answer.AnswerDigest) {
+			if answer.RunIndex != index+1 || answer.AnswerCalls != 1 || answer.JudgeCalls != 1 ||
+				answer.InputTokens < 1 || answer.CounterSource != protocol.Budget.CounterFingerprint ||
+				answer.AnswerDigest != evalTextDigest(answer.Answer) {
 				return fmt.Errorf("invalid formal answer run for question %q", classification.QuestionID)
 			}
 			outcomes = append(outcomes, answer.JudgeCorrect)
