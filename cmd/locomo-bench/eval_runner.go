@@ -181,13 +181,24 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "candidate_invalid")
 	}
 
-	user := buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
 	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
-	input := evidencecompiler.AnswerInput{Model: opt.answerModel, System: system, User: user}
+	packedHits, input, preflight, err := packFormalLegacyInput(ctx, protocol, opt.formalCounter, system, qa, hits, opt.temporalDateScaffold)
+	if err != nil {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "answer_input_budget_impossible")
+		input = evidencecompiler.AnswerInput{Model: opt.answerModel, System: system, User: buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)}
+	}
+	if input.Model == "" {
+		input.Model = opt.answerModel
+	}
 	artifact.Trace = buildFormalTrace(protocol, qa.QuestionID, artifact.Candidate)
-	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, hits, chunkTurns, input)
+	artifact.Bundle = buildFormalBundle(protocol, qa.QuestionID, artifact.Candidate, artifact.Trace, packedHits, chunkTurns, input)
+	artifact.Bundle.AnswerInputTokens = preflight.InputTokens
+	artifact.Bundle.WithinCap = err == nil
 	if !artifact.Bundle.SourceValid {
 		artifact.InvalidReasons = append(artifact.InvalidReasons, "source_lineage_unavailable")
+	}
+	if len(artifact.Bundle.SourceIDs) == 0 {
+		artifact.InvalidReasons = append(artifact.InvalidReasons, "no_evidence_fits_token_cap")
 	}
 	if len(artifact.InvalidReasons) > 0 {
 		artifact.Trace.Valid = false
@@ -227,6 +238,59 @@ func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options
 	correct := parseJudgeVerdict(verdict)
 	artifact.Answer.JudgeCorrect = correct
 	return correct, answer, usage, artifact
+}
+
+// packFormalLegacyInput preserves the legacy rank-order packer while making
+// its admission decision on the exact complete answer input.  It never uses a
+// character or per-item estimate: each candidate is rendered through the
+// production prompt and counted before it enters the Bundle.  The first
+// candidate that does not fit terminates the legacy prefix pack; later stages
+// compare their own packers against the same frozen candidate array.
+func packFormalLegacyInput(ctx context.Context, protocol evalProtocol, counter evidencecompiler.TokenCounter, system string, qa locomoQA, hits []memory.Result, scaffold bool) ([]memory.Result, evidencecompiler.AnswerInput, evidencecompiler.TokenCount, error) {
+	if counter == nil {
+		return nil, evidencecompiler.AnswerInput{}, evidencecompiler.TokenCount{}, fmt.Errorf("formal 022 evaluation requires a token counter")
+	}
+	render := func(selected []memory.Result) evidencecompiler.AnswerInput {
+		return evidencecompiler.AnswerInput{
+			Model: protocol.Models.Answerer.ID, System: system,
+			User: buildAnswerContextPrompt(qa.Question, selected, qa.QuestionDate, qa.Category, scaffold),
+		}
+	}
+	selected := make([]memory.Result, 0, len(hits))
+	input := render(selected)
+	count, fits, err := countFormalPackInput(ctx, protocol, counter, input)
+	if err != nil {
+		return nil, input, evidencecompiler.TokenCount{}, err
+	}
+	if !fits {
+		return nil, input, count, fmt.Errorf("formal static answer prompt exceeds token cap %d", protocol.Budget.AnswerInputTokenCap)
+	}
+	for _, hit := range hits {
+		trial := append(append([]memory.Result(nil), selected...), hit)
+		trialInput := render(trial)
+		trialCount, trialFits, err := countFormalPackInput(ctx, protocol, counter, trialInput)
+		if err != nil {
+			return nil, input, count, err
+		}
+		if !trialFits {
+			break
+		}
+		selected = trial
+		input = trialInput
+		count = trialCount
+	}
+	return selected, input, count, nil
+}
+
+func countFormalPackInput(ctx context.Context, protocol evalProtocol, counter evidencecompiler.TokenCounter, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, bool, error) {
+	count, err := counter.CountInput(ctx, input)
+	if err != nil {
+		return evidencecompiler.TokenCount{}, false, fmt.Errorf("formal answer pack preflight: %w", err)
+	}
+	if count.InputTokens < 1 || count.Fingerprint == "" || count.Fingerprint != protocol.Budget.CounterFingerprint {
+		return evidencecompiler.TokenCount{}, false, fmt.Errorf("formal answer pack counter fingerprint drift")
+	}
+	return count, count.InputTokens <= protocol.Budget.AnswerInputTokenCap, nil
 }
 
 func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []memory.Result, chunkTurns map[string][]string) evalCandidateArtifact {
@@ -272,7 +336,11 @@ func buildFormalTrace(protocol evalProtocol, questionID string, candidate evalCa
 }
 
 func buildFormalBundle(protocol evalProtocol, questionID string, candidate evalCandidateArtifact, trace evalFormalTraceRecord, hits []memory.Result, chunkTurns map[string][]string, input evidencecompiler.AnswerInput) evalFormalBundleRecord {
-	sources := stableStrings(collectRenderedSources(candidate.RenderedCandidates))
+	var sourceValues []string
+	for _, hit := range hits {
+		sourceValues = append(sourceValues, formalCandidateSourceIDs(hit, chunkTurns)...)
+	}
+	sources := stableStrings(sourceValues)
 	sourceValid := true
 	for _, sourceID := range sources {
 		if strings.HasPrefix(sourceID, "legacy-entry:") {

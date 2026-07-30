@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 	"github.com/wallfacers/engram/provider"
 )
@@ -128,9 +130,38 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	}
 }
 
+func TestPackFormalLegacyInputUsesExactCounterBeforeAnswer(t *testing.T) {
+	protocol := testEvalProtocol()
+	protocol.Budget.AnswerInputTokenCap = 80
+	protocol.Budget.CounterFingerprint = "sha256:length"
+	qa := locomoQA{Question: "where", Category: 4}
+	hits := []memory.Result{
+		{Name: "one", Content: "first short memory"},
+		{Name: "two", Content: "second memory that makes the complete prompt too long"},
+	}
+	counter := lengthCounter{fingerprint: protocol.Budget.CounterFingerprint}
+	selected, input, count, err := packFormalLegacyInput(context.Background(), protocol, counter, "system", qa, hits, false)
+	if err != nil {
+		t.Fatalf("pack formal input: %v", err)
+	}
+	if len(selected) != 1 || selected[0].Name != "one" || count.InputTokens > protocol.Budget.AnswerInputTokenCap || input.User == "" {
+		t.Fatalf("packed selected=%v count=%+v input=%+v", selected, count, input)
+	}
+	_, _, _, err = packFormalLegacyInput(context.Background(), protocol, counter, strings.Repeat("s", 100), qa, hits, false)
+	if err == nil {
+		t.Fatal("static over-cap prompt unexpectedly accepted")
+	}
+}
+
 type formalCounter struct {
 	count       int
 	fingerprint string
+}
+
+type lengthCounter struct{ fingerprint string }
+
+func (counter lengthCounter) CountInput(_ context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	return evidencecompiler.TokenCount{InputTokens: len([]rune(input.System + input.User)), Fingerprint: counter.fingerprint}, nil
 }
 
 func (counter formalCounter) CountInput(_ context.Context, _ evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
