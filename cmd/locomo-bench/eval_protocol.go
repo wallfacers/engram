@@ -16,8 +16,9 @@ const evalProtocolSchema = "022.v1"
 type evalRunMode string
 
 const (
-	evalRunFormal      evalRunMode = "formal"
-	evalRunExploratory evalRunMode = "exploratory"
+	evalRunFormal       evalRunMode = "formal"
+	evalRunB0Continuity evalRunMode = "b0_continuity"
+	evalRunExploratory  evalRunMode = "exploratory"
 )
 
 // evalProtocol freezes every input that can otherwise turn an apparent A/B
@@ -149,11 +150,17 @@ func validateEvalProtocol(protocol evalProtocol, mode evalRunMode) error {
 	if strings.TrimSpace(protocol.ProtocolID) == "" || protocol.CreatedAt.IsZero() {
 		return fmt.Errorf("protocol_id and created_at are required")
 	}
-	if mode != evalRunFormal && mode != evalRunExploratory {
+	if mode != evalRunFormal && mode != evalRunB0Continuity && mode != evalRunExploratory {
 		return fmt.Errorf("unknown run mode %q", mode)
 	}
-	if mode == evalRunFormal && protocol.Git.Dirty {
-		return fmt.Errorf("formal protocol refuses dirty git state")
+	if (mode == evalRunFormal || mode == evalRunB0Continuity) && protocol.Git.Dirty {
+		return fmt.Errorf("%s protocol refuses dirty git state", mode)
+	}
+	if mode == evalRunB0Continuity && protocol.Experiment.Stage != "b0" {
+		return fmt.Errorf("B0 continuity mode requires experiment stage b0")
+	}
+	if mode == evalRunFormal && protocol.Experiment.Stage == "b0" {
+		return fmt.Errorf("formal promotion mode refuses B0 continuity protocol")
 	}
 	if len(protocol.Git.Commit) != 40 || !isLowerHex(protocol.Git.Commit) {
 		return fmt.Errorf("git commit must be a full lowercase SHA-1")
@@ -187,7 +194,7 @@ func validateEvalProtocol(protocol evalProtocol, mode evalRunMode) error {
 	if strings.TrimSpace(protocol.Retrieval.Recipe) == "" || protocol.Retrieval.CandidateLimit < 1 || !isDigest(protocol.Retrieval.EmbeddingFingerprint) || !isDigest(protocol.Retrieval.CandidateRulesDigest) {
 		return fmt.Errorf("invalid retrieval provenance")
 	}
-	if err := validateEvalBudget(protocol.Budget, protocol.Retrieval.CandidateLimit); err != nil {
+	if err := validateEvalBudget(protocol.Budget, protocol.Retrieval.CandidateLimit, protocol.Experiment.Stage); err != nil {
 		return err
 	}
 	if protocol.Aggregation.AnswerRepetitions < 1 || protocol.Aggregation.AnswerRepetitions%2 == 0 || protocol.Aggregation.Rule != "majority_correctness" || protocol.Aggregation.JudgeRepetitions != 1 || protocol.Aggregation.SeedPolicy != "independent-recorded" {
@@ -232,15 +239,24 @@ func validateModelFingerprint(role string, model evalModelFingerprint) error {
 	return nil
 }
 
-func validateEvalBudget(budget evalBudgetProtocol, retrievalLimit int) error {
-	if (budget.Profile != "low" && budget.Profile != "high") ||
-		budget.AnswerInputTokenCap < 1 || budget.MaxOutputTokens < 1 ||
-		budget.CandidateLimit < 1 || budget.RetrievalCallLimit < 0 ||
-		budget.AnswerCallLimit != 1 || !isDigest(budget.CounterFingerprint) {
-		return fmt.Errorf("invalid token/call budget")
-	}
+func validateEvalBudget(budget evalBudgetProtocol, retrievalLimit int, stage string) error {
 	if budget.CandidateLimit != retrievalLimit {
 		return fmt.Errorf("budget candidate limit %d differs from retrieval limit %d", budget.CandidateLimit, retrievalLimit)
+	}
+	if budget.MaxOutputTokens < 1 || budget.CandidateLimit < 1 || !isDigest(budget.CounterFingerprint) {
+		return fmt.Errorf("invalid token/call budget")
+	}
+	if stage == "b0" {
+		if budget.Profile != "continuity" || budget.AnswerInputTokenCap != 0 ||
+			budget.RetrievalCallLimit != 3 || budget.AnswerCallLimit != 3 {
+			return fmt.Errorf("invalid B0 continuity budget")
+		}
+		return nil
+	}
+	if (budget.Profile != "low" && budget.Profile != "high") ||
+		budget.AnswerInputTokenCap < 1 || budget.RetrievalCallLimit < 0 ||
+		budget.AnswerCallLimit != 1 {
+		return fmt.Errorf("invalid token/call budget")
 	}
 	return nil
 }
@@ -271,6 +287,14 @@ func validateEvalExperiment(experiment evalExperimentProtocol) error {
 	}
 	if experiment.Stage != "b0" && experiment.Stage != "b1" && !isDigest(experiment.ControlProtocolHash) {
 		return fmt.Errorf("experiment stage %s requires control protocol hash", experiment.Stage)
+	}
+	if experiment.Stage == "b0" {
+		if experiment.Arm != "legacy_product_continuity" || !experiment.MechanismFlags["idk_retry"] {
+			return fmt.Errorf("B0 continuity requires the legacy product arm with IDK retry")
+		}
+	}
+	if experiment.Stage == "b1" && experiment.MechanismFlags["idk_retry"] {
+		return fmt.Errorf("B1 control must disable legacy IDK retry")
 	}
 	return nil
 }

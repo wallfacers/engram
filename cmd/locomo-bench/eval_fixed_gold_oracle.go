@@ -40,6 +40,8 @@ func validateFixedGoldOracleMode(opt options) error {
 	}{
 		{strings.TrimSpace(opt.compareSpec) != "", "--compare"},
 		{strings.TrimSpace(opt.evalValidate) != "", "--eval-validate"},
+		{strings.TrimSpace(opt.evalB0ProtocolPath) != "", "--eval-b0-protocol"},
+		{strings.TrimSpace(opt.evalFreezeB0Protocol) != "", "--eval-freeze-b0-protocol"},
 		{strings.TrimSpace(opt.evalFreezeProtocol) != "", "--eval-freeze-protocol"},
 		{opt.tokenCounterCalibrate, "--token-counter-calibrate"},
 		{opt.estimate, "--estimate"},

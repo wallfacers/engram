@@ -25,6 +25,28 @@ B0 可以记录当前 legacy IDK retry 的真实 answer-call 数；因此它不�
 promotion validity gate 约束，也不能作为 022 treatment control。B1 及所有机制 arm 必须
 关闭 legacy retry，并满足每个 repetition 一次 answerer。
 
+B0 使用独立的 `--eval-freeze-b0-protocol` / `--eval-b0-protocol` 路径。manifest 的
+`experiment.stage=b0`、`arm=legacy_product_continuity`、
+`mechanism_flags.idk_retry=true`，预算 profile 为 `continuity`；它不声明 exact
+answer-input cap 或 tokenizer admission，只保留实际 runtime usage。每个题/重复保存
+`b0_continuity` receipt：
+
+- `answer_calls`：legacy answer 路径的逻辑调用数，包含 IDK rewrite/wider-net 后的重答；
+- `rewrite_calls`：IDK query rewrite 调用数；
+- `judge_calls`：判分调用数；
+- `legacy_retry`：`answer_calls>1 || rewrite_calls>0`；
+- `protocol_hash` 与 `run_index`：绑定 manifest 和三次独立 repetition。
+
+provider transport 的透明重试仍按当前产品路径执行并进入全局 cost ledger；上述 receipt
+专门度量 legacy IDK 控制流，不把网络层重试冒充 memory retry。
+
+B0 run directory 只允许 `protocol.json`、逐 repetition 的普通
+`results-<arm>.jsonl`、`b0_continuity_summary.json`、`stats.json`、`cost.json` 和
+既有 regime/parity 辅助文件。出现 `candidates.jsonl`、`compile_trace.jsonl`、
+`bundles.jsonl`、`classification.jsonl`、formal freeze/call journal 或 fixed-gold
+artifact 时，B0 validator 必须判 INVALID。B0 summary 固定
+`promotion_eligible=false`，即使分数很高也不能作为 B1 或 treatment control。
+
 ### B1 — Causal Ruler
 
 - 冻结 ranked anchor candidates、完整 rendered candidate bytes、answerer/judge、
