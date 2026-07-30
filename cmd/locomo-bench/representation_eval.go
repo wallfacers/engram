@@ -61,7 +61,7 @@ func (r *chunk900Renderer) Render(ctx context.Context, anchors []evalRankedAncho
 	rank := 0
 
 	for _, anchor := range anchors {
-		for _, sourceID := range anchor.SourceIDs {
+		for sourceIdx, sourceID := range anchor.SourceIDs {
 			ev, err := r.evidence.Get(ctx, sourceID)
 			if err != nil {
 				// Skip unavailable evidence for bake-off comparison;
@@ -81,7 +81,7 @@ func (r *chunk900Renderer) Render(ctx context.Context, anchors []evalRankedAncho
 				}
 				chunkText := string(runes[offset:end])
 				rank++
-				candidateID := fmt.Sprintf("%s/chunk:%d", anchor.CandidateID, chunkIndex)
+				candidateID := fmt.Sprintf("%s/s%d/chunk:%d", anchor.CandidateID, sourceIdx, chunkIndex)
 				candidates = append(candidates, evalRenderedCandidate{
 					CandidateID:    candidateID,
 					Kind:           string(ReprChunk900),
@@ -133,7 +133,7 @@ func (r *rawTurnWindowRenderer) Render(ctx context.Context, anchors []evalRanked
 	rank := 0
 
 	for _, anchor := range anchors {
-		for _, sourceID := range anchor.SourceIDs {
+		for sourceIdx, sourceID := range anchor.SourceIDs {
 			ev, err := r.evidence.Get(ctx, sourceID)
 			if err != nil {
 				continue
@@ -181,7 +181,7 @@ func (r *rawTurnWindowRenderer) Render(ctx context.Context, anchors []evalRanked
 			}
 
 			rank++
-			candidateID := fmt.Sprintf("%s/window:%d", anchor.CandidateID, anchorPos)
+			candidateID := fmt.Sprintf("%s/s%d/window:%d", anchor.CandidateID, sourceIdx, anchorPos)
 			candidates = append(candidates, evalRenderedCandidate{
 				CandidateID:    candidateID,
 				Kind:           string(ReprRawTurnWindow),
