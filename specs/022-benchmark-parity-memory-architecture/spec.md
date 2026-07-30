@@ -41,6 +41,23 @@ Event、Scene、Profile、graph 只作为可重建 projection 独立消融。同
 - 上下文使用实际 tokenizer 精确计数；每个实验冻结相同 token cap，并可预注册多个
   预算点，不再把单一 4k cap 当作普遍架构规则。
 
+### Revision 2026-07-30 (F0 entry-gate replan — 破死循环)
+
+用户决策取代 FR-041 / T022 / Phase 4–5 entry gate 中「oracle 上界达 SC-002/SC-003 才
+CONTINUE、才解锁 US2–US5」的原口径。原口径构成死循环：US2（表示）/US3（Compiler）正是
+逼近 SC-002/SC-003 的手段，却被锁在「先达标」门后，且 oracle 上界由 answerer 能力决定、
+与这些机制无关。replan 后：
+
+- oracle 上界降为**登记 + 归因字段**（区分 candidate miss / compiler miss / answerer
+  miss），不再是 US2–US5 的前置解锁条件。
+- `CONTINUE` = US1 Evidence Ledger 已落地 **且** B0/B1 artifact 有效 **且** judge audit
+  完整。`HOLD` = 任一 artifact/audit 不完整。`STOP` = 宪法违反或 artifact 不可修。
+- SC-002/SC-003（92.53% / 94.6%）保留为 Phase 8 最终双基准目标，不当前置门。
+- 铁律不破：涨分仍 MUST 来自机制本身（FR-039/SC-004），不得来自更宽松 judge、更强
+  answerer、更大上下文预算或付费云 reranker；每个机制仍须同栈配对消融正向（SC-008）才 GO。
+- 若 US2–US5 全部 GO 后仍未达 SC-002/SC-003，记录真实终值并移交 023（trained compiler /
+  更强 answerer），不以堆叠 projection 掩盖不可达性。
+
 ## Background and Scope
 
 engram 当前以原子事实和多信号 RRF 为主要检索结构。已有预算消融显示：扩大 answer
@@ -349,10 +366,12 @@ token cap 和一次 answerer 调用。
 - **FR-041**: 在表示 bake-off、Compiler 或 optional projection 的正式满量评测前，
   系统 MUST 对 LoCoMo 与 LongMemEval-S 分别完成有效 low/high B1 和同 provider、
   answerer/judge model+revision、prompt、input/output cap 的 diagnostic-only
-  fixed-gold oracle，并输出
-  `CONTINUE | HOLD | STOP`。只有两个 benchmark 的 oracle 均达到 SC-002/SC-003 才可
-  `CONTINUE`；任一运行或 audit 不完整为 `HOLD`；有效 oracle 未达任一目标为 `STOP`，
-  此时不得以扩建 projection 继续追分。
+  fixed-gold oracle，并输出 `CONTINUE | HOLD | STOP`。**oracle 上界作为登记字段用于后续
+  candidate/compiler/answerer miss 归因，不再作为 US2–US5 的前置解锁条件**（见
+  Revision 2026-07-30）。`CONTINUE` 的条件改为：US1 Evidence Ledger 已落地、B0/B1
+  artifact 有效且 judge audit 完整；任一 artifact 或 audit 不完整为 `HOLD`；宪法违反
+  或 artifact 不可修为 `STOP`。SC-002/SC-003 保留为 Phase 8 最终双基准门，不是机制
+  实验的前置门；涨分仍 MUST 来自机制本身（FR-039/SC-004），本 replan 不放宽该铁律。
 
 ### Key Entities
 

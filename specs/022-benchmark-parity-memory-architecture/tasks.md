@@ -72,7 +72,7 @@ provenance validity。B1 的候选/分数必须等 Ledger 提供真实 source/sp
 - [X] T110 实现并测试 `cmd/locomo-bench/eval_fixed_gold_oracle.go` 的 `--fixed-gold-oracle` 独占执行路径：只接受三次 repetition 的冻结 B1 `legacy_count_packer` control，只装载全部 active gold Evidence，以 `dataset_source_ids` 区分 benchmark turn 与 Ledger ID，retrieval/extraction/embedding 调用为 0、整题不截断、同 provider/model/revision/prompt/input-output cap；合法 LongMemEval adversarial abstention 可为空 Evidence，任何分母/题级 artifact 无效时取消后续调度、summary 保留真实 answer/judge 调用数但不得输出部分分数，唯一 diagnostic 字段为 `correct/denominator/target_correct/target_met`
 - [X] T111 先为 `cmd/locomo-bench/eval_runner.go`、`cmd/locomo-bench/eval_protocol.go`、对应 integration tests、`specs/022-benchmark-parity-memory-architecture/contracts/evaluation-artifacts.md` 和 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 定义并实现独立 B0 continuity manifest/runner：真实记录 legacy retry，不生成或复用 B1 Candidate/Trace/Bundle，不接受 B1 validity/promotion；当前只支持 B1 的 freeze/runner 在本任务完成前不得被 T021 当作 B0
 - [ ] T021 仅在 T044、T045、T109、T110、T111 均完成后，冻结 LoCoMo/LongMemEval 的 low/high、B0 与 post-Ledger B1 protocols，依 `specs/022-benchmark-parity-memory-architecture/quickstart.md` 用 WSL2 detach 规则运行 lossless B0、有效 B1 low/high 和同栈 diagnostic-only fixed-gold oracle；确认每题 retrieval/compile 只发生一次、每 repetition 只调用一次 answerer，并把 immutable artifacts 与无 secret hashes 记录到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T022 完成 B0/B1/oracle validity 与 judge audit，确认 1,540/500 分母、candidate lineage、span、token/call 字段、三次 Candidate/Trace/Bundle digest identity 均为 100%，`source_lineage_unavailable=0`、drift=0；按 SC-002/SC-003 写唯一 F0 `CONTINUE | HOLD | STOP` 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`，只有 `CONTINUE` 才解锁 T046–T098 的正式满量执行
+- [ ] T022 完成 B0/B1/oracle validity 与 judge audit，确认 1,540/500 分母、candidate lineage、span、token/call 字段、三次 Candidate/Trace/Bundle digest identity 均为 100%，`source_lineage_unavailable=0`、drift=0；按 FR-041（2026-07-30 replan）写唯一 F0 `CONTINUE | HOLD | STOP` 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`——`CONTINUE` = US1 Ledger 已落地 + B0/B1 artifact 有效 + judge audit 完整（**不再**卡 oracle 上界达 SC-002/SC-003；oracle 上界登记用于 candidate/compiler/answerer miss 归因）；只有 `CONTINUE` 才解锁 T046–T098 的正式满量执行
 
 **Checkpoint**: B0 只用于历史连续性。v6 source-lineage failure 不产出 B1 分数；完成
 T023–T045、T020、T109–T111 全部完成后才可生成所有后续机制使用的同题、同
@@ -132,8 +132,9 @@ purge closure 完整且旧 Search/write parity 不变。
 **Goal**: 分开测量 navigation 与 answer-facing rendering，在同算法/候选预算/cap 下比较
 900-character chunk、raw-turn window 和可重建 Semantic Episode。
 
-**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`；否则本阶段保持未执行并记录
-`HOLD/STOP`，不得为勾选任务启动正式满量运行。
+**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`（FR-041 2026-07-30 replan：即 US1
+Ledger 已落地 + B0/B1 artifact 有效 + judge audit 完整，**不再**要求 oracle 上界达
+SC-002/SC-003）；否则本阶段保持未执行并记录 `HOLD/STOP`，不得为勾选任务启动正式满量运行。
 
 **Independent Test**: 同一 dataset/query 冻结 ranked anchors，三个 renderer 保存各自
 source expansion、gold-source survival、token truncation 和逐题答案；删除 Episode 后
@@ -171,8 +172,8 @@ Ledger 不变并能确定性重建。
 **Goal**: 不改变 retrieval、不补检，将冻结 candidates 编译为来源有效、真实 token
 不超 cap 的 Evidence Bundle；Planner 可选，失败时确定性 extractive fallback。
 
-**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`，且 T057 已冻结获选或保留的
-representation；否则不得启动四臂正式满量评测。
+**Entry Gate**: T022 的 F0 verdict 必须为 `CONTINUE`（FR-041 2026-07-30 replan，同
+Phase 4），且 T057 已冻结获选或保留的 representation；否则不得启动四臂正式满量评测。
 
 **Independent Test**: 对同一 candidate bytes 运行 legacy、exact relevance、
 deterministic extractive、local Planner 四臂；candidate digest 一致率、span 复原、
