@@ -52,6 +52,33 @@ func TestVLLMTokenCounterUsesChatTemplateEndpoint(t *testing.T) {
 	}
 }
 
+func TestVLLMTokenCounterRetriesTransientFailures(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if attempts.Add(1) < 3 {
+			http.Error(w, "temporary tokenizer overload", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"count":17}`))
+	}))
+	defer server.Close()
+
+	counter, err := newVLLMTokenCounter(vllmTokenCounterConfig{
+		BaseURL:     server.URL,
+		Fingerprint: "sha256:answerer-template-r1",
+		HTTPClient:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new counter: %v", err)
+	}
+	got, err := counter.CountInput(context.Background(), evidencecompiler.AnswerInput{
+		Model: "answerer-r1", System: "system rules", User: "question plus evidence",
+	})
+	if err != nil || got.InputTokens != 17 || attempts.Load() != 3 {
+		t.Fatalf("transient token count = (%+v, %v), attempts=%d", got, err, attempts.Load())
+	}
+}
+
 func TestGateTokenCounterSharesAdmissionLimit(t *testing.T) {
 	upstream := &blockingTokenCounter{
 		started:     make(chan struct{}),

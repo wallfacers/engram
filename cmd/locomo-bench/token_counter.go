@@ -9,8 +9,14 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wallfacers/engram/memory/evidencecompiler"
+)
+
+const (
+	vllmTokenCounterAttempts   = 3
+	vllmTokenCounterRetryDelay = 25 * time.Millisecond
 )
 
 // vllmTokenCounter calls vLLM's chat-aware /tokenize endpoint. It uses the
@@ -104,6 +110,35 @@ func (counter *vllmTokenCounter) CountInput(ctx context.Context, input evidencec
 	if err != nil {
 		return evidencecompiler.TokenCount{}, fmt.Errorf("encode vLLM token request: %w", err)
 	}
+	var lastErr error
+	for attempt := 1; attempt <= vllmTokenCounterAttempts; attempt++ {
+		count, retryable, err := counter.countInputOnce(ctx, body)
+		if err == nil {
+			return count, nil
+		}
+		lastErr = err
+		if !retryable || attempt == vllmTokenCounterAttempts {
+			return evidencecompiler.TokenCount{}, lastErr
+		}
+		delay := vllmTokenCounterRetryDelay * time.Duration(attempt)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token retry canceled: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return evidencecompiler.TokenCount{}, lastErr
+}
+
+// countInputOnce performs one idempotent `/tokenize` request. Its retryable
+// result deliberately distinguishes invalid caller input (4xx) from a
+// transport/reset or overloaded local vLLM (429/5xx), so the formal runner can
+// recover a transient tunnel failure without estimating or changing input.
+func (counter *vllmTokenCounter) countInputOnce(ctx context.Context, body []byte) (evidencecompiler.TokenCount, bool, error) {
 	// vLLM exposes tokenization helpers at the server root, while its OpenAI
 	// chat-completions endpoint conventionally lives under /v1. Accept the
 	// latter base URL because it is shared with the answer provider, then strip
@@ -111,7 +146,7 @@ func (counter *vllmTokenCounter) CountInput(ctx context.Context, input evidencec
 	tokenizeBase := strings.TrimSuffix(counter.baseURL, "/v1")
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenizeBase+"/tokenize", bytes.NewReader(body))
 	if err != nil {
-		return evidencecompiler.TokenCount{}, fmt.Errorf("build vLLM token request: %w", err)
+		return evidencecompiler.TokenCount{}, false, fmt.Errorf("build vLLM token request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if counter.apiKey != "" {
@@ -119,25 +154,26 @@ func (counter *vllmTokenCounter) CountInput(ctx context.Context, input evidencec
 	}
 	response, err := counter.httpClient.Do(request)
 	if err != nil {
-		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token request: %w", err)
+		return evidencecompiler.TokenCount{}, ctx.Err() == nil, fmt.Errorf("vLLM token request: %w", err)
 	}
 	defer response.Body.Close() //nolint:errcheck
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
-		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token request failed with status %d", response.StatusCode)
+		retryable := response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError
+		return evidencecompiler.TokenCount{}, retryable, fmt.Errorf("vLLM token request failed with status %d", response.StatusCode)
 	}
 	var decoded vllmTokenizeResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&decoded); err != nil {
-		return evidencecompiler.TokenCount{}, fmt.Errorf("decode vLLM token response: %w", err)
+		return evidencecompiler.TokenCount{}, true, fmt.Errorf("decode vLLM token response: %w", err)
 	}
 	count := decoded.Count
 	if count == 0 {
 		count = len(decoded.Tokens)
 	}
 	if count < 1 {
-		return evidencecompiler.TokenCount{}, fmt.Errorf("vLLM token response has no positive count")
+		return evidencecompiler.TokenCount{}, true, fmt.Errorf("vLLM token response has no positive count")
 	}
-	return evidencecompiler.TokenCount{InputTokens: count, Fingerprint: counter.fingerprint}, nil
+	return evidencecompiler.TokenCount{InputTokens: count, Fingerprint: counter.fingerprint}, false, nil
 }
 
 type evalTokenCalibrationFixture struct {
