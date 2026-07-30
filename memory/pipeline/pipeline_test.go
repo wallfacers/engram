@@ -3,6 +3,8 @@ package pipeline_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +25,131 @@ func newStore(t *testing.T) (*memory.EntryStore, *sql.DB) {
 }
 
 func staticCaller(out string) pipeline.ModelCaller {
-	return func(_ context.Context, _, _ string) (string, error) {
-		return out, nil
+	return func(_ context.Context, _, user string) (string, error) {
+		return withPromptSourceIDs(out, user), nil
+	}
+}
+
+func withPromptSourceIDs(out, user string) string {
+	if strings.Contains(out, `"source_ids"`) {
+		return out
+	}
+	ids, err := json.Marshal(sourceIDsFromPrompt(user))
+	if err != nil {
+		return out
+	}
+	return strings.ReplaceAll(out, `{"fact":`, `{"source_ids":`+string(ids)+`,"fact":`)
+}
+
+func sourceIDsFromPrompt(user string) []string {
+	const marker = "source_id="
+	var ids []string
+	for rest := user; ; {
+		start := strings.Index(rest, marker)
+		if start < 0 {
+			return ids
+		}
+		rest = rest[start+len(marker):]
+		end := strings.IndexByte(rest, ']')
+		if end < 0 {
+			return ids
+		}
+		ids = append(ids, rest[:end])
+		rest = rest[end+1:]
+	}
+}
+
+func TestIngestDetailedPersistsEvidenceBeforeExtractionFailure(t *testing.T) {
+	ctx := context.Background()
+	es, db := newStore(t)
+	ledger := memory.NewLedgerStore(db)
+	p := pipeline.New(pipeline.Config{
+		Entries: es,
+		Budgets: memory.DefaultBudgets(),
+		Call: func(context.Context, string, string) (string, error) {
+			return "", fmt.Errorf("model unavailable")
+		},
+	})
+	result, err := p.IngestDetailed(ctx, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC), "session-a", []pipeline.Message{
+		{ExternalSourceID: "turn-1", Role: "user", Text: "Alice moved to Berlin.", Ordinal: 0},
+		{ExternalSourceID: "turn-2", Role: "assistant", Text: "I recorded Alice's move.", Ordinal: 1},
+	})
+	if err != nil {
+		t.Fatalf("ingest detailed model failure: %v", err)
+	}
+	if len(result.Evidence) != 2 || len(result.Entries) != 0 || len(result.Degraded) != 1 || result.Degraded[0] != "extraction_model_failure" {
+		t.Fatalf("model-failure result = %+v", result)
+	}
+	stored, err := ledger.ListSession(ctx, "session-a", false)
+	if err != nil {
+		t.Fatalf("list persisted raw evidence: %v", err)
+	}
+	if len(stored) != 2 || stored[0].Content != "Alice moved to Berlin." || stored[1].Content != "I recorded Alice's move." {
+		t.Fatalf("raw evidence after extraction failure = %+v", stored)
+	}
+}
+
+func TestIngestDetailedRequiresCurrentBatchSourceIDsAndUnionsDuplicateFactLineage(t *testing.T) {
+	ctx := context.Background()
+	es, _ := newStore(t)
+	p := pipeline.New(pipeline.Config{
+		Entries: es,
+		Budgets: memory.DefaultBudgets(),
+		Call: func(_ context.Context, _, user string) (string, error) {
+			ids := sourceIDsFromPrompt(user)
+			if len(ids) != 1 {
+				return "", fmt.Errorf("prompt source IDs = %v, want one", ids)
+			}
+			return fmt.Sprintf(`{"facts":[{"fact":"Alice moved to Berlin.","source_ids":[%q]}]}`, ids[0]), nil
+		},
+	})
+	first, err := p.IngestDetailed(ctx, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC), "session-a", []pipeline.Message{
+		{ExternalSourceID: "turn-1", Role: "user", Text: "Alice moved to Berlin.", Ordinal: 0},
+	})
+	if err != nil || len(first.Entries) != 1 || len(first.Evidence) != 1 {
+		t.Fatalf("first detailed ingest = %+v, err=%v", first, err)
+	}
+	second, err := p.IngestDetailed(ctx, time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC), "session-b", []pipeline.Message{
+		{ExternalSourceID: "turn-2", Role: "user", Text: "Reminder: Alice moved to Berlin.", Ordinal: 0},
+	})
+	if err != nil {
+		t.Fatalf("second detailed ingest: %v", err)
+	}
+	if len(second.Entries) != 0 || len(second.Evidence) != 1 {
+		t.Fatalf("duplicate fact result = %+v, want evidence-only duplicate", second)
+	}
+	refs, err := es.SourceRefs(ctx, first.Entries[0].ID)
+	if err != nil {
+		t.Fatalf("read duplicate fact lineage: %v", err)
+	}
+	if len(refs) != 2 || refs[0].EvidenceID != first.Evidence[0].ID || refs[1].EvidenceID != second.Evidence[0].ID {
+		t.Fatalf("duplicate fact lineage = %+v", refs)
+	}
+}
+
+func TestIngestDetailedRejectsUnknownOrEmptyFactSources(t *testing.T) {
+	for _, sourceIDs := range []string{`[]`, `["unknown-source"]`} {
+		t.Run(sourceIDs, func(t *testing.T) {
+			es, _ := newStore(t)
+			p := pipeline.New(pipeline.Config{
+				Entries: es,
+				Budgets: memory.DefaultBudgets(),
+				Call:    staticCaller(`{"facts":[{"fact":"This must not be stored.","source_ids":` + sourceIDs + `}]}`),
+			})
+			result, err := p.IngestDetailed(context.Background(), time.Now().UTC(), "session-a", []pipeline.Message{
+				{ExternalSourceID: "turn-1", Role: "user", Text: "A source exists.", Ordinal: 0},
+			})
+			if err != nil {
+				t.Fatalf("ingest detailed invalid source IDs: %v", err)
+			}
+			if len(result.Evidence) != 1 || len(result.Entries) != 0 {
+				t.Fatalf("invalid source IDs result = %+v", result)
+			}
+			entries, err := es.List(context.Background())
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("invalid source IDs stored entries=%+v err=%v", entries, err)
+			}
+		})
 	}
 }
 
@@ -84,9 +209,9 @@ func TestIngestStoresEventRangeAndAliases(t *testing.T) {
 	p := pipeline.New(pipeline.Config{
 		Entries: es,
 		Budgets: memory.DefaultBudgets(),
-		Call: func(_ context.Context, system, _ string) (string, error) {
+		Call: func(_ context.Context, system, user string) (string, error) {
 			systemPrompt = system
-			return `{"facts":[{"fact":"The user bought a fitness tracker.","entities":["fitness tracker"],"event_date":"2023-05-02","event_start":"2023-05-01","event_end":"2023-05-03","aliases":["step counter","activity band"],"category":"event","durability":"volatile"}]}`, nil
+			return withPromptSourceIDs(`{"facts":[{"fact":"The user bought a fitness tracker.","entities":["fitness tracker"],"event_date":"2023-05-02","event_start":"2023-05-01","event_end":"2023-05-03","aliases":["step counter","activity band"],"category":"event","durability":"volatile"}]}`, user), nil
 		},
 	})
 

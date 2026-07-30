@@ -12,7 +12,9 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -22,6 +24,7 @@ import (
 	"github.com/wallfacers/engram/internal/idgen"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/prompt"
+	"github.com/wallfacers/engram/store"
 )
 
 // ModelCaller performs one text-in/text-out model call (same shape as the
@@ -30,14 +33,18 @@ type ModelCaller func(ctx context.Context, system, user string) (string, error)
 
 // Message is one conversation turn fed to the pipeline.
 type Message struct {
-	Role string // "user" or "assistant"
-	Text string
+	Role             string // "user" or "assistant"
+	Text             string
+	ExternalSourceID string
+	Ordinal          int
+	OccurredAt       *time.Time
 }
 
 // Pipeline extracts and stores facts. A nil call makes it inert (Ingest is a
 // no-op), mirroring the curation worker's inert mode.
 type Pipeline struct {
 	entries  *memory.EntryStore
+	ledger   *memory.LedgerStore
 	embedder *memory.Embedder // may be nil (embedding disabled)
 	call     ModelCaller
 	budgets  memory.Budgets
@@ -47,6 +54,7 @@ type Pipeline struct {
 // Config bundles the pipeline's dependencies.
 type Config struct {
 	Entries  *memory.EntryStore
+	Ledger   *memory.LedgerStore
 	Embedder *memory.Embedder
 	Call     ModelCaller
 	Budgets  memory.Budgets
@@ -58,8 +66,12 @@ func New(cfg Config) *Pipeline {
 	if cfg.Entries == nil || cfg.Call == nil {
 		return nil
 	}
+	if cfg.Ledger == nil {
+		cfg.Ledger = cfg.Entries.Ledger()
+	}
 	return &Pipeline{
 		entries:  cfg.Entries,
+		ledger:   cfg.Ledger,
 		embedder: cfg.Embedder,
 		call:     cfg.Call,
 		budgets:  cfg.Budgets,
@@ -69,6 +81,7 @@ func New(cfg Config) *Pipeline {
 
 type extractedFact struct {
 	Fact       string   `json:"fact"`
+	SourceIDs  []string `json:"source_ids"`
 	Entities   []string `json:"entities"`
 	EventDate  string   `json:"event_date"`
 	EventStart string   `json:"event_start"`
@@ -82,23 +95,88 @@ type extractionResult struct {
 	Facts []extractedFact `json:"facts"`
 }
 
+// IngestResult makes the two persistence phases observable: Evidence is
+// committed before extraction, while Entries contains only newly created fact
+// projections. Duplicate facts can still gain source lineage without being
+// counted as new Entries.
+type IngestResult struct {
+	Evidence []memory.Evidence
+	Entries  []*memory.Entry
+	Degraded []string
+}
+
+type preparedMessage struct {
+	message Message
+	ordinal int
+}
+
 // Ingest runs one extraction pass over messages dated sessionDate. It returns the
 // number of entries written. A nil pipeline, a trivial batch, or any failure
 // yields (0, nil) — the caller never needs to handle extraction errors.
 func (p *Pipeline) Ingest(ctx context.Context, sessionDate time.Time, sourceSessionID string, messages []Message) (int, error) {
+	result, err := p.IngestDetailed(ctx, sessionDate, sourceSessionID, messages)
+	return len(result.Entries), err
+}
+
+// IngestDetailed commits every substantive raw message as Evidence before one
+// extraction call. An extraction model/parse failure is an honest degraded
+// result: raw Evidence remains available even when no fact projection is made.
+func (p *Pipeline) IngestDetailed(ctx context.Context, sessionDate time.Time, sourceSessionID string, messages []Message) (IngestResult, error) {
 	if p == nil {
-		return 0, nil
+		return IngestResult{}, nil
 	}
-	if !hasSubstance(messages) {
-		return 0, nil // trivial batch: no LLM call
+	if p.ledger == nil {
+		return IngestResult{}, fmt.Errorf("memory: pipeline has no evidence ledger")
 	}
 
-	promptMsgs := make([]prompt.MemoryExtractionMessage, 0, len(messages))
-	for _, m := range messages {
+	prepared := make([]preparedMessage, 0, len(messages))
+	for index, m := range messages {
 		if strings.TrimSpace(m.Text) == "" {
 			continue
 		}
-		promptMsgs = append(promptMsgs, prompt.MemoryExtractionMessage{Role: m.Role, Text: m.Text})
+		ordinal := m.Ordinal
+		if ordinal == 0 && index > 0 {
+			ordinal = index
+		}
+		prepared = append(prepared, preparedMessage{message: m, ordinal: ordinal})
+	}
+	if len(prepared) == 0 {
+		return IngestResult{}, nil // trivial batch: no Evidence or LLM call
+	}
+	if sourceSessionID == "" {
+		sourceSessionID = legacyIngestSessionID(prepared)
+	}
+
+	recordedAt := time.Now().UTC()
+	inputs := make([]memory.EvidenceInput, 0, len(prepared))
+	for _, item := range prepared {
+		inputs = append(inputs, memory.EvidenceInput{
+			ExternalSourceID: item.message.ExternalSourceID,
+			SourceType:       memory.EvidenceMessage,
+			SourceSessionID:  sourceSessionID,
+			Speaker:          item.message.Role,
+			Ordinal:          item.ordinal,
+			Content:          item.message.Text,
+			OccurredAt:       item.message.OccurredAt,
+			RecordedAt:       recordedAt,
+		})
+	}
+	evidence, err := p.ledger.AppendBatch(ctx, inputs)
+	if err != nil {
+		return IngestResult{}, fmt.Errorf("memory: persist ingest evidence: %w", err)
+	}
+	result := IngestResult{Evidence: evidence}
+
+	promptMsgs := make([]prompt.MemoryExtractionMessage, 0, len(prepared))
+	batchSources := make(map[string]memory.Evidence, len(evidence))
+	for index, item := range prepared {
+		source := evidence[index]
+		batchSources[source.ID] = source
+		promptMsgs = append(promptMsgs, prompt.MemoryExtractionMessage{
+			Role:     item.message.Role,
+			Text:     item.message.Text,
+			SourceID: source.ID,
+		})
 	}
 	dateStr := ""
 	if !sessionDate.IsZero() {
@@ -109,43 +187,70 @@ func (p *Pipeline) Ingest(ctx context.Context, sessionDate time.Time, sourceSess
 	raw, err := p.call(ctx, prompt.MemoryExtractionSystemPrompt, user)
 	if err != nil {
 		slog.Warn("memory: extraction model call failed", "err", err)
-		return 0, nil
+		result.Degraded = append(result.Degraded, "extraction_model_failure")
+		return result, nil
 	}
 	facts, err := parseFacts(raw)
 	if err != nil {
 		slog.Warn("memory: extraction parse failed", "err", err)
-		return 0, nil
+		result.Degraded = append(result.Degraded, "extraction_parse_failure")
+		return result, nil
 	}
 
-	written := 0
 	for _, f := range facts.Facts {
-		if p.storeFact(ctx, sessionDate, sourceSessionID, f) {
-			written++
+		refs, ok := factSourceRefs(f.SourceIDs, batchSources)
+		if !ok {
+			slog.Warn("memory: extracted fact rejected", "reason", "invalid_source_ids")
+			continue
+		}
+		entry, created := p.storeFact(ctx, sessionDate, sourceSessionID, f, refs)
+		if created {
+			result.Entries = append(result.Entries, entry)
 		}
 	}
-	if written > 0 && p.onWrite != nil {
+	if len(result.Entries) > 0 && p.onWrite != nil {
 		p.onWrite() // one curation pressure signal per batch
 	}
-	return written, nil
+	return result, nil
 }
 
-// storeFact validates and persists one extracted fact. Returns true on success.
-func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceSessionID string, f extractedFact) bool {
+func legacyIngestSessionID(messages []preparedMessage) string {
+	var payload strings.Builder
+	for _, item := range messages {
+		fmt.Fprintf(&payload, "%d\x00%s\x00%s\n", item.ordinal, item.message.Role, item.message.Text)
+	}
+	digest := sha256.Sum256([]byte(payload.String()))
+	return fmt.Sprintf("legacy-ingest:%x", digest[:])
+}
+
+// storeFact validates and persists one extracted fact. It returns the entry and
+// whether this call created a new fact projection rather than only unioning
+// source lineage onto an existing ADD-only fact.
+func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceSessionID string, f extractedFact, refs []memory.EvidenceRef) (*memory.Entry, bool) {
 	content := strings.TrimSpace(f.Fact)
 	if content == "" {
-		return false
+		return nil, false
 	}
 	if err := p.budgets.CheckEntryContent(content); err != nil {
 		slog.Warn("memory: extracted fact rejected", "reason", "content_too_large", "err", err)
-		return false
+		return nil, false
 	}
-	exists, err := p.entries.HasContent(ctx, content)
-	if err != nil {
+	existing, err := p.entries.GetByContent(ctx, content)
+	if err == nil {
+		existingRefs, err := p.entries.SourceRefs(ctx, existing.ID)
+		if err != nil {
+			slog.Warn("memory: duplicate fact source lookup failed", "err", err)
+			return nil, false
+		}
+		if err := p.entries.UpsertWithSources(ctx, existing, unionEvidenceRefs(existingRefs, refs)); err != nil {
+			slog.Warn("memory: duplicate fact source union failed", "err", err)
+			return nil, false
+		}
+		return existing, false
+	}
+	if !errors.Is(err, store.ErrNotFound) {
 		slog.Warn("memory: extracted fact dedup check failed", "err", err)
-		return false
-	}
-	if exists {
-		return false
+		return nil, false
 	}
 	trigger := deriveTrigger(content, p.budgets.TriggerChars)
 	if err := p.budgets.CheckTrigger(trigger); err != nil {
@@ -164,9 +269,9 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 		EventDate:       parseEventDate(f.EventDate, sessionDate),
 	}
 	entry.EventStart, entry.EventEnd = parseEventRange(f.EventStart, f.EventEnd, f.EventDate, sessionDate)
-	if err := p.entries.Upsert(ctx, entry); err != nil {
+	if err := p.entries.UpsertWithSources(ctx, entry, refs); err != nil {
 		slog.Warn("memory: extracted fact upsert failed", "name", entry.Name, "err", err)
-		return false
+		return nil, false
 	}
 	if len(f.Entities) > 0 {
 		if err := p.entries.PutEntities(ctx, entry.Name, f.Entities); err != nil {
@@ -189,7 +294,46 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 			break
 		}
 	}
-	return true
+	return entry, true
+}
+
+func factSourceRefs(sourceIDs []string, batch map[string]memory.Evidence) ([]memory.EvidenceRef, bool) {
+	if len(sourceIDs) == 0 {
+		return nil, false
+	}
+	refs := make([]memory.EvidenceRef, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" {
+			return nil, false
+		}
+		if _, exists := batch[sourceID]; !exists {
+			return nil, false
+		}
+		if _, exists := seen[sourceID]; exists {
+			continue
+		}
+		seen[sourceID] = struct{}{}
+		refs = append(refs, memory.EvidenceRef{EvidenceID: sourceID, SourceOrder: len(refs), FullSource: true})
+	}
+	return refs, len(refs) > 0
+}
+
+func unionEvidenceRefs(existing, incoming []memory.EvidenceRef) []memory.EvidenceRef {
+	combined := make([]memory.EvidenceRef, 0, len(existing)+len(incoming))
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	for _, refs := range [][]memory.EvidenceRef{existing, incoming} {
+		for _, ref := range refs {
+			if _, exists := seen[ref.EvidenceID]; exists {
+				continue
+			}
+			seen[ref.EvidenceID] = struct{}{}
+			ref.SourceOrder = len(combined)
+			combined = append(combined, ref)
+		}
+	}
+	return combined
 }
 
 func entityPairs(entities []string) []memory.EntityEdge {

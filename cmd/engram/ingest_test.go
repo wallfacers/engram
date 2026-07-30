@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,8 +14,8 @@ import (
 
 func TestIngestStoresFactsFromStubCaller(t *testing.T) {
 	config := Config{DataDir: t.TempDir(), Namespace: defaultNamespace}
-	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
-		return `{"facts":[{"fact":"The user moved to Berlin.","category":"profile","durability":"durable"}]}`, nil
+	caller := pipeline.ModelCaller(func(_ context.Context, _, user string) (string, error) {
+		return responseWithPromptSources(`{"facts":[{"fact":"The user moved to Berlin.","category":"profile","durability":"durable"}]}`, user), nil
 	})
 	handle, err := openEngineWith(context.Background(), config, nil, caller)
 	if err != nil {
@@ -56,9 +57,9 @@ func TestIngestWithoutLLMReportsCapabilityDiagnostic(t *testing.T) {
 func TestOrdinaryIngestDoesNotStartOrNotifyCurator(t *testing.T) {
 	ctx := context.Background()
 	var calls atomic.Int32
-	caller := pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+	caller := pipeline.ModelCaller(func(_ context.Context, _, user string) (string, error) {
 		calls.Add(1)
-		return `{"facts":[{"fact":"The user moved to Berlin.","category":"profile","durability":"durable"}]}`, nil
+		return responseWithPromptSources(`{"facts":[{"fact":"The user moved to Berlin.","category":"profile","durability":"durable"}]}`, user), nil
 	})
 	handle, err := openEngineWith(ctx, Config{
 		DataDir: t.TempDir(), Namespace: defaultNamespace,
@@ -74,5 +75,34 @@ func TestOrdinaryIngestDoesNotStartOrNotifyCurator(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("ordinary ingest model calls = %d, want extraction only", got)
+	}
+}
+
+func responseWithPromptSources(response, user string) string {
+	if strings.Contains(response, `"source_ids"`) {
+		return response
+	}
+	sources, err := json.Marshal(promptSourceIDs(user))
+	if err != nil {
+		return response
+	}
+	return strings.ReplaceAll(response, `{"fact":`, `{"source_ids":`+string(sources)+`,"fact":`)
+}
+
+func promptSourceIDs(user string) []string {
+	const marker = "source_id="
+	var ids []string
+	for rest := user; ; {
+		start := strings.Index(rest, marker)
+		if start < 0 {
+			return ids
+		}
+		rest = rest[start+len(marker):]
+		end := strings.IndexByte(rest, ']')
+		if end < 0 {
+			return ids
+		}
+		ids = append(ids, rest[:end])
+		rest = rest[end+1:]
 	}
 }

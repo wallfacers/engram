@@ -80,6 +80,16 @@ func NewEntryStore(db *sql.DB) *EntryStore {
 	return &EntryStore{db: db}
 }
 
+// Ledger returns the Evidence Ledger backed by the same namespace-local
+// database as this entry store. It lets engine subsystems preserve source
+// material without exposing the raw database handle to adapters.
+func (s *EntryStore) Ledger() *LedgerStore {
+	if s == nil {
+		return nil
+	}
+	return NewLedgerStore(s.db)
+}
+
 // ---- time helpers (unix microseconds, consistent with internal/store/sqlite) ----
 
 func entryToMicros(t time.Time) int64 {
@@ -303,6 +313,15 @@ func scanEntry(sc interface{ Scan(dest ...any) error }) (*Entry, error) {
 func (s *EntryStore) GetByName(ctx context.Context, name string) (*Entry, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+entrySelectCols+` FROM memory_entries WHERE name = ?`, name)
+	return scanEntry(row)
+}
+
+// GetByContent returns the first exact-content Atomic Fact. ADD-only pipeline
+// dedup uses it only to union newly observed Evidence onto the existing fact;
+// it never overwrites the fact's canonical projection text.
+func (s *EntryStore) GetByContent(ctx context.Context, content string) (*Entry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+entrySelectCols+` FROM memory_entries WHERE content = ? ORDER BY created_at ASC, id ASC LIMIT 1`, content)
 	return scanEntry(row)
 }
 
