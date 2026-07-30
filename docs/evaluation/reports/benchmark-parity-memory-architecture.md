@@ -42,6 +42,31 @@ It derives from vLLM version, the served model's tokenizer/config file digests,
 and the disabled-thinking chat-template setting; it contains no endpoint or
 credential.
 
-No exact B1 cap, protocol manifest, candidate artifact, score, or judge audit
-has been frozen yet. They remain dependent on completing the formal runner
-integration and then running the full 1,540/500 denominators.
+## Formal B1 protocol freeze (scores pending)
+
+**Date**: 2026-07-30
+
+The formal runner now uses one hybrid retrieval arm, lossless chunks with a
+12-slot raw-chunk quota, `top-k=30`, the current force-answer + aligned-judge
+prompt regime, and no IRIS, reranker, multi-query, filter or legacy IDK retry.
+It preflights the complete answer input with the calibrated counter and packs
+the legacy rank-order context to the exact cap before the sole answer call.
+
+The calibration artifact is retained only in the session scratchpad; its
+immutable SHA-256 is
+`b54af313931ae1cf8c6ec6d03454014ba7165e4238c8d0d255692c3ef5040a89`.
+It contains eight fixture counts and all preflight/runtime deltas are zero.
+
+| Benchmark | Denominator | Profile | Exact cap | B1 protocol hash |
+|---|---:|---|---:|---|
+| LoCoMo category 1–4 | 1,540 | low | 1,100 | `sha256:d72e8a9646ec6f582ef0ff0c577faa32e4d785b51236884315621d5b17d59b94` |
+| LoCoMo category 1–4 | 1,540 | high | 3,600 | `sha256:968992bf3592dc929b991109930920443caaba7e6a9873f3614388a37045e2cd` |
+| LongMemEval-S cleaned full | 500 | low | 1,100 | `sha256:db823cc6a65d698a9a9619fe767799f21111eb363a8e5b803f29c1c72c83af77` |
+| LongMemEval-S cleaned full | 500 | high | 3,600 | `sha256:721a95e82c8c3cfd08f764cf8ba1bcd88030fe05b339edee412ad886e59c7368` |
+
+These manifests are configuration artifacts, not B1 results: no full answer
+run, candidate artifact, score, oracle, or judge audit has been accepted.
+They will be regenerated after the accompanying runner/report commits so their
+clean git provenance remains exact. B0 continuity still needs its separate
+legacy-retry accounting path and is not represented by these causal B1
+manifests.
