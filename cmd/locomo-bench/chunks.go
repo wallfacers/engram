@@ -21,9 +21,17 @@ import (
 // extraction commits to relevance before the question exists; chunks defer that
 // decision to query time.
 const (
+	pcicWindowSize = 60
+)
+
+// chunkTargetChars/chunkMaxChars are var (not const) so the --chunk-target-chars
+// / --chunk-max-chars flags can override them at store-build time. Finer chunks
+// (lower values) trade 900-char chunk bloat for turn-granularity coverage — the
+// "chunk→compact" pivot. A store built with one value is NOT comparable to one
+// built with another (extraction input is unchanged, but the chunk index differs).
+var (
 	chunkTargetChars = 900  // soft target per chunk (entry budget is 1200)
 	chunkMaxChars    = 1100 // hard cap per stored chunk
-	pcicWindowSize   = 60
 )
 
 type chunkSelector func(ctx context.Context, query string, chunks []memory.Result, budget int) []memory.Result

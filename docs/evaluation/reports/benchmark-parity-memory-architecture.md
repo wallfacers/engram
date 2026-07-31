@@ -642,6 +642,7 @@ two-independent-reviewer judge audit and the unique F0 verdict. That re-run
 still requires the remote-GPU prerequisite noted above — a local snapshot of
 the frozen Qwen answer/extraction model on an instance with no outbound
 download access.
+
 ### 83.83% runtime probe — invalidated by Phase 8 wiring audit (2026-07-31)
 
 **Date**: 2026-07-31
@@ -692,6 +693,86 @@ current B1 legacy control and covered by
 `TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments`. A fresh frozen same-store
 legacy/compiler pair is still required to measure any compiler Δ. Run artifacts retained off-repo at
 `~/.config/engram/022-eval-compile/`.
+
+## Oracle recall×budget gate — can low-token hold recall? (2026-07-31)
+
+The budget ablation showed engram's +3.20pp edge is **entirely token-driven**
+(3,605 tok vs MemOS ~1,059; at 1,083 tok engram is −5.62pp). The open question
+for a "low-token parity" goal: can retrieval recall be held while the evidence
+budget is cut? Six `(top-k, chunk-quota)` configs were run `--coverage-only`
+(retrieval only, no answer/judge — only bge query-embedding cost) on the reused
+`022-full-store`. top-k is the token proxy.
+
+| top-k | chunk-quota | ≈token | turn_recall | session_recall | n |
+|---:|---:|---:|---:|---:|---:|
+| 8  | 3  | ~960  | 0.596 | 0.823 | 1532 |
+| 10 | 4  | ~1200 | 0.641 | 0.858 | 1532 |
+| 15 | 6  | ~1800 | 0.703 | 0.905 | 1532 |
+| 20 | 8  | ~2400 | 0.747 | 0.935 | 1532 |
+| 30 | 12 | ~3600 | **0.808** | 0.966 | 1532 |
+| 60 | 24 | ~7200 | **0.808** | 0.986 | 1532 |
+
+Three hard conclusions:
+
+1. **Recall saturates at k=30** (turn_recall 0.808); doubling to k=60 adds
+   nothing. "Bigger top-k raises recall" is falsified — the retrievable gold is
+   exhausted by k=30. (The 008/014 pattern again: deep gold does not move.)
+2. **Low token forces recall loss** — token and recall are tightly bound:
+   k=30→15 (token halved) −10.5pp; k=30→8 (≈MemOS ~1k tok) −21.2pp. There is no
+   "low-token, same-recall" gap to exploit.
+3. **The ceiling is retrieval, not token**: even k=60 caps at turn_recall 0.808
+   — ~20% of questions have gold outside top-60 (echoes 009's gold-rank 71–90).
+
+Baseline token distribution (compiler-arm chunk-quota=12, all 1,540): mean
+3,605 / median 3,623 / max 5,798, narrow (p25=3,500, p75=3,726); **0% of
+questions are under 2,000 tok**, i.e. 3.4× MemOS with the budget fully filled by
+the 12 reserved chunk slots.
+
+**Verdict**: "low-token parity" is unreachable inside the current chunk+RRF
+architecture — cutting token cuts recall (→ cuts score), and bigger top-k does
+not buy recall back. The only path to "low token AND high score" is to change
+the **evidence representation** (chunk → compact fact) so the same gold is
+expressed in fewer tokens, not to retune the budget. This is the aggressive arm
+of 022 Increment 2 (Representation bake-off), and the direction the budget
+ablation explicitly pointed at ("what should be cut is the amount of evidence
+stuffed into the answerer").
+
+## Gate A — does pure fact hold the score? (chunk-quota=0, 2026-07-31)
+
+The pivot's first feasibility gate: if compact facts alone hold accuracy while
+slashing token, the pivot is a config change, not a redesign. Ran the same
+ordinary legacy runner with the ignored compiler flag at `--chunk-quota 0`
+(RRF fused order — chunks drop out, fact-dominated
+~30 hits) on the reused store; only answer+judge tokens spent. Single rep, same
+regime as the 83.83% row (force-answer, mem0-aligned judge).
+
+| metric | baseline chunk-quota=12 | Gate A pure-fact | Δ |
+|---|---|---|---|
+| overall | 83.83% | **73.70%** | **−10.13pp** |
+| token mean | 3,605 | **1,529** | −58% (→1.44× MemOS) |
+| single-hop | 87.0% | 70.99% | **−16.0pp** |
+| multi-hop | 86.9% | 83.33% | −3.6pp |
+| temporal | 80.1% | 76.01% | −4.1pp |
+| open-domain | 59.4% | 61.46% | +2.1pp (noise) |
+
+**Verdict: NO-GO for pure fact.** Accuracy drops 10pp — far outside the ±2pp
+noise ruler. Token does fall sharply (3,605→1,529; 53.5% of questions now
+≤1,500 tok), but 0% reach MemOS's ~1,059.
+
+**The decisive signal is per-category**: single-hop — direct factual lookup, the
+category facts should *dominate* — drops the *most* (−16pp). Extracted facts are
+paraphrases/abstractions; they lose the verbatim precision single-hop answers
+need, and chunk text is the carrier of that precision (cf. the lever-line
+finding "199/200 gold carried by chunks"). multi-hop drops only 3.6pp (cross-turn
+reasoning survives on facts). This falsifies "chunk → pure fact" as a drop-in.
+
+**Direction confirmed by Gate A**: the pivot is **not** chunk→pure-fact. It is
+chunk → **compact fact + verbatim span** — each fact carries its Evidence-source
+verbatim span (the 022 Ledger already gives facts `source_ids` lineage) so
+precision is preserved without the 900-char chunk bloat. The design variables are
+the fact/span token mix and whether it is category-aware (single-hop needs more
+verbatim span; multi-hop leans on fact reasoning). MemOS's MemCube (Payload +
+provenance; "structured knowledge fragments", not raw chunks) is the analog.
 
 ## Phase 8 local gates and completion audit (2026-07-31)
 
@@ -805,3 +886,63 @@ as delivered code.
 Per T108, `speckit-converge` appended Phase 9 T114–T115 for the two newly
 isolated infrastructure gaps. 022 remains incomplete and its unique verdict
 remains **HOLD**; T107 is unchecked and no default mechanism is promoted.
+
+### Mechanism refined by code trace (post Explore)
+
+A full evidence-chain trace corrects the "fact loses precision" reading.
+`toMemories` (main.go:2244) renders chunk and fact **identically** (`[event: …]
+<Content>`), and `--compiler-arm extractive` expands **every** hit into
+`raw_turn` Evidence spans (`expandFormalEvidence`, eval_source_bridge.go:99,
+hard-coded `Kind: "raw_turn"`) — the answerer sees **verbatim turn text, not
+fact paraphrase**, so precision is *present*. `CandidateAtomicFact` exists in
+types.go:18 but is unused. Gate A's loss is therefore **coverage**, not
+precision: ADD-only extracted facts cover fewer turns than verbatim chunks (one
+chunk spans ~3-5 turns; one fact points only at its source turn), so
+chunk-quota=0 drops the gold turns no extracted fact covers — single-hop, which
+needs the exact turn, is hit hardest. The pivot's real problem: **cover as many
+gold turns as chunk does, in ~1k tokens.** A hard prerequisite surfaces too —
+fact has **no turn-level provenance** in `memory_entries` (only `SourceSessionID`;
+dia_id is reachable only via projection→evidence joins, never activated at render
+time), so any fact-as-evidence-body design must add a `factTurns` equivalent
+first (consumers: evidence.go, attribution.go, coverage.go, abstain_probe.go).
+
+## MemOS reference re-anchored + token-accuracy tradeoff confirmed (alphaXiv, 2026-07-31)
+
+The pivot's "low-token parity" goal was premised on two MemOS anchors that the
+paper (arXiv:2507.03724 v4, MemOS-1031, Table 3) **contradicts**:
+
+| old anchor (wrong) | paper Table 3 (authoritative) |
+|---|---|
+| MemOS ~1,059 tokens | **1,589 tokens** |
+| MemOS overall 88.83 | **75.80** (GPT-4o-mini judge, LoCoMo cat 1–4) |
+
+Full Table 3 (GPT-4o-mini backbone): Mem0 1172tok@64.57, Memobase 2102@72.01,
+Zep 2701@59.22, MemU 617@56.55, Supermemory 500@55.34, **MemOS-1031 1589@75.80**.
+
+**MemOS §6.3 itself confirms token determines performance**: its chunk-size +
+top-k ablation (Figure 9) reports *"performance steadily improving as memory
+capacity increases… particularly for multi-hop and temporal reasoning."* MemOS
+does not have a low-token-same-score trick — it sits on the same tradeoff curve.
+
+**Five independent lines of evidence now agree that token-accuracy tradeoff is
+fundamental, not an engram defect:**
+
+| evidence | result | meaning |
+|---|---|---|
+| oracle recall×budget | recall saturates at top-k=30 (0.808) | retrieval ceiling; budget doesn't help |
+| Gate A0 (pure fact) | 1529 tok → −10.13pp (73.70%) | low token forces coverage loss → score loss |
+| Gate B chunk=150 q=0 | turn_recall 0.020 + 7000-chunk slow | RRF suppresses chunks regardless of size; over-fine doesn't scale |
+| Gate B chunk=150 q=12 | turn_recall 0.614 (< baseline 0.808) | 12 single-turn chunks cover 12 turns << 60 turns; chunk-finening needs more slots (more token) to match recall |
+| MemOS §6.3 (paper) | perf rises with token (chunk-size×top-k) | MemOS self-confirms token decides perf |
+| budget-ablation | engram 3614tok→+3.2 / 1083tok→−5.6 | engram's own tradeoff is budget-driven |
+
+**engram on the MemOS token band**: Gate A0 engram@1529tok=73.70% lands on the
+same token-performance band as MemOS@1589tok=75.80% (cross-judge not strictly
+comparable, but the band agrees). engram's 3605tok@83.83% is the "high-token,
+high-score" point of the **same tradeoff curve** MemOS rides — not an engram
+defect. "Low token AND hold 83.83%" is unreachable on this curve; the budget
+ablation already showed engram@1083tok=−5.62pp.
+
+**Implication for the pivot**: chunk→compact-fact (Gate A0) and chunk-granularity
+finening (Gate B) both fail to break the tradeoff — they only move along it. The
+"low-token parity" goal needs re-scoping against the corrected MemOS anchors.

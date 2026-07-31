@@ -71,6 +71,7 @@ npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-ski
 - [记忆新鲜度与状态一致性 Backlog](product/backlog/memory-freshness.md)：未实现的 proposed backlog。
 - [SaaS 习惯记忆探索](product/explorations/habit-memory.md)：未立项、未实现的 proposed 探索。
 - [长期记忆系统成绩与机制证据登记](research/high-scoring-memory-systems.md)：分开记录 LoCoMo/LongMemEval 完整系统成绩、受控机制证据和工程边界。
+- [本地优先与 SaaS 借鉴批次](research/lever-batch-local-vs-saas.md)：按受控机制证据、运行成本和产品边界区分可借鉴项与明确避坑项。
 - [查询期证据编译架构探索](product/explorations/benchmark-parity-memory-architecture.md)：未实现的 Mem0 数值目标、Evidence Compiler 合同与分阶段证伪顺序。
 - [论文方向](research/paper-direction.md)：评测可靠性与双基准结构研究方向。
 
