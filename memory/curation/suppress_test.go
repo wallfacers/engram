@@ -2,6 +2,7 @@ package curation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -121,6 +122,86 @@ func TestSuppressorNilSafety(t *testing.T) {
 		t.Fatalf("nil existing must never suppress")
 	}
 }
+
+// fixedEmbed maps the semantic-twin sentences to one vector and everything
+// else to an orthogonal vector, so cosine is 1 only for the twin pair.
+type fixedEmbed struct{}
+
+func (fixedEmbed) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		switch text {
+		case "小明明天下午三点开家长会", "Xiaoming has a parent-teacher meeting at 3pm tomorrow":
+			out[i] = []float32{1, 1}
+		default:
+			out[i] = []float32{1, 0}
+		}
+	}
+	return out, nil
+}
+
+func (fixedEmbed) Model() string { return "stub" }
+
+const (
+	twinExisting = "小明明天下午三点开家长会"
+	twinIncoming = "Xiaoming has a parent-teacher meeting at 3pm tomorrow"
+)
+
+func TestSuppressorEmbeddingOverlayIsDefaultOff(t *testing.T) {
+	// T012: the embedding overlay is default-off — without WithEmbedding, a
+	// character-distinct (Jaccard ≈ 0) but semantically-identical pair is NOT
+	// suppressed by the offline Jaccard signal alone.
+	s := NewSuppressor(0)
+	ctx := context.Background()
+	existing := entry("twin-0001", twinExisting, nil)
+	incoming := entry("twin-0002", twinIncoming, nil)
+	if s.ShouldSuppress(ctx, existing, incoming) {
+		t.Fatalf("character-distinct pair must NOT suppress without embedding overlay")
+	}
+}
+
+func TestSuppressorEmbeddingOverlaySuppressesSemanticTwin(t *testing.T) {
+	// T012: with the overlay on (OR combination), a pair whose embedding cosine
+	// clears the overlay threshold is suppressed even when Jaccard is ~0.
+	s := NewSuppressor(0).WithEmbedding(fixedEmbed{}, 0.9)
+	ctx := context.Background()
+	existing := entry("twin-0001", twinExisting, nil)
+	incoming := entry("twin-0002", twinIncoming, nil)
+	if !s.ShouldSuppress(ctx, existing, incoming) {
+		t.Fatalf("semantic twin must suppress with embedding overlay on")
+	}
+	// Orthogonal pair must NOT suppress via the overlay.
+	other := entry("other-0002", "totally unrelated fact", nil)
+	if s.ShouldSuppress(ctx, existing, other) {
+		t.Fatalf("orthogonal pair must not suppress via embedding overlay")
+	}
+	// Event-date conflict still survives the overlay.
+	a := entry("conflict-0001", twinExisting, day(2026, 1, 14))
+	b := entry("conflict-0002", twinIncoming, day(2026, 1, 15))
+	if s.ShouldSuppress(ctx, a, b) {
+		t.Fatalf("event-date conflict must survive even with embedding overlay")
+	}
+}
+
+func TestSuppressorEmbeddingOverlayDegradesOnError(t *testing.T) {
+	// T012: an embedding endpoint failure must degrade to the offline decision,
+	// never drop evidence.
+	s := NewSuppressor(0).WithEmbedding(erringEmbed{}, 0.9)
+	ctx := context.Background()
+	existing := entry("twin-0001", twinExisting, nil)
+	incoming := entry("twin-0002", twinIncoming, nil)
+	if s.ShouldSuppress(ctx, existing, incoming) {
+		t.Fatalf("embedding overlay error must degrade to offline decision (no suppression)")
+	}
+}
+
+type erringEmbed struct{}
+
+func (erringEmbed) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, fmt.Errorf("endpoint down")
+}
+
+func (erringEmbed) Model() string { return "stub" }
 
 func TestSuppressorCustomThreshold(t *testing.T) {
 	ctx := context.Background()

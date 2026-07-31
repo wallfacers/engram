@@ -333,6 +333,35 @@ func writeStats(path string, report statsReport) error {
 	return writeJSON(path, report)
 }
 
+// suppressionAuditReport aggregates the 024 write-time redundancy audit across
+// every conversation of a run (spec FR-005 / SC-001). Decisions/Suppressed/
+// SuspectedMisSuppressions are summed; the mis-suppression rate is the audit
+// hook for the paired-ablation fallback of research.md Decision 4.
+type suppressionAuditReport struct {
+	Enabled                  bool    `json:"enabled"`
+	Conversations            int     `json:"conversations"`
+	Decisions                int     `json:"decisions"`
+	Suppressed               int     `json:"suppressed"`
+	SuspectedMisSuppressions int     `json:"suspected_mis_suppressions"`
+	MisSuppressionRate       float64 `json:"mis_suppression_rate,omitempty"`
+}
+
+func writeSuppressionAudit(path string, runtimes []*conversationRuntime) error {
+	report := suppressionAuditReport{Enabled: true, Conversations: len(runtimes)}
+	for _, rt := range runtimes {
+		if rt == nil {
+			continue
+		}
+		report.Decisions += rt.suppression.Decisions
+		report.Suppressed += rt.suppression.Suppressed
+		report.SuspectedMisSuppressions += rt.suppression.SuspectedMisSuppressions
+	}
+	if report.Suppressed > 0 {
+		report.MisSuppressionRate = float64(report.SuspectedMisSuppressions) / float64(report.Suppressed)
+	}
+	return writeJSON(path, report)
+}
+
 type pairedQuestion struct {
 	QuestionID string `json:"question_id"`
 	Category   string `json:"category"`

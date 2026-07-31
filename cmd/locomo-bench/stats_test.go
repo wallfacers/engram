@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/wallfacers/engram/memory/pipeline"
 )
 
 func TestSummarizeRunsUsesTDistributionCI(t *testing.T) {
@@ -151,5 +154,36 @@ func TestCompareRunDirsRejectsEmptyAndUnalignedRuns(t *testing.T) {
 	}
 	if _, err := compareRunDirs(aDir, bDir); err == nil {
 		t.Fatal("compare without aligned questions should fail")
+	}
+}
+
+func TestWriteSuppressionAuditAggregatesAcrossRuntimes(t *testing.T) {
+	dir := t.TempDir()
+	runtimes := []*conversationRuntime{
+		{suppression: pipeline.SuppressionStats{Decisions: 10, Suppressed: 2, SuspectedMisSuppressions: 1}},
+		{suppression: pipeline.SuppressionStats{Decisions: 5, Suppressed: 1, SuspectedMisSuppressions: 0}},
+		{suppression: pipeline.SuppressionStats{Decisions: 3, Suppressed: 0, SuspectedMisSuppressions: 0}},
+		nil, // a conversation that failed to build must not skew the audit
+	}
+	path := filepath.Join(dir, "suppression-audit.json")
+	if err := writeSuppressionAudit(path, runtimes); err != nil {
+		t.Fatalf("write suppression audit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	var report suppressionAuditReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("unmarshal audit: %v", err)
+	}
+	if !report.Enabled || report.Conversations != 4 {
+		t.Fatalf("audit enabled/conversations = %t/%d, want true/4", report.Enabled, report.Conversations)
+	}
+	if report.Decisions != 18 || report.Suppressed != 3 || report.SuspectedMisSuppressions != 1 {
+		t.Fatalf("audit counts = %+v, want decisions=18 suppressed=3 suspected=1", report)
+	}
+	if report.MisSuppressionRate != 1.0/3.0 {
+		t.Fatalf("mis-suppression rate = %v, want 1/3", report.MisSuppressionRate)
 	}
 }

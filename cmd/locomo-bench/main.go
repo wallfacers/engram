@@ -776,6 +776,17 @@ func run() error {
 		}
 		return buildErr
 	}
+	// 024 write-time redundancy suppression audit (FR-005 / SC-001): aggregate
+	// per-conversation suppression counters into a run artifact so a write_dedup
+	// arm's mis-suppression rate is assessable without re-running the build.
+	if opt.writeDedup {
+		if err := writeSuppressionAudit(filepath.Join(opt.runDir, "suppression-audit.json"), runtimes); err != nil {
+			for _, runtime := range runtimes {
+				runtime.Close()
+			}
+			return err
+		}
+	}
 	defer func() {
 		for _, runtime := range runtimes {
 			runtime.Close()
@@ -1364,6 +1375,10 @@ type conversationRuntime struct {
 	// turnEvidence maps the dataset dialogue ID to its namespace-local Ledger
 	// Evidence ID. It is used only by formal source coverage materialization.
 	turnEvidence map[string]string
+	// suppression holds the cumulative write-time redundancy audit counters for
+	// this conversation when write_dedup is enabled (024 US1 / FR-005). It is
+	// aggregated into the run's suppression audit artifact.
+	suppression pipeline.SuppressionStats
 }
 
 func (r *conversationRuntime) Close() {
@@ -1406,11 +1421,18 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	episodes := memory.NewEpisodeStore(st.DB(), es.Ledger(), projections)
 	embedder := memory.NewEmbedder(es, vectors, embClient, memory.DefaultEmbedBuffer)
 
+	var suppressor pipeline.RedundancySuppressor
+	if opt.writeDedup {
+		// 024 write-time redundancy suppression (US1): the engine's offline
+		// Jaccard suppressor, pure local, no embedding/LLM required (FR-010).
+		suppressor = curation.NewSuppressor(0) // 0 → default threshold 0.7
+	}
 	pipe := pipeline.New(pipeline.Config{
-		Entries:  es,
-		Embedder: embedder,
-		Call:     extractCall,
-		Budgets:  memory.DefaultBudgets(),
+		Entries:    es,
+		Embedder:   embedder,
+		Call:       extractCall,
+		Budgets:    memory.DefaultBudgets(),
+		Suppressor: suppressor,
 	})
 
 	// Ingest each session with its date (extraction is the shared, once-paid
@@ -1530,7 +1552,12 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		}
 	}
 	keepStore = true
-	return &conversationRuntime{store: st, entries: es, projections: projections, episodes: episodes, vectors: vectors, embedClient: embClient, retrievers: retrievers, reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence}, nil
+	return &conversationRuntime{
+		store: st, entries: es, projections: projections, episodes: episodes,
+		vectors: vectors, embedClient: embClient, retrievers: retrievers,
+		reranked: reranked, chunkTurns: chunkTurns, turnEvidence: turnEvidence,
+		suppression: pipe.SuppressionStats(),
+	}, nil
 }
 
 func retrieverOptionsFor(opt options) memory.RetrieverOptions {

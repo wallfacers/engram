@@ -140,6 +140,10 @@ type IngestResult struct {
 	Evidence []memory.Evidence
 	Entries  []*memory.Entry
 	Degraded []string
+	// Suppression reports the write-time redundancy audit counts for this
+	// ingest when a suppressor is configured (spec FR-005 / SC-001). A zero
+	// value means suppression was disabled or made no decision.
+	Suppression SuppressionStats
 }
 
 type preparedMessage struct {
@@ -153,6 +157,18 @@ type preparedMessage struct {
 func (p *Pipeline) Ingest(ctx context.Context, sessionDate time.Time, sourceSessionID string, messages []Message) (int, error) {
 	result, err := p.IngestDetailed(ctx, sessionDate, sourceSessionID, messages)
 	return len(result.Entries), err
+}
+
+// SuppressionStats returns the cumulative write-time redundancy audit counters
+// since this pipeline was constructed (spec FR-005). A nil pipeline returns a
+// zero value. The counts are not concurrency-safe against concurrent Ingest
+// calls; callers driving a single pipeline from one goroutine (the MCP worker
+// and the eval harness both do) read them safely at the end of a pass.
+func (p *Pipeline) SuppressionStats() SuppressionStats {
+	if p == nil {
+		return SuppressionStats{}
+	}
+	return p.stats
 }
 
 // IngestDetailed commits every substantive raw message as Evidence before one
@@ -248,6 +264,7 @@ func (p *Pipeline) IngestDetailed(ctx context.Context, sessionDate time.Time, so
 	if len(result.Entries) > 0 && p.onWrite != nil {
 		p.onWrite() // one curation pressure signal per batch
 	}
+	result.Suppression = p.stats
 	return result, nil
 }
 
@@ -288,6 +305,39 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 	if !errors.Is(err, store.ErrNotFound) {
 		slog.Warn("memory: extracted fact dedup check failed", "err", err)
 		return nil, false
+	}
+	// 024 write-time redundancy suppression: before creating a new projection,
+	// check whether the incoming fact is a semantic duplicate of an existing
+	// one (US1). The FTS candidate pre-filter bounds the exact Jaccard step to
+	// a small candidate set (spec FR-001 / research.md Decision 1).
+	if p.suppressor != nil {
+		incoming := &memory.Entry{
+			Name:      entryName(content),
+			Content:   content,
+			EventDate: parseEventDate(f.EventDate, sessionDate),
+		}
+		candidates, candErr := p.entries.SimilarEntries(ctx, content, 8)
+		if candErr != nil {
+			slog.Warn("memory: suppression candidate lookup failed", "err", candErr)
+		}
+		for _, candidate := range candidates {
+			if candidate.Name == incoming.Name {
+				continue
+			}
+			p.stats.Decisions++
+			if p.suppressor.ShouldSuppress(ctx, candidate, incoming) {
+				p.stats.Suppressed++
+				// Suspected mis-suppression: the suppressed candidate carries its
+				// own independent evidence lineage (beyond the exact-duplicate
+				// union path), so "similar but not equivalent" may have been lost
+				// (spec FR-005 / research.md Decision 4).
+				if refs, err := p.entries.SourceRefs(ctx, candidate.ID); err == nil && len(refs) > 1 {
+					p.stats.SuspectedMisSuppressions++
+				}
+				slog.Debug("memory: extracted fact suppressed as redundant", "incoming", content, "existing", candidate.Content)
+				return nil, false
+			}
+		}
 	}
 	trigger := deriveTrigger(content, p.budgets.TriggerChars)
 	if err := p.budgets.CheckTrigger(trigger); err != nil {

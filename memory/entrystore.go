@@ -390,6 +390,85 @@ func (s *EntryStore) HasContent(ctx context.Context, content string) (bool, erro
 	return found != 0, nil
 }
 
+// SimilarEntries returns up to limit existing entries that plausibly overlap
+// the probe content, ordered by BM25 rank. It is the cheap candidate pre-filter
+// for write-time redundancy suppression (024 US1): a broad sampled-trigram FTS
+// query bounds the exact Jaccard comparison to a small candidate set instead of
+// the whole store. A probe with no searchable text returns nil.
+//
+// Unlike buildPlan's strict all-trigram AND (designed for retrieval recall of
+// exact queries), the suppression candidate query deliberately samples a sparse
+// OR of trigrams spread across the probe, so a near-duplicate that differs only
+// in the tail still surfaces — the exact Jaccard decision then runs on the
+// candidate pair (research.md Decision 1).
+func (s *EntryStore) SimilarEntries(ctx context.Context, probe string, limit int) ([]*Entry, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	matchExpr, ok := suppressionMatchExpr(probe)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.id, e.name, e.trigger, e.content, e.pinned, e.durability, e.category,
+			e.hit_count, e.last_used_at, e.created_at, e.updated_at, e.char_count,
+			e.source_session_id, e.event_date, e.fact_source, e.event_start, e.event_end,
+			e.superseded_by, e.revision
+		FROM memory_entries_fts
+		JOIN memory_entries AS e ON e.rowid = memory_entries_fts.rowid
+		WHERE memory_entries_fts MATCH ?
+		ORDER BY memory_entries_fts.rank ASC
+		LIMIT ?`, matchExpr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: similar entries: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var out []*Entry
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// suppressionMatchExpr builds a broad FTS5 trigram expression for the
+// suppression candidate pre-filter. It samples up to suppressionSampleTrigrams
+// trigrams spread across the probe (every k-th so the whole text contributes)
+// and ORs them — any overlap surfaces the candidate, and the exact Jaccard step
+// decides. ASCII runs contribute their words (lowercased) as soft OR terms.
+// Returns ("", false) when the probe has no trigram-able text.
+func suppressionMatchExpr(probe string) (string, bool) {
+	const sample = 12
+	var trigrams []string
+	runes := []rune(probe)
+	if len(runes) < 3 {
+		return "", false
+	}
+	// Sliding trigrams over the whole rune sequence, sampled evenly.
+	total := len(runes) - 2
+	step := 1
+	if total > sample {
+		step = (total + sample - 1) / sample
+	}
+	for i := 0; i < total; i += step {
+		trigrams = append(trigrams, string(runes[i:i+3]))
+	}
+	var terms []string
+	for _, tg := range trigrams {
+		if tg == "" {
+			continue
+		}
+		terms = append(terms, `"`+strings.ReplaceAll(tg, `"`, `""`)+`"`)
+	}
+	if len(terms) == 0 {
+		return "", false
+	}
+	return "(" + strings.Join(terms, " OR ") + ")", true
+}
+
 // List returns all entries, sorted by name ascending.
 func (s *EntryStore) List(ctx context.Context) ([]*Entry, error) {
 	rows, err := s.db.QueryContext(ctx,
