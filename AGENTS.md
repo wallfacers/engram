@@ -101,6 +101,17 @@ setsid bash -c 'go run ./cmd/locomo-bench ... >run.log 2>&1; echo $? >run.exit' 
 [ -f run.exit ] && echo "exit=$(cat run.exit)" || tail -1 run.log   # poll
 ```
 
+### Remote SSH — paramiko first (hard rule)
+Agent-driven remote work (e.g. the eval box, any SSH host) uses **paramiko** (`python3-paramiko`, already installed) — programmatic, no TTY, clean stdout/stderr/exit code, built-in SFTP. Prefer passwordless keys (`ssh-keygen` + `ssh-copy-id`); with keys configured, plain `ssh` is fine. **sshpass is for the maintainer's own manual terminal use only** — the password leaks into `ps`/shell history and quoting is a trap. **expect is avoided** (fragile screen-string matching). Credentials always flow live via env/tunnel, never into a tracked file, log, or tool response (see Secrets).
+```python
+import paramiko
+c = paramiko.SSHClient()
+c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect(host, username=user, password=pw)  # pw from env, never hardcoded
+_, out, err = c.exec_command("df -h")
+print(out.read().decode())
+```
+
 ### Parallel-Feature Isolation (SDD, hard)
 Spec-kit's single global active-feature pointer (`.specify/feature.json`) is silently stolen by a newer feature. Isolate: one git worktree per parallel feature (`.claude/worktrees/<feature>`), one working copy = one active feature. Pin within a shell via `export SPECIFY_FEATURE_DIRECTORY=specs/<NNN-feature>` (NOT `SPECIFY_FEATURE`). Before start / at plan / before merge: `git worktree list` + read each active sibling `specs/*/spec.md` and the surface it touches; reconcile overlap first.
 
