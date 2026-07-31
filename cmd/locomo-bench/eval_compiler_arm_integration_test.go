@@ -77,7 +77,7 @@ func TestFormalB1CompilerArmMaterializesValidBundle(t *testing.T) {
 	retriever := memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil)
 	projections := memory.NewProjectionStore(st.DB())
 	frozen := materializeFormalB1Question(
-		ctx, protocol, opt, retriever, projections, qa, nil, map[string]string{"D1:1": evidence[0].ID},
+		ctx, protocol, opt, retriever, projections, nil, qa, nil, map[string]string{"D1:1": evidence[0].ID},
 	)
 
 	// (1) Compiler arm must not produce invalid reasons.
@@ -231,7 +231,7 @@ func materializeCompilerArmSpec(t *testing.T, spec compilerArmQuestionSpec) (
 	}
 	retriever := memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil)
 	projections := memory.NewProjectionStore(st.DB())
-	frozen := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, nil, turnEvidence)
+	frozen := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, nil, qa, nil, turnEvidence)
 	return frozen, protocol, opt, qa, evidenceByID
 }
 

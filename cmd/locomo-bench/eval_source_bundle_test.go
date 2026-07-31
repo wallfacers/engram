@@ -61,7 +61,7 @@ func TestFormalB1SourceExpansionUsesActiveEvidenceAndUnicodeSpan(t *testing.T) {
 	frozen := materializeFormalB1Question(
 		ctx, protocol, opt,
 		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil),
-		memory.NewProjectionStore(st.DB()), qa, nil, map[string]string{"D1:1": evidence[0].ID},
+		memory.NewProjectionStore(st.DB()), nil, qa, nil, map[string]string{"D1:1": evidence[0].ID},
 	)
 	if len(frozen.InvalidReasons) != 0 {
 		t.Fatalf("source-backed materialization invalid: %v", frozen.InvalidReasons)
@@ -227,7 +227,7 @@ func TestFormalB1SourceExpansionCountsExpandedBytesBeforeAdmission(t *testing.T)
 	frozen := materializeFormalB1Question(
 		ctx, protocol, opt,
 		memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil),
-		memory.NewProjectionStore(st.DB()), qa, nil, map[string]string{"D1:1": evidence[0].ID},
+		memory.NewProjectionStore(st.DB()), nil, qa, nil, map[string]string{"D1:1": evidence[0].ID},
 	)
 	if !hasInvalidReason(frozen.InvalidReasons, "no_evidence_fits_token_cap") ||
 		!hasInvalidReason(frozen.InvalidReasons, "answer_input_budget_impossible") {

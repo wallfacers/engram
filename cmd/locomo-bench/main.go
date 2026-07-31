@@ -1828,7 +1828,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					armOpt.formalEvidence = runtime.entries.Ledger()
 					armOpt.formalEpisodes = runtime.episodes
 					frozen, err := armOpt.formalReplay.getOrMaterialize(key, qa.QuestionID, func() formalFrozenQuestion {
-						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, qa, runtime.chunkTurns, runtime.turnEvidence)
+						return materializeFormalB1Question(ctx, *armOpt.formalProtocol, armOpt, runtime.retrievers[s.name], runtime.projections, runtime.entries, qa, runtime.chunkTurns, runtime.turnEvidence)
 					})
 					if err != nil {
 						recordFormalErr(err)

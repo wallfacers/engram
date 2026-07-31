@@ -325,6 +325,59 @@ func (s *EntryStore) GetByContent(ctx context.Context, content string) (*Entry, 
 	return scanEntry(row)
 }
 
+// EntriesByID loads a set of entries by their ULID id, in bounded batches.
+// Missing ids are omitted. It is the identity lookup counterpart to
+// EntriesByName, used by lineage-extension paths that resolve atomic-fact
+// projections by object_key (which equals the entry id).
+func (s *EntryStore) EntriesByID(ctx context.Context, ids []string) (map[string]*Entry, error) {
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	out := make(map[string]*Entry, len(unique))
+	for start := 0; start < len(unique); start += 500 {
+		end := start + 500
+		if end > len(unique) {
+			end = len(unique)
+		}
+		batch := unique[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT `+entrySelectCols+` FROM memory_entries WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("memory: batch entries by id: %w", err)
+		}
+		for rows.Next() {
+			entry, err := scanEntry(rows)
+			if err != nil {
+				rows.Close() //nolint:errcheck
+				return nil, err
+			}
+			out[entry.ID] = entry
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // EntriesByName loads a set of entries in bounded batches. Missing names are
 // omitted, matching Search's race-tolerant GetByName behavior.
 func (s *EntryStore) EntriesByName(ctx context.Context, names []string) (map[string]*Entry, error) {

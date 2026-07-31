@@ -72,7 +72,7 @@ func TestFormalCandidateReplaySharedAcrossMaterializations(t *testing.T) {
 	// source-span/trace admission of the exact-token arm is owned by T069;
 	// this test only guards the T114 replay contract (no replay-level failure,
 	// one retrieval call, replay file written).
-	first := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, nil, turnEvidence)
+	first := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, nil, qa, nil, turnEvidence)
 	if containsString(first.InvalidReasons, "candidate_replay_drift") || containsString(first.InvalidReasons, "retrieval_failed") || containsString(first.InvalidReasons, "candidate_replay_write_failed") {
 		t.Fatalf("first materialize failed at the replay layer: %v", first.InvalidReasons)
 	}
@@ -86,7 +86,7 @@ func TestFormalCandidateReplaySharedAcrossMaterializations(t *testing.T) {
 
 	// (2) Second materialize: replay serves the identical candidates with
 	// zero retrieval calls (the retriever is not invoked at all).
-	second := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, nil, turnEvidence)
+	second := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, nil, qa, nil, turnEvidence)
 	if containsString(second.InvalidReasons, "candidate_replay_drift") || containsString(second.InvalidReasons, "retrieval_failed") {
 		t.Fatalf("replayed materialize failed at the replay layer: %v", second.InvalidReasons)
 	}
@@ -106,7 +106,7 @@ func TestFormalCandidateReplaySharedAcrossMaterializations(t *testing.T) {
 	if err := os.WriteFile(replayPath, []byte(tampered), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	third := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, nil, turnEvidence)
+	third := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, nil, qa, nil, turnEvidence)
 	drifted := false
 	for _, reason := range third.InvalidReasons {
 		if reason == "candidate_replay_drift" {

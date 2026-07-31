@@ -582,7 +582,7 @@ func admitFormalQuestion(ctx context.Context, gate chan struct{}) (func(), error
 // materializeFormalB1Question is the sole formal B1 path allowed to retrieve,
 // resolve lineage, or pack evidence. Its output is persisted before the first
 // answer call and then byte-replayed by every repetition.
-func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string) formalFrozenQuestion {
+func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, entries *memory.EntryStore, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string) formalFrozenQuestion {
 	frozen := formalFrozenQuestion{}
 	if retriever == nil {
 		frozen.InvalidReasons = []string{"retriever_unavailable"}
@@ -620,6 +620,14 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 			return frozen
 		}
 		retrievalCalls = 1
+		// 024 hit-time neighbor extension (US2): after candidate freeze and
+		// before answerer assembly, add bounded shared-evidence sibling facts to
+		// the answer context (spec FR-006/FR-007). This runs only on the legacy
+		// packer path — the compiler arm's candidate-replay must stay
+		// byte-identical, so siblings never enter a replay product.
+		if opt.neighborExtend {
+			hits = extendCandidatesWithSiblings(ctx, projections, entries, hits)
+		}
 	}
 	expanded, sourceErr := expandFormalEvidence(ctx, projections, opt.formalEvidence, hits)
 	if sourceErr != nil {
@@ -833,7 +841,7 @@ func answerFrozenFormalB1Question(ctx context.Context, protocol evalProtocol, op
 // runFormalB1Question remains a narrow compatibility helper for unit tests and
 // one-shot callers. Production repetitions go through formalQuestionReplay.
 func runFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, answerCall usageModelCaller, judgeCall usageModelCaller, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string, runIndex int) (bool, string, provider.Usage, evalFormalQuestionRun) {
-	frozen := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, qa, chunkTurns, turnEvidence)
+	frozen := materializeFormalB1Question(ctx, protocol, opt, retriever, projections, nil, qa, chunkTurns, turnEvidence)
 	return answerFrozenFormalB1Question(ctx, protocol, opt, answerCall, judgeCall, qa, frozen, runIndex)
 }
 
@@ -1082,6 +1090,62 @@ func formalCandidateSourceIDs(hit memory.Result, sourceByCandidate map[string][]
 // batches. A formal candidate never invents a source from its name, session, or
 // chunk bookkeeping: a missing projection ID or direct Evidence ref is a hard
 // validity failure before an answer call.
+// extendCandidatesWithSiblings appends bounded shared-evidence sibling facts to
+// the hit candidates (024 US2 neighbor extension). It queries depth-1 siblings
+// over memory_projection_sources — no extra retrieval call, no graph store
+// (spec FR-007). Siblings are appended only when they are not already present
+// as hits; any failure degrades to the unextended candidate set so an extension
+// error never loses a valid hit.
+func extendCandidatesWithSiblings(ctx context.Context, projections *memory.ProjectionStore, entries *memory.EntryStore, hits []memory.Result) []memory.Result {
+	if projections == nil || entries == nil {
+		return hits
+	}
+	projectionIDs := make([]string, 0, len(hits))
+	seenNames := make(map[string]struct{}, len(hits))
+	for _, hit := range hits {
+		seenNames[hit.Name] = struct{}{}
+		if hit.ProjectionID != "" {
+			projectionIDs = append(projectionIDs, hit.ProjectionID)
+		}
+	}
+	if len(projectionIDs) == 0 {
+		return hits
+	}
+	siblings, err := projections.SiblingFacts(ctx, projectionIDs, 8)
+	if err != nil || len(siblings) == 0 {
+		return hits // degrade gracefully (FR-008: no neighbors → zero change)
+	}
+	objectKeys := make([]string, 0, len(siblings))
+	for _, s := range siblings {
+		objectKeys = append(objectKeys, s.ObjectKey) // object_key == entry id
+	}
+	byID, err := entries.EntriesByID(ctx, objectKeys)
+	if err != nil {
+		return hits
+	}
+	extended := append([]memory.Result(nil), hits...)
+	for _, sibling := range siblings {
+		entry, ok := byID[sibling.ObjectKey]
+		if !ok {
+			continue
+		}
+		if _, already := seenNames[entry.Name]; already {
+			continue
+		}
+		seenNames[entry.Name] = struct{}{}
+		extended = append(extended, memory.Result{
+			ProjectionID:   sibling.ID,
+			ProjectionKind: sibling.Kind,
+			Name:           entry.Name,
+			Trigger:        entry.Trigger,
+			Content:        entry.Content,
+			EventDate:      entry.EventDate,
+			CreatedAt:      entry.CreatedAt,
+		})
+	}
+	return extended
+}
+
 func formalCandidateSources(ctx context.Context, projections *memory.ProjectionStore, hits []memory.Result) (map[string][]string, error) {
 	if projections == nil {
 		return nil, fmt.Errorf("formal candidate projections unavailable")

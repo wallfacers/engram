@@ -122,6 +122,88 @@ func (s *ProjectionStore) SourcesByProjectionIDs(ctx context.Context, projection
 	return out, nil
 }
 
+// SiblingFacts returns the depth-1 sibling facts of the given projection IDs:
+// other active atomic_fact projections that share at least one direct Evidence
+// source (024 US2 neighbor extension). It is bounded to maxSiblings and ordered
+// deterministically (evidence source order, then projection id), so answer
+// context never grows unbounded and repeated calls are stable (spec FR-006,
+// FR-007, research.md Decision 2).
+//
+// The query is one SQL join over memory_projection_sources — no graph database
+// and no extra retrieval call; it is a pure lineage extension over tables 024
+// already uses. Self projections and non-active views are excluded.
+func (s *ProjectionStore) SiblingFacts(ctx context.Context, projectionIDs []string, maxSiblings int) ([]Projection, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("memory: nil projection store")
+	}
+	unique := uniqueNonEmptyStrings(projectionIDs)
+	if len(unique) == 0 {
+		return nil, nil
+	}
+	if maxSiblings <= 0 {
+		maxSiblings = 8
+	}
+	placeholders := make([]string, len(unique))
+	args := make([]any, len(unique))
+	for index, id := range unique {
+		placeholders[index] = "?"
+		args[index] = id
+	}
+	inList := strings.Join(placeholders, ",")
+	// Three separate IN (...) clauses: NOT IN self, EXISTS mine, EXISTS-mine for
+	// ordering. Each needs its own copy of the projection-id args; the LIMIT is
+	// a final scalar. Build one flat arg slice with three copies + the limit.
+	flatArgs := make([]any, 0, 3*len(unique)+1)
+	for copy := 0; copy < 3; copy++ {
+		flatArgs = append(flatArgs, args...)
+	}
+	flatArgs = append(flatArgs, maxSiblings)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, p.kind, p.object_key, p.state, p.builder, p.builder_version,
+			p.config_hash, p.built_at, p.revision
+		FROM memory_projections AS p
+		WHERE p.kind = 'atomic_fact'
+		  AND p.state = 'active'
+		  AND p.id NOT IN (`+inList+`)
+		  AND EXISTS (
+			SELECT 1
+			FROM memory_projection_sources AS mine
+			JOIN memory_projection_sources AS other
+			  ON other.evidence_id = mine.evidence_id
+			 AND other.projection_id != mine.projection_id
+			WHERE mine.projection_id IN (`+inList+`)
+			  AND other.projection_id = p.id
+		  )
+		ORDER BY (
+			SELECT MIN(mine.source_order)
+			FROM memory_projection_sources AS mine
+			JOIN memory_projection_sources AS other
+			  ON other.evidence_id = mine.evidence_id
+			 AND other.projection_id = p.id
+			WHERE mine.projection_id IN (`+inList+`)
+		), p.id ASC
+		LIMIT ?`, flatArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("memory: sibling facts: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var out []Projection
+	for rows.Next() {
+		var projection Projection
+		var kind string
+		var builtAt int64
+		if err := rows.Scan(&projection.ID, &kind, &projection.ObjectKey, &projection.State,
+			&projection.Builder, &projection.BuilderVersion, &projection.ConfigHash,
+			&builtAt, &projection.Revision); err != nil {
+			return nil, fmt.Errorf("memory: scan sibling fact: %w", err)
+		}
+		projection.Kind = ProjectionKind(kind)
+		projection.BuiltAt = time.UnixMicro(builtAt).UTC()
+		out = append(out, projection)
+	}
+	return out, rows.Err()
+}
+
 // MarkStaleByEvidenceIDs invalidates only active projections that directly
 // reference a changed source. Disabled views remain disabled; they cannot be
 // accidentally revived through a source lifecycle operation.

@@ -753,3 +753,70 @@ func TestValidateFormalMechanismBindingDensityArms(t *testing.T) {
 		t.Fatal("unknown mechanism key accepted")
 	}
 }
+
+func TestExtendCandidatesWithSiblingsAppendsSharedEvidenceFacts(t *testing.T) {
+	// T017: neighbor extension (US2) — two facts sharing evidence; hitting one
+	// must append the sibling to the answer context, and the extension must not
+	// duplicate already-present candidates or add unrelated facts.
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	entries := memory.NewEntryStore(st.DB())
+	evidence, err := entries.Ledger().AppendBatch(ctx, []memory.EvidenceInput{{
+		ExternalSourceID: "D1:1", SourceType: memory.EvidenceMessage,
+		SourceSessionID: "conv0-sess1", Speaker: "user", Ordinal: 0,
+		Content: "the meeting was moved to Monday", RecordedAt: time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two facts share the SAME evidence (siblings).
+	sharedFact := &memory.Entry{Name: "meeting-moved-monday", Content: "The meeting was moved to Monday."}
+	if err := entries.UpsertWithSources(ctx, sharedFact, []memory.EvidenceRef{{EvidenceID: evidence[0].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+		t.Fatal(err)
+	}
+	sharedFact2 := &memory.Entry{Name: "rescheduled-monday", Content: "The gathering is rescheduled to Monday."}
+	if err := entries.UpsertWithSources(ctx, sharedFact2, []memory.EvidenceRef{{EvidenceID: evidence[0].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated evidence + fact.
+	otherEvidence, err := entries.Ledger().AppendBatch(ctx, []memory.EvidenceInput{{
+		ExternalSourceID: "D1:2", SourceType: memory.EvidenceMessage,
+		SourceSessionID: "conv0-sess1", Speaker: "user", Ordinal: 1,
+		Content: "grocery list", RecordedAt: time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := &memory.Entry{Name: "buy-groceries", Content: "Buy milk and eggs."}
+	if err := entries.UpsertWithSources(ctx, unrelated, []memory.EvidenceRef{{EvidenceID: otherEvidence[0].ID, SourceOrder: 0, FullSource: true}}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := memory.NewRetriever(entries, memory.NewVectorStore(st.DB()), nil).Search(ctx, "meeting Monday moved", 5)
+	if err != nil || len(hits) == 0 {
+		t.Fatalf("retrieval = %#v, %v (need at least the meeting fact)", hits, err)
+	}
+	projections := memory.NewProjectionStore(st.DB())
+
+	// Extension: sibling is appended, unrelated is not, no duplicates.
+	extended := extendCandidatesWithSiblings(ctx, projections, entries, hits)
+	seen := map[string]bool{}
+	for _, hit := range extended {
+		seen[hit.Name] = true
+	}
+	if !seen["rescheduled-monday"] {
+		t.Fatalf("shared-evidence sibling not appended; candidates = %v", extended)
+	}
+	if seen["buy-groceries"] {
+		t.Fatalf("unrelated fact must not be extended; candidates = %v", extended)
+	}
+	if len(seen) != len(extended) {
+		t.Fatalf("extension produced duplicate candidates")
+	}
+	_ = unrelated
+}
