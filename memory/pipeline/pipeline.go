@@ -40,15 +40,46 @@ type Message struct {
 	OccurredAt       *time.Time
 }
 
+// RedundancySuppressor decides whether an incoming extracted fact projection is
+// a semantic duplicate of an existing fact and should be suppressed before a
+// new projection is created (024 write-time redundancy suppression, US1). A
+// nil suppressor disables suppression (the default; behavior is byte-identical
+// to the pre-024 path). The engine provides an offline default implementation
+// (memory/curation.Suppressor); adapters may inject their own.
+type RedundancySuppressor interface {
+	// ShouldSuppress reports whether incoming is redundant with existing and
+	// its projection should be suppressed. It MUST be conservative: returning
+	// true suppresses a projection, so false is the safe default on doubt.
+	ShouldSuppress(ctx context.Context, existing, incoming *memory.Entry) bool
+}
+
+// SuppressionStats are the audit counters for write-time redundancy
+// suppression (spec FR-005 / SC-001). They are incremented by the pipeline
+// whenever a suppressor is configured.
+type SuppressionStats struct {
+	// Decisions is the number of incoming facts that were compared against
+	// at least one existing candidate (i.e. entered the suppression path).
+	Decisions int
+	// Suppressed is the number of projections suppressed as redundant.
+	Suppressed int
+	// SuspectedMisSuppressions is the number of suppressed candidates that
+	// also carry independent evidence beyond the matching existing entry — a
+	// runtime proxy for "similar but not equivalent" false suppressions
+	// (spec FR-005 / research.md Decision 4).
+	SuspectedMisSuppressions int
+}
+
 // Pipeline extracts and stores facts. A nil call makes it inert (Ingest is a
 // no-op), mirroring the curation worker's inert mode.
 type Pipeline struct {
-	entries  *memory.EntryStore
-	ledger   *memory.LedgerStore
-	embedder *memory.Embedder // may be nil (embedding disabled)
-	call     ModelCaller
-	budgets  memory.Budgets
-	onWrite  func() // curation pressure trigger; optional
+	entries    *memory.EntryStore
+	ledger     *memory.LedgerStore
+	embedder   *memory.Embedder // may be nil (embedding disabled)
+	call       ModelCaller
+	budgets    memory.Budgets
+	onWrite    func() // curation pressure trigger; optional
+	suppressor RedundancySuppressor
+	stats      SuppressionStats
 }
 
 // Config bundles the pipeline's dependencies.
@@ -59,6 +90,11 @@ type Config struct {
 	Call     ModelCaller
 	Budgets  memory.Budgets
 	OnWrite  func()
+	// Suppressor, when non-nil, enables write-time redundancy suppression
+	// (024 US1). It is the injection point for the engine's offline Jaccard
+	// suppressor (memory/curation.Suppressor) or an adapter-provided one.
+	// Default nil = suppression disabled, byte-identical legacy behavior.
+	Suppressor RedundancySuppressor
 }
 
 // New builds a Pipeline. Returns nil when Entries or Call is nil (inert).
@@ -70,12 +106,13 @@ func New(cfg Config) *Pipeline {
 		cfg.Ledger = cfg.Entries.Ledger()
 	}
 	return &Pipeline{
-		entries:  cfg.Entries,
-		ledger:   cfg.Ledger,
-		embedder: cfg.Embedder,
-		call:     cfg.Call,
-		budgets:  cfg.Budgets,
-		onWrite:  cfg.OnWrite,
+		entries:    cfg.Entries,
+		ledger:     cfg.Ledger,
+		embedder:   cfg.Embedder,
+		call:       cfg.Call,
+		budgets:    cfg.Budgets,
+		onWrite:    cfg.OnWrite,
+		suppressor: cfg.Suppressor,
 	}
 }
 

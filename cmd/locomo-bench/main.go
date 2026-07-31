@@ -179,6 +179,14 @@ type options struct {
 	// gapRefetch enables structured-gap refetch retrieval. Only valid in
 	// formal B1 runs; requires --event-projection.
 	gapRefetch bool
+	// writeDedup enables 024 write-time redundancy suppression: new atomic
+	// fact projections are compared against existing facts and suppressed as
+	// semantic duplicates (US1). Additive mechanism flag; default false.
+	writeDedup bool
+	// neighborExtend enables 024 hit-time neighbor extension: after candidate
+	// freeze and before answerer assembly, sibling facts sharing evidence are
+	// added to the answer context (US2). Additive mechanism flag; default false.
+	neighborExtend bool
 	// formalEpisodes is the runtime-only EpisodeStore, required by the
 	// semantic_episode representation renderer. Nil when not available.
 	formalEpisodes *memory.EpisodeStore
@@ -232,6 +240,8 @@ func run() error {
 	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner | exact_token (unset = legacy ranked-prefix packer)")
 	flag.StringVar(&opt.eventProjection, "event-projection", "", "event projection shadow mode for structured-gap refetch: E0 | E1 | E2 | E3")
 	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
+	flag.BoolVar(&opt.writeDedup, "write-dedup", false, "024 write-time redundancy suppression: suppress duplicate fact projections (additive mechanism flag; formal context required)")
+	flag.BoolVar(&opt.neighborExtend, "neighbor-extend", false, "024 hit-time neighbor extension: add shared-evidence sibling facts to answer context (additive mechanism flag; formal context required)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -1658,6 +1668,8 @@ func validateMechanismArms(opt options) error {
 			return fmt.Errorf("--compiler-arm requires --eval-protocol or --eval-freeze-protocol")
 		case opt.eventProjection != "" || opt.gapRefetch:
 			return fmt.Errorf("--event-projection/--gap-refetch require --eval-protocol or --eval-freeze-protocol")
+		case opt.writeDedup || opt.neighborExtend:
+			return fmt.Errorf("--write-dedup/--neighbor-extend require --eval-protocol or --eval-freeze-protocol (024 density mechanisms fail closed outside a formal context)")
 		}
 	}
 	switch opt.compilerArm {

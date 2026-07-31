@@ -643,3 +643,113 @@ func (counter evidenceFailCounter) CountInput(_ context.Context, input evidencec
 	}
 	return evidencecompiler.TokenCount{InputTokens: 12, Fingerprint: counter.fingerprint}, nil
 }
+
+func TestDensityMechanismFlagsFailClosedOutsideFormalContext(t *testing.T) {
+	// contracts/mechanism-bindings.md rule 1: a density mechanism flag must be
+	// rejected outside a formal context (no --eval-protocol / --eval-freeze-protocol).
+	for name, mutate := range map[string]func(*options){
+		"write_dedup":     func(opt *options) { opt.writeDedup = true },
+		"neighbor_extend": func(opt *options) { opt.neighborExtend = true },
+		"both": func(opt *options) {
+			opt.writeDedup = true
+			opt.neighborExtend = true
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			diagnostic := options{representationArm: ReprChunk900}
+			mutate(&diagnostic)
+			if err := validateMechanismArms(diagnostic); err == nil {
+				t.Fatalf("non-formal %s mechanism was silently accepted", name)
+			}
+
+			formalRun := diagnostic
+			formalRun.evalProtocolPath = "protocol.json"
+			if err := validateMechanismArms(formalRun); err != nil {
+				t.Fatalf("formal-run %s mechanism rejected: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestDensityMechanismFlagsMergeIntoB1Control(t *testing.T) {
+	// mechanism-bindings rule 4: density keys participate in the frozen
+	// manifest, so each arm gets a distinct protocol hash; and rule
+	// (backward compat): no density flag → pure legacy 3-key control.
+	control, err := buildFormalExperiment(options{}, "")
+	if err != nil {
+		t.Fatalf("build control: %v", err)
+	}
+	if control.Stage != "b1" || control.Arm != "legacy_count_packer" {
+		t.Fatalf("control manifest = %s/%s", control.Stage, control.Arm)
+	}
+	if !isFormalLegacyControlMechanismFlags(control.MechanismFlags) {
+		t.Fatalf("no-density control must stay legacy 3-key, got %v", control.MechanismFlags)
+	}
+
+	dedup, err := buildFormalExperiment(options{writeDedup: true}, "")
+	if err != nil {
+		t.Fatalf("build dedup arm: %v", err)
+	}
+	if !dedup.MechanismFlags["write_dedup"] || dedup.MechanismFlags["neighbor_extend"] {
+		t.Fatalf("dedup arm flags = %v, want write_dedup=true neighbor_extend=false", dedup.MechanismFlags)
+	}
+	if !isFormalControlMechanismFlags(dedup.MechanismFlags) {
+		t.Fatalf("dedup arm must pass isFormalControlMechanismFlags, got %v", dedup.MechanismFlags)
+	}
+	if isFormalLegacyControlMechanismFlags(dedup.MechanismFlags) {
+		t.Fatalf("dedup arm must NOT pass legacy 3-key check")
+	}
+
+	// Distinct protocol hashes per arm (attribution).
+	controlProto := evalProtocol{Schema: evalProtocolSchema, ProtocolID: "b1", Experiment: control}
+	dedupProto := evalProtocol{Schema: evalProtocolSchema, ProtocolID: "b1", Experiment: dedup}
+	hControl, _ := evalProtocolFingerprint(controlProto)
+	hDedup, _ := evalProtocolFingerprint(dedupProto)
+	if hControl == hDedup {
+		t.Fatal("density arm must produce a different protocol hash than the control")
+	}
+}
+
+func TestValidateFormalMechanismBindingDensityArms(t *testing.T) {
+	// A frozen density arm must bind the exact requested density flags; a
+	// mismatched request (or a density arm requested against a plain control)
+	// must fail closed before any model call.
+	dedupProto := evalProtocol{Experiment: evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{
+			"idk_retry": false, "iris": false, "rerank": false,
+			"write_dedup": true, "neighbor_extend": false,
+		},
+	}}
+	matching := options{writeDedup: true}
+	if err := validateFormalMechanismBinding(dedupProto, matching); err != nil {
+		t.Fatalf("matching density arm rejected: %v", err)
+	}
+	if err := validateFormalMechanismBinding(dedupProto, options{}); err == nil {
+		t.Fatal("density arm accepted with no requested density flag")
+	}
+	if err := validateFormalMechanismBinding(dedupProto, options{neighborExtend: true}); err == nil {
+		t.Fatal("density arm accepted with a different requested density flag")
+	}
+
+	// A plain legacy control (3 keys) still validates with no density request.
+	legacyProto := evalProtocol{Experiment: evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+	}}
+	if err := validateFormalMechanismBinding(legacyProto, options{}); err != nil {
+		t.Fatalf("legacy control rejected: %v", err)
+	}
+	if err := validateFormalMechanismBinding(legacyProto, options{writeDedup: true}); err == nil {
+		t.Fatal("legacy control accepted with a density flag request")
+	}
+
+	// Unknown mechanism key must be rejected.
+	badProto := evalProtocol{Experiment: evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false, "mystery": true},
+	}}
+	if err := validateFormalMechanismBinding(badProto, options{}); err == nil {
+		t.Fatal("unknown mechanism key accepted")
+	}
+}

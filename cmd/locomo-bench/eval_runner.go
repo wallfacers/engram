@@ -337,6 +337,46 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 	return nil
 }
 
+// densityMechanismKeys are the 024 additive write-time/query-time mechanism
+// flags (contracts/mechanism-bindings.md). They are additive to a formal B1
+// control manifest rather than a distinct treatment stage: the four-arm 024
+// ablation freezes four independent B1 manifests that differ only in these
+// keys, so the protocol hash attributes each arm (mechanism-bindings rule 4).
+// They are deliberately NOT part of formalTreatmentForOptions — a density
+// flag never replaces the legacy B1 control, it extends it.
+var densityMechanismKeys = []string{"write_dedup", "neighbor_extend"}
+
+// densityMechanismFlagsForOptions returns the 024 additive mechanism flags
+// derived from the CLI. Absent flags are omitted so a run with neither
+// mechanism set stays byte-identical to the legacy B1 control manifest
+// (mechanism-bindings rule: new keys default to false / absent = false).
+func densityMechanismFlagsForOptions(opt options) map[string]bool {
+	flags := make(map[string]bool)
+	if opt.writeDedup {
+		flags["write_dedup"] = true
+	}
+	if opt.neighborExtend {
+		flags["neighbor_extend"] = true
+	}
+	return flags
+}
+
+// mergeMechanismFlags merges additive flags over a base set, returning a new
+// map. The base is never mutated.
+func mergeMechanismFlags(base, additive map[string]bool) map[string]bool {
+	if len(additive) == 0 {
+		return base
+	}
+	merged := make(map[string]bool, len(base)+len(additive))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range additive {
+		merged[k] = v
+	}
+	return merged
+}
+
 // formalTreatmentFreeze names the single treatment mechanism a formal
 // manifest is frozen for. T114 keeps treatment freezes single-mechanism:
 // mixing mechanisms in one manifest would make the artifact's effect
@@ -417,9 +457,11 @@ func buildFormalExperiment(opt options, controlHash string) (evalExperimentProto
 		return evalExperimentProtocol{}, err
 	}
 	if treatment.Stage == "" {
+		flags := map[string]bool{"idk_retry": false, "iris": false, "rerank": false}
+		flags = mergeMechanismFlags(flags, densityMechanismFlagsForOptions(opt))
 		return evalExperimentProtocol{
 			Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
-			MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+			MechanismFlags: flags,
 		}, nil
 	}
 	if !isDigest(controlHash) {
@@ -442,11 +484,20 @@ func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
 		if exp.Arm != "legacy_count_packer" || exp.ControlProtocolHash != "" {
 			return fmt.Errorf("formal B1 control manifest must be arm=legacy_count_packer without control hash, got %q/%q", exp.Stage, exp.Arm)
 		}
-		if !isFormalLegacyControlMechanismFlags(exp.MechanismFlags) {
+		if !isFormalControlMechanismFlags(exp.MechanismFlags) {
 			return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
 		}
 		if formalTreatmentMechanismRequested(opt) {
 			return fmt.Errorf("formal b1/legacy_count_packer run cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch")
+		}
+		// 024 density mechanisms are additive to the B1 control: the manifest's
+		// density keys must exactly match the requested CLI flags so a frozen
+		// write_dedup/neighbor_extend arm cannot silently change mechanism.
+		want := densityMechanismFlagsForOptions(opt)
+		for _, key := range densityMechanismKeys {
+			if exp.MechanismFlags[key] != want[key] {
+				return fmt.Errorf("formal b1 manifest density mechanism %s=%v differs from requested %s=%v", key, exp.MechanismFlags[key], key, want[key])
+			}
 		}
 		return nil
 	}
@@ -473,6 +524,32 @@ func isFormalLegacyControlMechanismFlags(flags map[string]bool) bool {
 	for _, name := range []string{"idk_retry", "iris", "rerank"} {
 		value, ok := flags[name]
 		if !ok || value {
+			return false
+		}
+	}
+	return true
+}
+
+// isFormalControlMechanismFlags accepts the legacy 3-key B1 control, optionally
+// extended with the 024 density additive keys (write_dedup / neighbor_extend,
+// contracts/mechanism-bindings.md). Legacy keys must be present and false;
+// density keys may be true or false; no unknown key is allowed. A pure legacy
+// control (3 keys) satisfies this — backward compatible with frozen 022 assets.
+func isFormalControlMechanismFlags(flags map[string]bool) bool {
+	if len(flags) < 3 {
+		return false
+	}
+	for _, name := range []string{"idk_retry", "iris", "rerank"} {
+		value, ok := flags[name]
+		if !ok || value {
+			return false
+		}
+	}
+	for name := range flags {
+		switch name {
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend":
+			continue
+		default:
 			return false
 		}
 	}
