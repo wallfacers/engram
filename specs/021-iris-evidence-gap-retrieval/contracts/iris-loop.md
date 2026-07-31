@@ -73,7 +73,9 @@ EvalSufficiency 调用失败时停止迭代并使用当前候选答题，不能�
    原顺序补 round-0 hits。
 5. 最终集合再次去重且长度不得超过 `topK`。IRIS 不得通过扩大 answer context 获益。
 
-每题仍只调用一次最终 answer 路径；IRIS 的额外调用仅用于 sufficiency/refine/retrieval。
+IRIS 循环本身不调用 answer prompt；候选选择完成后，既有 answer 与可选 IDK-retry 路径
+原样执行。sufficiency 可以复用 answer provider/caller，因此成本 artifact 必须记录实际
+provider 调用，不能把它误报为零 answer-side 开销。
 
 ## 6. 失败与产品边界
 
