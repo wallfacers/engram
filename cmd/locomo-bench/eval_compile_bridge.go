@@ -16,11 +16,11 @@ func buildCompileCandidates(sources []formalExpandedSource) []evidencecompiler.C
 	candidates := make([]evidencecompiler.Candidate, 0, len(sources))
 	for _, source := range sources {
 		candidates = append(candidates, evidencecompiler.Candidate{
-			ID:   source.Candidate.CandidateID,
-			Kind: evidencecompiler.CandidateKind(source.Candidate.Kind),
-			Rank: source.Candidate.Rank,
+			ID:    source.Candidate.CandidateID,
+			Kind:  evidencecompiler.CandidateKind(source.Candidate.Kind),
+			Rank:  source.Candidate.Rank,
 			Score: source.Candidate.Score,
-			Text: source.Result.Content,
+			Text:  source.Result.Content,
 			// evidencecompiler.sameDigest expects a bare 64-char SHA-256 hex (no
 			// "sha256:" prefix); evalTextDigest returns the prefixed artifact form.
 			TextDigest: strings.TrimPrefix(evalTextDigest(source.Result.Content), "sha256:"),
@@ -187,10 +187,7 @@ func compileFormalSources(
 	expanded []formalExpandedAnchor,
 ) (evidencecompiler.Bundle, evidencecompiler.Trace, error) {
 	// Collect all expanded sources into a flat candidate list.
-	var allSources []formalExpandedSource
-	for _, anchor := range expanded {
-		allSources = append(allSources, anchor.Sources...)
-	}
+	allSources := formalCompileSourceList(expanded)
 	if len(allSources) == 0 {
 		return evidencecompiler.Bundle{}, evidencecompiler.Trace{}, fmt.Errorf("no expanded sources for compilation")
 	}
@@ -212,14 +209,26 @@ func compileFormalSources(
 	}
 
 	return evidencecompiler.Compile(ctx, evidencecompiler.CompileRequest{
-		Query:             qa.Question,
-		Candidates:        candidates,
-		TokenCap:          protocol.Budget.AnswerInputTokenCap,
+		Query:              qa.Question,
+		Candidates:         candidates,
+		TokenCap:           protocol.Budget.AnswerInputTokenCap,
 		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		MaxCandidates:     len(candidates),
-		MaxSources:        len(srcIDs),
-		Counter:           opt.formalCounter,
-		Resolver:          resolver,
-		Renderer:          renderer,
+		MaxCandidates:      len(candidates),
+		MaxSources:         len(srcIDs),
+		Counter:            opt.formalCounter,
+		Resolver:           resolver,
+		Renderer:           renderer,
 	})
+}
+
+// formalCompileSourceList flattens the expanded anchors into the flat source
+// list shared by every compiler arm (extractive/planner via
+// compileFormalSources, exact-token via compileExactTokenArm). One list means
+// every arm scores the same candidate set — the byte-replay contract of T114.
+func formalCompileSourceList(expanded []formalExpandedAnchor) []formalExpandedSource {
+	var allSources []formalExpandedSource
+	for _, anchor := range expanded {
+		allSources = append(allSources, anchor.Sources...)
+	}
+	return allSources
 }

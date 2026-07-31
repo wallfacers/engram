@@ -229,7 +229,7 @@ func run() error {
 			return fmt.Errorf("invalid representation %q: must be chunk_900, raw_turn_window, or semantic_episode", s)
 		}
 	})
-	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner (unset = legacy ranked-prefix packer)")
+	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner | exact_token (unset = legacy ranked-prefix packer)")
 	flag.StringVar(&opt.eventProjection, "event-projection", "", "event projection shadow mode for structured-gap refetch: E0 | E1 | E2 | E3")
 	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")

@@ -561,8 +561,17 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		if opt.compilerArm != "" {
 			// Compile arm: use the evidencecompiler engine instead of the
 			// legacy ranked-prefix packer. The compiler selects items under
-			// the real token counter and produces an auditable trace.
-			compiledBundle, compiledTrace, compileErr := compileFormalSources(ctx, protocol, opt, qa, expanded)
+			// the real token counter and produces an auditable trace. The
+			// exact-token arm uses the same candidate list but a local,
+			// token-level relevance selection.
+			var compiledBundle evidencecompiler.Bundle
+			var compiledTrace evidencecompiler.Trace
+			var compileErr error
+			if opt.compilerArm == "exact_token" {
+				compiledBundle, compiledTrace, compileErr = compileExactTokenArm(qa.Question, buildCompileCandidates(formalCompileSourceList(expanded)), protocol.Retrieval.CandidateLimit)
+			} else {
+				compiledBundle, compiledTrace, compileErr = compileFormalSources(ctx, protocol, opt, qa, expanded)
+			}
 			if compileErr != nil {
 				packErr = fmt.Errorf("compile: %w", compileErr)
 			} else {
