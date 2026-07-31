@@ -984,3 +984,35 @@ memory/evidencecompiler/
 
 本改造只服务结构清晰度，不产生 B0/B1/oracle/SC-002/SC-003 分数，不改变任何
 mechanism 的 promotion 状态。US3 的 T059-T068 验收口径（行为/失败测试）不受影响。
+
+## 022 Formal Acceptance Run（2026-08-01）
+
+**运行环境**：云机器 vLLM（Qwen/Qwen3.6-35B-A3B-FP8 answer/extract、BAAI/bge-large-en-v1.5 embed）、DeepSeek judge（deepseek-v4-flash）。代码 commit `23190da`（clean worktree）。counter fingerprint `sha256:4806660…`（fixture delta=0）。数据集 `testdata/locomo/locomo.json`（即官方 locomo10.json，10 对话 / 1986 题 / 1540 可答）。
+
+### LoCoMo 正式结果（3 reps majority correctness，全部 `--eval-validate` valid=true）
+
+| Arm | Budget cap | 总分 | multi-hop | temporal | open-domain | single-hop | answer tokens mean |
+|---|---|---:|---:|---:|---:|---:|---:|
+| B0 continuity（legacy, IDK retry） | unbounded | **1307/1540 = 84.9%** | 85.8% | 80.8% | 61.5% | 86.6% | 3599 |
+| B1 low（formal, 无 IDK retry） | 1100 | **914/1540 = 59.4%** | 181/282=64.2% | 203/321=63.2% | 55/96=57.3% | 475/841=56.5% | 1042 |
+| B1 high（formal, 无 IDK retry） | 3600 | **1278/1540 = 83.0%** | 240/282=85.1% | 254/321=79.1% | 58/96=60.4% | 726/841=86.3% | 3406 |
+
+- B0 `answer_calls=4628 judge_calls=4620`（含 legacy IDK retry），`promotion_eligible=false`。
+- B1 low/high 均满足 frozen protocol：`idk_retry/iris/rerank=false`、一次 answerer、candidate replay、source/span/citation 100%（validity.valid=true）。artifact hashes 见各 `summary.json`。
+- 分类别以 `summary.json by_category` 为准（与运行时 OVERALL mean 口径略异：前者题级 majority，后者 rep 均值）。
+
+**关键观察**：B1 high（83.0%）与 B0（84.9%）差距 1.9pp 是关闭 IDK retry 的 formal 代价；B1 low（59.4%）相对 B1 high **-23.6pp**——低预算 1100 token 严重损害，再次印证 token-accuracy 权衡（`docs/` 中 arch-pivot 记录）。SC-002（≥1425/1540）**未达**。
+
+### LongMemEval-S 与 fixed-gold oracle 未完成（外部中断）
+
+LME B0 的 lossless ingestion（500 conversations，~23.9k extraction calls，LongMemEval 长对话 prefill 慢）运行约 5 小时后被**并发的 024 feature agent 中断**：vLLM 被 kill、`lme-store` 被改名隔离为 `lme-store-corrupted-1785513478`（500 DB 完整保留）、`watch-lme.sh` 被禁用、进程被终止。oracle 先因 vLLM 满载下的第 3 次 repetition 超时失败（answer_failed/judge_failed）多次，随后同样被中断。**LME 双基准未出分，SC-003 未测。**
+
+### 024 并发冲突记录
+
+另一 agent（024）复用同一台云机器，从 022 b1-high baseline 派生 density-arm protocol manifests（`024-control/dedup/neighbor/both`，仅 mechanism_flags 增写去重/邻居扩展键），停用 022 的 vLLM 与 watch。022 与 024 需协调机器/资源与 baseline 归属。本记录未删除/未恢复 024 的任何文件。
+
+### 结论
+
+- LoCoMo 侧有 **valid 的 B0/B1 正式结果**（首次在 022.v1 protocol 下产出）。
+- 022 整体 verdict：**HOLD**——双基准（LongMemEval 缺）未完成，SC-002/SC-003 未达，任何 mechanism 未 promotion。
+- LoCoMo 低预算硬伤（B1 low -23.6pp）确认后续机制路线应聚焦"~3.6k 预算下提质"而非压缩 token 保分。
