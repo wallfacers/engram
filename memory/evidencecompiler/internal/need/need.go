@@ -1,4 +1,7 @@
-package evidencecompiler
+// Package need builds the deterministic EvidenceNeed for a query and the
+// source-grounded relations between resolved sources. It is pure and has no
+// IO: no resolver, tokenizer, or model dependency.
+package need
 
 import (
 	"fmt"
@@ -7,6 +10,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wallfacers/engram/memory/evidencecompiler/internal/contracts"
+	"github.com/wallfacers/engram/memory/evidencecompiler/internal/validate"
 )
 
 var (
@@ -20,6 +26,9 @@ var (
 	needSpaceRE        = regexp.MustCompile(`\s+`)
 )
 
+// NeedDateRE matches explicit ISO dates; extractive time evidence uses it.
+var NeedDateRE = needDateRE
+
 var needEntityStopWords = map[string]bool{
 	"A": true, "An": true, "And": true, "Are": true, "Can": true, "Did": true,
 	"Do": true, "Does": true, "For": true, "Give": true, "How": true, "In": true,
@@ -30,23 +39,23 @@ var needEntityStopWords = map[string]bool{
 
 // BuildNeed deterministically extracts only explicit, query-local constraints.
 // It intentionally has no benchmark category, Retriever, or model dependency.
-func BuildNeed(query string) EvidenceNeed {
+func BuildNeed(query string) contracts.EvidenceNeed {
 	return deterministicNeed(query)
 }
 
-func deterministicNeed(query string) EvidenceNeed {
-	need := EvidenceNeed{
+func deterministicNeed(query string) contracts.EvidenceNeed {
+	need := contracts.EvidenceNeed{
 		Entities:        extractEntities(query),
 		TimeConstraints: extractTimeConstraints(query),
 		Operands:        extractOperands(query),
 		ListCardinality: extractCardinality(query),
 		UpdateState:     extractUpdateState(query),
 	}
-	canonical, err := canonicalizeNeed(need)
+	canonical, err := CanonicalizeNeed(need)
 	if err != nil {
 		// All fields above are generated locally. Returning the zero value here is
 		// safer than manufacturing a partially valid Need should this ever drift.
-		return EvidenceNeed{}
+		return contracts.EvidenceNeed{}
 	}
 	return canonical
 }
@@ -59,7 +68,7 @@ func extractEntities(query string) []string {
 		}
 	}
 	entities = append(entities, needHanNameRE.FindAllString(query, -1)...)
-	return canonicalStrings(entities)
+	return CanonicalStrings(entities)
 }
 
 func extractTimeConstraints(query string) []string {
@@ -75,20 +84,20 @@ func extractTimeConstraints(query string) []string {
 			constraints = append(constraints, canonical)
 		}
 	}
-	return canonicalStrings(constraints)
+	return CanonicalStrings(constraints)
 }
 
-func extractCardinality(query string) Cardinality {
+func extractCardinality(query string) contracts.Cardinality {
 	for _, expression := range []*regexp.Regexp{needListCountRE, needNounCountRE, needChineseCountRE} {
 		matches := expression.FindStringSubmatch(query)
 		if len(matches) != 2 {
 			continue
 		}
 		if count := parseExplicitCount(matches[1]); count > 0 {
-			return Cardinality{Known: true, Count: count}
+			return contracts.Cardinality{Known: true, Count: count}
 		}
 	}
-	return Cardinality{}
+	return contracts.Cardinality{}
 }
 
 func parseExplicitCount(value string) int {
@@ -129,13 +138,13 @@ func parseExplicitCount(value string) int {
 	return count
 }
 
-func extractOperands(query string) []Operand {
+func extractOperands(query string) []contracts.Operand {
 	segments := needSplitRE.Split(query, -1)
-	operands := make([]Operand, 0, len(segments))
+	operands := make([]contracts.Operand, 0, len(segments))
 	for _, segment := range segments {
 		name := canonicalOperand(segment)
 		if name != "" {
-			operands = append(operands, Operand{Name: name})
+			operands = append(operands, contracts.Operand{Name: name})
 		}
 	}
 	if len(operands) < 2 {
@@ -148,7 +157,7 @@ func extractOperands(query string) []Operand {
 			operands = operands[:0]
 			for _, part := range parts {
 				if name := canonicalOperand(part); name != "" {
-					operands = append(operands, Operand{Name: name})
+					operands = append(operands, contracts.Operand{Name: name})
 				}
 			}
 			break
@@ -176,36 +185,41 @@ func extractUpdateState(query string) string {
 			states = append(states, canonical)
 		}
 	}
-	return strings.Join(canonicalStrings(states), "|")
+	return strings.Join(CanonicalStrings(states), "|")
 }
 
-func canonicalizeNeed(need EvidenceNeed) (EvidenceNeed, error) {
-	need.Entities = canonicalStrings(need.Entities)
-	need.TimeConstraints = canonicalStrings(need.TimeConstraints)
+// CanonicalizeNeed normalizes a Need: sorted unique strings, checked operands,
+// validated cardinality and a cloned validated gap. It is shared by the
+// deterministic builder and the planner merge path.
+func CanonicalizeNeed(need contracts.EvidenceNeed) (contracts.EvidenceNeed, error) {
+	need.Entities = CanonicalStrings(need.Entities)
+	need.TimeConstraints = CanonicalStrings(need.TimeConstraints)
 	operands, err := canonicalOperandsChecked(need.Operands)
 	if err != nil {
-		return EvidenceNeed{}, err
+		return contracts.EvidenceNeed{}, err
 	}
 	need.Operands = operands
 	if need.ListCardinality.Known {
 		if need.ListCardinality.Count <= 0 {
-			return EvidenceNeed{}, fmt.Errorf("%w: known cardinality must be positive", ErrInvalidNeed)
+			return contracts.EvidenceNeed{}, fmt.Errorf("%w: known cardinality must be positive", contracts.ErrInvalidNeed)
 		}
 	} else if need.ListCardinality.Count != 0 {
-		return EvidenceNeed{}, fmt.Errorf("%w: unknown cardinality cannot contain a count", ErrInvalidNeed)
+		return contracts.EvidenceNeed{}, fmt.Errorf("%w: unknown cardinality cannot contain a count", contracts.ErrInvalidNeed)
 	}
-	need.UpdateState = strings.Join(canonicalStrings(strings.FieldsFunc(need.UpdateState, func(r rune) bool { return r == '|' })), "|")
+	need.UpdateState = strings.Join(CanonicalStrings(strings.FieldsFunc(need.UpdateState, func(r rune) bool { return r == '|' })), "|")
 	if need.Gap != nil {
 		gap := *need.Gap
 		if err := validateStructuredGap(gap); err != nil {
-			return EvidenceNeed{}, err
+			return contracts.EvidenceNeed{}, err
 		}
 		need.Gap = &gap
 	}
 	return need, nil
 }
 
-func canonicalStrings(values []string) []string {
+// CanonicalStrings returns sorted, unique, trimmed strings. It is the shared
+// canonical form for entity lists and source-ID unions.
+func CanonicalStrings(values []string) []string {
 	seen := make(map[string]bool, len(values))
 	canonical := make([]string, 0, len(values))
 	for _, value := range values {
@@ -220,18 +234,18 @@ func canonicalStrings(values []string) []string {
 	return canonical
 }
 
-func canonicalOperands(values []Operand) []Operand {
+func canonicalOperands(values []contracts.Operand) []contracts.Operand {
 	operands, _ := canonicalOperandsChecked(values)
 	return operands
 }
 
-func canonicalOperandsChecked(values []Operand) ([]Operand, error) {
+func canonicalOperandsChecked(values []contracts.Operand) ([]contracts.Operand, error) {
 	byName := make(map[string]bool, len(values))
-	operands := make([]Operand, 0, len(values))
+	operands := make([]contracts.Operand, 0, len(values))
 	for _, operand := range values {
 		operand.Name = canonicalOperand(operand.Name)
 		if operand.Name == "" || !utf8.ValidString(operand.Name) {
-			return nil, fmt.Errorf("%w: operand is empty or invalid UTF-8", ErrInvalidNeed)
+			return nil, fmt.Errorf("%w: operand is empty or invalid UTF-8", contracts.ErrInvalidNeed)
 		}
 		if satisfied, exists := byName[operand.Name]; exists {
 			byName[operand.Name] = satisfied || operand.Satisfied
@@ -240,76 +254,76 @@ func canonicalOperandsChecked(values []Operand) ([]Operand, error) {
 		byName[operand.Name] = operand.Satisfied
 	}
 	for name, satisfied := range byName {
-		operands = append(operands, Operand{Name: name, Satisfied: satisfied})
+		operands = append(operands, contracts.Operand{Name: name, Satisfied: satisfied})
 	}
 	sort.Slice(operands, func(left, right int) bool { return operands[left].Name < operands[right].Name })
 	return operands, nil
 }
 
-func validateStructuredGap(gap StructuredGap) error {
+func validateStructuredGap(gap contracts.StructuredGap) error {
 	if strings.TrimSpace(gap.SourceNeed) == "" {
-		return fmt.Errorf("%w: gap needs an auditable source requirement", ErrInvalidNeed)
+		return fmt.Errorf("%w: gap needs an auditable source requirement", contracts.ErrInvalidNeed)
 	}
 	switch gap.Kind {
-	case GapEntity:
+	case contracts.GapEntity:
 		if strings.TrimSpace(gap.Entity) == "" || gap.Operand != "" || gap.Start != nil || gap.End != nil {
-			return fmt.Errorf("%w: entity gap fields are invalid", ErrInvalidNeed)
+			return fmt.Errorf("%w: entity gap fields are invalid", contracts.ErrInvalidNeed)
 		}
-	case GapTimeRange:
+	case contracts.GapTimeRange:
 		if gap.Entity != "" || gap.Operand != "" || (gap.Start == nil && gap.End == nil) || (gap.Start != nil && gap.End != nil && gap.End.Before(*gap.Start)) {
-			return fmt.Errorf("%w: time range gap fields are invalid", ErrInvalidNeed)
+			return fmt.Errorf("%w: time range gap fields are invalid", contracts.ErrInvalidNeed)
 		}
-	case GapSecondOperand:
+	case contracts.GapSecondOperand:
 		if strings.TrimSpace(gap.Operand) == "" || gap.Entity != "" || gap.Start != nil || gap.End != nil {
-			return fmt.Errorf("%w: second operand gap fields are invalid", ErrInvalidNeed)
+			return fmt.Errorf("%w: second operand gap fields are invalid", contracts.ErrInvalidNeed)
 		}
 	default:
-		return fmt.Errorf("%w: unknown gap kind %q", ErrInvalidNeed, gap.Kind)
+		return fmt.Errorf("%w: unknown gap kind %q", contracts.ErrInvalidNeed, gap.Kind)
 	}
 	return nil
 }
 
-// mergePlannerNeed allows additions but never lets a proposal remove or alter
+// MergePlannerNeed allows additions but never lets a proposal remove or alter
 // an explicit deterministic constraint. Unknown cardinality is intentionally
 // sticky: a planner cannot invent a count from an unconstrained question.
-func mergePlannerNeed(base, proposal EvidenceNeed) (EvidenceNeed, error) {
-	base, err := canonicalizeNeed(base)
+func MergePlannerNeed(base, proposal contracts.EvidenceNeed) (contracts.EvidenceNeed, error) {
+	base, err := CanonicalizeNeed(base)
 	if err != nil {
-		return EvidenceNeed{}, err
+		return contracts.EvidenceNeed{}, err
 	}
-	proposal, err = canonicalizeNeed(proposal)
+	proposal, err = CanonicalizeNeed(proposal)
 	if err != nil {
-		return EvidenceNeed{}, err
+		return contracts.EvidenceNeed{}, err
 	}
 	if !containsAll(proposal.Entities, base.Entities) || !containsAll(proposal.TimeConstraints, base.TimeConstraints) || !containsAll(operandNames(proposal.Operands), operandNames(base.Operands)) {
-		return EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed an explicit constraint", ErrInvalidNeed)
+		return contracts.EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed an explicit constraint", contracts.ErrInvalidNeed)
 	}
 	if base.ListCardinality.Known {
 		if !proposal.ListCardinality.Known || proposal.ListCardinality.Count != base.ListCardinality.Count {
-			return EvidenceNeed{}, fmt.Errorf("%w: planner proposal changed explicit cardinality", ErrInvalidNeed)
+			return contracts.EvidenceNeed{}, fmt.Errorf("%w: planner proposal changed explicit cardinality", contracts.ErrInvalidNeed)
 		}
 	} else if proposal.ListCardinality.Known {
-		return EvidenceNeed{}, fmt.Errorf("%w: planner proposal invented cardinality", ErrInvalidNeed)
+		return contracts.EvidenceNeed{}, fmt.Errorf("%w: planner proposal invented cardinality", contracts.ErrInvalidNeed)
 	}
-	if !containsAll(splitStates(proposal.UpdateState), splitStates(base.UpdateState)) {
-		return EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed explicit update state", ErrInvalidNeed)
+	if !containsAll(SplitStates(proposal.UpdateState), SplitStates(base.UpdateState)) {
+		return contracts.EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed explicit update state", contracts.ErrInvalidNeed)
 	}
 	if base.Gap != nil && !equalGap(base.Gap, proposal.Gap) {
-		return EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed or changed explicit gap", ErrInvalidNeed)
+		return contracts.EvidenceNeed{}, fmt.Errorf("%w: planner proposal removed or changed explicit gap", contracts.ErrInvalidNeed)
 	}
 
-	merged := EvidenceNeed{
-		Entities:        canonicalStrings(append(append([]string(nil), base.Entities...), proposal.Entities...)),
-		TimeConstraints: canonicalStrings(append(append([]string(nil), base.TimeConstraints...), proposal.TimeConstraints...)),
+	merged := contracts.EvidenceNeed{
+		Entities:        CanonicalStrings(append(append([]string(nil), base.Entities...), proposal.Entities...)),
+		TimeConstraints: CanonicalStrings(append(append([]string(nil), base.TimeConstraints...), proposal.TimeConstraints...)),
 		Operands:        mergeOperands(base.Operands, proposal.Operands),
 		ListCardinality: base.ListCardinality,
-		UpdateState:     strings.Join(canonicalStrings(append(splitStates(base.UpdateState), splitStates(proposal.UpdateState)...)), "|"),
-		Gap:             cloneGap(base.Gap),
+		UpdateState:     strings.Join(CanonicalStrings(append(SplitStates(base.UpdateState), SplitStates(proposal.UpdateState)...)), "|"),
+		Gap:             CloneGap(base.Gap),
 	}
 	if merged.Gap == nil {
-		merged.Gap = cloneGap(proposal.Gap)
+		merged.Gap = CloneGap(proposal.Gap)
 	}
-	return canonicalizeNeed(merged)
+	return CanonicalizeNeed(merged)
 }
 
 func containsAll(values, required []string) bool {
@@ -325,7 +339,7 @@ func containsAll(values, required []string) bool {
 	return true
 }
 
-func operandNames(operands []Operand) []string {
+func operandNames(operands []contracts.Operand) []string {
 	names := make([]string, 0, len(operands))
 	for _, operand := range operands {
 		names = append(names, operand.Name)
@@ -333,19 +347,21 @@ func operandNames(operands []Operand) []string {
 	return names
 }
 
-func mergeOperands(left, right []Operand) []Operand {
-	combined := append(append([]Operand(nil), left...), right...)
+func mergeOperands(left, right []contracts.Operand) []contracts.Operand {
+	combined := append(append([]contracts.Operand(nil), left...), right...)
 	return canonicalOperands(combined)
 }
 
-func splitStates(value string) []string {
+// SplitStates splits a pipe-joined update-state value.
+func SplitStates(value string) []string {
 	if value == "" {
 		return nil
 	}
 	return strings.FieldsFunc(value, func(r rune) bool { return r == '|' })
 }
 
-func cloneGap(gap *StructuredGap) *StructuredGap {
+// CloneGap deep-copies a StructuredGap, normalizing timestamps to UTC.
+func CloneGap(gap *contracts.StructuredGap) *contracts.StructuredGap {
 	if gap == nil {
 		return nil
 	}
@@ -361,7 +377,7 @@ func cloneGap(gap *StructuredGap) *StructuredGap {
 	return &clone
 }
 
-func equalGap(left, right *StructuredGap) bool {
+func equalGap(left, right *contracts.StructuredGap) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
@@ -378,9 +394,10 @@ func equalTime(left, right *time.Time) bool {
 	return left.Equal(*right)
 }
 
-func equalNeed(left, right EvidenceNeed) bool {
-	left, leftErr := canonicalizeNeed(left)
-	right, rightErr := canonicalizeNeed(right)
+// EqualNeed reports canonical Need equality without mutating its arguments.
+func EqualNeed(left, right contracts.EvidenceNeed) bool {
+	left, leftErr := CanonicalizeNeed(left)
+	right, rightErr := CanonicalizeNeed(right)
 	if leftErr != nil || rightErr != nil {
 		return false
 	}
@@ -398,34 +415,34 @@ func equalNeed(left, right EvidenceNeed) bool {
 	return true
 }
 
-// buildRelations only emits relationships that can be independently checked
+// BuildRelations only emits relationships that can be independently checked
 // against resolved source content or timestamps. It never invents an edge from
 // a candidate score, planner assertion, or benchmark category.
-func buildRelations(need EvidenceNeed, sources map[string]Source) []EvidenceRelation {
+func BuildRelations(need contracts.EvidenceNeed, sources map[string]contracts.Source) []contracts.EvidenceRelation {
 	ids := make([]string, 0, len(sources))
 	for id, source := range sources {
-		if source.ID == id && source.Content != "" && utf8.ValidString(source.Content) && sameDigest(source.ContentDigest, source.Content) {
+		if source.ID == id && source.Content != "" && utf8.ValidString(source.Content) && validate.SameDigest(source.ContentDigest, source.Content) {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
-	relations := make([]EvidenceRelation, 0)
+	relations := make([]contracts.EvidenceRelation, 0)
 	for leftIndex := 0; leftIndex < len(ids); leftIndex++ {
 		for rightIndex := leftIndex + 1; rightIndex < len(ids); rightIndex++ {
 			left, right := sources[ids[leftIndex]], sources[ids[rightIndex]]
 			if left.OccurredAt != nil && right.OccurredAt != nil && !left.OccurredAt.Equal(*right.OccurredAt) {
 				if left.OccurredAt.Before(*right.OccurredAt) {
-					relations = append(relations, EvidenceRelation{Kind: RelationBefore, LeftSourceID: left.ID, RightSourceID: right.ID})
+					relations = append(relations, contracts.EvidenceRelation{Kind: contracts.RelationBefore, LeftSourceID: left.ID, RightSourceID: right.ID})
 				} else {
-					relations = append(relations, EvidenceRelation{Kind: RelationBefore, LeftSourceID: right.ID, RightSourceID: left.ID})
+					relations = append(relations, contracts.EvidenceRelation{Kind: contracts.RelationBefore, LeftSourceID: right.ID, RightSourceID: left.ID})
 				}
 			}
 			if sourcesConflict(left.Content, right.Content) {
-				relations = append(relations, EvidenceRelation{Kind: RelationConflicts, LeftSourceID: left.ID, RightSourceID: right.ID})
+				relations = append(relations, contracts.EvidenceRelation{Kind: contracts.RelationConflicts, LeftSourceID: left.ID, RightSourceID: right.ID})
 			}
 			for _, operand := range need.Operands {
-				if sourceSupportsOperand(left.Content, operand.Name) && sourceSupportsOperand(right.Content, operand.Name) {
-					relations = append(relations, EvidenceRelation{Kind: RelationSupportsOperand, LeftSourceID: left.ID, RightSourceID: right.ID, Operand: operand.Name})
+				if SourceSupportsOperand(left.Content, operand.Name) && SourceSupportsOperand(right.Content, operand.Name) {
+					relations = append(relations, contracts.EvidenceRelation{Kind: contracts.RelationSupportsOperand, LeftSourceID: left.ID, RightSourceID: right.ID, Operand: operand.Name})
 				}
 			}
 		}
@@ -446,10 +463,10 @@ func buildRelations(need EvidenceNeed, sources map[string]Source) []EvidenceRela
 }
 
 func sourcesConflict(left, right string) bool {
-	if hasNegation(left) == hasNegation(right) {
+	if HasNegation(left) == HasNegation(right) {
 		return false
 	}
-	leftWords, rightWords := lexicalWords(left), lexicalWords(right)
+	leftWords, rightWords := LexicalWords(left), LexicalWords(right)
 	overlap := 0
 	for word := range leftWords {
 		if rightWords[word] {
@@ -459,7 +476,8 @@ func sourcesConflict(left, right string) bool {
 	return overlap >= 2
 }
 
-func hasNegation(value string) bool {
+// HasNegation reports whether the text carries an explicit negation marker.
+func HasNegation(value string) bool {
 	lower := strings.ToLower(value)
 	for _, marker := range []string{" not ", "n't", " no ", " never ", "没有", "不是", "并非", "未"} {
 		if strings.Contains(" "+lower+" ", marker) {
@@ -469,12 +487,14 @@ func hasNegation(value string) bool {
 	return false
 }
 
-func sourceSupportsOperand(content, operand string) bool {
-	words := lexicalWords(operand)
+// SourceSupportsOperand reports whether the content contains any lexical word
+// of the operand name.
+func SourceSupportsOperand(content, operand string) bool {
+	words := LexicalWords(operand)
 	if len(words) == 0 {
 		return false
 	}
-	contentWords := lexicalWords(content)
+	contentWords := LexicalWords(content)
 	for word := range words {
 		if contentWords[word] {
 			return true
@@ -483,7 +503,9 @@ func sourceSupportsOperand(content, operand string) bool {
 	return false
 }
 
-func lexicalWords(value string) map[string]bool {
+// LexicalWords tokenizes text into the lowercase word set used by operand
+// support, conflict, and lexical-overlap scoring.
+func LexicalWords(value string) map[string]bool {
 	words := make(map[string]bool)
 	for _, token := range strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && !(r >= '一' && r <= '龥')

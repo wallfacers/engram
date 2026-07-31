@@ -1,9 +1,13 @@
-package evidencecompiler
+package need
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wallfacers/engram/memory/evidencecompiler/internal/contracts"
 )
 
 func TestBuildNeedCapturesExplicitQueryConstraintsDeterministically(t *testing.T) {
@@ -27,7 +31,7 @@ func TestBuildNeedCapturesExplicitQueryConstraintsDeterministically(t *testing.T
 	}
 
 	again := BuildNeed(query)
-	if !equalNeed(need, again) {
+	if !EqualNeed(need, again) {
 		t.Fatalf("BuildNeed() was not deterministic:\nfirst=%+v\nnext=%+v", need, again)
 	}
 }
@@ -36,21 +40,21 @@ func TestMergePlannerNeedCannotDeleteExplicitConstraintsOrInventCardinality(t *t
 	base := BuildNeed("What did Alice do after 2024-01-01?")
 	proposal := base
 	proposal.Entities = nil
-	if _, err := mergePlannerNeed(base, proposal); err == nil {
-		t.Fatal("mergePlannerNeed() accepted a proposal that removed Alice")
+	if _, err := MergePlannerNeed(base, proposal); err == nil {
+		t.Fatal("MergePlannerNeed() accepted a proposal that removed Alice")
 	}
 
 	proposal = base
-	proposal.ListCardinality = Cardinality{Known: true, Count: 2}
-	if _, err := mergePlannerNeed(base, proposal); err == nil {
-		t.Fatal("mergePlannerNeed() accepted an invented cardinality from an unknown base")
+	proposal.ListCardinality = contracts.Cardinality{Known: true, Count: 2}
+	if _, err := MergePlannerNeed(base, proposal); err == nil {
+		t.Fatal("MergePlannerNeed() accepted an invented cardinality from an unknown base")
 	}
 
 	proposal = base
 	proposal.Entities = append(proposal.Entities, "Bob")
-	merged, err := mergePlannerNeed(base, proposal)
+	merged, err := MergePlannerNeed(base, proposal)
 	if err != nil {
-		t.Fatalf("mergePlannerNeed(additive proposal) error = %v", err)
+		t.Fatalf("MergePlannerNeed(additive proposal) error = %v", err)
 	}
 	if !containsString(merged.Entities, "Alice") || !containsString(merged.Entities, "Bob") {
 		t.Fatalf("merged entities = %v, want preserved Alice plus Bob", merged.Entities)
@@ -60,7 +64,7 @@ func TestMergePlannerNeedCannotDeleteExplicitConstraintsOrInventCardinality(t *t
 func TestBuildRelationsOnlyUsesResolvedSourceEvidence(t *testing.T) {
 	earlier := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	later := earlier.Add(24 * time.Hour)
-	sources := map[string]Source{
+	sources := map[string]contracts.Source{
 		"src-a": {
 			ID:            "src-a",
 			Content:       "Alice selected the red plan.",
@@ -74,9 +78,9 @@ func TestBuildRelationsOnlyUsesResolvedSourceEvidence(t *testing.T) {
 			OccurredAt:    &later,
 		},
 	}
-	relations := buildRelations(EvidenceNeed{Operands: []Operand{{Name: "plan"}}}, sources)
+	relations := BuildRelations(contracts.EvidenceNeed{Operands: []contracts.Operand{{Name: "plan"}}}, sources)
 	if len(relations) == 0 {
-		t.Fatal("buildRelations() returned no evidence-grounded relation")
+		t.Fatal("BuildRelations() returned no evidence-grounded relation")
 	}
 
 	var before, conflict bool
@@ -84,8 +88,8 @@ func TestBuildRelationsOnlyUsesResolvedSourceEvidence(t *testing.T) {
 		if relation.LeftSourceID == "" || relation.RightSourceID == "" || sources[relation.LeftSourceID].ID == "" || sources[relation.RightSourceID].ID == "" {
 			t.Fatalf("relation %+v is not grounded in resolved sources", relation)
 		}
-		before = before || relation.Kind == RelationBefore
-		conflict = conflict || relation.Kind == RelationConflicts
+		before = before || relation.Kind == contracts.RelationBefore
+		conflict = conflict || relation.Kind == contracts.RelationConflicts
 	}
 	if !before || !conflict {
 		t.Fatalf("relations = %+v, want grounded before and conflict relations", relations)
@@ -99,4 +103,9 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func sha256Hex(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:])
 }

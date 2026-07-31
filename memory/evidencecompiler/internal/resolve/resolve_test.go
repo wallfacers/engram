@@ -1,11 +1,14 @@
-package evidencecompiler
+package resolve
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/evidencecompiler/internal/contracts"
 )
 
 func TestLedgerResolverReadsRequestedActiveEvidenceInOneBatch(t *testing.T) {
@@ -36,8 +39,8 @@ func TestResolveSourcesFailsClosedForMissingUnavailableOrDriftedEvidence(t *test
 	} {
 		t.Run(name, func(t *testing.T) {
 			resolver := sourceTestResolver{records: records}
-			if _, err := resolveSources(context.Background(), resolver, allowlist, []string{"src-a"}); !errors.Is(err, ErrSourceUnavailable) {
-				t.Fatalf("resolveSources() error = %v, want ErrSourceUnavailable", err)
+			if _, err := ResolveSources(context.Background(), resolver, allowlist, []string{"src-a"}); !errors.Is(err, contracts.ErrSourceUnavailable) {
+				t.Fatalf("ResolveSources() error = %v, want ErrSourceUnavailable", err)
 			}
 		})
 	}
@@ -64,9 +67,14 @@ type sourceTestResolver struct {
 	err     error
 }
 
-func (resolver sourceTestResolver) Resolve(_ context.Context, _ []string) ([]Evidence, error) {
+func (resolver sourceTestResolver) Resolve(_ context.Context, _ []string) ([]contracts.Evidence, error) {
 	if resolver.err != nil {
 		return nil, resolver.err
 	}
 	return resolver.records, nil
+}
+
+func sha256Hex(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:])
 }
