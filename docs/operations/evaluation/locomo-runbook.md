@@ -27,7 +27,7 @@ export EMBED_MODEL=BAAI/bge-large-en-v1.5
 export EMBED_API_KEY=local-eval
 
 locomo-bench \
-  --data testdata/locomo/locomo10.json \
+  --data testdata/locomo/locomo.json \
   --store-dir <frozen-store> \
   --chunks --top-k 30 --chunk-quota 12 \
   --retrieval hybrid --force-answer --judge-mem0-aligned \

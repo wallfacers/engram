@@ -25,7 +25,7 @@ CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench -run TemporalContract
 # 每臂公共:
 #   source ~/.config/engram/locomo-vllm.env ; source ~/.config/engram/judge.env
 #   export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=BAAI/bge-large-en-v1.5 EMBED_API_KEY=local-eval
-#   STORE=.locomo-run/009-bge-chunks-store ; DATA=testdata/locomo/locomo10.json
+#   STORE=.locomo-run/009-bge-chunks-store ; DATA=testdata/locomo/locomo.json
 # 公共 flag:--chunks --chunk-quota 12 --top-k 30 --force-answer --judge-mem0-aligned
 #           --retrieval hybrid --repeats 3 --concurrency 48   (无 cat-top-k:默认 30)
 

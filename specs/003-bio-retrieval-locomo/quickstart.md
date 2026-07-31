@@ -21,7 +21,7 @@ go build ./cmd/locomo-bench
 
 ```bash
 # 1) 算账（不花钱）
-./locomo-bench --data testdata/locomo/locomo10.json --repeats 5 --estimate --no-idk-retry
+./locomo-bench --data testdata/locomo/locomo.json --repeats 5 --estimate --no-idk-retry
 # --estimate is offline and does not require --run-dir or LOCOMO_API_KEY.
 
 # 2) 抽取 A/B（两库各建一次，维护者确认预估后执行）

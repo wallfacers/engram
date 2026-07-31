@@ -26,7 +26,7 @@
 
 **Constraints**: 引擎离线可跑;禁云/付费 reranker(死规则);US1 期间 `git diff -- memory embedding provider store internal` 为空;US2 默认关零值 = 现基线逐字节不变。
 
-**Scale/Scope**: LoCoMo locomo10 全量 1540 题(目标类 single/multi-hop/temporal);单机单用户评测规模。
+**Scale/Scope**: LoCoMo locomo 全量 1540 题(目标类 single/multi-hop/temporal);单机单用户评测规模。
 
 ## Constitution Check
 

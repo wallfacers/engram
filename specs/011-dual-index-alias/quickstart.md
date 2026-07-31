@@ -33,13 +33,13 @@ git diff --name-only -- memory embedding provider store internal   # 必空
 ```bash
 # EMBED 走 box bge-large 8001 隧道(与 009/010 同);retrieval-only 不调答题
 export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=bge-large-en-v1.5 EMBED_API_KEY=local-eval
-setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir <009-bge-chunks-store> --chunks --top-k 30 --retrieval hybrid \
   --alias-shadow baseline --only-category 1 --recall-diagnostic \
   --run-dir .locomo-run/011-recall >recall-base.log 2>&1; echo $? >recall-base.exit' </dev/null >/dev/null 2>&1 & disown
 [ -f recall-base.exit ] && echo "exit=$(cat recall-base.exit)" || tail -1 recall-base.log
 # baseline exit=0 后再跑 treatment;两次共用 run-dir 以生成配对分层 delta
-setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir <009-bge-chunks-store> --chunks --top-k 30 --retrieval hybrid \
   --alias-shadow treatment --only-category 1 --recall-diagnostic \
   --run-dir .locomo-run/011-recall >recall-treatment.log 2>&1; echo $? >recall-treatment.exit' </dev/null >/dev/null 2>&1 & disown
@@ -56,13 +56,13 @@ setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
 source ~/.config/engram/locomo-vllm.env; source ~/.config/engram/judge.env
 export EMBED_BASE_URL=http://127.0.0.1:8001/v1 EMBED_MODEL=bge-large-en-v1.5 EMBED_API_KEY=local-eval
 # baseline 臂
-setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir <009-bge-chunks-store> --chunks --chunk-quota 12 --top-k 30 \
   --force-answer --judge-mem0-aligned --retrieval hybrid --concurrency 40 --repeats 3 \
   --alias-shadow baseline \
   --run-dir .locomo-run/011-e2e-base >base.log 2>&1; echo $? >base.exit' </dev/null >/dev/null 2>&1 & disown
 # treatment 臂(+影子,其余逐字相同)
-setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir <009-bge-chunks-store> --chunks --chunk-quota 12 --top-k 30 \
   --force-answer --judge-mem0-aligned --retrieval hybrid --concurrency 40 --repeats 3 \
   --alias-shadow treatment \

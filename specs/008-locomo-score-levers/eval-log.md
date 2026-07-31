@@ -7,7 +7,7 @@
 
 - **Date**: 2026-07-22 14:17-14:20 +08:00，旧版与新版连续单次运行。
 - **Code**: 旧版 `0f06b78`；新版 mechanism `61b5311`。
-- **Dataset**: `locomo10.json`，仅 category 3，共 96 题；两侧 question_id 96/96 对齐。
+- **Dataset**: `locomo.json`，仅 category 3，共 96 题；两侧 question_id 96/96 对齐。
 - **Store / retrieval**: `.locomo-run/007-us2/cov-store`，`hybrid`，`--chunks`，
   `--top-k 100`，`--chunk-quota 50`。
 - **Answer**: 本地 `Qwen/Qwen3.6-35B-A3B-FP8`。runner 的 Temperature 为 Go
@@ -57,7 +57,7 @@ temporal **265/321=82.6%**，single-hop **733/841=87.2%**；三类合计
 ## US3: bge-large 本地 embedder coverage A/B
 
 - **Date**: 2026-07-22 14:18-14:42 +08:00，正式 large / small 各单次运行。
-- **Dataset / denominator**: `locomo10.json` 全量 10 段；1540 题中有可解析 gold
+- **Dataset / denominator**: `locomo.json` 全量 10 段；1540 题中有可解析 gold
   turn evidence 的 **1532** 题（multi-hop 281、temporal 321、open-domain 89、
   single-hop 841）。这是 coverage 分母，不是答题正确率分母。
 - **Frozen retrieval config**: 两臂均为 `--coverage-only --chunks --top-k 30
@@ -130,7 +130,7 @@ multi-hop 均有明显正增益，符合既定门。bge-large 保持默认关，
 - **Frozen retrieval config**: `--store-dir .locomo-run/007-us2/cov-store
   --coverage-only --chunks --top-k 30 --chunk-quota 12
   --retrieval 'hybrid,hybrid+rerank'`；两臂唯一变量 = 是否启用 reranker。
-- **Dataset / denominator**: `locomo10.json` 全量，可解析 gold turn evidence 的
+- **Dataset / denominator**: `locomo.json` 全量，可解析 gold turn evidence 的
   **1532** 题（multi-hop 281、temporal 321、open-domain 89、single-hop 841）；两臂
   同分母。复用 007 固化 `cov-store`（bge-small 384d），未重建、无重抽取方差。
 - **本地 reranker sidecar（死规则核心）**: 双端点纯本地服务，`/v1/embeddings`
@@ -206,4 +206,4 @@ reranker 保持**默认关 / opt-in**（宪法 V）；本轮**未声明或替换
 3. **差距地图（拉平方向）**：open-domain **56.2%** 最弱且 coverage 加满也几乎不动（54→56）→ **答题/推理/判题问题，非检索**；
    temporal 82.2% 次弱且脆（reranker 会害）；multi-hop 85.8% / single-hop 86.7% 已接近 MemOS 级。
    下一步涨分应打 **open-domain + temporal + single-hop 精度**，**不是**堆检索召回。
-- 引擎零改（`git diff` 空）；reranker 默认关；未把此 83.70% 声明为团队 leaderboard 数（本地 10-conv locomo10，单次，honest-scale）。
+- 引擎零改（`git diff` 空）；reranker 默认关；未把此 83.70% 声明为团队 leaderboard 数（本地 10-conv locomo，单次，honest-scale）。

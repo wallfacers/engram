@@ -17,7 +17,7 @@ then the gated paid step. Uses the reused artifacts from the rerank work.
 
 ```bash
 go run ./cmd/locomo-bench --pcic-annotate \
-  --data testdata/locomo/locomo10.json --store-dir <stores> --pcic-meta <dir>/pcic_meta.json
+  --data testdata/locomo/locomo.json --store-dir <stores> --pcic-meta <dir>/pcic_meta.json
 ```
 
 **Expected**: writes `pcic_meta.json` (header + per-span typed claims); re-running is a cache
@@ -29,7 +29,7 @@ hit (no LLM calls). No engine store rows added.
 go run ./cmd/locomo-bench --coverage-only --chunks --concurrency 8 \
   --retrieval hybrid+rerank,hybrid+rerank+pcic,hybrid+rerank+oracle \
   --top-k 30 --chunk-quota 12 --pcic-meta <dir>/pcic_meta.json \
-  --data testdata/locomo/locomo10.json --store-dir <stores> --run-dir <dir>/cov-pcic
+  --data testdata/locomo/locomo.json --store-dir <stores> --run-dir <dir>/cov-pcic
 ```
 
 **Expected** (`coverage.json` + printed matrix): three arms with `turn_recall` per category
@@ -51,7 +51,7 @@ Only if Step 2 passed.
 go run ./cmd/locomo-bench --chunks --concurrency 8 \
   --retrieval hybrid+rerank,hybrid+rerank+pcic \
   --top-k 30 --chunk-quota 12 --only-category 1 --pcic-meta <dir>/pcic_meta.json \
-  --data testdata/locomo/locomo10.json --store-dir <stores> --run-dir <dir>/ans-pcic
+  --data testdata/locomo/locomo.json --store-dir <stores> --run-dir <dir>/ans-pcic
 ```
 
 **Expected**: `paired.json` with per-arm accuracy, flips, McNemar p, verdict for

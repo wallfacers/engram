@@ -17,7 +17,7 @@ superseded_by: docs/evaluation/experiment-verdicts.md
 
 本文件是 LoCoMo 检索/答题**杠杆实验的持久正本**(tracked,跨环境不失传)——记录每条杠杆的 verdict、真实数字、口径边界。本地 session memory 只做快速召回,结论以此为准。逐条细节见对应 `specs/NNN-*/eval-log.md`。
 
-**通用口径**:所有 coverage 数为 `--coverage-only` 的 exact-turn recall(turn@k),零 answer/judge 调用(免费);分母 = 有可解析 gold turn evidence 的题(locomo10 全量为 1532)。coverage 增益是端到端答题增益的**必要非充分**条件;声明答题分需另跑端到端。所有采纳杠杆按宪法 V **默认关 / opt-in**。
+**通用口径**:所有 coverage 数为 `--coverage-only` 的 exact-turn recall(turn@k),零 answer/judge 调用(免费);分母 = 有可解析 gold turn evidence 的题(locomo 全量为 1532)。coverage 增益是端到端答题增益的**必要非充分**条件;声明答题分需另跑端到端。所有采纳杠杆按宪法 V **默认关 / opt-in**。
 
 > ## 🏁 状态(2026-07-27):**LoCoMo 杠杆线已探尽,本台账停止新增方向**
 >
@@ -823,7 +823,7 @@ SDD 正本:[`specs/017-temporal-date-scaffold/`](../../../specs/017-temporal-dat
 **立意**:全量错题分诊实测 **caption-borne 18 题**(single-hop 17 + multi-hop 1)——gold 词面
 只出现在图片 `blip_caption` 里,而 caption **从未进过抽取输入**(`--image-captions` 默认关),
 店里根本没有这条证据。这是**唯一一条机理与"五连败"不同的剩余杠杆**:不是排序、不是表示改写、
-不是 prompt,是 **ingestion 覆盖缺口**。locomo10 实测 1226/5882 turn(20.8%)带 caption。
+不是 prompt,是 **ingestion 覆盖缺口**。locomo 实测 1226/5882 turn(20.8%)带 caption。
 
 ### 门:全量 1540,四臂,两套**同会话新建的同源店**
 

@@ -260,7 +260,7 @@ detach 并设置同 namespace closing marker，在锁外执行慢关闭，避免
 
 同日取得维护者 **¥16 硬上限**的显式成本授权后，完成可比 LoCoMo 端到端门禁：
 
-- 数据/店：`locomo10.json` 全量 1540 题，隔离复制
+- 数据/店：`locomo.json` 全量 1540 题，隔离复制
   `.locomo-run/009-bge-chunks-store`，`extract_calls=0`。
 - 模型栈：Qwen `Qwen/Qwen3.6-35B-A3B-FP8` answer、与店内模型标识一致的
   `BAAI/bge-large-en-v1.5` embed、`deepseek-v4-flash` judge。

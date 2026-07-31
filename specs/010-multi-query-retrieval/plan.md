@@ -26,7 +26,7 @@
 
 **Constraints**: 引擎离线可跑;`len==1` 退化保真逐字节不变;融合复用现有 RRF 常数、**无新可调权重**(tuning-free 可移植);禁云/付费 reranker(死规则);**最终 top-k=30 不变、answer-context 不涨**(提质硬约束——涨即加量判负);US2 期间 `git diff -- memory embedding provider store internal` 为空。
 
-**Scale/Scope**: LoCoMo locomo10 全量 1540 题(目标类 multi-hop;single-hop/temporal/open-domain 作非目标类监控不回退);单机单用户评测规模。
+**Scale/Scope**: LoCoMo locomo 全量 1540 题(目标类 multi-hop;single-hop/temporal/open-domain 作非目标类监控不回退);单机单用户评测规模。
 
 ## Constitution Check
 

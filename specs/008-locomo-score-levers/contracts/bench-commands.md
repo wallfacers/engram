@@ -18,7 +18,7 @@ JUDGE_PROVIDER=openai  JUDGE_BASE_URL=https://api.deepseek.com  JUDGE_MODEL=deep
 
 ```bash
 CGO_ENABLED=0 go run ./cmd/locomo-bench \
-  --data testdata/locomo/locomo10.json \
+  --data testdata/locomo/locomo.json \
   --store-dir .locomo-run/007-us2/cov-store \
   --coverage-only --chunks --top-k 30 --chunk-quota 12 \
   --retrieval 'hybrid,hybrid+rerank' \
@@ -36,7 +36,7 @@ CGO_ENABLED=0 go run ./cmd/locomo-bench \
 ```bash
 # 旧版(git stash / 旧 worktree)与新版各跑一次,其余参数完全一致:
 CGO_ENABLED=0 go run ./cmd/locomo-bench \
-  --data testdata/locomo/locomo10.json \
+  --data testdata/locomo/locomo.json \
   --store-dir .locomo-run/007-us2/cov-store \
   --chunks --top-k 100 --chunk-quota 50 \
   --retrieval hybrid --only-category 3 --judge-mem0-aligned \
@@ -52,11 +52,11 @@ CGO_ENABLED=0 go run ./cmd/locomo-bench \
 
 ```bash
 # 1) 大 embedder sidecar 起好(端口/模型见 contracts);整店重建:
-CGO_ENABLED=0 go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+CGO_ENABLED=0 go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir .locomo-run/008-bge-large-store --chunks \
   # (EMBED_MODEL=bge-large-en-v1.5, 本地 Qwen 抽取;--coverage-only 前先建店)
 # 2) coverage A/B:small-store vs large-store,同预算:
-CGO_ENABLED=0 go run ./cmd/locomo-bench --data testdata/locomo/locomo10.json \
+CGO_ENABLED=0 go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
   --store-dir <small|large>-store --coverage-only --chunks --top-k 30 --chunk-quota 12 \
   --retrieval hybrid --run-dir .locomo-run/008-embed-<small|large>
 ```

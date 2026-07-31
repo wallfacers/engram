@@ -484,7 +484,7 @@ category-1 全量**（离线统计：cat-1 命中 51/282，其中 33 错，要�
   --only-enumeration` 只返回 cat-1 且枚举命中的题；call-plan 缩减。
 - **Z3（evidence 诊断日志）**：每题 results 记录新增诊断字段（sweep 命中时必记，
   非 sweep 路径可留空）——(a) LoCoMo gold evidence（数据集 QA 的 evidence 字段，
-  映射到 session/dialog id；先确认 locomo10.json 的 evidence schema）、
+  映射到 session/dialog id；先确认 locomo.json 的 evidence schema）、
   (b) 检索到的 memory names、(c) 检索到的 source session ids、(d) sweep 前/后
   候选数、(e) evidence session recall = |gold evidence session ∩ 检索 session| /
   |gold evidence session|、(f) answer context token 数（已有则复用）。目的：

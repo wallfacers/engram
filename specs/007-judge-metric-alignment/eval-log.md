@@ -9,7 +9,7 @@
 ## US2 Strike 1: mem0-aligned 全量参考点(新栈)
 
 - **Date**: 2026-07-22 (10:50–11:34 +08:00, 单次连续运行)
-- **Dataset / repeats**: locomo10.json 全量 10 段 × 1540 题(cat 1-4,cat-5 排除) × repeats=1
+- **Dataset / repeats**: locomo.json 全量 10 段 × 1540 题(cat 1-4,cat-5 排除) × repeats=1
 - **Retrieval**: `hybrid`,`hybrid+assoc`,`hybrid+temporal` 三臂;**top-k 100 / chunk-quota 50**(统一慷慨预算)
 - **Answer + Extract model**: 本地 `Qwen/Qwen3.6-35B-A3B-FP8`(vllm,`enable_thinking:false`)
 - **Embedding**: 本地 `bge-small-en-v1.5`(fastembed sidecar,384d)

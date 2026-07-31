@@ -7,7 +7,7 @@
 
 | 项 | 值 |
 |----|----|
-| 数据集 | `testdata/locomo/locomo10.json`(HF `KimmoZZZ/locomo` 原版,10 段对话) |
+| 数据集 | `testdata/locomo/locomo.json`(HF `KimmoZZZ/locomo` 原版,10 段对话) |
 | 答题/判分 LLM | `gpt-5.6-luna`(OpenAI 协议中转站,`LOCOMO_PROVIDER=openai`) |
 | 抽取模型 | `gpt-5.4-mini`(EXTRACT_MODEL,提速) |
 | embedding | 本地 Ollama `qwen3-embedding:0.6b`(1024 维,`/v1/embeddings`) |

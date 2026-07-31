@@ -7,7 +7,7 @@ and the keep/revert decision together.
 ## Strike 0: Calibration Baseline
 
 - Date: 2026-07-19 (10:01–12:42 +08:00, 单次连续运行)
-- Dataset / repeats: locomo10.json 全量 10 段 × 1540 题(可判分四类) × repeats=5, single-pass (--no-idk-retry), hybrid, top_k=30
+- Dataset / repeats: locomo.json 全量 10 段 × 1540 题(可判分四类) × repeats=5, single-pass (--no-idk-retry), hybrid, top_k=30
 - Answer model: gpt-5.6-sol (答题+判分, 中转站 tokensfree)
 - Extract model candidates: A=gpt-5.6-luna, B=gpt-5.6-sol
 - Frozen extract model: **gpt-5.6-luna**（见 Decision）
@@ -97,7 +97,7 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
 金额可忽略。第三次运行（19:14 启动）健康：degraded=0，答题稳定产出。
 
 - Date: 2026-07-19（第三次运行，前两次中止见上）
-- Dataset / repeats: locomo10 全量（1540 题）× 5 repeats × 双臂 = 15400 answer calls
+- Dataset / repeats: locomo 全量（1540 题）× 5 repeats × 双臂 = 15400 answer calls
 - Flags: `--retrieval hybrid,hybrid+assoc --no-idk-retry --force-answer`（同进程配对，Amendment 001）
 - Estimate output: ¥95.40
 - Actual cost (`cost.json`): **¥139.50**（超预估 46%。分角色：answer ¥78.95、judge
@@ -133,7 +133,7 @@ SIGQUIT 终止（goroutine dump 留存于当时的 strike1.log）。链式根因
 ## Strike 2: Temporal Retrieval
 
 - Date: 2026-07-19 ~ 2026-07-20（全新建库 s2-store，5 repeats）
-- Dataset / repeats: locomo10.json（英文，1540 题）× 5 repeats，配对双臂
+- Dataset / repeats: locomo.json（英文，1540 题）× 5 repeats，配对双臂
 - Flags: `--retrieval hybrid,hybrid+temporal --no-idk-retry --force-answer
   --temporal-answer-prompt`（**两臂共用 temporal_answer_prompt=true**，唯一
   变量是检索侧时间打分）
@@ -341,7 +341,7 @@ offline probe (`--abstain-probe`, zero answer/judge token — adversarial
 offline) must clear SC-003 before any paid answering.
 
 - Date: 2026-07-21
-- Dataset / repeats: locomo10 全量 1986 题(446 对抗 + 1540 可答),单次离线探针
+- Dataset / repeats: locomo 全量 1986 题(446 对抗 + 1540 可答),单次离线探针
 - Flags: `--abstain-probe --store-dir <reused 10-conv store> --pcic-meta <005 sidecar>
   --retrieval {hybrid, hybrid+rerank}`；两个 confidence 变体(mean-blended / top-1)
 - Estimate / Actual cost: **¥0 answer/judge**（US1 全离线；本地 fastembed bge-small

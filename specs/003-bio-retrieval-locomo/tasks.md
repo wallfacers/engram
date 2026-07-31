@@ -86,7 +86,7 @@
 - [x] T011 [US1] 报告层打通：`aggregator` 扩展 per-桶 CI 输出、`reportDelta` 兼容
       compare 模式、`results.jsonl` 记录 LME 原始题型（`cmd/locomo-bench/main.go`）
 
-**Checkpoint**: 全部离线单测绿；`--estimate` 对 locomo10 输出费用预估；
+**Checkpoint**: 全部离线单测绿；`--estimate` 对 locomo 输出费用预估；
 人造 run-dir 对拍 compare verdict 正确
 
 ---

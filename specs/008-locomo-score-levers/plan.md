@@ -26,7 +26,7 @@
 
 **Constraints**: 死规则(本地 reranker only);引擎目录 `git diff` 必须空;凭据只走 env/隧道;采纳杠杆默认 off(宪法 V);eval 单独提交、声明新参考点(宪法 IV)。
 
-**Scale/Scope**: LoCoMo locomo10 全量 10 段 × 1540 题(cat1-4);US1/US3 coverage 复用固化 store;US2 仅 open-domain(cat3,约 96 题)A/B。
+**Scale/Scope**: LoCoMo locomo 全量 10 段 × 1540 题(cat1-4);US1/US3 coverage 复用固化 store;US2 仅 open-domain(cat3,约 96 题)A/B。
 
 ## Constitution Check
 

@@ -29,7 +29,7 @@
 **Acceptance Scenarios**:
 
 1. **Given** 本地 reranker sidecar 就绪且 `EMBED_RERANK_MODEL` 指向本地模型,**When** 跑
-   `--data testdata/locomo/locomo10.json --store-dir .locomo-run/007-us2/cov-store --coverage-only --chunks --top-k 30 --chunk-quota 12 --retrieval 'hybrid,hybrid+rerank'`,
+   `--data testdata/locomo/locomo.json --store-dir .locomo-run/007-us2/cov-store --coverage-only --chunks --top-k 30 --chunk-quota 12 --retrieval 'hybrid,hybrid+rerank'`,
    **Then** 产出 `coverage.json`,含两臂 turn@k(overall + multi-hop/temporal/open-domain/single-hop)+ session_recall,**零** answer/judge LLM 调用。
 2. **Given** 上述结果,**When** 比较 `hybrid+rerank` 对 `hybrid` 的 overall turn@k,**Then** 抬升 **≥ +4pp**(多跳为关键类,付费版曾 +8.3pp)判「本地 reranker 复现可移植赢」→ PASS;否则判「本地模型追不平」→ 记录并转 US3 备胎(可换本地模型再试一次)。
 3. **Given** reranker 通道,**When** 检查 sidecar 加载来源,**Then** 确认为**本地模型文件**(非任何云 rerank API 代理);`EMBED_BASE_URL` 仅经 SSH 隧道指向自托管 sidecar。

@@ -26,7 +26,7 @@
 用法
 ----
     python3 scripts/oracle-category-coverage.py \
-        testdata/locomo/locomo10.json \
+        testdata/locomo/locomo.json \
         .locomo-run/<run>/trace-base.jsonl \
         .locomo-run/009-bge-chunks-store \
         .locomo-run/009-opinion-store \

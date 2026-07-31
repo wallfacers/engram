@@ -179,7 +179,7 @@ LoCoMo 上的同一对照是 0.808 / 0.841。两个 benchmark 上宽松尺子都
 |---|---|---|
 | T038 引擎零改动 | `git diff --name-only -- memory embedding provider store internal` | **空**（工作树与近 6 次提交均是） |
 | T039 全量回归 | `CGO_ENABLED=0 go build ./...` / `go test -count=1 ./...` | build exit 0；**14 包全绿，0 FAIL** |
-| T040 LoCoMo 零行为变更 | `--data testdata/locomo/locomo10.json --estimate` | `questions=1540 extract_calls=288`，**与 T001 锚点逐字相同** |
+| T040 LoCoMo 零行为变更 | `--data testdata/locomo/locomo.json --estimate` | `questions=1540 extract_calls=288`，**与 T001 锚点逐字相同** |
 | T036 判据完整性 | `sha256sum criterion.txt` | `2142f722…09ba`，**与登记值一致** |
 
 T040 是宪法 IV 的核心证据：016 只动 loader 的 LongMemEval 分支与归因门，LoCoMo

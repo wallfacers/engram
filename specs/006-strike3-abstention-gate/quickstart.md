@@ -14,7 +14,7 @@ Validation guide proving the feature works end-to-end. See [contracts/cli-and-ar
 ```bash
 CGO_ENABLED=0 go build ./cmd/locomo-bench
 ./locomo-bench --abstain-probe \
-  --data testdata/locomo/locomo10.json \
+  --data testdata/locomo/locomo.json \
   --store-dir <persisted-store> \
   --pcic-meta <persisted-store>/pcic_meta.json \
   --abstain-probe-out ./scratch/abstain-probe.json
