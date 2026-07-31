@@ -4,7 +4,7 @@ summary: 本文把 LoCoMo 与 LongMemEval 的完整系统成绩、受控机制�
 status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-30
+last_reviewed: 2026-07-31
 canonical_for: [high-scoring-memory-systems]
 tags: [research, memory, locomo, longmemeval]
 ---
@@ -173,6 +173,27 @@ engram 的默认或推荐栈不得用付费云 reranker/recall model 涨分。�
 每项实验都必须冻结数据、候选池或候选预算、answerer、judge、prompt 与上下文 token，
 报告逐题结果、分类别回退、证据覆盖率和成本。未通过独立消融的 Event、Scene、Profile、
 graph 均不得成为必须经过的架构层。
+
+## 022 本地机制证据更新（2026-07-31）
+
+022 当前只得到可用于缩小假设空间的诊断证据，尚未得到正式双基准 promotion 证据：
+
+- LoCoMo lossless B0 的三次多数为 1,314/1,540（85.32%），但 B0 按合同只作 continuity。
+- 请求 extractive compiler 的单次命令为 1,291/1,540（83.83%），平均 answer context
+  3,605 token；但它未带 `--eval-protocol`，compiler flag 被普通 runner 静默忽略，并
+  发生 1,546 次 answer 与 6 次 rewrite。因此它不是 Compiler 机制证据；CLI 已改为对
+  formal context 外的 mechanism flags fail closed。
+- coverage-only 扫描在 top-k 30/60 的 turn recall 都为 0.808；从约 3,600 token 降到
+  约 1,200 token 时 turn recall 从 0.808 降到 0.641。该结果继续支持连续 coverage
+  分层，不支持把 `recall >= 0.95` 固化为通用阈值。
+- pure-fact 把平均 context 从 3,605 降到 1,529 token，却把总体从 83.83% 降到
+  73.70%，其中 single-hop −16.0pp。故“chunk 直接替换为抽象 fact”是 NO-GO；若继续
+  研究紧凑表示，必须保留可复原 verbatim span，而不是把 write-time 摘要当作真相。
+
+这些内部结果没有改变上述论文事实：Merge 的有效已登记区间仍是
+`−0.107 [−0.204, −0.013]`，coverage 仍按连续量解释，judge/分母仍是第一优先级有效性
+门。修复后的正式 LoCoMo/LongMemEval B1、双 reviewer judge audit 和逐题配对统计未完成，
+所以 022 当前 verdict 只能是 `HOLD`，不能把任一实验臂写成默认能力。
 
 ## Mem0 数值目标的边界
 

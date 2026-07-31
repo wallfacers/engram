@@ -32,6 +32,37 @@ func TestPrepareFrozenEvalOptionsRejectsIRISAndForcesOneAnswerPath(t *testing.T)
 	}
 }
 
+func TestMechanismArmsRequireFormalProtocolContext(t *testing.T) {
+	for name, mutate := range map[string]func(*options){
+		"representation": func(opt *options) { opt.representationArm = ReprRawTurnWindow },
+		"compiler":       func(opt *options) { opt.compilerArm = "extractive" },
+		"event gap": func(opt *options) {
+			opt.eventProjection = "E1"
+			opt.gapRefetch = true
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			diagnostic := options{representationArm: ReprChunk900}
+			mutate(&diagnostic)
+			if err := validateMechanismArms(diagnostic); err == nil {
+				t.Fatalf("non-formal %s mechanism was silently accepted", name)
+			}
+
+			formalRun := diagnostic
+			formalRun.evalProtocolPath = "protocol.json"
+			if err := validateMechanismArms(formalRun); err != nil {
+				t.Fatalf("formal-run %s mechanism rejected: %v", name, err)
+			}
+
+			formalFreeze := diagnostic
+			formalFreeze.evalFreezeProtocol = "protocol.json"
+			if err := validateMechanismArms(formalFreeze); err == nil {
+				t.Fatalf("formal-freeze %s mechanism was accepted before T114 can bind it", name)
+			}
+		})
+	}
+}
+
 func TestGateUsageOnceNeverRetriesFormalProviderAttempt(t *testing.T) {
 	calls := 0
 	caller := func(context.Context, string, string) (string, provider.Usage, error) {
@@ -257,6 +288,88 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	}
 }
 
+func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T) {
+	t.Setenv("EMBED_FINGERPRINT", "sha256:embedding")
+	baseProtocol := testEvalProtocol()
+	baseProtocol.Retrieval.Recipe = "hybrid"
+	baseProtocol.Store.SchemaVersion = 7
+	baseProtocol.Store.IngestionRecipe = "ledger_lossless_chunks_v2"
+	baseProtocol.Store.IngestionConfigDigest = evalJSONDigest(evalFreezeIngestion{Chunks: true})
+	baseProtocol.Store.ProjectionBuilderVersions = map[string]string{"atomic_fact": "entry_store_explicit_v1"}
+	baseProtocol.Retrieval.CandidateRulesDigest = evalJSONDigest(evalFreezeCandidateRules{
+		TopK: 30, ChunkQuota: 7, Chunks: true, Retrieval: "hybrid",
+	})
+	opt := options{repeats: 3, topK: 30, chunkQuota: 7, chunks: true, maxTokens: 8000}
+	if err := validateFormalRunnerOptions(baseProtocol, opt, []string{"hybrid"}); err != nil {
+		t.Fatalf("formal runner rejected frozen legacy control: %v", err)
+	}
+
+	// Phase 8 supports only the frozen B1 legacy control. Treatment manifests
+	// and flags remain fail-closed until T114 implements candidate replay and
+	// bidirectional option/manifest binding.
+	for name, mutate := range map[string]func(*options){
+		"compiler arm":   func(o *options) { o.compilerArm = "extractive" },
+		"representation": func(o *options) { o.representationArm = ReprRawTurnWindow },
+		"event + gap": func(o *options) {
+			o.eventProjection = "E1"
+			o.gapRefetch = true
+		},
+	} {
+		t.Run("unbound "+name, func(t *testing.T) {
+			drifted := opt
+			mutate(&drifted)
+			if err := validateFormalRunnerOptions(baseProtocol, drifted, []string{"hybrid"}); err == nil {
+				t.Fatalf("formal runner accepted %s against a manifest that does not bind it", name)
+			}
+		})
+	}
+
+	t.Run("non-legacy b1 arm without CLI flag", func(t *testing.T) {
+		drifted := baseProtocol
+		drifted.Experiment.Arm = "deterministic_extractive_compiler"
+		if err := validateFormalRunnerOptions(drifted, opt, []string{"hybrid"}); err == nil {
+			t.Fatal("formal runner accepted a non-legacy B1 arm without a treatment flag")
+		}
+	})
+	t.Run("treatment manifest remains unavailable", func(t *testing.T) {
+		treatment := baseProtocol
+		treatment.Experiment = evalExperimentProtocol{
+			Stage: "representation_rendering", Arm: string(ReprRawTurnWindow), PrimaryCohort: "all",
+			ControlProtocolHash: "sha256:control",
+			MechanismFlags:      map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+		}
+		treatmentOpt := opt
+		treatmentOpt.representationArm = ReprRawTurnWindow
+		if err := validateFormalRunnerOptions(treatment, treatmentOpt, []string{"hybrid"}); err == nil {
+			t.Fatal("formal runner accepted a treatment manifest before T114")
+		}
+	})
+	t.Run("combined mechanisms remain unavailable", func(t *testing.T) {
+		treatment := baseProtocol
+		treatment.Experiment = evalExperimentProtocol{
+			Stage: "representation_rendering", Arm: string(ReprRawTurnWindow), PrimaryCohort: "all",
+			ControlProtocolHash: "sha256:control",
+			MechanismFlags:      map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+		}
+		combined := opt
+		combined.representationArm = ReprRawTurnWindow
+		combined.eventProjection = "E1"
+		combined.gapRefetch = true
+		if err := validateFormalRunnerOptions(treatment, combined, []string{"hybrid"}); err == nil {
+			t.Fatal("formal runner accepted multiple treatment mechanisms before T114")
+		}
+	})
+	t.Run("legacy manifest mechanism flag", func(t *testing.T) {
+		drifted := baseProtocol
+		drifted.Experiment.MechanismFlags = map[string]bool{
+			"idk_retry": false, "iris": false, "rerank": false, "gap_refetch": true,
+		}
+		if err := validateFormalRunnerOptions(drifted, opt, []string{"hybrid"}); err == nil {
+			t.Fatal("formal runner accepted a treatment mechanism flag in the legacy manifest")
+		}
+	})
+}
+
 func TestFreezeFormalB1ProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *testing.T) {
 	base := options{
 		evalBudgetProfile:   "low",
@@ -265,9 +378,17 @@ func TestFreezeFormalB1ProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t 
 		retrieval:           "hybrid",
 	}
 	for name, mutate := range map[string]func(*options){
-		"suffixed recipe": func(opt *options) { opt.retrieval = "hybrid+rerank" },
-		"build mode":      func(opt *options) { opt.doc2queryBuild = true },
-		"diagnostic mode": func(opt *options) { opt.coverageOnly = true },
+		"suffixed recipe":  func(opt *options) { opt.retrieval = "hybrid+rerank" },
+		"build mode":       func(opt *options) { opt.doc2queryBuild = true },
+		"diagnostic mode":  func(opt *options) { opt.coverageOnly = true },
+		"compiler arm":     func(opt *options) { opt.compilerArm = "extractive" },
+		"representation":   func(opt *options) { opt.representationArm = ReprRawTurnWindow },
+		"event projection": func(opt *options) { opt.eventProjection = "E1" },
+		"gap refetch":      func(opt *options) { opt.gapRefetch = true },
+		"event + gap": func(opt *options) {
+			opt.eventProjection = "E1"
+			opt.gapRefetch = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			opt := base

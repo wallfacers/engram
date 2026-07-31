@@ -4,7 +4,7 @@ summary: 本文说明竞品自报、论文高分和同栈复现的比较边界�
 status: active
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-29
+last_reviewed: 2026-07-31
 canonical_for: [competitors]
 tags: [evaluation, competitors, methodology]
 ---
@@ -28,6 +28,13 @@ Mem0、MemOS 或其他厂商的公开数字可作为外部来源记录，但必�
 Mem0 2025 论文只报告 LoCoMo，其结果与后续托管平台 New Memory Algorithm 的
 LoCoMo/LongMemEval 自报不是同一套系统和口径。后者不可由开源 SDK 同栈复现，
 因此只能作为数值方向锚。
+
+022 在 2026-07-31 的单次 LoCoMo 命令未带 `--eval-protocol`，所以请求的 compiler flag
+被静默忽略；同时没有使用与当前基线相同的 category-top-k/三次多数协议，并发生额外
+answer/rewrite。它既不是 Compiler 证据、正式双基准结果，也不是 Mem0/MemOS 对照。
+Pure-fact 与 recall×budget 扫描只支持内部负结论：压低上下文会同步损失 gold-source
+survival，不能据此声明竞品优劣。数值与 artifact hashes 只在
+[当前评测结果](results.md)维护。
 
 ## 论文成绩与机制记录
 

@@ -82,6 +82,53 @@ func TestCompilePropagatesCallerCancellationBeforeResolver(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsCandidateAndSourceBoundsBeforeResolution(t *testing.T) {
+	content := "Alice met Bob."
+	candidate := Candidate{
+		ID:         "candidate-1",
+		Kind:       CandidateRawTurn,
+		Rank:       1,
+		Text:       content,
+		TextDigest: sha256Hex(content),
+		SourceIDs:  []string{"src-1"},
+	}
+
+	t.Run("candidate limit", func(t *testing.T) {
+		resolver := &compilerTestResolver{}
+		req := compilerTestRequest(content, resolver, compilerLengthCounter{fingerprint: "tokenizer-v1"}, nil, 100)
+		second := candidate
+		second.ID = "candidate-2"
+		second.Rank = 2
+		second.SourceIDs = []string{"src-2"}
+		req.Candidates = []Candidate{candidate, second}
+		req.MaxCandidates = 1
+
+		_, _, err := Compile(context.Background(), req)
+		if !errors.Is(err, ErrInvalidCandidate) {
+			t.Fatalf("Compile(candidate overflow) error = %v, want ErrInvalidCandidate", err)
+		}
+		if resolver.calls != 0 {
+			t.Fatalf("Compile(candidate overflow) resolver calls = %d, want 0", resolver.calls)
+		}
+	})
+
+	t.Run("source limit", func(t *testing.T) {
+		resolver := &compilerTestResolver{}
+		req := compilerTestRequest(content, resolver, compilerLengthCounter{fingerprint: "tokenizer-v1"}, nil, 100)
+		candidate.SourceIDs = []string{"src-1", "src-2"}
+		req.Candidates = []Candidate{candidate}
+		req.MaxSources = 1
+
+		_, _, err := Compile(context.Background(), req)
+		if !errors.Is(err, ErrInvalidCandidate) {
+			t.Fatalf("Compile(source overflow) error = %v, want ErrInvalidCandidate", err)
+		}
+		if resolver.calls != 0 {
+			t.Fatalf("Compile(source overflow) resolver calls = %d, want 0", resolver.calls)
+		}
+	})
+}
+
 func compilerTestRequest(content string, resolver SourceResolver, counter TokenCounter, planner Planner, cap int) CompileRequest {
 	return CompileRequest{
 		Query: "What did Alice do?",

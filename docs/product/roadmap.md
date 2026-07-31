@@ -4,7 +4,7 @@ summary: 本文维护当前产品方向、待决的双基准架构探索与排�
 status: active
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-29
+last_reviewed: 2026-07-31
 canonical_for: [product-roadmap]
 tags: [product, roadmap, decisions]
 ---
@@ -18,10 +18,14 @@ tags: [product, roadmap, decisions]
 - 保持显式写入、namespace 隔离和离线降级的可靠边界。
 - 将新鲜度与状态一致性作为独立的未实现 backlog，先定义可审计状态模型再进入实施。
 - 把评测可靠性、协议记录与可复现性作为持续维护能力，而不是把单次涨分当作路线输入。
-- 以[查询期证据编译架构探索](explorations/benchmark-parity-memory-architecture.md)
-  评估 Evidence Ledger、Semantic Episode 和固定候选 Evidence Compiler；Event、
-  Scene、Profile 与 graph 只在独立消融过门后加入。该工作仍为 `proposed`，未批准
-  进入实现。
+- Evidence Ledger 已作为 schema v7 与 additive engine/MCP 合同交付；继续以
+  [查询期证据编译架构探索](explorations/benchmark-parity-memory-architecture.md)
+  评估 Semantic Episode 和固定候选 Evidence Compiler。022 当前仍因正式 B1、双人
+  judge audit 与 LongMemEval-S 配对证据缺失而 `HOLD`；Event、Scene、Profile 与 graph
+  即使已有影子实验代码，也只有独立双基准消融过门后才有资格进入产品化设计。
+- 若纯本地、同预算的 022 机制不能达到双目标，训练型本地 evidence compiler/answerer
+  作为独立 023 工作推进；不得用更强云 answerer、付费 reranker 或更大上下文把它包装成
+  022 的机制收益。
 
 ## 明确排除
 

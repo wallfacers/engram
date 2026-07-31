@@ -257,6 +257,9 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
 		return err
 	}
+	if err := validateFormalMechanismBinding(protocol, opt); err != nil {
+		return err
+	}
 	if strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" ||
 		len(opt.catTopK) != 0 || len(opt.catQuota) != 0 {
 		return fmt.Errorf("formal 022 evaluation refuses category-specific candidate budgets")
@@ -331,6 +334,46 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 		return fmt.Errorf("formal B1 legacy control refuses unfrozen retrieval, store, selector, shadow, build, or diagnostic modes")
 	}
 	return nil
+}
+
+// validateFormalMechanismBinding keeps the current formal runner limited to
+// the frozen B1 legacy control. Treatment manifests need bidirectional
+// option/manifest binding, exact arm-name mapping, candidate replay, and
+// single-mechanism enforcement; T114 owns that complete contract. Until then,
+// accepting either a treatment manifest or a treatment CLI flag would create
+// a mislabeled artifact, so both directions fail closed.
+func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
+	exp := protocol.Experiment
+	if exp.Stage != "b1" || exp.Arm != "legacy_count_packer" || exp.ControlProtocolHash != "" {
+		return fmt.Errorf("formal runner supports only the frozen b1/legacy_count_packer control until T114, got %q/%q",
+			exp.Stage, exp.Arm)
+	}
+	if !isFormalLegacyControlMechanismFlags(exp.MechanismFlags) {
+		return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
+	}
+	if formalTreatmentMechanismRequested(opt) {
+		return fmt.Errorf("formal b1/legacy_count_packer run cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch until T114")
+	}
+	return nil
+}
+
+func isFormalLegacyControlMechanismFlags(flags map[string]bool) bool {
+	if len(flags) != 3 {
+		return false
+	}
+	for _, name := range []string{"idk_retry", "iris", "rerank"} {
+		value, ok := flags[name]
+		if !ok || value {
+			return false
+		}
+	}
+	return true
+}
+
+func formalTreatmentMechanismRequested(opt options) bool {
+	return opt.compilerArm != "" ||
+		(opt.representationArm != "" && opt.representationArm != ReprChunk900) ||
+		opt.eventProjection != "" || opt.gapRefetch
 }
 
 // admitFormalQuestion limits in-flight retrieve→pack→answer pipelines. It is
@@ -962,6 +1005,13 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	}
 	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
 		return err
+	}
+	// The B1 freezer only writes the legacy_count_packer control manifest. A
+	// treatment flag would be silently dropped from the manifest (the artifact
+	// would then claim legacy while a treatment actually ran), so fail closed
+	// at freeze time until T114 adds treatment stage/arm/mechanism binding.
+	if formalTreatmentMechanismRequested(opt) {
+		return fmt.Errorf("formal B1 freeze cannot bind treatment mechanisms yet (T114); pass no --compiler-arm/--representation/--event-projection/--gap-refetch")
 	}
 	if len(opt.catTopK) != 0 || len(opt.catQuota) != 0 ||
 		strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" {

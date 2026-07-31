@@ -4,7 +4,7 @@ summary: 本文汇总已收口实验的可执行 verdict 与证据入口；不�
 status: stable
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-29
+last_reviewed: 2026-07-31
 canonical_for: [experiment-verdicts]
 tags: [evaluation, verdicts, evidence]
 ---
@@ -13,7 +13,7 @@ tags: [evaluation, verdicts, evidence]
 
 本文是已收口实验的唯一裁决入口；完整当前分数见[当前评测结果](results.md)，逐次过程、旧基线和原始数字见[LoCoMo 历史实验台账](../archive/evaluation/locomo-experiment-ledger-2026-07.md)。本页不把覆盖率、代理指标或单次差值写成默认能力。
 
-## Feature 003–021 的交付与实验裁决
+## Feature 003–022 的交付与实验裁决
 
 | Feature | Verdict | 范围及最终结论 | 出货影响 | 证据 |
 |---|---|---|---|---|
@@ -34,6 +34,7 @@ tags: [evaluation, verdicts, evidence]
 | 017 | closed-no-go | 确定性 TIMELINE 脚手架实现正确，但端到端结果落在噪声内。 | `--temporal-date-scaffold` 默认关闭、不出货。 | [规格](../../specs/017-temporal-date-scaffold/spec.md) · [历史证据](../archive/evaluation/locomo-experiment-ledger-2026-07.md) |
 | 018 | shipped-opt-in | curation 生命周期与索引完整性已交付。 | 显式启用；默认 MCP 行为保持不变，不是 LoCoMo 涨点。 | [规格](../../specs/018-curation-lifecycle-cleanup/spec.md) · [任务验收](../../specs/018-curation-lifecycle-cleanup/tasks.md) |
 | 021 | closed-no-go | 「真实超越」检索侧路线收口。(A) 低预算复用 003 `--assoc` graph：tk7 temporal **−7.17pp（p=0.011）**。(C/US1) IRIS 证据缺口迭代检索 temporal MVP：tk7 temporal **−9.35pp（b=15 c=45，exact p=0.000135）**，预算对齐（1099≈1083）非预算问题，slot 合并挤掉 round-0 好时序证据。两者均证伪；叠加 008/013/014/017 共 **6 次** temporal 检索/答题杠杆全 NO-GO。结论：MemOS 对齐预算下 temporal 真差距在**写入侧结构化记忆**（tree/graph），检索侧已穷尽。 | `--assoc`/`--iris` 均不进默认检索（default-off）。 | [spec 021](../../specs/021-iris-evidence-gap-retrieval/spec.md) · [budget-ablation](reports/budget-ablation.md) |
+| 022 | in-progress-hold | Evidence Ledger/schema v7 与来源/隐私生命周期合同已交付；Episode、Compiler、Event/gap/窄 projection 代码仍是待正式消融的实验面。有效 LoCoMo B0 为 85.32% continuity-only；请求 compiler 的 83.83% 单次命令未带 formal protocol，flag 被 legacy runner 忽略且发生 1,546 answer/6 rewrite，故不是机制证据；pure-fact 73.70% 为配置 NO-GO。正式 B1、LongMemEval-S、双 reviewer audit 和双基准配对门未完成。 | Ledger 可用；所有 query-time treatment/default promotion 保持关闭，最终 verdict 仍 `HOLD`。 | [规格](../../specs/022-benchmark-parity-memory-architecture/spec.md) · [评测记录](reports/benchmark-parity-memory-architecture.md) |
 
 ## 判定规则
 

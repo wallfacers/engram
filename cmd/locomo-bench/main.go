@@ -1605,6 +1605,17 @@ func validateMechanismArms(opt options) error {
 	if err := validateRepresentationArm(opt.representationArm); err != nil {
 		return err
 	}
+	formalContext := strings.TrimSpace(opt.evalProtocolPath) != "" || strings.TrimSpace(opt.evalFreezeProtocol) != ""
+	if !formalContext {
+		switch {
+		case opt.representationArm != "" && opt.representationArm != ReprChunk900:
+			return fmt.Errorf("--representation requires --eval-protocol or --eval-freeze-protocol")
+		case opt.compilerArm != "":
+			return fmt.Errorf("--compiler-arm requires --eval-protocol or --eval-freeze-protocol")
+		case opt.eventProjection != "" || opt.gapRefetch:
+			return fmt.Errorf("--event-projection/--gap-refetch require --eval-protocol or --eval-freeze-protocol")
+		}
+	}
 	switch opt.compilerArm {
 	case "", "extractive", "planner":
 	default:
@@ -1622,6 +1633,9 @@ func validateMechanismArms(opt options) error {
 	}
 	if opt.gapRefetch && opt.eventProjection == "" {
 		return fmt.Errorf("--gap-refetch requires --event-projection")
+	}
+	if strings.TrimSpace(opt.evalFreezeProtocol) != "" && formalTreatmentMechanismRequested(opt) {
+		return fmt.Errorf("--eval-freeze-protocol cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch until T114")
 	}
 	return nil
 }

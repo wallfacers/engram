@@ -275,16 +275,16 @@ gate 的机制有资格进入产品化设计。
 **Purpose**: 完成文档、性能、安全、宪法和最终双基准门；不得用清理阶段偷改算法或评测
 配置。
 
-- [ ] T099 [P] 把最终机制证据、正确分母/judge 口径、Merge CI 和非阈值化 coverage 结论同步到 `docs/research/high-scoring-memory-systems.md` 与 `docs/product/explorations/benchmark-parity-memory-architecture.md`
-- [ ] T100 [P] 更新公开能力/路线/竞争边界且不把实验臂写成已交付能力到 `docs/product/capabilities.md`、`docs/product/roadmap.md` 和 `docs/evaluation/competitors.md`
-- [ ] T101 [P] 更新 022 当前分数、artifact hashes、成本与所有负结果到 `docs/evaluation/results.md`、`docs/evaluation/experiment-verdicts.md` 和 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T102 运行 `node --test docs/validation/check-docs.test.mjs` 与文档链接/metadata 校验，修复本特性引入的问题到 `docs/validation/check-docs.mjs` 或对应 022/docs 文件
-- [ ] T103 运行 `CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...` 和 `CGO_ENABLED=0 go vet ./...`，把完整输出摘要写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T104 运行 migration rollback、deterministic parity、MCP schema、namespace isolation、003 graph unchanged 和 offline degradation 门，并把结果写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T105 运行 100k Evidence/projection 性能、batch lineage 无 N+1、Compiler candidate bounds 和 purge checkpoint 压测，把诚实边界写入 `docs/product/capabilities.md`
-- [ ] T106 [P] 执行 secret/log/artifact 扫描与 privacy purge 恢复性检查，修复范围限于 `mcpserver/secrets_test.go`、`cmd/locomo-bench/testdata/022/README.md` 和相关 engine tests
+- [X] T099 [P] 把最终机制证据、正确分母/judge 口径、Merge CI 和非阈值化 coverage 结论同步到 `docs/research/high-scoring-memory-systems.md` 与 `docs/product/explorations/benchmark-parity-memory-architecture.md`
+- [X] T100 [P] 更新公开能力/路线/竞争边界且不把实验臂写成已交付能力到 `docs/product/capabilities.md`、`docs/product/roadmap.md` 和 `docs/evaluation/competitors.md`
+- [X] T101 [P] 更新 022 当前分数、artifact hashes、成本与所有负结果到 `docs/evaluation/results.md`、`docs/evaluation/experiment-verdicts.md` 和 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [X] T102 运行 `node --test docs/validation/check-docs.test.mjs` 与文档链接/metadata 校验，修复本特性引入的问题到 `docs/validation/check-docs.mjs` 或对应 022/docs 文件
+- [X] T103 运行 `CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...` 和 `CGO_ENABLED=0 go vet ./...`，把完整输出摘要写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [X] T104 运行 migration rollback、deterministic parity、MCP schema、namespace isolation、003 graph unchanged 和 offline degradation 门，并把结果写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
+- [X] T105 运行 100k Evidence/projection 性能、batch lineage 无 N+1、Compiler candidate bounds 和 purge checkpoint 压测，把诚实边界写入 `docs/product/capabilities.md`
+- [X] T106 [P] 执行 secret/log/artifact 扫描与 privacy purge 恢复性检查，修复范围限于 `mcpserver/secrets_test.go`、`cmd/locomo-bench/testdata/022/README.md` 和相关 engine tests
 - [ ] T107 用冻结 default recipe 完成 LoCoMo 1,540 与 LongMemEval-S 500 full runs、judge audit、逐题 artifacts、exact paired/category gates和成本统计，把最终 hashes/verdict 写入 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
-- [ ] T108 对照 `.specify/memory/constitution.md` 和 `specs/022-benchmark-parity-memory-architecture/spec.md` 审核五项原则与 SC-001–SC-015；若双目标或必需合同仍未满足，使用 `speckit-converge` 把剩余证据支持的工作追加到 `specs/022-benchmark-parity-memory-architecture/tasks.md`，不得把 022 标为完成
+- [X] T108 对照 `.specify/memory/constitution.md` 和 `specs/022-benchmark-parity-memory-architecture/spec.md` 审核五项原则与 SC-001–SC-015；若双目标或必需合同仍未满足，使用 `speckit-converge` 把剩余证据支持的工作追加到 `specs/022-benchmark-parity-memory-architecture/tasks.md`，不得把 022 标为完成
 
 ---
 
@@ -462,3 +462,8 @@ Scene/Profile/graph 可并行，但必须分别运行、分别 verdict。
 - 付费 hosted reranker/recall 只能 diagnostic，不能作为 GO/default 得分。
 - 每个 benchmark task 先 `--estimate`，再按 WSL2 `setsid` detach；不得前台等待。
 - 未满足 SC-002/SC-003、artifact validity、judge audit 或宪法门时，022 不得标为完成。
+
+## Phase 9: Convergence
+
+- [ ] T114 为 representation/compiler/event/gap/projection treatment 实现可冻结、可重放且 fail-closed 的 formal protocol：manifest 必须记录真实 `stage`、`arm`、mechanism flags 与 B1 `control_protocol_hash`，Compiler 四臂必须逐字节读取同一 `candidate-replay`（包含 exact-token arm、post-freeze retrieval=0），runner 必须拒绝 option/manifest/candidate digest 漂移；补齐 CLI、artifact validator 和集成测试到 `cmd/locomo-bench/eval_protocol.go`、`eval_runner.go`、`eval_artifact.go`、`main.go` 及对应 tests，满足 FR-003、FR-014、FR-036、FR-040、SC-005、SC-006、SC-008、SC-014（partial）
+- [ ] T115 实现可运行的 judge-audit prepare/finalize workflow：从 control/treatment 三次结果确定性生成全 discordant + 分层 concordant 的盲化 reviewer packets，私有 arm/raw-label key 分离保存，严格导入两位独立 reviewer 与必要 adjudication，输出 raw/corrected FN/FP/agreement/verdict-change summary 并绑定 protocol/artifact hashes；接入 `cmd/locomo-bench` CLI、离线 tests 和 `cmd/locomo-bench/testdata/022/README.md`，满足 FR-037、FR-041、SC-013、SC-015（missing）

@@ -4,7 +4,7 @@ summary: 本文维护 engram 当前可引用的 LoCoMo 与 LongMemEval-S 结果�
 status: active
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-29
+last_reviewed: 2026-07-31
 canonical_for: [evaluation-results]
 tags: [evaluation, locomo, longmemeval, results]
 ---
@@ -27,6 +27,36 @@ tags: [evaluation, locomo, longmemeval, results]
 | LoCoMo（cat 1–4） | 1540 | deepseek-v4-pro | deepseek-v4-flash | canonical recipe、3 次答题多数 | 89.03% | 强 answerer 探针，不能与本地基线混作默认分 |
 | LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local-first、3 次答题多数 | 80.80% | 历史 full 500 本地栈测量；见下方口径更正 |
 | LongMemEval-S（cleaned） | 500 | deepseek-v4-pro | deepseek-v4-flash | 与本地臂相同检索、3 次答题多数 | 86.00% | 历史强 answerer 探针；同受下方口径更正约束 |
+
+## 022 当前证据：正式双基准仍未完成
+
+022 已产生一个有效但不具 promotion 资格的 LoCoMo B0 continuity：三次原始结果为
+1,297、1,313、1,320/1,540，多数票 1,314/1,540（85.32%）。它真实记录 4,627 次
+answer、7 次 rewrite 和 4,620 次 judge；protocol hash 为
+`sha256:49ba0fa3a53afde56ac3a4a34168aea797375e9fea4bf507f7c2abda779ae41c`，
+summary 文件 SHA-256 为
+`4463576a0b65586d575cf08d09159960dc5bbf2ecc36f6579215cc682146fff8`。
+B0 仅用于历史连续性，不能作为 B1 control 或 SC-002 结果。
+
+后续两个 LoCoMo 单次探针均不进入上方当前结果矩阵：
+
+| 探针 | 结果 | 平均 answer context | 关键有效性边界 | Verdict |
+|---|---:|---:|---|---|
+| 请求 extractive compiler、实际为 legacy runner，chunk-quota=12 | 1,291/1,540（83.83%） | 3,605 token | 未带 `--eval-protocol`，compiler flag 被旧 CLI 静默忽略；非三次多数、1,546 answer + 6 rewrite | invalid mechanism evidence |
+| pure fact，chunk-quota=0 | 73.70% | 1,529 token | 单次配置探针；相对前行 −10.13pp，single-hop −16.0pp | NO-GO for pure fact |
+
+83.83% legacy 探针的无 secret artifact hashes 为：`results-hybrid.jsonl`
+`bc544c43c10349528ef39f23588fa597e5c153712cdad7c1547cb141908088bc`、
+`stats.json` `a86b6088fb2ed73d56fb72612d2e1dfe0b653d42c012acadb934dcbc9e68c1d0`、
+`cost.json` `3005b399e52eca2ac316acf0cf40bb0e6c5d63acda3935229deae4b41a005358`。
+Cost artifact 的 `actual_usd=0` 只表示 Qwen/BGE/DeepSeek 三个模型均未在价格表中定价，
+不是 judge 免费；它记录 1,540 judge calls、5,572,719 answer input tokens 和
+674,721 judge input tokens。
+
+截至 2026-07-31，修复排序合同后的 LoCoMo low/high B1、LongMemEval-S low/high B1、
+两 benchmark fixed-gold diagnostic、两位独立 reviewer 的 judge audit 和正式配对消融
+均未形成完整有效产物。故 1,425/1,540 与 473/500 两个最终目标都没有 accepted result，
+022 唯一合法状态仍为 `HOLD`。
 
 ## LongMemEval-S 口径更正待刷新
 

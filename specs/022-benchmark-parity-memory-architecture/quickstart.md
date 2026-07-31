@@ -1,7 +1,8 @@
 # Quickstart: 022 实现与评测
 
-本页是实现阶段的验收入口。022 当前处于 plan 阶段；标为“目标 CLI”的 flags 是本特性要
-实现和测试的合同，在对应 task 完成前尚不可用。
+本页是实现与评测阶段的验收入口。标为“目标 CLI”的 flags 是本特性的冻结合同；实际
+可用性以当前 `locomo-bench -h` 和对应 task/test 为准，未完成的正式实验不得因代码已接线
+而视为通过。
 
 ## 1. 固定工作区并检查碰撞
 
@@ -312,9 +313,12 @@ go run ./cmd/locomo-bench \
 embedding fingerprint 作为 provenance，但执行和无模型 read-back 都不读取或实例化
 embedding sidecar。`--eval-validate` 也不需要 answer/judge/token-counter endpoint。
 
-只有 LoCoMo `>=1425/1540` 且 LongMemEval-S `>=473/500`、B1/oracle/judge audit 全部有效，
-T022 才能写 `CONTINUE`。任一 artifact 不完整写 `HOLD`；artifact 全部有效但 oracle 未达
-目标写 `STOP`。`HOLD/STOP` 均不得启动后续满量机制。
+按 2026-07-30 的 F0 replan，oracle 仍必须有效运行并登记，用于区分 candidate/compiler/
+answerer miss，但不再以是否达到 LoCoMo `1425/1540`、LongMemEval-S `473/500` 作为
+US2–US5 的解锁条件。T022 只有在 US1 Ledger 已落地、B0/B1 artifacts 有效且双 reviewer
+judge audit 完整时才写 `CONTINUE`；任一 artifact/audit 不完整写 `HOLD`，宪法违反或
+artifact 不可修写 `STOP`。SC-002/SC-003 仍是 Phase 8 最终双基准门，机制必须靠同栈
+配对证据独立过门，不能借 replan 放宽 judge、answerer、预算或 reranker 口径。
 
 ## 8. 表示 Bake-off
 

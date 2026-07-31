@@ -1,21 +1,23 @@
 ---
 title: 超越 Mem0 的查询期证据编译架构探索
-summary: 本文提出以不可损失 Evidence Ledger、语义 Episode 视图和查询期 Evidence Compiler 为核心的双基准路线；Event、Scene、Profile 与 graph 均为待独立消融的可重建 projection。
-status: proposed
+summary: 本文跟踪 Evidence Ledger 与查询期 Evidence Compiler 的 022 实施和双基准证伪；未过正式门的 Episode、Event、Scene、Profile 与 graph 保持实验性。
+status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-30
+last_reviewed: 2026-07-31
 canonical_for: [benchmark-parity-memory-architecture]
 tags: [product, exploration, memory, benchmarks, evidence-compiler]
 ---
 
 # 超越 Mem0 的查询期证据编译架构探索
 
-本文是**未实现**的架构探索。目标是让 engram 在 LoCoMo 和 LongMemEval-S 上形成
-论文级、可复现、local-first 的结果，并在数值上严格超过 Mem0 托管平台自报的
-92.5% / 94.4%。外部依据见[长期记忆系统成绩与机制证据登记](../../research/high-scoring-memory-systems.md)，
-当前能力与分数仍以[能力边界](../capabilities.md)和[评测结果](../../evaluation/results.md)
-为准。
+本文已从纯设计进入实施与证伪阶段。Evidence Ledger/schema v7 已交付；Semantic
+Episode、Query-time Evidence Compiler、Event/gap 与窄 projection 已有 engine 或
+benchmark 实验代码，但未通过正式双基准配对门，均不得表述为默认产品能力。目标仍是
+让 engram 在 LoCoMo 和 LongMemEval-S 上形成论文级、可复现、local-first 的结果，并在
+数值上严格超过 Mem0 托管平台自报的 92.5% / 94.4%。外部依据见
+[长期记忆系统成绩与机制证据登记](../../research/high-scoring-memory-systems.md)，当前
+能力与分数仍以[能力边界](../capabilities.md)和[评测结果](../../evaluation/results.md)为准。
 
 ## 纠偏后的结论
 
@@ -280,8 +282,33 @@ correctness、evidence density 和 answer utility，而不只拟合更短摘要�
    用 DeepSeek-v4-flash judge，阶段 0 应抽样人审确认 FN / FP 率与方向性，否则 Compiler
    的个位数 pp 收益可能落在 judge 噪声内（017 date-scaffold +0.62pp 的教训）。
 
+## 当前实施与证据状态（2026-07-31）
+
+已确认的工程结果是 Evidence Ledger、直接 source lineage、Unicode span/citation
+validator、deterministic Compiler fallback、run-scoped shadow projection 和离线降级
+测试均已进入代码；100k projection lineage 使用固定批量查询而非 per-candidate N+1。
+这证明机制边界可实现，不证明它们提高 benchmark 分数。
+
+当前可引用的实验结论只有：
+
+1. 有效 LoCoMo B0 continuity 为 1,314/1,540（85.32%），不具 promotion 资格。
+2. 请求 extractive compiler 的单次命令为 1,291/1,540（83.83%），平均 context
+   3,605 token；但它没有 `--eval-protocol`，compiler flag 被普通 runner 静默忽略，且
+   有 1,546 次 answer 与 6 次 rewrite，因此是 invalid mechanism evidence。CLI 现已对
+   formal context 外的 mechanism flags fail closed。
+3. top-k 30→60 的 turn recall 均为 0.808；把 context 压到约 1.2k token 时 recall 降至
+   0.641。低 token 与当前 RRF/chunk 表示下的高 recall 不可同时保持。
+4. pure-fact 把平均 context 降至 1,529 token，但总分降至 73.70%、single-hop 降
+   16.0pp，结论为 NO-GO。后续紧凑表示必须保留来源原文 span，不能只留抽象 fact。
+
+正式 LoCoMo/LongMemEval-S low/high B1、same-candidate paired ablation、两位独立 reviewer
+的 judge audit、成本定价和最终 GO/HOLD/STOP 仍未完成。当前唯一合法 verdict 是
+`HOLD`；Episode、Compiler、Event、Scene、Profile、graph 和 gap refetch 均保持默认关闭。
+
 ## 下一步
 
-022 规范应只冻结 Evidence Ledger、三个表示对照、固定候选 Compiler、可审计 action、
-exact-token bundle、deterministic fallback 和评测顺序。Event、Scene、Profile、graph
-在规范中只能是后续独立实验，不得成为 V1 完成条件或预建层级。
+先恢复冻结 answer/extract runtime，生成排序修复后的新 immutable B1 artifacts，并完成
+LoCoMo 与 LongMemEval-S 的同 recipe control/treatment、双 reviewer judge audit 和 exact
+paired/category gates。只有跨 benchmark `GO` 的单项才能进入 productization；若所有
+纯本地机制仍未达到 1,425/1,540 与 473/500，保留真实终值并转交独立的 023 trained
+compiler/answerer 工作，不以增加 projection 或预算掩盖失败。

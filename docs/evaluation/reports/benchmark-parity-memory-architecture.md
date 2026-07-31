@@ -1,3 +1,14 @@
+---
+title: 022 Benchmark-Parity Memory Architecture — Evaluation Record
+summary: 本文记录 022 的评测协议、有效性门、运行证据、负结果与尚未完成的双基准验收；不把诊断探针写成正式分数。
+status: active
+audience: [maintainers, agents]
+owner: engram-maintainers
+last_reviewed: 2026-07-31
+canonical_for: [benchmark-parity-memory-architecture-evaluation]
+tags: [evaluation, locomo, longmemeval, evidence-compiler]
+---
+
 # 022 Benchmark-Parity Memory Architecture — Evaluation Record
 
 ## Pre-algorithm code-health baseline
@@ -631,3 +642,166 @@ two-independent-reviewer judge audit and the unique F0 verdict. That re-run
 still requires the remote-GPU prerequisite noted above — a local snapshot of
 the frozen Qwen answer/extraction model on an instance with no outbound
 download access.
+### 83.83% runtime probe — invalidated by Phase 8 wiring audit (2026-07-31)
+
+**Date**: 2026-07-31
+
+The command requested `--compiler-arm extractive` against the full LoCoMo
+1,540 category-1–4 set, but it did **not** include `--eval-protocol` (per
+operator record; the retained run directory independently lacks the formal
+`candidates.jsonl`/`compile_trace.jsonl`/`bundles.jsonl` artifacts a formal
+runner must write, and `cost.json` records 1,546 answer calls, which violates
+the formal one-answer rule). Phase 8 code tracing found that `compilerArm` was
+consumed only by the formal materializer; the ordinary runner silently
+accepted and ignored the flag. Therefore this run did not exercise the
+Compiler on a real provider. T112's offline formal-path tests remain valid,
+but this runtime probe cannot extend their conclusion.
+
+**Recipe**: answer/extract = remote vLLM `Qwen/Qwen3.6-35B-A3B-FP8` (:8000);
+embedding = remote vLLM `BAAI/bge-large-en-v1.5` (:8010, full served name so
+`EMBED_MODEL` matches and semantic does not silently degrade); judge =
+`deepseek-v4-flash`; `--compiler-arm extractive --chunks --chunk-quota 12
+--top-k 30 --retrieval hybrid --force-answer --judge-mem0-aligned --concurrency
+40 --repeats 1`. No `--cat-top-k` (differs from the 85.71% row, which adds it).
+
+**Result**: 1,291/1,540 = **83.83%** overall, single rep. Per-category:
+single-hop 732/841 (87.0%), multi-hop 245/282 (86.9%), temporal 257/321
+(80.1%), open-domain 57/96 (59.4%).
+
+| Check | Result |
+|---|---|
+| Ordinary result errors | **0** — all 1,540 legacy-runner questions produced results; this is not Compiler Bundle validity evidence |
+| Answer/rewrite calls | **1,546 / 6** — `cost.json` proves legacy retry remained active; this violates FR-024 and the formal compiler-arm one-answer rule |
+| Judge calls | 1,540 (all judged); `cost.actual_usd=0` is an unpriced-model artifact (`Qwen3.6`, `bge-large`, `deepseek-v4-flash` all unpriced), not free judging |
+| Cross-recipe comparability | NOT comparable to the 85.71% row (that adds `--cat-top-k` and 3-rep majority); this is a single-rep, no-cat-top-k probe |
+| Compiler execution | **NO** — the non-formal runner ignored `--compiler-arm`; the CLI now rejects every treatment flag outside a formal run and rejects all formal treatment freeze/run requests until T114 implements their complete protocol |
+| Formal eligibility | **INVALID as mechanism evidence** — no Compiler execution, frozen `022.v1` pair, three-repetition majority, one-answer compliance, or double-reviewer audit |
+
+| Artifact | SHA-256 |
+|---|---|
+| `results-hybrid.jsonl` | `bc544c43c10349528ef39f23588fa597e5c153712cdad7c1547cb141908088bc` |
+| `stats.json` | `a86b6088fb2ed73d56fb72612d2e1dfe0b653d42c012acadb934dcbc9e68c1d0` |
+| `cost.json` | `3005b399e52eca2ac316acf0cf40bb0e6c5d63acda3935229deae4b41a005358` |
+| retained archive | `ed806cce7f9ac7b4be06b424a4ebf00c65f5bf1afc249e744f733d71ccb1431a` |
+
+**Interpretation**: 83.83% is only a single-repetition legacy-runner diagnostic
+with a silently ignored mechanism flag. It says nothing about Compiler gain or
+real-provider Bundle validity. The wiring defect is now fail-closed for the
+current B1 legacy control and covered by
+`TestMechanismArmsRequireFormalProtocolContext` plus
+`TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments`. A fresh frozen same-store
+legacy/compiler pair is still required to measure any compiler Δ. Run artifacts retained off-repo at
+`~/.config/engram/022-eval-compile/`.
+
+## Phase 8 local gates and completion audit (2026-07-31)
+
+### Runtime-probe correction and fail-closed CLI
+
+Phase 8 traced every use of `compilerArm`. The formal materializer consumes it,
+but the ordinary runner did not; the 83.83% command omitted `--eval-protocol`,
+so the flag was silently ignored. This invalidates the earlier interpretation
+that a real provider had exercised the Compiler. It does not invalidate T112's
+offline formal-path coverage.
+
+`TestMechanismArmsRequireFormalProtocolContext` first reproduced the bug for
+representation, compiler and event/gap flags. The CLI is now fail-closed on
+three layers: `validateMechanismArms` rejects these treatment flags outside a
+formal run and rejects them during freeze before dataset loading; the B1
+freezer repeats that refusal at its own boundary; and a formal run accepts only
+the exact `stage=b1`, `arm=legacy_count_packer`, empty control hash and three
+false control flags, with no treatment CLI option
+(`validateFormalMechanismBinding`, covered by
+`TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments`). No
+treatment manifest is claimed runnable: bidirectional binding, contract arm
+mapping, candidate replay and single-mechanism enforcement remain T114. No
+engine behavior or default recipe changed.
+
+### T102–T106 local verification
+
+All logs were written to the session scratchpad; no dataset, DB, credential or
+run artifact was added to the repository.
+
+| Task / gate | Result |
+|---|---|
+| T102 documentation unit tests | PASS — 10/10 `node --test docs/validation/check-docs.test.mjs` |
+| T102 022 metadata/link issues | PASS — the 022 report front matter and score-consumer duplication were fixed |
+| Full docs validator | FAIL outside 022 — four pre-existing findings remain: duplicate heading + orphan/navigation for `docs/research/lever-batch-local-vs-saas.md`, and missing 021 `contracts/iris-loop.md`; no 022 finding remains |
+| T103 `CGO_ENABLED=0 go build ./...` | PASS |
+| T103 `CGO_ENABLED=0 go test -count=1 ./...` | PASS — all packages green; `cmd/locomo-bench` 40.764s, `mcpserver` 25.063s |
+| T103 `CGO_ENABLED=0 go vet ./...` | PASS |
+| T103 `git diff --check` | PASS |
+| T104 v7 fresh/idempotent/backfill rollback + v3 round trip | PASS — targeted `./store` |
+| T104 deterministic retrieval/signal degradation + 003 graph unchanged | PASS — targeted `./memory` |
+| T104 MCP parity/schema/namespace/path containment/offline degradation | PASS — targeted `./mcpserver` |
+| T104 formal Compiler shape + graph projection unchanged | PASS — targeted `./cmd/locomo-bench` |
+| T105 100k lineage | PASS — 200 batched queries, 856,729,470 ns/op, 53,008,872 B/op, 1,406,751 allocs/op for one iteration |
+| T105 candidate/source bounds | PASS — overflow is rejected before resolver access by `TestCompileRejectsCandidateAndSourceBoundsBeforeResolution` |
+| T105 purge checkpoint stress | PASS — 20 repeated lifecycle/checkpoint runs |
+| T106 MCP secret contract | PASS — configured secrets absent from logs/tool responses |
+| T106 tracked artifact scan | PASS — no tracked run dir, benchmark dataset, DB/WAL/SQLite artifact |
+| T106 exact live-secret scan | PASS — no current judge/remote credential value found in tracked content or Phase 8 logs |
+| T106 privacy purge recovery | PASS — 10 repeated purge/closure runs |
+| Optional scanner | `gitleaks` unavailable; exact-value, tracked-path and contract-test fallbacks above were used and recorded |
+
+The 100k result proves bounded batched access rather than a latency SLO. The
+allocation count and memory footprint are now documented in the public
+capability boundary instead of being hidden behind “100k supported”.
+
+### T107 preflight and blockers
+
+Both required datasets exist locally. The mandatory no-call estimates completed:
+
+| Benchmark | Questions | Repeats | Estimated extraction calls | Estimate interpretation |
+|---|---:|---:|---:|---|
+| LoCoMo category 1–4 | 1,540 | 3 | 288 | answer/judge models unpriced; USD=0 is not a real cost estimate |
+| LongMemEval-S cleaned full | 500 | 3 | 23,867 | answer/judge models unpriced; the extraction volume makes an accidental run especially unacceptable |
+
+T107 was not started. No answer/embed endpoint or `LOCOMO_*`/`EMBED_*` runtime
+was available, and the remote GPU cannot be assumed billable/stopped without
+provider-console confirmation. More importantly, code convergence found two
+artifact blockers which must be fixed before spending model tokens:
+
+1. the protocol freezer always labels formal output `stage=b1,
+   arm=legacy_count_packer` and now refuses treatment flags outright (freeze
+   with `--compiler-arm`/`--representation`/`--event-projection`/`--gap-refetch`
+   errors until T114); it cannot yet bind treatment stage/arm/control hash
+   or byte-replay one candidate artifact across compiler arms;
+2. judge audit has deterministic selection/blinding/adjudication primitives but
+   no operational packet export + two-reviewer import/finalize workflow.
+
+Running full benchmarks before these are fixed would recreate an INVALID or
+mislabeled artifact. Convergence tasks T114–T115 capture them. The separate 022
+worktree's untracked `judge_audit_cli*.go` files were not overwritten or treated
+as delivered code.
+
+### T108 constitution and SC-001–SC-015 audit
+
+| Constitution principle | Result |
+|---|---|
+| I. Local-first/offline | PASS — Ledger, validator, Compiler fallback and all local gates run without hosted dependencies; model side remains optional |
+| II. Engine/adapter separation | PASS — Compiler/Ledger remain engine packages; this Phase 8 CLI fix does not move algorithms into adapters |
+| III. Contract-first/namespace isolation | PASS — v7 is additive, namespace/path tests pass, and treatment artifacts now fail closed rather than accepting an unfrozen flag |
+| IV. Evaluation regression gate | HOLD — the shipped Ledger slice/parity gate passes, but 022 mechanisms have no valid final dual-benchmark paired evidence |
+| V. Graceful degradation/honest scale | PASS — offline degradation passes and the measured 100k time/memory/allocation boundary is published |
+
+| Success criterion | Status | Evidence / missing work |
+|---|---|---|
+| SC-001 | PARTIAL | valid LoCoMo lossless B0 exists; refreshed LongMemEval-S B0/full per-question result does not |
+| SC-002 | FAIL | no accepted 1,425/1,540 LoCoMo formal result |
+| SC-003 | FAIL | no accepted 473/500 LongMemEval-S formal result |
+| SC-004 | FAIL | numerical targets are not met; no cloud/reranker shortcut was used |
+| SC-005 | PARTIAL | three representation implementations/tests exist; full paired artifacts and verdict do not |
+| SC-006 | PARTIAL | candidate/cap/compiler bounds are tested; four-arm candidate-replay artifacts do not exist |
+| SC-007 | PARTIAL | offline source/span/citation guards pass; no complete formal arm corpus proves 100% rates |
+| SC-008 | GUARDED | zero unproven mechanisms are promoted; no mechanism has positive dual-benchmark promotion evidence |
+| SC-009 | PARTIAL | gap/one-answer invariants have tests; no full formal run proves corpus-wide compliance |
+| SC-010 | PASS (code gate) | Ledger/projection lifecycle, lineage and namespace tests pass |
+| SC-011 | PASS (code gate) | optional projection/model/offline degradation tests pass |
+| SC-012 | PASS | deterministic retrieval parity, error paths and namespace isolation pass |
+| SC-013 | FAIL | final dual-benchmark per-question/statistics/cost/audit artifact set is incomplete |
+| SC-014 | PARTIAL | replay/drift tests pass; no accepted full B1 corpus exists after the ordering fix |
+| SC-015 | PARTIAL | LoCoMo B0 exists and unique verdict is HOLD; remaining B1/oracle/audit artifacts are incomplete |
+
+Per T108, `speckit-converge` appended Phase 9 T114–T115 for the two newly
+isolated infrastructure gaps. 022 remains incomplete and its unique verdict
+remains **HOLD**; T107 is unchecked and no default mechanism is promoted.
