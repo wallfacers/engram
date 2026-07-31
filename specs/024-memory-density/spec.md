@@ -10,9 +10,15 @@
 
 ## Clarifications
 
-### Session 2026-07-31
+### Session 2026-07-31（实现验证回填）
 
-本 spec 直接源自 022 探索中的外部证据与 MemOS 源码分析（AutoDL `memos-repro/MemOS`）：
+- **判定信号基于 fact Content 而非 name**：`entryName` 带随机 ULID 尾，若把 name 纳入 trigram Jaccard 会把近似事实的相似度从 ~0.87 稀释到 ~0.5（随机尾噪声淹没 content 信号）。`memory/curation.Suppressor` 的 `suppressionText` 只用 Content（小写 + 空白折叠），与 dedup 的 `normalizeText` 区分开（后者用于 curation Cluster，name 是稳定标识）。
+- **候选查询用采样 OR trigram**：`buildPlan` 的全 trigram AND 对"尾部差一个字"的近似文本不命中（候选=0）；`SimilarEntries` 用均匀采样 OR（每 k 个 trigram 取 1，最多 12 个），近似文本仍能进入候选，精确 Jaccard 兜底判定。
+- **冲突保护依赖 EventDate**：`ShouldSuppress` 只在两 entry 的 `EventDate` 都非 nil 且不等时视为冲突（FR-003）；判定发生在投影创建前，`storeFact` 需先解析 incoming 的 `event_date` 再判定。
+- **邻居扩展只在 legacy packer 路径**：compiler arm 的 candidate-replay 必须 byte-identical，兄弟扩展会改变候选集 → 只在非 compiler 的 materialize 路径生效（FR-007）。
+- **四臂 manifest 冻结验证**：`--eval-freeze-protocol` + `--write-dedup`/`--neighbor-extend` 产出独立 hash 的 b1 manifest（control 3-key 与 022 资产逐字节一致；dedup/neighbor 各带独立 hash → 归因成立）；`--eval-protocol control + --write-dedup` 在模型调用前 fail closed（`write_dedup=false differs from requested true`）。
+
+### 022 外部证据（初始）
 
 - **写入时去重的依据**：MemOS `manager.py` 用 `merged_threshold=0.92` 的 embedding 相似度 + LLM 判定做写入时合并，保证库里的事实非冗余、信息密集。这是其"低预算高信息密度"（同栈复现 1059 tok 达 82.4%，engram 同预算仅 76.85%）的根因。
 - **engram 版本不能照搬 LLM 融合写回**：`Retain or Consolidate` 证明宽松预算下 write-time merge 显著为负（−0.107 [−0.204,−0.013]），且融合写回破坏 022 的 append-only Evidence Ledger 宪法。因此本 spec 只取"抑制**冗余投影**"（投影可丢弃可重建，不碰 evidence），不做"融合覆盖"。
