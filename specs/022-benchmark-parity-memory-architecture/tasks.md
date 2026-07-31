@@ -200,6 +200,7 @@ citation、cap 与单次 answerer 合规率均为 100%，无来源 ADD=0。
 - [ ] T069 [US3] 实现 legacy-count、exact-token relevance、deterministic extractive、optional local Planner 的 byte-replay arms 到 `cmd/locomo-bench/compiler_eval.go`
 - [ ] T070 [P] [US3] 实现只提议 Need/actions、无 Store/answer 权限的可替换本地 Planner adapter 到 `cmd/locomo-bench/local_planner.go`
 - [ ] T071 [US3] 将 retrieve→Compile→validate→exactly-one-answer 路径接入 `cmd/locomo-bench/eval_runner.go`，正式 arm 强制 `--no-idk-retry` 且不调用 `irisRetrieve`
+- [X] T112 [US3] 为 compiler-arm formal 接入路径（`materializeFormalB1Question` + `compilerArm=extractive`）加厚 offline 单题集成测试到 `cmd/locomo-bench/eval_compiler_arm_integration_test.go`：新增多 anchor FullSource、单 anchor 多 source（异 session/event-date）、EXTRACT unicode span + KEEP 混合、以及 budget-impossible 诚实失效四个单题场景，分别守住 `56cef8b` 修复的 TextDigest 裸 64 位 hex / verbatim Evidence span / RenderedCandidates 不被 compiler 覆盖 / per-source SourceSessionID+EventDate 四类 formal 契约违反，并在 budget 不可行时拒绝静默产出假 valid bundle；全场景断言零 per-question invalid（无 invalid reason + `validateFormalFrozenPayload` + 跨产物 digest 同一性 + 独立 active-source 重读），engine 未触碰
 - [ ] T072 [US3] 用同一正式本地 answerer runtime 重跑 counter calibration，要求全部 fixture delta=0，并更新 fingerprint 到 `docs/evaluation/reports/benchmark-parity-memory-architecture.md`
 
 ### Experiments and gate — US3
