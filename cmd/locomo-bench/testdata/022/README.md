@@ -29,3 +29,26 @@ candidates-one-question.jsonl
 Those names are illustrative, not an alternate runtime artifact location.
 Real benchmark artifacts remain in the session scratchpad/run directory and
 are referenced only by digest and question ID in tracked reports.
+
+## judge-audit fixture
+
+`judge-audit/run-{1,2,3}/results-{control,treatment}.jsonl` is a deterministic
+three-repetition answer journal over three invented questions (`q-1`, `q-2`,
+`q-3`). The control arm is judge-correct on every repetition; the treatment
+arm is judge-incorrect on every repetition, so the frozen selection rules pick
+all three questions as discordant and the blinded packet set covers both arms.
+It drives `TestJudgeAuditCLIWorkflow` offline:
+
+```text
+judge-audit/run-1/results-control.jsonl   control arm, repetition 1
+judge-audit/run-1/results-treatment.jsonl treatment arm, repetition 1
+judge-audit/run-2/results-control.jsonl   control arm, repetition 2
+judge-audit/run-2/results-treatment.jsonl treatment arm, repetition 2
+judge-audit/run-3/results-control.jsonl   control arm, repetition 3
+judge-audit/run-3/results-treatment.jsonl treatment arm, repetition 3
+```
+
+Expected offline behavior (asserted by the test): prepare emits blinded
+packets + a separate private key; finalize with two agreeing reviewers binds
+the run protocol/artifact hashes and reports a HOLD→GO verdict change at the
+0.9 accuracy gate (raw accuracy 0.5, corrected 1.0).

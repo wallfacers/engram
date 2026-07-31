@@ -97,3 +97,16 @@ func scanResultsJSONLStrict(path string, visit func(result) error) error {
 	}
 	return nil
 }
+
+// readJSON reads and decodes one JSON document from path. It is the strict
+// counterpart of writeJSON: any decode error is returned (no tolerance).
+func readJSON(path string, value any) error {
+	raw, err := os.ReadFile(path) //nolint:gosec // operator-selected artifact
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, value); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}

@@ -57,98 +57,109 @@ import (
 )
 
 type options struct {
-	dataPath              string
-	runDir                string
-	storeDir              string
-	aliasShadow           string
-	aliasShadowPrepared   bool
-	doc2query             string
-	doc2queryPrepared     bool
-	doc2queryBuild        bool
-	datasetFormat         string
-	compareSpec           string
-	evalValidate          string
-	evalB0ProtocolPath    string
-	evalFreezeB0Protocol  string
-	b0Protocol            *evalProtocol
-	evalProtocolPath      string
-	fixedGoldOracle       bool
-	evalFreezeProtocol    string
-	evalBudgetProfile     string
-	answerInputTokenCap   int
-	counterFingerprint    string
-	tokenCounterCalibrate bool
-	tokenCounterBaseURL   string
-	formalProtocol        *evalProtocol
-	formalCounter         evidencecompiler.TokenCounter
-	formalQuestionGate    chan struct{}
-	formalReplay          *formalQuestionReplay
-	formalCalls           *formalCallJournal
-	formalRunIndex        int
-	repeats               int
-	estimate              bool
-	noIDKRetry            bool
-	budgetBaseline        float64
-	retrieval             string
-	multiQuery            bool
-	mqMaxSubqueries       int
-	recallDiagnostic      bool
-	maxConvs              int
-	maxQuestions          int
-	onlyCategory          int
-	onlyEnumeration       bool
-	topK                  int
-	maxTokens             int
-	concurrency           int
-	chunks                bool
-	chunkQuota            int
-	filterPool            int
-	assoc                 bool
-	assocDepth            int
-	clusterSweep          bool
-	temporalScore         bool
-	temporalHardFilter    bool
-	conflictResolution    bool
-	supersededPenalty     float64
-	abstainPrompt         bool
-	abstainHard           bool
-	abstainSoft           bool
-	forceAnswer           bool
-	imageCaptions         bool
-	temporalAnswerPrompt  bool
-	temporalDateScaffold  bool
-	iris                  bool
-	irisDepth             int
-	judgeMem0Aligned      bool
-	answerModel           string
-	judgeModel            string
-	rerank                bool
-	pcic                  bool
-	oracle                bool
-	pcicAnnotate          bool
-	pcicFillTurns         string
-	pcicMetaPath          string
-	pcicMeta              *PCICMeta
-	abstainProbe          bool
-	abstainProbeOut       string
-	abstainGateSpec       string
-	abstainGate           AbstainGate
-	selector              chunkSelector
-	opinionPass           bool
-	adversarial           int
-	catTopKSpec           string
-	catQuotaSpec          string
-	catTopK               map[int]int
-	catQuota              map[int]int
-	coverageOnly          bool
-	temporalDiagnostic    bool
-	attributionTrace      bool
-	joinResults           string
-	embedProbe            bool
-	outrankCap            int
-	widePool              int
-	factCoverageTau       float64
-	contextParity         *contextParityJournal
+	dataPath                  string
+	runDir                    string
+	storeDir                  string
+	aliasShadow               string
+	aliasShadowPrepared       bool
+	doc2query                 string
+	doc2queryPrepared         bool
+	doc2queryBuild            bool
+	datasetFormat             string
+	compareSpec               string
+	evalValidate              string
+	evalB0ProtocolPath        string
+	evalFreezeB0Protocol      string
+	b0Protocol                *evalProtocol
+	evalProtocolPath          string
+	fixedGoldOracle           bool
+	evalFreezeProtocol        string
+	evalBudgetProfile         string
+	answerInputTokenCap       int
+	counterFingerprint        string
+	tokenCounterCalibrate     bool
+	tokenCounterBaseURL       string
+	formalProtocol            *evalProtocol
+	formalCounter             evidencecompiler.TokenCounter
+	formalQuestionGate        chan struct{}
+	formalReplay              *formalQuestionReplay
+	formalCalls               *formalCallJournal
+	formalRunIndex            int
+	repeats                   int
+	judgeAuditPrepare         string
+	judgeAuditFinalize        string
+	auditControlArm           string
+	auditTreatmentArm         string
+	auditBenchmark            string
+	auditRepeats              int
+	auditPlanSeed             string
+	auditConcordantPerStratum int
+	auditAccuracyGate         float64
+	auditReviews              string
+	auditDecisions            string
+	estimate                  bool
+	noIDKRetry                bool
+	budgetBaseline            float64
+	retrieval                 string
+	multiQuery                bool
+	mqMaxSubqueries           int
+	recallDiagnostic          bool
+	maxConvs                  int
+	maxQuestions              int
+	onlyCategory              int
+	onlyEnumeration           bool
+	topK                      int
+	maxTokens                 int
+	concurrency               int
+	chunks                    bool
+	chunkQuota                int
+	filterPool                int
+	assoc                     bool
+	assocDepth                int
+	clusterSweep              bool
+	temporalScore             bool
+	temporalHardFilter        bool
+	conflictResolution        bool
+	supersededPenalty         float64
+	abstainPrompt             bool
+	abstainHard               bool
+	abstainSoft               bool
+	forceAnswer               bool
+	imageCaptions             bool
+	temporalAnswerPrompt      bool
+	temporalDateScaffold      bool
+	iris                      bool
+	irisDepth                 int
+	judgeMem0Aligned          bool
+	answerModel               string
+	judgeModel                string
+	rerank                    bool
+	pcic                      bool
+	oracle                    bool
+	pcicAnnotate              bool
+	pcicFillTurns             string
+	pcicMetaPath              string
+	pcicMeta                  *PCICMeta
+	abstainProbe              bool
+	abstainProbeOut           string
+	abstainGateSpec           string
+	abstainGate               AbstainGate
+	selector                  chunkSelector
+	opinionPass               bool
+	adversarial               int
+	catTopKSpec               string
+	catQuotaSpec              string
+	catTopK                   map[int]int
+	catQuota                  map[int]int
+	coverageOnly              bool
+	temporalDiagnostic        bool
+	attributionTrace          bool
+	joinResults               string
+	embedProbe                bool
+	outrankCap                int
+	widePool                  int
+	factCoverageTau           float64
+	contextParity             *contextParityJournal
 	// formalEvidence is the active, namespace-local Evidence Ledger reader
 	// used by formal source expansion and the independent pre-answer
 	// span/citation validator. It is runtime-only and is never serialized.
@@ -195,6 +206,17 @@ func run() error {
 	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
 	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
 	flag.BoolVar(&opt.tokenCounterCalibrate, "token-counter-calibrate", false, "compare formal /tokenize preflight with local answer-runtime usage and write a calibration artifact")
+	flag.StringVar(&opt.judgeAuditPrepare, "judge-audit-prepare", "", "prepare a blinded judge-audit from control/treatment answer journals in a run directory and exit (offline)")
+	flag.StringVar(&opt.judgeAuditFinalize, "judge-audit-finalize", "", "finalize a judge-audit with two reviewer decision files and exit (offline)")
+	flag.StringVar(&opt.auditControlArm, "audit-control-arm", "", "control arm name for --judge-audit-prepare")
+	flag.StringVar(&opt.auditTreatmentArm, "audit-treatment-arm", "", "treatment arm name for --judge-audit-prepare")
+	flag.StringVar(&opt.auditBenchmark, "audit-benchmark", "", "benchmark name recorded in judge-audit packets (default locomo)")
+	flag.IntVar(&opt.auditRepeats, "audit-repeats", 3, "answer repetition count for judge-audit journals (must be odd)")
+	flag.StringVar(&opt.auditPlanSeed, "audit-plan-seed", "", "deterministic judge-audit sampling seed (required)")
+	flag.IntVar(&opt.auditConcordantPerStratum, "audit-concordant-per-stratum", 1, "concordant questions sampled per stratum")
+	flag.Float64Var(&opt.auditAccuracyGate, "audit-accuracy-gate", 0.9, "accuracy gate for raw/corrected verdict-change detection")
+	flag.StringVar(&opt.auditReviews, "audit-reviews", "", "reviewer decisions JSON for --judge-audit-finalize (required)")
+	flag.StringVar(&opt.auditDecisions, "audit-decisions", "", "optional adjudication JSON for --judge-audit-finalize")
 	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.Func("representation", "source representation: chunk_900 | raw_turn_window | semantic_episode (default chunk_900)", func(s string) error {
 		switch RepresentationKind(s) {
@@ -313,6 +335,14 @@ func run() error {
 			return runFixedGoldOracleValidateCLI(context.Background(), opt)
 		}
 		return runEvalArtifactValidateCLI(opt.evalValidate)
+	}
+	if opt.judgeAuditPrepare != "" {
+		opt.runDir = opt.judgeAuditPrepare
+		return runJudgeAuditPrepareCLI(opt)
+	}
+	if opt.judgeAuditFinalize != "" {
+		opt.runDir = opt.judgeAuditFinalize
+		return runJudgeAuditFinalizeCLI(opt)
 	}
 	if opt.tokenCounterCalibrate {
 		return runFormalTokenCalibrationCLI(opt)

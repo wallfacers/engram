@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -16,29 +19,29 @@ type judgeAuditArmInput struct {
 }
 
 type operationalJudgeAuditPacket struct {
-	PacketID  string `json:"packet_id"`
+	PacketID   string `json:"packet_id"`
 	QuestionID string `json:"question_id"`
-	Benchmark string `json:"benchmark"`
-	Category  string `json:"category"`
-	Question  string `json:"question"`
-	Gold      string `json:"gold"`
-	Answer    string `json:"answer"`
+	Benchmark  string `json:"benchmark"`
+	Category   string `json:"category"`
+	Question   string `json:"question"`
+	Gold       string `json:"gold"`
+	Answer     string `json:"answer"`
 }
 
 // operationalJudgeAuditKey is kept away from reviewer packets. Arm identity
 // and the raw judge label are intentionally absent from the blinded packet.
 type operationalJudgeAuditKey struct {
-	PacketID       string `json:"packet_id"`
-	QuestionID     string `json:"question_id"`
-	Arm            string `json:"arm"`
+	PacketID        string `json:"packet_id"`
+	QuestionID      string `json:"question_id"`
+	Arm             string `json:"arm"`
 	RawJudgeCorrect *bool  `json:"raw_judge_correct"`
 }
 
 type operationalJudgeAuditPreparation struct {
-	Plan       evalJudgeAuditPlan        `json:"plan"`
-	Selections []evalJudgeAuditSelection `json:"selections"`
+	Plan       evalJudgeAuditPlan            `json:"plan"`
+	Selections []evalJudgeAuditSelection     `json:"selections"`
 	Packets    []operationalJudgeAuditPacket `json:"packets"`
-	Key        []operationalJudgeAuditKey `json:"key"`
+	Key        []operationalJudgeAuditKey    `json:"key"`
 }
 
 type operationalJudgeAuditReview struct {
@@ -65,8 +68,11 @@ type operationalJudgeAuditResult struct {
 }
 
 type operationalJudgeAuditCompletion struct {
-	Results []operationalJudgeAuditResult `json:"results"`
-	Summary evalJudgeAuditSummary         `json:"summary"`
+	Results      []operationalJudgeAuditResult `json:"results"`
+	Summary      evalJudgeAuditSummary         `json:"summary"`
+	Verdict      operationalJudgeAuditVerdict  `json:"verdict"`
+	ProtocolHash string                        `json:"protocol_hash,omitempty"`
+	ArtifactHash string                        `json:"artifact_hash,omitempty"`
 }
 
 type judgeAuditQuestionOutcome struct {
@@ -282,4 +288,237 @@ func finalizeOperationalJudgeAudit(prepared operationalJudgeAuditPreparation, re
 	}
 	completion.Summary = summary
 	return completion, nil
+}
+
+// judgeAuditDirName holds the judge-audit workflow artifacts of one run
+// directory. packets.json is the blinded reviewer deliverable; key.json is
+// the private arm/raw-label ledger kept apart from it; prepared.json carries
+// the full plan+selections+packets+key state for the finalize step.
+const judgeAuditDirName = "judge-audit"
+
+const (
+	judgeAuditPacketsFile    = "packets.json"
+	judgeAuditKeyFile        = "key.json"
+	judgeAuditPreparedFile   = "prepared.json"
+	judgeAuditCompletionFile = "completion.json"
+)
+
+// judgeAuditAccuracyGate is the audit-scoped promotion threshold: an arm's
+// (raw or corrected) accuracy at or above Accuracy maps to GO, below to HOLD.
+// The gate is declared per run and recorded in the completion artifact so the
+// verdict-change check is reproducible.
+type judgeAuditAccuracyGate struct {
+	Accuracy float64 `json:"accuracy"`
+}
+
+// operationalJudgeAuditVerdict reports whether judge-audit correction moved
+// the arm across the accuracy gate (raw judge accuracy vs adjudicated
+// accuracy). Changed is evaluated with judgeAuditChangesVerdict so identical
+// verdicts never report a change.
+type operationalJudgeAuditVerdict struct {
+	Raw       evalVerdict `json:"raw_verdict"`
+	Corrected evalVerdict `json:"corrected_verdict"`
+	Changed   bool        `json:"verdict_changed"`
+}
+
+func judgeAuditVerdictFor(accuracy float64, gate judgeAuditAccuracyGate) evalVerdict {
+	if gate.Accuracy <= 0 || gate.Accuracy > 1 {
+		return evalVerdictInvalid
+	}
+	if accuracy >= gate.Accuracy {
+		return evalVerdictGO
+	}
+	return evalVerdictHOLD
+}
+
+func judgeAuditVerdictForSummary(summary evalJudgeAuditSummary, gate judgeAuditAccuracyGate) operationalJudgeAuditVerdict {
+	raw := judgeAuditVerdictFor(summary.RawAccuracy, gate)
+	corrected := judgeAuditVerdictFor(summary.CorrectedAccuracy, gate)
+	return operationalJudgeAuditVerdict{
+		Raw:       raw,
+		Corrected: corrected,
+		Changed:   judgeAuditChangesVerdict(raw, corrected),
+	}
+}
+
+// writeJudgeAuditPreparation persists a prepared audit as three separate
+// files under runDir/judge-audit: blinded packets (reviewer-facing), private
+// key (arm/raw labels), and the full preparation for the finalize step.
+// It returns the three file paths.
+func writeJudgeAuditPreparation(runDir string, prepared operationalJudgeAuditPreparation) (string, string, string, error) {
+	auditDir := filepath.Join(runDir, judgeAuditDirName)
+	if err := os.MkdirAll(auditDir, 0o755); err != nil {
+		return "", "", "", fmt.Errorf("create judge-audit dir: %w", err)
+	}
+	packetsPath := filepath.Join(auditDir, judgeAuditPacketsFile)
+	keyPath := filepath.Join(auditDir, judgeAuditKeyFile)
+	preparedPath := filepath.Join(auditDir, judgeAuditPreparedFile)
+	if err := writeJSON(packetsPath, prepared.Packets); err != nil {
+		return "", "", "", fmt.Errorf("write blinded packets: %w", err)
+	}
+	if err := writeJSON(keyPath, prepared.Key); err != nil {
+		return "", "", "", fmt.Errorf("write private key: %w", err)
+	}
+	if err := writeJSON(preparedPath, prepared); err != nil {
+		return "", "", "", fmt.Errorf("write prepared audit: %w", err)
+	}
+	return packetsPath, keyPath, preparedPath, nil
+}
+
+// loadJudgeAuditPreparation restores the full preparation previously written
+// by writeJudgeAuditPreparation. A missing or corrupt prepared.json is a hard
+// error: finalize must never run against a partial state.
+func loadJudgeAuditPreparation(runDir string) (operationalJudgeAuditPreparation, error) {
+	path := filepath.Join(runDir, judgeAuditDirName, judgeAuditPreparedFile)
+	raw, err := os.ReadFile(path) //nolint:gosec // operator-selected run artifact
+	if err != nil {
+		return operationalJudgeAuditPreparation{}, fmt.Errorf("read prepared audit: %w", err)
+	}
+	var prepared operationalJudgeAuditPreparation
+	if err := json.Unmarshal(raw, &prepared); err != nil {
+		return operationalJudgeAuditPreparation{}, fmt.Errorf("decode prepared audit: %w", err)
+	}
+	if len(prepared.Packets) == 0 || len(prepared.Key) == 0 {
+		return operationalJudgeAuditPreparation{}, fmt.Errorf("prepared audit is empty or incomplete")
+	}
+	return prepared, nil
+}
+
+// loadJudgeAuditReviews imports reviewer decisions from a JSON file. Any
+// decode or identity error is fail-closed.
+func loadJudgeAuditReviews(path string) ([]operationalJudgeAuditReview, error) {
+	var reviews []operationalJudgeAuditReview
+	if err := readJSON(path, &reviews); err != nil {
+		return nil, fmt.Errorf("read reviews %s: %w", path, err)
+	}
+	return reviews, nil
+}
+
+// loadJudgeAuditDecisions imports adjudications from a JSON file. The file is
+// optional (agreement on every packet needs no adjudication); an empty path
+// yields an empty decision list.
+func loadJudgeAuditDecisions(path string) ([]operationalJudgeAuditDecision, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	var decisions []operationalJudgeAuditDecision
+	if err := readJSON(path, &decisions); err != nil {
+		return nil, fmt.Errorf("read decisions %s: %w", path, err)
+	}
+	return decisions, nil
+}
+
+// runJudgeAuditPrepareCLI implements --judge-audit-prepare: it loads the
+// control/treatment answer journals (auditRepeats odd repetitions), generates
+// the blinded reviewer packets plus private key from the frozen selection
+// rules, and persists them under runDir/judge-audit. No model calls.
+func runJudgeAuditPrepareCLI(opt options) error {
+	if strings.TrimSpace(opt.auditControlArm) == "" || strings.TrimSpace(opt.auditTreatmentArm) == "" {
+		return fmt.Errorf("judge-audit prepare requires --audit-control-arm and --audit-treatment-arm")
+	}
+	if opt.auditRepeats < 1 || opt.auditRepeats%2 == 0 {
+		return fmt.Errorf("--audit-repeats must be an odd positive repetition count")
+	}
+	if strings.TrimSpace(opt.auditPlanSeed) == "" {
+		return fmt.Errorf("--audit-plan-seed is required for deterministic sampling")
+	}
+	benchmark := strings.TrimSpace(opt.auditBenchmark)
+	if benchmark == "" {
+		benchmark = "locomo"
+	}
+	controlRuns, err := loadArmRuns(opt.runDir, opt.auditControlArm, opt.auditRepeats)
+	if err != nil {
+		return fmt.Errorf("load control arm: %w", err)
+	}
+	treatmentRuns, err := loadArmRuns(opt.runDir, opt.auditTreatmentArm, opt.auditRepeats)
+	if err != nil {
+		return fmt.Errorf("load treatment arm: %w", err)
+	}
+	plan := evalJudgeAuditPlan{
+		AllDiscordant:        true,
+		ConcordantPerStratum: opt.auditConcordantPerStratum,
+		Seed:                 opt.auditPlanSeed,
+	}
+	prepared, err := prepareOperationalJudgeAudit(plan, judgeAuditArmInput{
+		Benchmark: benchmark, Arm: opt.auditControlArm, Runs: controlRuns,
+	}, judgeAuditArmInput{
+		Benchmark: benchmark, Arm: opt.auditTreatmentArm, Runs: treatmentRuns,
+	})
+	if err != nil {
+		return fmt.Errorf("prepare judge audit: %w", err)
+	}
+	packetsPath, keyPath, preparedPath, err := writeJudgeAuditPreparation(opt.runDir, prepared)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("judge-audit-prepare: packets=%d key=%d selections=%d\n", len(prepared.Packets), len(prepared.Key), len(prepared.Selections))
+	fmt.Printf("judge-audit-prepare: %s\n%s\n%s\n", packetsPath, keyPath, preparedPath)
+	return nil
+}
+
+// runJudgeAuditFinalizeCLI implements --judge-audit-finalize: it imports the
+// two independent reviewer files (plus optional adjudications), computes the
+// raw/corrected summary and verdict change against the accuracy gate, binds
+// the run's protocol and artifact hashes, and writes completion.json. No
+// model calls.
+func runJudgeAuditFinalizeCLI(opt options) error {
+	if strings.TrimSpace(opt.auditReviews) == "" {
+		return fmt.Errorf("judge-audit finalize requires --audit-reviews")
+	}
+	if opt.auditAccuracyGate <= 0 || opt.auditAccuracyGate > 1 {
+		return fmt.Errorf("--audit-accuracy-gate must be in (0,1]")
+	}
+	prepared, err := loadJudgeAuditPreparation(opt.runDir)
+	if err != nil {
+		return err
+	}
+	reviews, err := loadJudgeAuditReviews(opt.auditReviews)
+	if err != nil {
+		return err
+	}
+	decisions, err := loadJudgeAuditDecisions(opt.auditDecisions)
+	if err != nil {
+		return err
+	}
+	completion, err := finalizeOperationalJudgeAudit(prepared, reviews, decisions)
+	if err != nil {
+		return fmt.Errorf("finalize judge audit: %w", err)
+	}
+	completion.Verdict = judgeAuditVerdictForSummary(completion.Summary, judgeAuditAccuracyGate{Accuracy: opt.auditAccuracyGate})
+	if completion.ProtocolHash, err = readEvalProtocolHash(opt.runDir); err != nil {
+		return err
+	}
+	artifactHashes, err := evalArtifactFileHashes(opt.runDir)
+	if err != nil {
+		return fmt.Errorf("hash run artifacts: %w", err)
+	}
+	if completion.ArtifactHash, err = aggregateEvalArtifactHash(artifactHashes); err != nil {
+		return err
+	}
+	completionPath := filepath.Join(opt.runDir, judgeAuditDirName, judgeAuditCompletionFile)
+	if err := writeJSON(completionPath, completion); err != nil {
+		return fmt.Errorf("write completion: %w", err)
+	}
+	fmt.Printf("judge-audit-finalize: audited=%d fn=%d fp=%d agreement=%.3f verdict=%s→%s changed=%t\n",
+		completion.Summary.Audited, completion.Summary.FalseNegative, completion.Summary.FalsePositive,
+		completion.Summary.ReviewerAgreement, completion.Verdict.Raw, completion.Verdict.Corrected, completion.Verdict.Changed)
+	fmt.Printf("judge-audit-finalize: protocol=%s artifacts=%s\n", completion.ProtocolHash, completion.ArtifactHash)
+	return nil
+}
+
+// readEvalProtocolHash reads the frozen protocol hash bound to a run
+// directory (runDir/protocol.json). A missing or empty protocol_hash is a
+// hard error: a judge-audit completion must never be bound to an unprovenanced
+// run.
+func readEvalProtocolHash(runDir string) (string, error) {
+	var protocol struct {
+		ProtocolHash string `json:"protocol_hash"`
+	}
+	if err := readJSON(filepath.Join(runDir, "protocol.json"), &protocol); err != nil {
+		return "", fmt.Errorf("read protocol for hash binding: %w", err)
+	}
+	if !isDigest(protocol.ProtocolHash) {
+		return "", fmt.Errorf("run protocol has no protocol_hash to bind")
+	}
+	return protocol.ProtocolHash, nil
 }

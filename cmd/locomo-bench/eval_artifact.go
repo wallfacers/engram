@@ -860,3 +860,27 @@ func evalArtifactFileHashes(runDir string) (map[string]string, error) {
 	}
 	return hashes, nil
 }
+
+// aggregateEvalArtifactHash folds the per-file artifact hashes of one run
+// directory into a single deterministic digest (sorted file:hash lines then
+// SHA-256 of the joined bytes). It is used to bind a judge-audit completion
+// to the exact artifact set it was computed over.
+func aggregateEvalArtifactHash(hashes map[string]string) (string, error) {
+	if len(hashes) == 0 {
+		return "", fmt.Errorf("no artifact hashes to aggregate")
+	}
+	keys := make([]string, 0, len(hashes))
+	for file := range hashes {
+		keys = append(keys, file)
+	}
+	sort.Strings(keys)
+	var builder strings.Builder
+	for _, file := range keys {
+		builder.WriteString(file)
+		builder.WriteByte('=')
+		builder.WriteString(hashes[file])
+		builder.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(builder.String()))
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
