@@ -44,7 +44,7 @@ description: "Task list for 024-memory-density implementation"
 
 - [ ] T003 [P] 在 `cmd/locomo-bench/eval_runner.go` 的 `freezeFormalProtocol` / `validateFormalMechanismBinding` 与 `cmd/locomo-bench/main.go` 的 `validateMechanismArms` / `supportedArmMechanisms` 中，按 `contracts/mechanism-bindings.md` 增加 `write_dedup` / `neighbor_extend` 两个新 mechanism key（解析、fail closed、参与 protocol_hash，缺省 false）
 - [ ] T004 [P] 在 `memory/pipeline/pipeline.go` 定义冗余判定接口（如 `ShouldSuppress(ctx, existing, incoming *memory.Entry) bool`）+ 审计统计结构（判定/抑制/疑似误伤计数），作为 US1 的注入点
-- [ ] T005 [P] 在 `memory/curation/` 新增 `suppress.go`：封装复用 `dedup.go` 的 `normalizeText` + 字符 trigram Jaccard（阈值 0.7 可配，FTS pre-filter 限 candidate pairs），实现 `T004` 接口的离线默认判定器；无 embedding 端点时此路径即唯一路径
+- [ ] T005 在 `memory/curation/` 新增 `suppress.go`：封装复用 `dedup.go` 的 `normalizeText` + 字符 trigram Jaccard（阈值 0.7 可配，FTS pre-filter 限 candidate pairs），实现 `T004` 接口的离线默认判定器；无 embedding 端点时此路径即唯一路径（依赖 T004 的接口签名）
 
 **Checkpoint**: 判定接口 + 离线实现 + mechanism 框架就绪，US1/US2/US3 可开始
 

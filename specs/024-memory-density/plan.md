@@ -74,16 +74,15 @@ specs/024-memory-density/
 memory/                              # ENGINE — 两机制落点
 ├── pipeline/pipeline.go             # storeFact 前插入冗余抑制（Increment 0）
 ├── curation/dedup.go                # 复用：离线 trigram Jaccard 判定信号
-├── projection.go                    # 新增/扩展：兄弟 fact 邻居查询（Increment 1）
-└── retrieval/                       # 检索后候选冻结处的邻居扩展（Increment 1）
+└── projection.go                    # 新增/扩展：兄弟 fact 邻居查询（Increment 1）
 
 cmd/locomo-bench/                    # EVAL — 机制绑定与配对验证
 ├── main.go                          # mechanism flag + validateMechanismArms 扩展
 ├── eval_runner.go                   # mechanism_flags 新 key + freeze/validate binding
 └── (materialize)                    # 邻居扩展插入点：候选冻结后、answerer 组装前
 
-memory/curation/ 测试                # TDD：Jaccard 复用 + 抑制行为的失败测试先行
-cmd/locomo-bench/ 测试               # 契约/集成测试：protocol 绑定 + 四臂开关
+memory/pipeline/ + memory/curation/ 测试   # TDD：抑制行为（pipeline）+ Jaccard 判定器（curation）失败测试先行
+cmd/locomo-bench/ 测试                      # 契约/集成测试：protocol 绑定 + 四臂开关
 ```
 
 **Structure Decision**: 单引擎库 + eval harness（与 022/023 完全一致的结构）。无新包、无新适配层；机制以内聚函数/小接口挂在现有 `pipeline`/`projection`/`retrieval` 上，默认关。不引入图数据库（与 spec 范围边界一致）。

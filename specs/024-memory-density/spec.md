@@ -104,12 +104,12 @@ budget-ablation 已证明 LoCoMo 分数主要是 answer-context token 预算的�
 
 ### Functional Requirements
 
-- **FR-001**: 系统 MUST 在新增 atomic fact 投影前，检测其与已有事实投影的语义冗余，判定信号默认基于 embedding 余弦相似度（阈值可配置），并 MUST 提供无 embedding 端点的纯离线判定降级路径。
+- **FR-001**: 系统 MUST 在新增 atomic fact 投影前，检测其与已有事实投影的语义冗余。主判定信号为**离线字符相似度**（trigram Jaccard，默认阈值 0.7，FTS pre-filter 限定 candidate pairs；见 research.md Decision 1）；可选叠加 embedding 语义信号（默认关，需本地 sidecar，阈值约 0.9）。系统 MUST 提供无 embedding 端点的纯离线判定降级路径。
 - **FR-002**: 被判定为冗余的新投影 MUST 不写入检索候选；对应原始消息的 evidence MUST 完整保留（append-only 不受影响）。
 - **FR-003**: 冗余抑制 MUST 只处理"冗余/等价"，MUST NOT 处理"矛盾/冲突"——冲突事实不得被抑制。
 - **FR-004**: 冗余抑制 MUST 默认关闭；关闭时 MUST 与现状逐字节一致（零行为变化）。
-- **FR-005**: 冗余抑制 MUST 记录可审计的判定统计（判定总数、抑制数、误判疑似数），供评估误伤率。
-- **FR-006**: 检索命中 fact 后，系统 MUST 支持沿 lineage/relation 取有界数量的相关兄弟 fact（扩展深度与上限可配置，默认 depth-1 且有界）。
+- **FR-005**: 冗余抑制 MUST 记录可审计的判定统计（判定总数、抑制数、疑似误伤数），供评估误伤率。"疑似误伤"的运行时判定（如：被抑制候选存在独立 evidence 支撑仍被抑制）与配对消融兜底（端到端分类别回退）见 research.md Decision 4。
+- **FR-006**: 检索命中 fact 后，系统 MUST 支持沿 lineage/relation 取有界数量的相关兄弟 fact（扩展深度与上限可配置，默认 depth-1 且有界；上限取值与理由见 research.md Decision 2）。
 - **FR-007**: 邻居扩展 MUST 在候选冻结之后、answerer 上下文组装之前执行，MUST NOT 触发额外检索调用。
 - **FR-008**: 邻居扩展 MUST 默认关闭；关闭时候选与现状完全一致；无邻居可扩展时行为与关闭一致。
 - **FR-009**: 两机制 MUST 可独立开关、独立配置，并 MUST 在 022 冻结协议下分别配对验证（宪法 IV 回归门）。
