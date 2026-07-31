@@ -218,24 +218,25 @@ token/call 字段完整率与 repetition digest identity 必须为 100%，并且
 `source_lineage_unavailable=0`。Judge audit 未完成、校正改变 verdict 或任一预注册
 category 显著回退时不得 GO。
 
-### Feasibility Gate F0 — Same-stack ceiling before mechanism scale-up
+### Feasibility Gate F0 — Artifact validity before mechanism scale-up
 
 1. 在两个 benchmark 上分别完成有效 low/high B1；INVALID 运行只登记基础设施问题，
    不进入均值、配对统计或 verdict。
 2. 使用同一 provider、answerer/judge model+revision、prompt 与对应 input/output cap，
    对冻结 gold Evidence 运行
    diagnostic-only fixed-gold oracle；oracle 不得作为产品分数或 treatment。
-3. 按固定答对题数生成唯一 verdict：
-   - `CONTINUE`：LoCoMo oracle 至少 1,425/1,540，且 LongMemEval-S oracle 至少
-     473/500；允许进入 Increment 2/3 的正式满量评测。
-   - `HOLD`：任一 B1、oracle、judge audit 或 artifact validity 不完整；仅修评测尺子，
-     不启动新机制满量运行。
-   - `STOP`：所有 artifact 有效但任一 oracle 未达目标；022 停止扩建表示、Compiler 与
-     optional projection，并把更换 answerer、训练专用 memory compiler 或改变评测栈
-     作为独立特性重新 specify。
+3. 按 FR-041（2026-07-30 replan）生成唯一 verdict：
+   - `CONTINUE`：US1 Evidence Ledger 已落地，LoCoMo 与 LongMemEval-S 的 B0/B1
+     artifact 全部有效，且两位独立 reviewer 的 judge audit 完整；允许进入 Increment
+     2/3 的正式满量评测。
+   - `HOLD`：任一 B0/B1/oracle artifact 或 judge audit 不完整；仅修评测尺子，不启动
+     新机制满量运行。
+   - `STOP`：存在宪法违反或 artifact 合同不可修；停止扩建并形成独立合同/基础设施
+     特性，不用放宽 validity 制造结果。
 
-该门不降低 SC-002/SC-003，也不把 oracle 表述为 Mem0 的同栈对照；它只判断当前冻结栈
-是否存在达到最终目标的可验证上界。
+Oracle 的固定答对题数继续登记，用于区分 candidate/compiler/answerer miss，但不再决定
+F0。该门不降低 SC-002/SC-003；两项数值仍是 Phase 8 的最终共同目标，也不把 oracle
+表述为 Mem0 的同栈对照。
 
 ### Increment 2 — Representation bake-off
 

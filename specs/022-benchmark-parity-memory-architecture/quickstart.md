@@ -312,9 +312,11 @@ go run ./cmd/locomo-bench \
 embedding fingerprint 作为 provenance，但执行和无模型 read-back 都不读取或实例化
 embedding sidecar。`--eval-validate` 也不需要 answer/judge/token-counter endpoint。
 
-只有 LoCoMo `>=1425/1540` 且 LongMemEval-S `>=473/500`、B1/oracle/judge audit 全部有效，
-T022 才能写 `CONTINUE`。任一 artifact 不完整写 `HOLD`；artifact 全部有效但 oracle 未达
-目标写 `STOP`。`HOLD/STOP` 均不得启动后续满量机制。
+按 FR-041（2026-07-30 replan），US1 已落地、两个 benchmark 的 B0/B1 artifact 有效且
+两位独立 reviewer 的 judge audit 完整时，T022 写 `CONTINUE`。Oracle 必须有效并登记
+LoCoMo `/1540` 与 LongMemEval-S `/500` 的诊断上界，但是否达到 1,425/473 不再决定 F0。
+任一 artifact 或 audit 不完整写 `HOLD`；存在宪法违反或 artifact 合同不可修才写
+`STOP`。`HOLD/STOP` 均不得启动后续正式满量机制，SC-002/SC-003 仍由 Phase 8 最终门验收。
 
 ## 8. 表示 Bake-off
 
