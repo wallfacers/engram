@@ -331,17 +331,17 @@ func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T
 			t.Fatal("formal runner accepted a non-legacy B1 arm without a treatment flag")
 		}
 	})
-	t.Run("treatment manifest remains unavailable", func(t *testing.T) {
+	t.Run("treatment manifest binds matching mechanism", func(t *testing.T) {
 		treatment := baseProtocol
 		treatment.Experiment = evalExperimentProtocol{
-			Stage: "representation_rendering", Arm: string(ReprRawTurnWindow), PrimaryCohort: "all",
+			Stage: "representation_navigation", Arm: string(ReprRawTurnWindow), PrimaryCohort: "all",
 			ControlProtocolHash: "sha256:control",
-			MechanismFlags:      map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+			MechanismFlags:      map[string]bool{"representation": true},
 		}
 		treatmentOpt := opt
 		treatmentOpt.representationArm = ReprRawTurnWindow
-		if err := validateFormalRunnerOptions(treatment, treatmentOpt, []string{"hybrid"}); err == nil {
-			t.Fatal("formal runner accepted a treatment manifest before T114")
+		if err := validateFormalRunnerOptions(treatment, treatmentOpt, []string{"hybrid"}); err != nil {
+			t.Fatalf("formal runner refused a matching treatment manifest: %v", err)
 		}
 	})
 	t.Run("combined mechanisms remain unavailable", func(t *testing.T) {
@@ -370,7 +370,7 @@ func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T
 	})
 }
 
-func TestFreezeFormalB1ProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *testing.T) {
+func TestFreezeFormalProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *testing.T) {
 	base := options{
 		evalBudgetProfile:   "low",
 		answerInputTokenCap: 1100,
@@ -393,10 +393,10 @@ func TestFreezeFormalB1ProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t 
 		t.Run(name, func(t *testing.T) {
 			opt := base
 			mutate(&opt)
-			if err := freezeFormalB1Protocol(opt, nil); err == nil {
-				t.Fatal("formal B1 freeze accepted an alternate recipe or execution mode")
+			if err := freezeFormalProtocol(opt, nil, ""); err == nil {
+				t.Fatal("formal freeze accepted an alternate recipe or execution mode")
 			} else if strings.Contains(err.Error(), "read benchmark") {
-				t.Fatalf("formal B1 freeze reached dataset I/O before rejecting the mode: %v", err)
+				t.Fatalf("formal freeze reached dataset I/O before rejecting the mode: %v", err)
 			}
 		})
 	}

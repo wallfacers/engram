@@ -74,6 +74,7 @@ type options struct {
 	evalProtocolPath          string
 	fixedGoldOracle           bool
 	evalFreezeProtocol        string
+	controlProtocolPath       string
 	evalBudgetProfile         string
 	answerInputTokenCap       int
 	counterFingerprint        string
@@ -201,7 +202,8 @@ func run() error {
 	flag.StringVar(&opt.evalFreezeB0Protocol, "eval-freeze-b0-protocol", "", "write a clean-worktree B0 continuity manifest and exit (no model calls)")
 	flag.StringVar(&opt.evalProtocolPath, "eval-protocol", "", "frozen 022.v1 protocol manifest; enables formal B1-compatible runner")
 	flag.BoolVar(&opt.fixedGoldOracle, "fixed-gold-oracle", false, "run the diagnostic-only all-gold Evidence ceiling from a frozen B1 protocol (no retrieval/extraction)")
-	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 protocol manifest and exit (no model calls)")
+	flag.StringVar(&opt.evalFreezeProtocol, "eval-freeze-protocol", "", "write a clean-worktree formal 022 B1 or treatment protocol manifest and exit (no model calls)")
+	flag.StringVar(&opt.controlProtocolPath, "control-protocol", "", "frozen B1 control manifest whose protocol hash a treatment freeze must bind")
 	flag.StringVar(&opt.evalBudgetProfile, "eval-budget-profile", "", "formal protocol budget profile: low | high (required with --eval-freeze-protocol)")
 	flag.IntVar(&opt.answerInputTokenCap, "answer-input-cap", 0, "exact formal answer-input token cap (required with --eval-freeze-protocol)")
 	flag.StringVar(&opt.counterFingerprint, "counter-fingerprint", "", "calibrated formal answer tokenizer fingerprint (required with --eval-freeze-protocol)")
@@ -487,7 +489,17 @@ func run() error {
 		return freezeB0ContinuityProtocol(opt, convs)
 	}
 	if opt.evalFreezeProtocol != "" {
-		return freezeFormalB1Protocol(opt, convs)
+		controlHash := ""
+		if formalTreatmentMechanismRequested(opt) {
+			if strings.TrimSpace(opt.controlProtocolPath) == "" {
+				return fmt.Errorf("treatment freeze requires --control-protocol <frozen B1 manifest>")
+			}
+			var err error
+			if controlHash, err = readEvalProtocolHash(opt.controlProtocolPath); err != nil {
+				return err
+			}
+		}
+		return freezeFormalProtocol(opt, convs, controlHash)
 	}
 	sampledConversations := 0
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {

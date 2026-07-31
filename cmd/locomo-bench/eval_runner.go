@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -336,23 +337,131 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 	return nil
 }
 
-// validateFormalMechanismBinding keeps the current formal runner limited to
-// the frozen B1 legacy control. Treatment manifests need bidirectional
-// option/manifest binding, exact arm-name mapping, candidate replay, and
-// single-mechanism enforcement; T114 owns that complete contract. Until then,
-// accepting either a treatment manifest or a treatment CLI flag would create
-// a mislabeled artifact, so both directions fail closed.
+// formalTreatmentFreeze names the single treatment mechanism a formal
+// manifest is frozen for. T114 keeps treatment freezes single-mechanism:
+// mixing mechanisms in one manifest would make the artifact's effect
+// unattributable.
+type formalTreatmentFreeze struct {
+	Stage          string
+	Arm            string
+	MechanismFlags map[string]bool
+}
+
+// formalTreatmentForOptions derives the frozen treatment mechanism from the
+// CLI flags, enforcing that at most one mechanism is requested and that
+// dependent flags (gap-refetch requires event-projection) are consistent.
+// An empty result (no treatment flags) is the legacy B1 control.
+func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
+	active := make([]string, 0, 3)
+	if opt.compilerArm != "" {
+		active = append(active, "compiler")
+	}
+	if opt.representationArm != "" && opt.representationArm != ReprChunk900 {
+		active = append(active, "representation")
+	}
+	switch {
+	case opt.eventProjection != "" && opt.gapRefetch:
+		active = append(active, "gap")
+	case opt.eventProjection != "":
+		active = append(active, "event")
+	case opt.gapRefetch:
+		active = append(active, "gap")
+	}
+	if len(active) > 1 {
+		return formalTreatmentFreeze{}, fmt.Errorf("formal treatment freeze allows exactly one mechanism, got %v", active)
+	}
+	if len(active) == 0 {
+		return formalTreatmentFreeze{}, nil
+	}
+	switch active[0] {
+	case "compiler":
+		switch opt.compilerArm {
+		case "extractive", "planner", "exact_token":
+		default:
+			return formalTreatmentFreeze{}, fmt.Errorf("--compiler-arm must be extractive | planner | exact_token, got %q", opt.compilerArm)
+		}
+		return formalTreatmentFreeze{Stage: "compiler", Arm: opt.compilerArm, MechanismFlags: map[string]bool{"compiler": true}}, nil
+	case "representation":
+		return formalTreatmentFreeze{Stage: "representation_navigation", Arm: string(opt.representationArm), MechanismFlags: map[string]bool{"representation": true}}, nil
+	case "event":
+		if !validEventProjection(opt.eventProjection) {
+			return formalTreatmentFreeze{}, fmt.Errorf("--event-projection must be E0 | E1 | E2 | E3, got %q", opt.eventProjection)
+		}
+		if opt.gapRefetch {
+			return formalTreatmentFreeze{Stage: "gap", Arm: "structured_gap_refetch", MechanismFlags: map[string]bool{"event_projection": true, "gap_refetch": true}}, nil
+		}
+		return formalTreatmentFreeze{Stage: "event", Arm: "event_" + strings.ToLower(opt.eventProjection), MechanismFlags: map[string]bool{"event_projection": true}}, nil
+	case "gap":
+		if !validEventProjection(opt.eventProjection) {
+			return formalTreatmentFreeze{}, fmt.Errorf("--gap-refetch requires --event-projection E0 | E1 | E2 | E3")
+		}
+		return formalTreatmentFreeze{Stage: "gap", Arm: "structured_gap_refetch", MechanismFlags: map[string]bool{"event_projection": true, "gap_refetch": true}}, nil
+	}
+	return formalTreatmentFreeze{}, nil
+}
+
+func validEventProjection(value string) bool {
+	switch value {
+	case "E0", "E1", "E2", "E3":
+		return true
+	}
+	return false
+}
+
+// buildFormalExperiment derives the frozen experiment block for either the
+// legacy B1 control (no treatment flags, empty control hash) or a single
+// treatment mechanism bound to its B1 control protocol hash.
+func buildFormalExperiment(opt options, controlHash string) (evalExperimentProtocol, error) {
+	treatment, err := formalTreatmentForOptions(opt)
+	if err != nil {
+		return evalExperimentProtocol{}, err
+	}
+	if treatment.Stage == "" {
+		return evalExperimentProtocol{
+			Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+			MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false},
+		}, nil
+	}
+	if !isDigest(controlHash) {
+		return evalExperimentProtocol{}, fmt.Errorf("treatment freeze requires a frozen B1 control protocol hash, got %q", controlHash)
+	}
+	return evalExperimentProtocol{
+		Stage: treatment.Stage, Arm: treatment.Arm, PrimaryCohort: "all",
+		MechanismFlags: treatment.MechanismFlags, ControlProtocolHash: controlHash,
+	}, nil
+}
+
+// validateFormalMechanismBinding keeps the formal runner honest about what
+// its manifest claims: a B1 control manifest must run without treatment
+// flags, and a treatment manifest must run with exactly the mechanism it was
+// frozen for, bound to a real control protocol hash. Any mismatch fails
+// closed before a single model call.
 func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
 	exp := protocol.Experiment
-	if exp.Stage != "b1" || exp.Arm != "legacy_count_packer" || exp.ControlProtocolHash != "" {
-		return fmt.Errorf("formal runner supports only the frozen b1/legacy_count_packer control until T114, got %q/%q",
-			exp.Stage, exp.Arm)
+	if exp.Stage == "b1" {
+		if exp.Arm != "legacy_count_packer" || exp.ControlProtocolHash != "" {
+			return fmt.Errorf("formal B1 control manifest must be arm=legacy_count_packer without control hash, got %q/%q", exp.Stage, exp.Arm)
+		}
+		if !isFormalLegacyControlMechanismFlags(exp.MechanismFlags) {
+			return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
+		}
+		if formalTreatmentMechanismRequested(opt) {
+			return fmt.Errorf("formal b1/legacy_count_packer run cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch")
+		}
+		return nil
 	}
-	if !isFormalLegacyControlMechanismFlags(exp.MechanismFlags) {
-		return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
+	if !isDigest(exp.ControlProtocolHash) {
+		return fmt.Errorf("treatment manifest %s/%s must bind a B1 control protocol hash", exp.Stage, exp.Arm)
 	}
-	if formalTreatmentMechanismRequested(opt) {
-		return fmt.Errorf("formal b1/legacy_count_packer run cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch until T114")
+	requested, err := formalTreatmentForOptions(opt)
+	if err != nil {
+		return err
+	}
+	if requested.Stage == "" {
+		return fmt.Errorf("treatment manifest %s/%s requires the matching treatment CLI flags", exp.Stage, exp.Arm)
+	}
+	if exp.Stage != requested.Stage || exp.Arm != requested.Arm || !reflect.DeepEqual(exp.MechanismFlags, requested.MechanismFlags) {
+		return fmt.Errorf("treatment manifest %s/%s does not match requested mechanism %s/%s", exp.Stage, exp.Arm, requested.Stage, requested.Arm)
 	}
 	return nil
 }
@@ -975,12 +1084,15 @@ func verifyFormalGitProvenance(protocol evalProtocol) error {
 	return nil
 }
 
-// freezeFormalB1Protocol is the no-model half of T020.  It derives the two
+// freezeFormalProtocol is the no-model half of T020/T114. It derives the
 // dataset fingerprints and all current harness knobs from the actual command
 // line/environment, then refuses to write a manifest from a dirty worktree.
+// Without treatment flags it writes the frozen B1 legacy control; with
+// exactly one treatment mechanism it writes that treatment's manifest bound
+// to the B1 control protocol hash (controlHash, required for treatment).
 // It deliberately writes only the manifest: scores and per-question artifacts
 // belong to a later immutable run directory.
-func freezeFormalB1Protocol(opt options, convs []conversation) error {
+func freezeFormalProtocol(opt options, convs []conversation, controlHash string) error {
 	if strings.TrimSpace(opt.evalProtocolPath) != "" {
 		return fmt.Errorf("--eval-freeze-protocol cannot be combined with --eval-protocol")
 	}
@@ -998,7 +1110,7 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 		return err
 	}
 	if len(arms) != 1 {
-		return fmt.Errorf("formal B1 freeze requires exactly one retrieval arm")
+		return fmt.Errorf("formal freeze requires exactly one retrieval arm")
 	}
 	if err := validateFormalLegacyRecipe(arms[0]); err != nil {
 		return err
@@ -1006,12 +1118,15 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 	if err := validateFormalLegacyMechanismOptions(opt); err != nil {
 		return err
 	}
-	// The B1 freezer only writes the legacy_count_packer control manifest. A
-	// treatment flag would be silently dropped from the manifest (the artifact
-	// would then claim legacy while a treatment actually ran), so fail closed
-	// at freeze time until T114 adds treatment stage/arm/mechanism binding.
-	if formalTreatmentMechanismRequested(opt) {
-		return fmt.Errorf("formal B1 freeze cannot bind treatment mechanisms yet (T114); pass no --compiler-arm/--representation/--event-projection/--gap-refetch")
+	experiment, err := buildFormalExperiment(opt, controlHash)
+	if err != nil {
+		return err
+	}
+	if experiment.Stage == "b1" && formalTreatmentMechanismRequested(opt) {
+		return fmt.Errorf("formal B1 freeze cannot bind treatment mechanisms; pass no --compiler-arm/--representation/--event-projection/--gap-refetch")
+	}
+	if experiment.Stage != "b1" && !isDigest(controlHash) {
+		return fmt.Errorf("treatment freeze requires a frozen B1 control protocol hash (--control-protocol)")
 	}
 	if len(opt.catTopK) != 0 || len(opt.catQuota) != 0 ||
 		strings.TrimSpace(opt.catTopKSpec) != "" || strings.TrimSpace(opt.catQuotaSpec) != "" {
@@ -1055,7 +1170,7 @@ func freezeFormalB1Protocol(opt options, convs []conversation) error {
 		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
 		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:concordant-stratified-plan:freeze-before-treatment"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
 		CoverageStrata: evalCoverageStrataProtocol{Boundaries: []float64{0, 0.5, 0.9, 1}, SelectionDigest: evalTextDigest("022.v1:coverage-strata:0,0.5,0.9,1")},
-		Experiment:     evalExperimentProtocol{Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all", MechanismFlags: map[string]bool{"idk_retry": false, "iris": false, "rerank": false}},
+		Experiment:     experiment,
 	}
 	if !opt.chunks {
 		return fmt.Errorf("formal B1 freeze requires --chunks for lossless source identity")
