@@ -102,10 +102,10 @@ description: "Task list for 024-memory-density implementation"
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] 冻结四个 protocol manifest（none / dedup-only / neighbor-only / both），基于 022 的 `b1-high.json` 冻结基线，新增机制 flag 绑定（`contracts/mechanism-bindings.md`）
-- [ ] T019 [US3] LoCoMo 四臂配对（F0 门）：`cmd/locomo-bench --eval-protocol <manifest> --run-dir ...`，repeats≥3，固定 token cap；判断任一机制不显著回归、有方向收益则进下一步，无收益/负则记录负结果收口（spec SC-003）
-- [ ] T020 [US3] LongMemEval-S 四臂配对（同 recipe，数据 `testdata/longmemeval/longmemeval_s_cleaned.json`）
-- [ ] T021 [US3] 报告与归档：双基准 overall + 分类别 + exact McNemar + token 记账 + 候选冗余下降度量（SC-001）+ 交互效应（SC-003）写入 `docs/evaluation/`；负收益机制保持默认关并记录 verdict
+- [x] T018 [US3] 冻结四个 protocol manifest（none / dedup-only / neighbor-only / both），基于 022 的 `b1-high.json` 冻结基线，新增机制 flag 绑定（`contracts/mechanism-bindings.md`）
+- [x] T019 [US3] LoCoMo 四臂配对（F0 门）：`cmd/locomo-bench --eval-protocol <manifest> --run-dir ...`，repeats≥3，固定 token cap；判断任一机制不显著回归、有方向收益则进下一步，无收益/负则记录负结果收口（spec SC-003）
+- [ ] T020 [US3] LongMemEval-S 四臂配对（同 recipe，数据 `testdata/longmemeval/longmemeval_s_cleaned.json`）— **未跑**：LoCoMo 四臂已为负结果（FR-011 收口），LongMemEval-S 四臂不再有执行价值；留作后续如果两机制实现调整后的复核
+- [x] T021 [US3] 报告与归档：双基准 overall + 分类别 + exact McNemar + token 记账 + 候选冗余下降度量（SC-001）+ 交互效应（SC-003）写入 `docs/evaluation/`；负收益机制保持默认关并记录 verdict
 
 **Checkpoint**: US3 产出双基准四臂验证报告，宪法 IV 门完成
 
@@ -115,10 +115,10 @@ description: "Task list for 024-memory-density implementation"
 
 **Purpose**: 收尾、门禁与一致性
 
-- [ ] T022 [P] 引擎门：`CGO_ENABLED=0 go build ./...` 零错误 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿（含新增 TDD 测试）
-- [ ] T023 [P] adapter 无关确认：`git diff --name-only -- mcpserver` 为空；引擎 diff guard（`git diff --name-only -- memory embedding provider store internal` 仅含本 feature 新增文件）
-- [ ] T024 [P] 文档收尾：更新 `spec.md` 的 Clarifications（补验证结果）、`research.md` 的 Residual Risks（补实测），确认 `tasks.md` 全部勾选与 spec/plan 一致
-- [ ] T025 [P] 归因提交核查：机制代码、协议绑定、eval 配置为三个独立 commit（宪法 IV 归因）
+- [x] T022 [P] 引擎门：`CGO_ENABLED=0 go build ./...` 零错误 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿（含新增 TDD 测试）
+- [x] T023 [P] adapter 无关确认：`git diff --name-only -- mcpserver` 为空；引擎 diff guard（`git diff --name-only -- memory embedding provider store internal` 仅含本 feature 新增文件）
+- [x] T024 [P] 文档收尾：更新 `spec.md` 的 Clarifications（补验证结果）、`research.md` 的 Residual Risks（补实测），确认 `tasks.md` 全部勾选与 spec/plan 一致
+- [x] T025 [P] 归因提交核查：机制代码、协议绑定、eval 配置为三个独立 commit（宪法 IV 归因）
 
 ---
 

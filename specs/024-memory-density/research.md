@@ -50,3 +50,11 @@
 2. **邻居扩展放大 token**：高关联 fact 兄弟多 → 数量上限强制，SC-002 用同 cap 验证。
 3. **两机制交互**：同开时可能抵消（如抑制减少的兄弟 fact 又由扩展找回）→ SC-003 显式报告交互，不假设可加。
 4. **022 资产未冻结**：依赖 022 协议/store 资产；若 022 未冻结则本 feature 实验不启动（spec Assumptions）。
+5. **邻居扩展的"兄弟"≠语义邻居（评审 2026-08-01 记录）**：`SiblingFacts` 按"共享至少一条 evidence"推导兄弟。在 LoCoMo 里一条原始消息通常被抽取成多个 fact（抽取 refs 全为 `FullSource`），因此同一条消息派生的所有 fact 互为兄弟——扩展可能拉回同一消息的不同 fact，而非跨消息的语义相关事实。这与 MemOS depth-2 图邻居（父 topic + 兄弟）语义不同。**不得把"共享 evidence 兄弟"直接宣称等于"语义邻居"**；实验报告须单独记录该扩展的实际构成（同消息占比 vs 跨消息占比），避免归因到不存在的机制。
+6. **write_dedup 臂与 neighbor_extend 臂非同一 store（评审 2026-08-01 记录）**：write_dedup 是写侧机制，其臂必须用抑制后重新 build 的 store；neighbor_extend 臂用同一旧 store。因此四臂中 **臂 1/2（dedup off/on）与臂 3/4（neighbor off/on）不是同一 store**，neighbor_extend 相对自身的消融干净，但 write_dedup×neighbor 组合的比较含 store 差异这一混淆变量。实验报告须明说各臂的 store 来源，不得把组合差值全部归给机制交互。
+
+7. **实测（2026-08-01 四臂后）**：
+   - **点 5 坐实**：LoCoMo 单条原始消息被抽取成多个 fact（`FullSource` refs），共享 evidence 的兄弟多为同消息内不同 fact；neighbor 臂全面小幅下滑（−0.3 到 −1.0pp/类）与"扩展带回同消息冗余而非跨消息语义上下文"一致。
+   - **点 1 放大**：write_dedup 在 LoCoMo 上几乎不触发（21,860 判定仅 20 抑制，0.09%），Jaccard 0.7 阈值对近似但非逐字节转述的漏检面很宽；疑似误伤 5 例（误伤率 25%）不可忽略。
+   - **点 2/3 结论**：扩展 token 未放大（cap 内），但交互为单调负向（both −1.30pp < 单开），无叠加收益。
+   - 两机制 verdict：**负结果，保持默认关**（FR-011）。

@@ -18,6 +18,12 @@
 - **邻居扩展只在 legacy packer 路径**：compiler arm 的 candidate-replay 必须 byte-identical，兄弟扩展会改变候选集 → 只在非 compiler 的 materialize 路径生效（FR-007）。
 - **四臂 manifest 冻结验证**：`--eval-freeze-protocol` + `--write-dedup`/`--neighbor-extend` 产出独立 hash 的 b1 manifest（control 3-key 与 022 资产逐字节一致；dedup/neighbor 各带独立 hash → 归因成立）；`--eval-protocol control + --write-dedup` 在模型调用前 fail closed（`write_dedup=false differs from requested true`）。
 
+### Session 2026-08-01（四臂实验完成回填）
+
+- **冻结 manifest 曾因旧二进制 prompt digest 漂移出错**：机器上旧 `locomo-bench-024` 二进制的 `answerer prompt_digest` 为 `dec161e`，与 022 资产 `8187fec` 不一致（prompt 常量编译版本漂移）；导致首跑四臂 `formal embedding fingerprint differs from frozen protocol` fail closed。修复：本地 HEAD 重编译二进制（digest 恢复 `8187fec`）+ 用与 022 完全一致的 env（`--force-answer`、Qwen/openai/bge、source judge.env）重冻结四份 manifest。重冻结后 control 与 022 b1-high **逐字节一致**（仅 created_at/git/hash 不同），四份 protocol_hash 互不相同。教训：**正式实验的二进制必须与 manifest 冻结二进制同源**；T018 冻结验证须核对 answerer prompt digest。
+- **四臂结果（LoCoMo 1540 题，cap 3600）**：control **84.29%** > neighbor 83.83%（−0.46pp）> dedup 83.38%（−0.91pp）> both 82.99%（−1.30pp）。两机制单独与组合均为负结果，随机制叠加单调下降。write_dedup 在 LoCoMo 上几乎不触发（21,860 判定仅 20 抑制，误伤 5 例）；dedup 的 multi-hop +3.2pp 被 open-domain −4.2pp 抵消。**两机制保持默认关（FR-011 verdict）**。报告：[docs/evaluation/reports/memory-density-four-arm.md](../../docs/evaluation/reports/memory-density-four-arm.md)。
+- **LongMemEval-S 四臂未跑**：LoCoMo 四臂已为负结果收口，LongMemEval-S 不再有执行价值；留作后续机制调整后的复核（tasks.md T020）。
+
 ### 022 外部证据（初始）
 
 - **写入时去重的依据**：MemOS `manager.py` 用 `merged_threshold=0.92` 的 embedding 相似度 + LLM 判定做写入时合并，保证库里的事实非冗余、信息密集。这是其"低预算高信息密度"（同栈复现 1059 tok 达 82.4%，engram 同预算仅 76.85%）的根因。
