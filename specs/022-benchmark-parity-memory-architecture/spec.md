@@ -85,10 +85,11 @@ V1 请求必须经过的层，也不是为了宣告架构完整而必须交付�
 评测口径取得名义涨分。
 
 数值目标保持为双基准最终验收门，不因低分控制臂而下调；同时它也不是要求无限追加结构
-的授权。进入机制实验前必须先证明冻结 answerer/judge 在同栈 fixed-gold Evidence 上具备
-达到目标的能力。若该上界不成立，本特性记录 `STOP` 并把需要更换 answerer、训练专用
-memory compiler 或改变评测栈的工作移交独立特性，不以 Event/Scene/Profile/graph 堆叠
-掩盖不可达性。
+的授权。进入机制实验前仍须完成同栈 fixed-gold Evidence oracle，用它区分 candidate、
+compiler 与 answerer miss；但按 2026-07-30 replan，oracle 是否达到最终数值目标不再决定
+F0。F0 只以 US1 已落地、B0/B1 artifact 有效和 judge audit 完整为 `CONTINUE` 条件；
+数值目标只在 Phase 8 最终双基准门验收，未达时诚实记录并移交后续特性，不以
+Event/Scene/Profile/graph 堆叠掩盖不可达性。
 
 ## User Scenarios & Testing *(mandatory)*
 

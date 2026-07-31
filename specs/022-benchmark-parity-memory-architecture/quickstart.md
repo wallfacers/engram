@@ -313,12 +313,13 @@ go run ./cmd/locomo-bench \
 embedding fingerprint 作为 provenance，但执行和无模型 read-back 都不读取或实例化
 embedding sidecar。`--eval-validate` 也不需要 answer/judge/token-counter endpoint。
 
-按 2026-07-30 的 F0 replan，oracle 仍必须有效运行并登记，用于区分 candidate/compiler/
-answerer miss，但不再以是否达到 LoCoMo `1425/1540`、LongMemEval-S `473/500` 作为
-US2–US5 的解锁条件。T022 只有在 US1 Ledger 已落地、B0/B1 artifacts 有效且双 reviewer
-judge audit 完整时才写 `CONTINUE`；任一 artifact/audit 不完整写 `HOLD`，宪法违反或
-artifact 不可修写 `STOP`。SC-002/SC-003 仍是 Phase 8 最终双基准门，机制必须靠同栈
-配对证据独立过门，不能借 replan 放宽 judge、answerer、预算或 reranker 口径。
+按 FR-041（2026-07-30 F0 replan），oracle 仍必须有效运行并登记，用于区分 candidate/
+compiler/answerer miss；Oracle 登记 LoCoMo `/1540` 与 LongMemEval-S `/500` 的诊断上界，
+但是否达到 1,425/473 不再决定 F0。US1 Ledger 已落地、两个 benchmark 的 B0/B1 artifact
+有效且两位独立 reviewer 的 judge audit 完整时，T022 写 `CONTINUE`。任一 artifact 或
+audit 不完整写 `HOLD`；存在宪法违反或 artifact 合同不可修才写 `STOP`。`HOLD/STOP`
+均不得启动后续正式满量机制。SC-002/SC-003 仍由 Phase 8 最终双基准门验收，机制必须靠
+同栈配对证据独立过门，不能借 replan 放宽 judge、answerer、预算或 reranker 口径。
 
 ## 8. 表示 Bake-off
 
