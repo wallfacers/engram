@@ -511,10 +511,38 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.InvalidReasons = []string{"retriever_unavailable"}
 		return frozen
 	}
-	hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
-	if err != nil {
-		frozen.InvalidReasons = []string{"retrieval_failed"}
-		return frozen
+	// T114 candidate-replay: compiler arms must consume the byte-identical
+	// retrieval product of the same protocol/question/query. The first
+	// materialize retrieves and persists the replay; every later arm reads
+	// it with zero retrieval calls. Identity or digest drift fails closed.
+	var hits []memory.Result
+	retrievalCalls := 0
+	var retrieveErr error
+	if opt.compilerArm != "" && strings.TrimSpace(opt.runDir) != "" {
+		replay, replayErr := loadFormalCandidateReplay(opt.runDir, protocol.ProtocolHash, qa.QuestionID, qa.Question)
+		if replayErr == nil {
+			hits = replay.Hits
+		} else if os.IsNotExist(replayErr) {
+			hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
+			if retrieveErr != nil {
+				frozen.InvalidReasons = []string{"retrieval_failed"}
+				return frozen
+			}
+			retrievalCalls = 1
+			if replayWriteErr := writeFormalCandidateReplay(opt.runDir, protocol, qa.QuestionID, qa.Question, hits); replayWriteErr != nil {
+				frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_replay_write_failed")
+			}
+		} else {
+			frozen.InvalidReasons = []string{"candidate_replay_drift"}
+			return frozen
+		}
+	} else {
+		hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
+		if retrieveErr != nil {
+			frozen.InvalidReasons = []string{"retrieval_failed"}
+			return frozen
+		}
+		retrievalCalls = 1
 	}
 	expanded, sourceErr := expandFormalEvidence(ctx, projections, opt.formalEvidence, hits)
 	if sourceErr != nil {
@@ -522,9 +550,9 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		// Retain the navigation artifact for diagnosis, but never let its
 		// projection text become answer-facing evidence.
 		sourceByCandidate, _ := formalCandidateSources(ctx, projections, hits)
-		frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence)
+		frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence, retrievalCalls)
 	} else {
-		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, 1)
+		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, retrievalCalls)
 		// When a non-chunk_900 representation is selected, re-render the
 		// anchors through the representation renderer so the candidate
 		// artifact records the enriched structure (windows or episodes).
@@ -785,7 +813,7 @@ func countFormalPackInput(ctx context.Context, protocol evalProtocol, counter ev
 	return count, count.InputTokens <= protocol.Budget.AnswerInputTokenCap, nil
 }
 
-func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []memory.Result, chunkTurns map[string][]string, sourceByCandidate map[string][]string, turnEvidence map[string]string) evalCandidateArtifact {
+func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []memory.Result, chunkTurns map[string][]string, sourceByCandidate map[string][]string, turnEvidence map[string]string, retrievalCalls int) evalCandidateArtifact {
 	anchors := make([]evalRankedAnchor, 0, len(hits))
 	rendered := make([]evalRenderedCandidate, 0, len(hits))
 	for index, hit := range hits {
@@ -806,7 +834,7 @@ func buildFormalCandidateArtifact(protocol evalProtocol, qa locomoQA, hits []mem
 	resolved, unresolved, _ := resolveDatasetSourceIDs(qa.Evidence, turnEvidence)
 	artifact := evalCandidateArtifact{
 		Schema: evalProtocolSchema, ProtocolHash: protocol.ProtocolHash, QuestionID: qa.QuestionID,
-		QueryDigest: evalTextDigest(qa.Question), Mode: evalCandidateModeAnchorRendering, RetrievalCalls: 1,
+		QueryDigest: evalTextDigest(qa.Question), Mode: evalCandidateModeAnchorRendering, RetrievalCalls: retrievalCalls,
 		Anchors: anchors, RenderedCandidates: rendered,
 		Gold: evalGoldResolution{DatasetSourceIDs: stableStrings(qa.Evidence), ResolvedEvidenceIDs: resolved, UnresolvedIDs: unresolved},
 	}

@@ -471,7 +471,7 @@ func TestFormalCandidateSourcesUseLedgerEvidenceIDs(t *testing.T) {
 
 	protocol := testEvalProtocol()
 	qa := locomoQA{QuestionID: "q-source", Question: "retrievable", Evidence: []string{"D1:1"}}
-	candidate := buildFormalCandidateArtifact(protocol, qa, hits, map[string][]string{hits[0].Name: {"D1:1"}}, sources, map[string]string{"D1:1": evidence[0].ID})
+	candidate := buildFormalCandidateArtifact(protocol, qa, hits, map[string][]string{hits[0].Name: {"D1:1"}}, sources, map[string]string{"D1:1": evidence[0].ID}, 1)
 	if got := candidate.Gold.ResolvedEvidenceIDs; len(got) != 1 || got[0] != evidence[0].ID {
 		t.Fatalf("resolved gold evidence = %#v, want Ledger Evidence %q", got, evidence[0].ID)
 	}
