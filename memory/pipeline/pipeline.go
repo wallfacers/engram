@@ -321,9 +321,10 @@ func (p *Pipeline) storeFact(ctx context.Context, sessionDate time.Time, sourceS
 			slog.Warn("memory: suppression candidate lookup failed", "err", candErr)
 		}
 		for _, candidate := range candidates {
-			if candidate.Name == incoming.Name {
-				continue
-			}
+			// No self-exclusion guard is needed here: candidate names are unique
+			// ULID-suffixed slugs (entryName) that never equal incoming.Name, and
+			// a byte-identical fact is already handled by the GetByContent exact
+			// match above — the suppression path only ever sees near-duplicates.
 			p.stats.Decisions++
 			if p.suppressor.ShouldSuppress(ctx, candidate, incoming) {
 				p.stats.Suppressed++
