@@ -2,6 +2,7 @@ package evidencecompiler
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"testing"
@@ -186,4 +187,9 @@ type compilerTestPlanner struct {
 
 func (planner compilerTestPlanner) Propose(context.Context, string, []Candidate) (Proposal, error) {
 	return planner.proposal, planner.err
+}
+
+func sha256Hex(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:])
 }

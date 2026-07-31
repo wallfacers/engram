@@ -55,7 +55,7 @@ provenance validity。B1 的候选/分数必须等 Ledger 提供真实 source/sp
 
 ### Measurement implementation
 
-- [X] T011 定义供 B1 与 Compiler 共用的 provider-neutral `AnswerInput`、`TokenCounter`、candidate/source/action 基础类型到 `memory/evidencecompiler/types.go`
+- [X] T011 定义供 B1 与 Compiler 共用的 provider-neutral `AnswerInput`、`TokenCounter`、candidate/source/action 基础类型到 `memory/evidencecompiler/internal/contracts/types.go`（顶层 `export.go` alias 保持公开形状不变；结构改造 commit 后路径）
 - [X] T012 实现 `022.v1` protocol canonicalization、hash、validation 和 resume refusal 到 `cmd/locomo-bench/eval_protocol.go`
 - [X] T013 [P] 实现 ranked anchor、rendered candidate、continuous source coverage、JSONL round-trip 与 digest 校验到 `cmd/locomo-bench/candidate_artifact.go`
 - [X] T014 [P] 实现 majority、exact McNemar、confidence interval、Holm category gate 与 promotion verdict 到 `cmd/locomo-bench/paired_eval.go`
@@ -181,19 +181,19 @@ citation、cap 与单次 answerer 合规率均为 100%，无来源 ADD=0。
 
 ### Tests first — US3
 
-- [ ] T059 [P] [US3] 为封闭 action union、字段矩阵、lineage allowlist、Unicode code-point span/digest、unknown action/ADD 拒绝写失败测试到 `memory/evidencecompiler/validate_test.go`
-- [ ] T060 [P] [US3] 为 deterministic entity/time/operands/cardinality/update Need、Planner 不得删除显式 constraint 和有来源关系写失败测试到 `memory/evidencecompiler/need_test.go`
-- [ ] T061 [P] [US3] 为 raw-fits 保留原文、over-cap 才 EXTRACT、EXTRACT 充分时拒绝 MERGE、EXTRACT 不充分才逐句验证 MERGE 写失败测试到 `memory/evidencecompiler/extractive_test.go`
-- [ ] T062 [P] [US3] 为 resolver missing/tombstone/purge、counter nil/error/fingerprint drift、static prompt over-cap、invalid Planner fallback 和 cancellation 写失败测试到 `memory/evidencecompiler/compiler_test.go`
+- [ ] T059 [P] [US3] 为封闭 action union、字段矩阵、lineage allowlist、Unicode code-point span/digest、unknown action/ADD 拒绝写失败测试到 `memory/evidencecompiler/internal/validate/validate_test.go`
+- [ ] T060 [P] [US3] 为 deterministic entity/time/operands/cardinality/update Need、Planner 不得删除显式 constraint 和有来源关系写失败测试到 `memory/evidencecompiler/internal/need/need_test.go`
+- [ ] T061 [P] [US3] 为 raw-fits 保留原文、over-cap 才 EXTRACT、EXTRACT 充分时拒绝 MERGE、EXTRACT 不充分才逐句验证 MERGE 写失败测试到 `memory/evidencecompiler/internal/extract/extract_test.go`
+- [ ] T062 [P] [US3] 为 resolver missing/tombstone/purge、counter nil/error/fingerprint drift、static prompt over-cap、invalid Planner fallback 和 cancellation 写失败测试到 `memory/evidencecompiler/compiler_test.go`（顶层门面）与 `memory/evidencecompiler/internal/resolve/resolve_test.go`
 - [ ] T063 [P] [US3] 为 fixed-candidate post-freeze retrieval=0、gap disabled、invalid Bundle answerer=0、valid Bundle answerer=1 和 IDK 不重答写失败测试到 `cmd/locomo-bench/compiler_eval_test.go`
 
 ### Engine implementation — US3
 
-- [ ] T064 [US3] 实现 Candidate/Need/Action/Trace/Bundle canonical validation、allowlist 与 typed errors 到 `memory/evidencecompiler/validate.go`
-- [ ] T065 [P] [US3] 实现不依赖 benchmark category 的 deterministic Need/relationship builder 到 `memory/evidencecompiler/need.go`
-- [ ] T066 [P] [US3] 实现 relevance ordering、raw-fit 检查、extractive span selection 和 MERGE 双条件 gate 到 `memory/evidencecompiler/extractive.go`
-- [ ] T067 [US3] 实现 Compile orchestration、Planner proposal validation、deterministic fallback、完整 prompt 重计与 Trace/Bundle rendering 到 `memory/evidencecompiler/compiler.go` 和 `memory/evidencecompiler/render.go`
-- [ ] T068 [US3] 通过窄 `Resolve(ids)` bridge 批量读取 active Ledger 且禁止 Search/query 到 `memory/evidencecompiler/source.go`
+- [ ] T064 [US3] 实现 Candidate/Need/Action/Trace/Bundle canonical validation、allowlist 与 typed errors 到 `memory/evidencecompiler/internal/validate/validate.go`（sentinel errors 在 `internal/contracts`）
+- [ ] T065 [P] [US3] 实现不依赖 benchmark category 的 deterministic Need/relationship builder 到 `memory/evidencecompiler/internal/need/need.go`
+- [ ] T066 [P] [US3] 实现 relevance ordering、raw-fit 检查、extractive span selection 和 MERGE 双条件 gate 到 `memory/evidencecompiler/internal/extract/extract.go`
+- [ ] T067 [US3] 实现 Compile orchestration、Planner proposal validation、deterministic fallback、完整 prompt 重计与 Trace/Bundle rendering 到 `memory/evidencecompiler/compiler.go`（门面）和 `memory/evidencecompiler/orchestrate.go`（编排）及 `memory/evidencecompiler/internal/render/render.go`
+- [ ] T068 [US3] 通过窄 `Resolve(ids)` bridge 批量读取 active Ledger 且禁止 Search/query 到 `memory/evidencecompiler/internal/resolve/resolve.go`
 
 ### Harness integration
 

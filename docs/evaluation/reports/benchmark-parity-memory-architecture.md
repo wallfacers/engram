@@ -946,3 +946,41 @@ ablation already showed engram@1083tok=−5.62pp.
 **Implication for the pivot**: chunk→compact-fact (Gate A0) and chunk-granularity
 finening (Gate B) both fail to break the tradeoff — they only move along it. The
 "low-token parity" goal needs re-scoping against the corrected MemOS anchors.
+
+## evidencecompiler 分层结构改造（refactor, 2026-07-31）
+
+**分支**: `refactor/evidencecompiler-structure`（基线 022 `f4d58a4`）
+
+将扁平单包 `memory/evidencecompiler`（13 文件 ~2,900 行）重构为分层结构，公开合同
+与行为不变：
+
+```
+memory/evidencecompiler/
+├── export.go        # 公开合同 alias 面（类型/常量/Err* re-export + BuildNeed wrapper）
+├── compiler.go      # 门面：New/Compile/Compiler + compileConfig
+├── orchestrate.go   # 有状态编排：planner proposal/admission/finalize/trace
+└── internal/
+    ├── contracts/   # 冻结合同类型/常量/sentinel errors（唯一类型源，无行为）
+    ├── need/        # deterministic Need/relations（纯函数）
+    ├── validate/    # canonical validation + digest（纯校验）
+    ├── extract/     # EvidenceItem/ExtractionPlan/raw-fit/EXTRACT/MERGE 决策（纯决策）
+    ├── render/      # Bundle/Trace rendering + bundle 校验（纯渲染）
+    └── resolve/     # LedgerResolver + 批量 source resolution（IO 层）
+```
+
+依赖方向单向无环：`contracts → validate → need/extract/render/resolve → 顶层编排`。
+`internal/` 的 Go import 规则禁止 eval harness 绕过顶层合同直接接触实现层。
+
+| 验证 | 结果 |
+|---|---|
+| 公开 API 形状 | PASS — 63/63 导出符号（type/const/var/func）与重构前逐项一致（alias + wrapper + var re-export；含 `LedgerResolver`、`Err*`、`BuildNeed`） |
+| `CGO_ENABLED=0 go build ./...` | PASS |
+| `CGO_ENABLED=0 go test -count=1 ./...` | PASS — 全包绿；`cmd/locomo-bench` 8.392s 通过，证明 eval harness 对 alias 合同编译兼容 |
+| `CGO_ENABLED=0 go vet ./...` | PASS |
+| `gofmt -l memory/evidencecompiler` | 干净 |
+| 行为不变性 | 无算法/默认 recipe 改动；`compiler_test.go` 等原测试原样通过；T021/T022 状态不变（F0 仍 HOLD） |
+| 评测回归门 | 纯结构重构，测试全绿 + API 形状一致证明不变性；正式 LoCoMo 回归仍归 T021/T022/T107 既有计划，不额外引入风险 |
+| tasks.md 路径同步 | T011、T059-T068 的文件路径已更新到新分层结构 |
+
+本改造只服务结构清晰度，不产生 B0/B1/oracle/SC-002/SC-003 分数，不改变任何
+mechanism 的 promotion 状态。US3 的 T059-T068 验收口径（行为/失败测试）不受影响。
