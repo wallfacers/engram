@@ -113,7 +113,7 @@ packer 一致；本文的增量是把每项的实证置信度逐篇坐实（见�
 逐篇核实证实「没有任何一篇同时满足标准 LoCoMo 1540 + 标准 LongMemEval 500 + 干净逐组件消融 +
 可比 judge」。与借鉴判断相关的关键不可比点：
 
-- **LoCoMo 分母注水**（>1540）：ByteRover 1982、Mandol 1986。
+- **LoCoMo 分母口径差异**（全量 vs answerable 子集，非注水）：engram 与 MemOS 用 category 1–4 的 1,540；ByteRover 1982、Mandol 1986 用全量口径（含 category 5 adversarial，完整 1,986）。差异在于 adversarial 是否计入、是否按拒答处理。
 - **分母缩水**（<标准）：NapMem 1315（说话人切分）、LazyMem 314（末两段对话）；LongMemEval 缩水：
   LazyMem 100（test split）、NapMem 100（OOD）、Retain or Consolidate 75（test split）。
 - **单篇内 judge 口径不一致**：True Memory 的 LoCoMo 用 semantic-match（93.0 = oracle ceiling

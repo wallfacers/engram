@@ -42,18 +42,23 @@ GPT-OSS-120B judge 且自承 "not directly comparable to official benchmark judg
 True Memory 的 LoCoMo 用宽松 semantic-match（93.0 = oracle ceiling 92.99）、LongMemEval
 却用 strict（87.8），**单篇内部口径都不一致**。
 
-**分母 / 子集**（标准为 LoCoMo 1,540、LongMemEval 500）：
+**分母 / 子集**（LoCoMo 全量 1,986 = category 1–4 共 1,540 + category 5 adversarial 446；LongMemEval 全量 500）：
 
 | 论文 | LoCoMo | LongMemEval |
 |---|---|---|
-| ByteRover | 1,982（非标准） | 500 |
-| Mandol | 1,986（非标准） | 500 |
+| ByteRover | 1,982（全量口径，含 adversarial） | 500 |
+| Mandol | 1,986（全量口径，含 adversarial） | 500 |
 | LazyMem | 314（末两段对话） | 100（test split） |
 | Retain or Consolidate | 分层采样 | 75（test split） |
 | NapMem | 1,315（说话人切分） | 100（OOD held-out） |
 | Chronos 消融 | — | 116（ablation subset） |
 
-没有任何一篇同时用「标准 1,540 + 全量 500 + 干净逐组件消融」；LongMemEval 全量 500
+分母差异要分清"全量 vs 子集"与"注水"是两回事：engram 与 MemOS 使用 category 1–4
+answerable 子集 1,540（不含 category 5 adversarial），ByteRover/Mandol 使用全量口径
+1,982/1,986（含 category 5 adversarial）。adversarial 是否计入、是否按拒答处理，
+决定两口径能否直接可比；这不是分母注水。
+
+没有任何一篇同时用「category 1–4 的 1,540 + 全量 500 + 干净逐组件消融」；LongMemEval 全量 500
 配干净消融是当前空白。不可迁移的托管依赖另见第三层：Chronos 依赖付费 Cohere Rerank v3，
 ByteRover 依赖不可消融的 Gemini 3.1 Pro justifier，EverMemOS 的 4B GPU embedder + Neo4j
 检索栈不开源且 True Memory 明确「cannot be run on local hardware」，Hindsight 的检索
@@ -64,7 +69,7 @@ token budget 在论文中是未填的 `<add>` 占位符。
 | 论文 | 论文主结果 | 完整系统结构 | 复现与解释边界 |
 |---|---|---|---|
 | [Chronos](https://www.alphaxiv.org/abs/2603.16862) | LongMemEval-S full 500：Low 92.60%，High 95.60% | raw turn calendar、结构化 event calendar、日期/grep/vector 工具和 ReAct 查询 | 使用 `text-embedding-3-large`、Cohere Rerank v3、Gemini 动态提示和 Claude answerer；事件消融只覆盖 116 题 |
-| [ByteRover](https://www.alphaxiv.org/abs/2604.01599) | LoCoMo 96.1%；LongMemEval-S 92.8% | Context Tree、五级渐进检索、relation、justifier 和 agent loop | LoCoMo 为非标准 1,982 题；使用 Gemini 3 Flash judge 与 Gemini 3.1 Pro justifier；公开分数是整套答案管线结果 |
+| [ByteRover](https://www.alphaxiv.org/abs/2604.01599) | LoCoMo 96.1%；LongMemEval-S 92.8% | Context Tree、五级渐进检索、relation、justifier 和 agent loop | LoCoMo 为全量口径 1,982 题（含 category 5 adversarial，接近完整 1,986）；使用 Gemini 3 Flash judge 与 Gemini 3.1 Pro justifier；公开分数是整套答案管线结果 |
 | [Mandol](https://www.alphaxiv.org/abs/2606.29778) | GPT-4.1-mini：LoCoMo 92.21%，LongMemEval 88.40% | basic graph、episodic/semantic/emotional memory spaces、路由、RRF、图扩展、冲突处理和 MMR | 没有逐组件端到端 QA 消融；主实验使用 H800，只能作为结构观察 |
 | [EverMemOS](https://www.alphaxiv.org/abs/2601.02163) | GPT-4.1-mini：LoCoMo 93.05%，LongMemEval 83.00% | Atomic Facts 导航到 MemScene，再扩展 synthesized Episodes；另有 profile | 主查询路径不向 answerer 回收 raw turn；可复用的强证据主要来自语义分段对照 |
 | [True Memory](https://www.alphaxiv.org/abs/2605.04897) | LoCoMo Pro 93.0%；LongMemEval strict 87.8% | 原始消息/event、lexical+dense、salience、consolidation、query expansion 和本地 rerank | Pro 预排序取 top-100，论文未披露最终答案上下文的硬 token cap；LoCoMo semantic-match judge 与 strict 口径不可混比 |
