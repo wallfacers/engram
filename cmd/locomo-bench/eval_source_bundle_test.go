@@ -504,3 +504,120 @@ func formalSourceTestIDs(sources []formalExpandedSource) []string {
 	}
 	return ids
 }
+
+// TestFormalSemanticEpisodeMixedGenuineAndFallbackPrefixValidates reproduces
+// the 025 treatment-arm failure: a semantic_episode renderer produces genuine
+// episode candidates (multi-source, ID "…/episode") alongside single-source
+// fallback candidates (ID "…/episode-fallback:<id>", also Kind=semantic_episode).
+// The rebuilt expansion must fold ONLY genuine episodes into one multi-source
+// item each, keep fallback anchors as per-source items, and still validate when
+// the token cap admits only a ranked prefix of anchors.
+func TestFormalSemanticEpisodeMixedGenuineAndFallbackPrefixValidates(t *testing.T) {
+	ctx := context.Background()
+	protocol := sourceTestProtocol()
+	system := answerPromptForRegime(4, false, false, false)
+	qa := locomoQA{QuestionID: "locomo:0:mixed", Question: "What was said?", Category: 4}
+	reader := formalEvidenceMap{}
+
+	evG1 := formalSourceTestEvidence("e-genuine-1", "genuine episode first source", memory.EvidenceMessage)
+	evG2 := formalSourceTestEvidence("e-genuine-2", "genuine episode second source", memory.EvidenceMessage)
+	evF1 := formalSourceTestEvidence("e-fallback-1", "fallback first source", memory.EvidenceMessage)
+	evF2 := formalSourceTestEvidence("e-fallback-2", "fallback second source", memory.EvidenceMessage)
+	for _, evidence := range []memory.Evidence{evG1, evG2, evF1, evF2} {
+		reader[evidence.ID] = evidence
+	}
+	genuine := formalSourceTestAnchor(t, "projection:genuine", 0.9, evG1, evG2)
+	fallback := formalSourceTestAnchor(t, "projection:fallback", 0.8, evF1, evF2)
+	anchors := []formalExpandedAnchor{genuine, fallback}
+	formalSourceTestRankAnchors(anchors)
+
+	// Enriched renderer output: the genuine anchor aggregates both sources into
+	// one episode candidate; the fallback anchor degrades to one candidate per
+	// source. Both carry Kind=semantic_episode, so only the candidate ID suffix
+	// distinguishes them.
+	genuineEpisode := evalRenderedCandidate{
+		CandidateID:    genuine.CandidateID + "/episode",
+		Kind:           string(ReprSemanticEpisode),
+		Rank:           1,
+		Score:          genuine.Hit.Score,
+		Text:           evG1.Content + "\n" + evG2.Content + "\n",
+		TextDigest:     evalTextDigest(evG1.Content + "\n" + evG2.Content + "\n"),
+		SourceIDs:      []string{evG1.ID, evG2.ID},
+		ExpandedFrom:   []string{genuine.CandidateID},
+		ExpansionCount: 1,
+	}
+	var enriched []evalRenderedCandidate
+	rank := 1
+	for _, source := range fallback.Sources {
+		enriched = append(enriched, evalRenderedCandidate{
+			CandidateID:    fallback.CandidateID + "/episode-fallback:" + source.Evidence.ID,
+			Kind:           string(ReprSemanticEpisode),
+			Rank:           rank,
+			Score:          fallback.Hit.Score,
+			Text:           source.Evidence.Content,
+			TextDigest:     evalTextDigest(source.Evidence.Content),
+			SourceIDs:      []string{source.Evidence.ID},
+			ExpandedFrom:   []string{fallback.CandidateID},
+			ExpansionCount: 0,
+		})
+		rank++
+	}
+	enriched = append([]evalRenderedCandidate{genuineEpisode}, enriched...)
+
+	rebuilt := rebuildExpandedForEpisodes(anchors, enriched, reader)
+	if len(rebuilt) != 2 {
+		t.Fatalf("rebuilt anchors = %d, want 2", len(rebuilt))
+	}
+	// Genuine anchor folded to one multi-source episode item.
+	if len(rebuilt[0].Sources) != 1 || len(rebuilt[0].Sources[0].Item.Sources) != 2 {
+		t.Fatalf("genuine anchor must fold into one 2-source episode item, got %d items %d sources",
+			len(rebuilt[0].Sources), len(rebuilt[0].Sources[0].Item.Sources))
+	}
+	// Fallback anchor must keep its per-source expansion (two items), never be
+	// folded by its episode-fallback candidates.
+	if len(rebuilt[1].Sources) != 2 {
+		t.Fatalf("fallback anchor must keep 2 per-source items, got %d", len(rebuilt[1].Sources))
+	}
+
+	candidate := buildExpandedFormalCandidateArtifact(protocol, qa, rebuilt, nil, 1)
+	if len(candidate.RenderedCandidates) != 3 {
+		t.Fatalf("rendered candidates = %d, want 3 (one episode + two fallback sources)", len(candidate.RenderedCandidates))
+	}
+	// Ranks must be renumbered 1..N in artifact order.
+	for index, rendered := range candidate.RenderedCandidates {
+		if rendered.Rank != index+1 {
+			t.Fatalf("rendered candidate %d rank = %d, want %d", index, rendered.Rank, index+1)
+		}
+	}
+
+	// Token cap admits only the genuine anchor (the prefix boundary at 1 item).
+	firstOnlyInput := formalSourceTestInput(protocol, system, qa, rebuilt[0].Sources)
+	protocol.Budget.AnswerInputTokenCap = len([]rune(firstOnlyInput.System + firstOnlyInput.User))
+	selected, input, count, evidenceTokens, err := packExpandedFormalInput(
+		ctx, protocol, lengthCounter{fingerprint: protocol.Budget.CounterFingerprint}, system, qa, rebuilt, false,
+	)
+	if err != nil {
+		t.Fatalf("pack prefix bundle: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("selected sources = %d, want only the genuine episode item", len(selected))
+	}
+	trace := buildFormalTraceForItems(protocol, qa.QuestionID, candidate, formalBundleItems(selected))
+	bundle := buildExpandedFormalBundle(protocol, qa.QuestionID, candidate, trace, selected, input)
+	bundle.AnswerInputTokens = count.InputTokens
+	bundle.EvidenceTokens = evidenceTokens
+	bundle.WithinCap = true
+
+	opt := options{formalEvidence: reader}
+	if err := validateActiveFormalBundle(ctx, reader, protocol, opt, qa, candidate, trace, bundle); err != nil {
+		t.Fatalf("active validator rejected genuine+fallback prefix bundle: %v", err)
+	}
+	// The frozen payload gate additionally requires an independent Ledger
+	// receipt, which the production path derives via revalidateFrozenFormalSources.
+	frozen := revalidateFrozenFormalSources(ctx, protocol, opt, qa, formalFrozenQuestion{
+		Candidate: candidate, Trace: trace, Bundle: bundle,
+	})
+	if err := validateFormalFrozenPayload(protocol, frozen.Candidate, frozen.Trace, frozen.Bundle); err != nil {
+		t.Fatalf("frozen validator rejected genuine+fallback prefix bundle: %v", err)
+	}
+}

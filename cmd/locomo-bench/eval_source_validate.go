@@ -184,7 +184,7 @@ func validateActiveFormalBundleReceipt(
 	contextRecoverable := true
 	for _, item := range bundle.Items {
 		rendered, renderedExists := renderedByID[item.CandidateIDs[0]]
-		isEpisodeItem := renderedExists && rendered.Kind == string(ReprSemanticEpisode)
+		isEpisodeItem := renderedExists && isGenuineEpisodeRendered(rendered)
 		if len(item.CandidateIDs) != 1 {
 			spanOK, citationOK = false, false
 			contextRecoverable = false
@@ -207,12 +207,22 @@ func validateActiveFormalBundleReceipt(
 				citationOK = false
 				problems = append(problems, fmt.Sprintf("episode item %q differs from its frozen rendered candidate", item.ItemID))
 			}
-			for _, span := range item.Sources {
-				ev, ok := evidenceByID[span.EvidenceID]
+			// The episode item is one aggregated narrative in the answer input,
+			// so reconstruction appends exactly one result (matching the
+			// one-result-per-item contract below). Its identity must match the
+			// packer's episode Result (Name = the episode candidate ID, not the
+			// bundle item ID); session/date identity comes from the first
+			// whole-source span.
+			if len(item.Sources) > 0 {
+				first, ok := evidenceByID[item.Sources[0].EvidenceID]
 				if !ok {
-					continue
+					spanOK = false
+					contextRecoverable = false
+					problems = append(problems, fmt.Sprintf("episode item %q first source cannot be resolved", item.ItemID))
+				} else {
+					result := formalEvidenceResult(item.CandidateIDs[0], item.Text, first)
+					results = append(results, result)
 				}
-				results = append(results, formalEvidenceResult(item.ItemID, ev.Content, ev))
 			}
 			continue
 		}
@@ -362,6 +372,16 @@ func validateFormalActiveBundleEnvelope(
 	return nil
 }
 
+// isGenuineEpisodeRendered reports whether a rendered candidate is a genuine
+// cross-message episode (candidate ID "…/episode", many sources) rather than the
+// renderer's single-source fallback ("…/episode-fallback:<id>"). The 022 renderer
+// tags both with Kind=semantic_episode, so the candidate ID suffix — not the
+// Kind — is the disambiguator. (025 regression: fallback items treated as
+// episodes failed recoverEpisodeNarrative and killed B1 citation validation.)
+func isGenuineEpisodeRendered(rendered evalRenderedCandidate) bool {
+	return rendered.Kind == string(ReprSemanticEpisode) && strings.HasSuffix(rendered.CandidateID, "/episode")
+}
+
 // validateFormalB1AnchorPrefix proves that B1 packed exactly a ranked prefix
 // of complete navigation anchors. Candidate membership alone is insufficient:
 // it would permit skipping a large first anchor, reordering sources, or
@@ -370,13 +390,15 @@ func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFo
 	if len(candidate.Anchors) == 0 || len(candidate.RenderedCandidates) == 0 {
 		return fmt.Errorf("candidate has no ranked anchors or rendered sources")
 	}
-	// 025: a semantic_episode rendered candidate aggregates a whole cross-message
-	// cluster into one candidate (many SourceIDs), so the legacy per-source 1:1
-	// mapping below does not apply. Detect episode mode from the rendered
-	// candidate kind and switch to the episode branch.
+	// 025: a genuine semantic_episode rendered candidate aggregates a whole
+	// cross-message cluster into one candidate (many SourceIDs), so the legacy
+	// per-source 1:1 mapping below does not apply. Detect episode mode from the
+	// candidate ID suffix (a genuine episode is "…/episode"), not from the Kind
+	// alone: the renderer's single-source fallback also carries
+	// Kind=semantic_episode but maps 1:1 per source like a raw turn.
 	isEpisode := false
 	for _, rendered := range candidate.RenderedCandidates {
-		if rendered.Kind == string(ReprSemanticEpisode) {
+		if isGenuineEpisodeRendered(rendered) {
 			isEpisode = true
 			break
 		}
@@ -438,18 +460,55 @@ func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFo
 }
 
 // validateFormalB1EpisodeAnchorPrefix is the 025 semantic_episode branch of the
-// ranked-anchor prefix contract. Each anchor has at most one episode rendered
-// candidate (a cross-message cluster), whose SourceIDs are the episode lineage.
-// The bundle item for that anchor carries the same text and the same source set
-// (whole-source spans), so answer context is auditable against the rendered
-// candidate. This relaxes the legacy single-source cardinality without changing
-// the chunk/raw-turn path (research.md R5, direction A).
+// ranked-anchor prefix contract. A genuine episode renders exactly one candidate
+// per anchor (a cross-message cluster with many SourceIDs), so the bundle is a
+// ranked prefix of anchors where each selected anchor contributes one
+// multi-source item. The bundle item for that anchor carries the same text and
+// the same source set (whole-source spans), so answer context is auditable
+// against the rendered candidate. This relaxes the legacy single-source
+// cardinality without changing the chunk/raw-turn path (research.md R5,
+// direction A).
 func validateFormalB1EpisodeAnchorPrefix(candidate evalCandidateArtifact, bundle evalFormalBundleRecord) error {
-	if len(bundle.Items) == 0 {
-		return fmt.Errorf("episode bundle has no items")
+	if len(candidate.Anchors) == 0 || len(candidate.RenderedCandidates) == 0 {
+		return fmt.Errorf("episode candidate has no ranked anchors or rendered candidates")
 	}
-	if len(bundle.Items) != len(candidate.RenderedCandidates) {
-		return fmt.Errorf("episode bundle item count %d differs from rendered candidate count %d", len(bundle.Items), len(candidate.RenderedCandidates))
+	if len(bundle.Items) == 0 || len(bundle.Items) > len(candidate.RenderedCandidates) {
+		return fmt.Errorf("episode bundle has no items or exceeds rendered candidate count")
+	}
+	// The packer admits whole anchors only, so the bundle must end on a
+	// complete-anchor boundary. With one episode rendered candidate per anchor,
+	// the boundary index equals the number of selected anchors. (The fallback
+	// renderer may emit one candidate per source instead, so a fallback item
+	// keeps legacy 1:1 cardinality; the boundary below counts rendered
+	// candidates per anchor accordingly.)
+	renderedIndex := 0
+	validBoundaries := map[int]bool{0: true}
+	for anchorIndex, anchor := range candidate.Anchors {
+		if anchor.Rank != anchorIndex+1 || strings.TrimSpace(anchor.CandidateID) == "" {
+			return fmt.Errorf("episode anchor %d has invalid identity or rank", anchorIndex)
+		}
+		start := renderedIndex
+		for renderedIndex < len(candidate.RenderedCandidates) {
+			rendered := candidate.RenderedCandidates[renderedIndex]
+			if len(rendered.ExpandedFrom) != 1 || rendered.ExpandedFrom[0] != anchor.CandidateID {
+				break
+			}
+			if rendered.Rank != renderedIndex+1 {
+				return fmt.Errorf("episode rendered candidate %d has invalid rank", renderedIndex)
+			}
+			renderedIndex++
+		}
+		if renderedIndex == start {
+			return fmt.Errorf("episode anchor %q has no rendered candidate group", anchor.CandidateID)
+		}
+		validBoundaries[renderedIndex] = true
+	}
+	if renderedIndex != len(candidate.RenderedCandidates) {
+		return fmt.Errorf("episode rendered candidates are not grouped in ranked anchor order")
+	}
+	if len(bundle.Items) == 0 || len(bundle.Items) > len(candidate.RenderedCandidates) ||
+		!validBoundaries[len(bundle.Items)] {
+		return fmt.Errorf("episode Bundle item count %d is not a complete-anchor prefix boundary", len(bundle.Items))
 	}
 	for index, item := range bundle.Items {
 		rendered := candidate.RenderedCandidates[index]
@@ -458,7 +517,9 @@ func validateFormalB1EpisodeAnchorPrefix(candidate evalCandidateArtifact, bundle
 			item.Text != rendered.Text {
 			return fmt.Errorf("episode bundle item %d is not its rendered candidate %q", index, rendered.CandidateID)
 		}
-		// Every rendered source must be present as a whole-source span in the item.
+		// Every rendered source must be present as a span in the item. Genuine
+		// episodes carry many whole-source spans; a single-source fallback item
+		// carries exactly one.
 		if len(rendered.SourceIDs) == 0 || len(item.Sources) != len(rendered.SourceIDs) {
 			return fmt.Errorf("episode item %d source cardinality mismatch", index)
 		}
@@ -602,7 +663,7 @@ func inspectFormalBundleStructure(
 		if !exists {
 			citationOK = false
 		}
-		if exists && rendered.Kind == string(ReprSemanticEpisode) {
+		if exists && isGenuineEpisodeRendered(rendered) {
 			// 025 episode item: every whole-source span must be allowed and
 			// resolvable; the rendered SourceIDs set must equal the item's set.
 			if len(item.Sources) == 0 || len(rendered.SourceIDs) != len(item.Sources) {

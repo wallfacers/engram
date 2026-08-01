@@ -230,6 +230,15 @@ func buildExpandedFormalCandidateArtifact(
 			rendered = append(rendered, source.Candidate)
 		}
 	}
+	// The artifact renders candidates in ranked order regardless of producer.
+	// When a semantic_episode rebuild replaces per-source sources with episode
+	// sources, the source candidates originate from different counters (the
+	// renderer for episodes, expandFormalEvidence for per-source fallbacks), so
+	// renumber ranks 1..N in artifact order to keep validateEvalCandidateArtifact
+	// and the episode anchor-prefix boundary checks satisfied.
+	for index := range rendered {
+		rendered[index].Rank = index + 1
+	}
 	resolved, unresolved, _ := resolveDatasetSourceIDs(qa.Evidence, turnEvidence)
 	artifact := evalCandidateArtifact{
 		Schema:             evalProtocolSchema,
@@ -345,7 +354,12 @@ func rebuildExpandedForEpisodes(expanded []formalExpandedAnchor, enriched []eval
 
 	episodeByAnchor := make(map[string]evalRenderedCandidate)
 	for _, candidate := range enriched {
-		if candidate.Kind != string(ReprSemanticEpisode) || len(candidate.ExpandedFrom) != 1 {
+		// Only a genuine episode (candidate ID "…/episode") folds the anchor's
+		// per-source expansion into one multi-source item. The renderer's
+		// single-source fallback ("…/episode-fallback:<id>") also carries
+		// Kind=semantic_episode; folding it would silently drop the anchor's
+		// other sources and misalign bundle items with rendered candidates.
+		if !isGenuineEpisodeRendered(candidate) || len(candidate.ExpandedFrom) != 1 {
 			continue
 		}
 		episodeByAnchor[candidate.ExpandedFrom[0]] = candidate
@@ -388,14 +402,15 @@ func rebuildExpandedForEpisodes(expanded []formalExpandedAnchor, enriched []eval
 			Sources:      spans,
 		}
 		// One aggregated source per anchor: the episode narrative as Result.
+		// The Result identity must match what the active validator reconstructs
+		// for the same item (formalEvidenceResult on the episode candidate ID),
+		// so the reconstructed answer prompt is byte-identical.
+		episodeResult := formalEvidenceResult(episode.CandidateID, episode.Text, evidenceByID[episode.SourceIDs[0]])
+		episodeResult.Score = anchor.Hit.Score
+		episodeResult.ProjectionID = anchor.Hit.ProjectionID
 		source := formalExpandedSource{
 			Evidence: evidenceByID[episode.SourceIDs[0]],
-			Result: memory.Result{
-				Name:     episode.CandidateID,
-				Content:  episode.Text,
-				Score:    anchor.Hit.Score,
-				ProjectionID: anchor.Hit.ProjectionID,
-			},
+			Result:   episodeResult,
 			Candidate: episode,
 			Item:      item,
 		}

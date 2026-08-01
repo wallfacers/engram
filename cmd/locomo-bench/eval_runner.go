@@ -668,16 +668,21 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 				anchors := buildFormalRankedAnchors(expanded)
 				enriched, renderErr := renderer.Render(ctx, anchors)
 				if renderErr == nil && len(enriched) > 0 {
-					frozen.Candidate.RenderedCandidates = enriched
-					frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(enriched)
-					frozen.Candidate.Mode = evalCandidateModeAnchorRendering
-					// 025 semantic_episode: the renderer aggregates a cross-message
-					// cluster into one candidate. Rebuild the expanded source set so
-					// the answer bundle carries the episode narrative (multi-source)
-					// instead of the per-source expansion, keeping candidate and
-					// bundle aligned for the episode anchor-prefix contract.
 					if opt.representationArm == ReprSemanticEpisode {
+						// 025 semantic_episode: the renderer aggregates a cross-message
+						// cluster into one candidate. Rebuild the expanded source set so
+						// the answer bundle carries the episode narrative (multi-source)
+						// instead of the per-source expansion, then rebuild the candidate
+						// artifact from the folded expansion. This keeps RenderedCandidates
+						// byte-identical to the bundle items (genuine episode anchors →
+						// one episode candidate; fallback anchors → canonical per-source
+						// candidates), which the episode anchor-prefix contract requires.
 						expanded = rebuildExpandedForEpisodes(expanded, enriched, opt.formalEvidence)
+						frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, retrievalCalls)
+					} else {
+						frozen.Candidate.RenderedCandidates = enriched
+						frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(enriched)
+						frozen.Candidate.Mode = evalCandidateModeAnchorRendering
 					}
 				}
 			}
