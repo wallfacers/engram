@@ -337,14 +337,17 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 	return nil
 }
 
-// densityMechanismKeys are the 024 additive write-time/query-time mechanism
-// flags (contracts/mechanism-bindings.md). They are additive to a formal B1
-// control manifest rather than a distinct treatment stage: the four-arm 024
-// ablation freezes four independent B1 manifests that differ only in these
-// keys, so the protocol hash attributes each arm (mechanism-bindings rule 4).
-// They are deliberately NOT part of formalTreatmentForOptions — a density
-// flag never replaces the legacy B1 control, it extends it.
-var densityMechanismKeys = []string{"write_dedup", "neighbor_extend"}
+// densityMechanismKeys are the additive write-time/query-time mechanism flags
+// (contracts/mechanism-bindings.md). They are additive to a formal B1 control
+// manifest rather than a distinct treatment stage: the four-arm 024 ablation
+// freezes four independent B1 manifests that differ only in these keys, so the
+// protocol hash attributes each arm (mechanism-bindings rule 4). 025's
+// episode_cluster follows the same shape: it is a build-time mechanism additive
+// to the B1 control (the semantic_episode renderer is requested at runtime via
+// --representation, but the frozen manifest difference is the episode_cluster
+// key alone). They are deliberately NOT part of formalTreatmentForOptions — a
+// density flag never replaces the legacy B1 control, it extends it.
+var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster"}
 
 // densityMechanismFlagsForOptions returns the 024 additive mechanism flags
 // derived from the CLI. Absent flags are omitted so a run with neither
@@ -357,6 +360,9 @@ func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	}
 	if opt.neighborExtend {
 		flags["neighbor_extend"] = true
+	}
+	if opt.episodeCluster {
+		flags["episode_cluster"] = true
 	}
 	return flags
 }
@@ -494,7 +500,13 @@ func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
 		if !isFormalControlMechanismFlags(exp.MechanismFlags) {
 			return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
 		}
-		if formalTreatmentMechanismRequested(opt) {
+		// 025: --representation semantic_episode alongside --episode-cluster is a
+		// renderer selection, not a treatment — the mechanism difference is fully
+		// expressed by the frozen episode_cluster key. It is therefore exempt from
+		// the treatment-flag rejection so a b1+episode_cluster manifest can run
+		// its semantic_episode arm. Any other treatment flag still fails closed.
+		if formalTreatmentMechanismRequested(opt) &&
+			!(opt.episodeCluster && opt.representationArm == ReprSemanticEpisode) {
 			return fmt.Errorf("formal b1/legacy_count_packer run cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch")
 		}
 		// 024 density mechanisms are additive to the B1 control: the manifest's
@@ -554,7 +566,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	}
 	for name := range flags {
 		switch name {
-		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend":
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster":
 			continue
 		default:
 			return false
