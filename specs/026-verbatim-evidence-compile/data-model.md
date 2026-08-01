@@ -46,7 +46,7 @@ Frozen Candidate ──> Candidate lineage ──> Evidence
 
 | 概念 | 类型 | 语义 |
 |---|---|---|
-| `CompileArm` | enum(string) | `legacy_count \| exact_token \| extractive \| verbatim_first`;arm 是同一 frozen candidate 上的确定性编译策略 |
-| verbatim-first 双态 gate | 逻辑 | 原文装得下 → KEEP/FETCH_SOURCE;装不下 → EXTRACT(按 relevance 排序)仍不够 → MERGE(逐句验证);复用 022 extract.go 的 raw-fit/MERGE gate |
+| `CompileArm` | enum(string) | `legacy_count \| exact_token \| extractive`;arm 是同一 frozen candidate 上的确定性编译策略(引擎已实现,026 验证) |
+| verbatim-first 双态 gate | 逻辑 | 原文装得下 → KEEP/FETCH_SOURCE;装不下 → EXTRACT(按 relevance 排序)仍不够 → MERGE(逐句验证);**022 `internal/extract/extract.go` 已实现**(`BuildExtractionPlan`/`SelectPackingItems`/`MergePermitted`),026 不重写 |
 
-**不新增**:无新表、无新迁移。026 的"原始 span 回收"沿候选 lineage 走 022 的批量 `Resolve(ids)`,禁 Search/query。
+**不新增**:无新表、无新迁移、无新引擎代码。026 的"原始 span 回收"沿候选 lineage 走 022 的批量 `Resolve(ids)`,禁 Search/query;增量仅在验证测试与配对 harness。

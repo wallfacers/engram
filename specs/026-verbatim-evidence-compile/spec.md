@@ -21,11 +21,14 @@
 
 ### 与 022 US3(Query-time Evidence Compiler)的关系
 
-022 已交付**Compiler 引擎层**(`memory/evidencecompiler/`,contracts/need/extract/validate/render/resolve 全包,**测试全绿**,含 compiler_test/extract_test/need_test/validate_test/render_test/resolve_test)与 **exact-token relevance arm**(`cmd/locomo-bench/compiler_eval.go` 的 `compileExactTokenArm`)。**但 T069 的其余 arms(legacy-count、deterministic extractive、optional local Planner)未实现**,且 022 从未在正式 B1 协议下跑过完整 arms 配对。026 的增量是:
+022 已交付**完整 Compiler 引擎层**(`memory/evidencecompiler/`,contracts/need/extract/validate/render/resolve 全包,**测试全绿**),且 **verbatim-first 双态已实现**:`internal/extract` 的 `BuildExtractionPlan`(raw 原文 KEEP vs EXTRACT 双态)、`SelectPackingItems(rawFits)`(原文装得下保留原文)、`MergePermitted`(原文 over-cap **且** EXTRACT 不满足 Need 才允许 MERGE)与 `ExtractiveSatisfiesNeed`(EXTRACT 充分性)均已有,测试覆盖原文优先/超 cap/EXTRACT/MERGE gate。`--compiler-arm extractive|planner|exact_token` 已接线 formal B1(`eval_compile_bridge.go` 的 `compileFormalSources` → `evidencecompiler.Compile`;`compiler_eval.go` 的 `compileExactTokenArm`)。
 
-1. **补齐并冻结 Compiler arms 集合**(legacy-count / exact-token / deterministic extractive / verbatim-first),在 022 冻结协议下做**同 store、候选逐字节一致**的配对消融(与 025 的配对纪律一致)。
-2. **核心新臂 = verbatim-first(原文优先双态)**:原文装得下 → `KEEP`/`FETCH_SOURCE` 保留原始 span;装不下 → 才 `EXTRACT(span)` 或有来源 `MERGE`(逐句绑 source ID)。这直接落地 Fidelity-Before-Structure 的"结构增强 verbatim 而非替换"与 Retain-or-Consolidate 的"原文装得下优先保留、MERGE 宽松预算下显著负"(MERGE −0.107 [−0.204, −0.013])。
-3. **承接但显著区别**——022 的 Compiler 是"把候选内已有证据编译成更可回答的 bundle"的**通用机制契约**;026 是把它**落到 verbatim-first 具体策略 + 正式配对验证**。026 不做引擎层大改(引擎契约已冻结),主要改动在 `cmd/locomo-bench/`(eval harness 臂 + 配对)与必要的确定性编译策略代码。
+**026 的真实增量(2026-08-01 核实修正)**:**不实现新机制**。022 已实现 verbatim-first 引擎、已接线 formal B1,但**从未在正式 B1 协议下跑过配对消融**——这是 026 的核心工作:
+
+1. **验证**:`--compiler-arm extractive`(verbatim-first)与 `exact_token` 在 formal B1 冻结协议下 byte-replay 确定性、fail-closed、默认关零行为变化(MVP)。
+2. **配对消融**:在 022 冻结协议下,与 chunk_900 基线**同 store、候选逐字节一致**配对,确认 query-time verbatim 编译是否同预算优于 write-time 固定 chunk(与 025 的配对纪律一致)。
+
+**承接但显著区别**:022 的 Compiler 是"把候选内已有证据编译成更可回答的 bundle"的**通用机制契约与引擎实现**;026 是把它**放到 formal B1 下做正式配对验证**。026 不改引擎层(契约与实现已冻结),改动集中在 `cmd/locomo-bench/`(配对 harness、验证测试、报告)。
 
 ### 文献证据基础(alphaXiv 核实 2026-08-01)
 
@@ -117,9 +120,9 @@ budget-ablation 证明 engram 同预算(1059 tok)对 MemOS 落后 −5.62pp(1083
 
 ### Functional Requirements
 
-- **FR-001**: 系统 MUST 支持在固定候选池内按 query 执行 verbatim 证据编译:原文能装入 token cap 时优先 `KEEP`/`FETCH_SOURCE` 保留原始 turn/span(命中后沿 lineage 回收原文),只有装不下才 `EXTRACT(span)` 或有来源 `MERGE`(逐句绑 source ID)。
-- **FR-002**: 编译 MUST 基于 022 已交付的 Compiler 引擎契约(`memory/evidencecompiler/`),不重写引擎;引擎契约改动 MUST 走显式 increment(宪法 II)。
-- **FR-003**: 编译 arms MUST 至少包含 legacy-count、exact-token relevance(已实现)、deterministic extractive、verbatim-first 四臂;每臂对同一 query+候选池 MUST 输出确定性、byte-replay 可复现的 bundle+trace。
+- **FR-001**: 系统 MUST 支持在固定候选池内按 query 执行 verbatim 证据编译:原文能装入 token cap 时优先 `KEEP`/`FETCH_SOURCE` 保留原始 turn/span(命中后沿 lineage 回收原文),只有装不下才 `EXTRACT(span)` 或有来源 `MERGE`(逐句绑 source ID)。(**022 引擎已实现**,026 验证其在 formal B1 下可用。)
+- **FR-002**: 编译 MUST 基于 022 已交付的 Compiler 引擎契约与实现(`memory/evidencecompiler/`),**不重写引擎、不新增机制**;引擎契约改动 MUST 走显式 increment(宪法 II)。026 的增量在验证与配对 harness(`cmd/locomo-bench/`)。
+- **FR-003**: 编译 arms MUST 至少包含 legacy_count(control)、exact-token relevance(022 已实现)、extractive(verbatim-first,022 引擎已实现)三臂;每臂对同一 query+候选池 MUST 输出确定性、byte-replay 可复现的 bundle+trace。026 验证其在 formal B1 下的确定性,不重写实现。
 - **FR-004**: 编译 MUST 默认关闭;关闭时 MUST 与 chunk_900 基线行为完全一致(零行为变化)。
 - **FR-005**: 编译 MUST fail-closed:无来源 `ADD` 拒绝、无效 citation 丢弃、退回 deterministic extractive,不调 answerer(022 引擎校验已实现)。
 - **FR-006**: 无 LLM/embedding 端点时 MUST 退化到 deterministic extractive 路径,查询不失败(宪法 V 离线可退化)。

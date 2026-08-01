@@ -19,12 +19,11 @@ Compile arm 位于 retrieval 之后、answerer 之前。每个 arm:
 
 | Arm ID | 策略 | 实现状态 |
 |---|---|---|
-| `legacy_count` | 按条数装填(现状基线) | 022 有 legacy runner;026 固化为正式 arm |
+| `legacy_count` | 按条数装填(现状基线,control) | 022 legacy runner;026 用其作为配对对照 |
 | `exact_token` | exact query-token relevance 排序 | **022 已实现**(`compileExactTokenArm`) |
-| `extractive` | deterministic span 选择(按 relevance,EXTRACT) | **026 补齐** |
-| `verbatim_first` | 原文优先双态(KEEP/FETCH_SOURCE,装不下才 EXTRACT/MERGE) | **026 核心新臂** |
+| `extractive` | verbatim-first 双态(原文优先 KEEP,装不下才 EXTRACT/MERGE) | **022 引擎已实现**(`internal/extract`);026 验证 + 配对 |
 
-## verbatim-first 双态 gate
+## verbatim-first 双态 gate(022 引擎已实现)
 
 ```
 原文能装入 cap?
@@ -34,7 +33,7 @@ Compile arm 位于 retrieval 之后、answerer 之前。每个 arm:
                   └─ 仍不够 ──> MERGE(逐句验证 source IDs)
 ```
 
-- 复用 022 `internal/extract/extract.go` 的 raw-fit / over-cap / EXTRACT-sufficient gate,不重写。
+- 由 022 `internal/extract/extract.go` 实现:`BuildExtractionPlan`(raw vs EXTRACT 双态)、`SelectPackingItems(rawFits)`(原文优先)、`MergePermitted`(over-cap && EXTRACT 不充分)、`ExtractiveSatisfiesNeed`(充分性)。**026 不重写。**
 - 无来源 `ADD` MUST 被拒绝(022 已实现)。
 - MERGE 仅当原文装不下 **且** EXTRACT 仍不满足 Need 时允许(Retain-or-Consolidate 实证)。
 

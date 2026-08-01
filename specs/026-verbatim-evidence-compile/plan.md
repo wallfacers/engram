@@ -98,12 +98,12 @@ cmd/locomo-bench/
 
 ### Phase 2: 实现计划(见 tasks.md,经 /speckit-tasks 生成)
 
-**MVP**: deterministic extractive arm + verbatim-first arm 在固定候选池上的 byte-replay + fail-closed(无 LLM 依赖),验证"候选内已有证据被编译成更可回答的 bundle"。
-**完整**: 四 arms 配对消融(022 冻结协议,LoCoMo + LongMemEval-S,同 store 候选一致),candidate oracle 区分 miss,分类别报告。
+**MVP**: 验证 formal B1 下 `--compiler-arm extractive`(verbatim-first)与 `exact_token` 可用(byte-replay 确定性、fail-closed、默认关零行为变化)——**不实现新机制**(022 引擎已完整实现原文优先双态 + MERGE 双条件 gate,测试全绿)。
+**完整**: arms 配对消融(022 冻结协议,LoCoMo + LongMemEval-S,同 store 候选一致),candidate oracle 区分 miss,分类别报告,verdict 收口。
 
 ## Key Technical Decisions
 
-1. **承接而非重写**:022 的 `memory/evidencecompiler` 契约(Evidence Need / Action 闭集 / SourceResolver / TokenCounter / Bundle / Trace)与 exact-token arm 直接复用;026 只补 arms 与配对。引擎契约改动须走显式 increment(宪法 II)。
-2. **verbatim-first 双态**:原文装得下 → KEEP/FETCH_SOURCE 保留原始 span;装不下 → EXTRACT(按 relevance 排序)仍不够才 MERGE(每句逐句验证 source)。这直接落地 Fidelity-Before-Structure + Retain-or-Consolidate(MERGE 宽松预算显著负)。
+1. **承接而非重写**:022 的 `memory/evidencecompiler` 契约与 verbatim-first 引擎实现(原文优先双态 + MERGE 双条件 gate)已完整且测试全绿;`--compiler-arm extractive/exact_token` 已接线 formal B1(`compileFormalSources` → `evidencecompiler.Compile`)。026 **不实现新机制**,增量是验证 + 配对消融。引擎契约改动须走显式 increment(宪法 II)。
+2. **verbatim-first 双态(已由 022 引擎实现)**:原文装得下 → KEEP/FETCH_SOURCE 保留原始 span;装不下 → EXTRACT(按 relevance 排序)仍不够才 MERGE(每句逐句验证 source)。这直接落地 Fidelity-Before-Structure + Retain-or-Consolidate(MERGE 宽松预算显著负)。026 的职责是验证它在 formal B1 下是否同预算优于 chunk_900。
 3. **配对纪律(025 教训)**:两臂必须同一 store、候选逐字节一致,只差编译策略;报告 candidate oracle 区分 compiler miss vs candidate miss;LoCoMo 6.4% 答案键噪声记录在案,小 delta 不单独作 promotion 依据。
 4. **fail-closed**:无来源 ADD 拒绝、无效 citation 丢弃、退回 extractive(022 引擎已实现),不调 answerer。
