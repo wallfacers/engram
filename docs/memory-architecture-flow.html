@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="engram — local-first memory engine 架构流程：Agent 对话 → 无损 Evidence → 三信号混合检索 → Evidence Bundle → answerer 恰好一次。">
+<meta property="og:title" content="engram — Agent 对话 → 记忆">
+<meta property="og:description" content="local-first memory engine：无损写入 → 混合检索 → 证据编译的架构流程图解。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070b14'/%3E%3Cpath d='M16 7 25 16 16 25 7 16Z' fill='%236ea8ff'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23ffb454'/%3E%3C/svg%3E">
+<title>engram — Agent 对话 → 记忆 · PPT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+:root{
+  --bg:#07090f; --panel:#0d131d; --panel2:#111a27; --panel3:#0a101a;
+  --line:#1b2433; --line-bright:#2b3b52;
+  --text:#dde3ee; --muted:#8b98ab; --faint:#5a6676;
+  --host:#ffb454; --blue:#6ea8ff; --green:#7ee787; --cyan:#4fd1d9; --purple:#b39df3; --red:#ff7a93; --gold:#ffd166;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'Space Grotesk','Inter',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--bg)}
+body{color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+::selection{background:rgba(110,168,255,.28)}
+.mono{font-family:var(--mono)}
+h1,h2,h3{font-weight:800;letter-spacing:-.02em;text-wrap:balance}
+a{color:var(--blue);text-decoration:none}
+
+/* ---------- deck / pages ---------- */
+.deck{position:fixed;inset:0;overflow:hidden}
+.page{position:absolute;inset:0;overflow-y:auto;background:
+  radial-gradient(900px 500px at 80% 10%,rgba(110,168,255,.07),transparent 60%),
+  radial-gradient(700px 500px at 10% 90%,rgba(126,231,135,.05),transparent 60%),
+  var(--bg);
+  visibility:hidden;opacity:0;display:flex;align-items:center;justify-content:center}
+.page .gridlines{position:absolute;inset:0;pointer-events:none;opacity:.4;
+  background-image:linear-gradient(rgba(110,168,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(110,168,255,.045) 1px,transparent 1px);
+  background-size:46px 46px;mask-image:radial-gradient(80% 60% at 50% 45%,#000 30%,transparent 100%)}
+.slide{position:relative;width:min(1080px,92vw);padding:52px 8px;z-index:2}
+
+/* page header */
+.p-kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.p-kicker::before{content:"";width:26px;height:2px;border-radius:2px;background:currentColor}
+.p-kicker.k-host{color:var(--host)} .p-kicker.k-blue{color:var(--blue)} .p-kicker.k-green{color:var(--green)}
+.p-kicker.k-cyan{color:var(--cyan)} .p-kicker.k-purple{color:var(--purple)} .p-kicker.k-gold{color:var(--gold)} .p-kicker.k-dim{color:var(--faint)}
+.p-title{font-size:clamp(26px,3.6vw,42px);line-height:1.15;margin-bottom:10px}
+.p-desc{color:var(--muted);font-size:clamp(14px,1.5vw,16.5px);max-width:52em;margin-bottom:30px}
+.p-desc b{color:var(--text);font-weight:600}
+
+.badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:6px;letter-spacing:.05em;margin-right:8px;vertical-align:middle;white-space:nowrap}
+.badge.green{background:rgba(126,231,135,.1);color:var(--green);border:1px solid rgba(126,231,135,.3)}
+.badge.blue{background:rgba(110,168,255,.1);color:var(--blue);border:1px solid rgba(110,168,255,.3)}
+.badge.amber{background:rgba(255,180,84,.1);color:var(--host);border:1px solid rgba(255,180,84,.3)}
+.badge.red{background:rgba(255,122,147,.1);color:var(--red);border:1px solid rgba(255,122,147,.3)}
+.badge.faint{background:transparent;color:var(--faint);border:1px dashed var(--line-bright)}
+.badge.cyan{background:rgba(79,209,217,.1);color:var(--cyan);border:1px solid rgba(79,209,217,.3)}
+
+/* ---------- cover ---------- */
+.cover .slide{text-align:center}
+.cover .eyebrow,.end .eyebrow{display:inline-flex;align-items:center;gap:8px;color:var(--cyan);font-family:var(--mono);font-size:13px;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--line-bright);background:rgba(79,209,217,.06);padding:7px 16px;border-radius:999px;margin-bottom:26px}
+.cover .eyebrow .pulse,.end .eyebrow .pulse{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+.cover h1{font-size:clamp(30px,5.2vw,58px);line-height:1.15;max-width:18em;margin:0 auto}
+.cover h1 .hl-host{color:var(--host)}
+.cover h1 .hl-eng{color:var(--green)}
+.cover .sub{margin:22px auto 0;color:var(--muted);font-size:clamp(15px,1.7vw,18px);max-width:46em}
+.cover .sub b{color:var(--text)}
+.cover .flow-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:9px;margin-top:34px}
+.chip{font-family:var(--mono);font-size:12.5px;padding:7px 13px;border-radius:8px;border:1px solid var(--line-bright);background:var(--panel);color:var(--muted)}
+.chip.host{color:var(--host);border-color:rgba(255,180,84,.35)}
+.chip.green{color:var(--green);border-color:rgba(126,231,135,.35)}
+.chip.cyan{color:var(--cyan);border-color:rgba(79,209,217,.35)}
+.chip.purple{color:var(--purple);border-color:rgba(179,157,243,.35)}
+.chip.blue{color:var(--blue);border-color:rgba(110,168,255,.35)}
+.chip.gold{color:var(--gold);border-color:rgba(255,209,102,.35)}
+.chip .arr{color:var(--faint);margin:0 6px}
+.cover .nav-hint,.end .nav-hint{margin-top:44px;color:var(--faint);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;display:inline-flex;align-items:center;gap:12px}
+.cover .nav-hint .keys{font-family:var(--mono);border:1px solid var(--line-bright);border-radius:6px;padding:3px 9px;font-size:12px}
+
+/* ---------- generic cards ---------- */
+.stage-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px 26px;position:relative}
+.stage-card::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:3px;border-radius:3px}
+.stage-card.c-host::before{background:var(--host)} .stage-card.c-blue::before{background:var(--blue)}
+.stage-card.c-green::before{background:var(--green)} .stage-card.c-cyan::before{background:var(--cyan)}
+.stage-card.c-purple::before{background:var(--purple)} .stage-card.c-gold::before{background:var(--gold)}
+.stage-card.c-dim::before{background:var(--faint)}
+.stage-title{font-size:17px;font-weight:700;margin-bottom:6px}
+.stage-note{color:var(--muted);font-size:13.5px;margin-bottom:14px}
+.stage-note b{color:var(--text)}
+
+/* chat */
+.chat{display:flex;flex-direction:column;gap:12px}
+.msg{max-width:80%;padding:12px 16px;border-radius:14px;font-size:14.5px;position:relative}
+.msg .who{display:block;font-family:var(--mono);font-size:11px;color:var(--faint);margin-bottom:3px;letter-spacing:.06em}
+.msg .sid{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:6px;display:block;opacity:.75}
+.msg.u{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-top-left-radius:4px}
+.msg.u .who{color:var(--host)}
+.msg.a{align-self:flex-end;background:rgba(110,168,255,.09);border:1px solid rgba(110,168,255,.22);border-top-right-radius:4px}
+.msg.a .who{color:var(--blue)}
+
+/* json */
+pre.json{background:#06090f;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.7}
+pre.json .c{color:var(--faint)} pre.json .k{color:var(--blue)} pre.json .s{color:var(--green)} pre.json .n{color:var(--gold)} pre.json .p{color:var(--muted)}
+
+/* field map */
+.map{display:grid;grid-template-columns:1fr;gap:8px}
+.map-row{display:grid;grid-template-columns:1fr auto 1fr auto;gap:12px;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel3)}
+.map-row .k,.map-row .v{font-family:var(--mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.map-row .k{color:var(--host);text-align:right}
+.map-row .v{color:var(--green);text-align:left}
+.map-row .arrow{color:var(--faint);font-size:13px}
+.map-row .gen{color:var(--faint);font-family:var(--mono);font-size:11px;text-align:center}
+.map-row.new{border-color:rgba(79,209,217,.4);background:rgba(79,209,217,.05)}
+.map-row.new .v{color:var(--cyan)}
+@media (max-width:720px){.map-row{grid-template-columns:1fr auto 1fr}.map-row .gen{display:none}}
+
+/* two-col pages */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+@media (max-width:860px){.cols{grid-template-columns:1fr}}
+.col .col-title{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.col .col-title::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* ledger */
+.ledger{display:flex;flex-direction:column;gap:8px}
+.ledger .row{display:flex;align-items:center;gap:12px;background:var(--panel3);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-family:var(--mono);font-size:12px}
+.ledger .row .eid{color:var(--cyan);white-space:nowrap}
+.ledger .row .who{color:var(--host);white-space:nowrap}
+.ledger .row .txt{color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ledger .row .st{color:var(--green);font-size:11px;border:1px solid rgba(126,231,135,.3);padding:1px 7px;border-radius:5px;white-space:nowrap}
+
+/* facts */
+.facts{display:flex;flex-direction:column;gap:10px}
+.fact{display:flex;align-items:flex-start;gap:14px;background:var(--panel3);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.fact .fid{font-family:var(--mono);color:var(--cyan);font-size:13px;font-weight:600;min-width:34px}
+.fact .body{flex:1}
+.fact .body .txt{font-size:14px;color:var(--text)}
+.fact .body .src{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:4px}
+.fact .body .srcline{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:2px;display:flex;gap:4px;flex-wrap:wrap}
+.fact .body .srcline i{font-style:normal;color:var(--host);border:1px solid var(--line-bright);border-radius:4px;padding:0 5px}
+
+/* dup */
+.dup-wrap{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch}
+@media (max-width:760px){.dup-wrap{grid-template-columns:1fr}}
+.dup-card{background:var(--panel3);border:1px solid var(--line);border-radius:12px;padding:14px}
+.dup-card .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--faint);margin-bottom:8px;text-transform:uppercase}
+.dup-card .txt{font-size:13.5px;color:var(--muted);margin-bottom:8px}
+.dup-card .verdict{font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:6px;display:inline-block}
+.dup-card .verdict.suppress{color:var(--red);background:rgba(255,122,147,.1);border:1px solid rgba(255,122,147,.35)}
+.dup-card .verdict.keep{color:var(--green);background:rgba(126,231,135,.1);border:1px solid rgba(126,231,135,.35)}
+.dup-center{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+.dup-center .metric{color:var(--red);font-size:13px;font-weight:600}
+.dup-center .metric b{color:var(--text)}
+
+/* indexes */
+.idx-row{display:flex;flex-wrap:wrap;gap:10px}
+.idx{font-family:var(--mono);font-size:12px;padding:10px 15px;border-radius:10px;border:1px solid var(--line-bright);background:var(--panel3);color:var(--muted)}
+.idx b{display:block;color:var(--cyan);font-size:12.5px;margin-bottom:2px}
+.idx.kw b{color:var(--host)} .idx.vec b{color:var(--purple)} .idx.ent b{color:var(--red)} .idx.fts b{color:var(--cyan)}
+
+/* fusion */
+.sigs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.sig{min-width:0;border-radius:14px;padding:14px 16px;border:1px solid var(--line);background:var(--panel3)}
+.sig .sname{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.sig .sname::before{content:"";width:8px;height:8px;border-radius:50%}
+.sig[data-sig=sem] .sname::before{background:var(--purple);box-shadow:0 0 8px var(--purple)}
+.sig[data-sig=kw] .sname::before{background:var(--host);box-shadow:0 0 8px var(--host)}
+.sig[data-sig=ent] .sname::before{background:var(--red);box-shadow:0 0 8px var(--red)}
+.sig .sdesc{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:4px}
+.sig .shits{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px;display:flex;flex-wrap:wrap;gap:4px}
+.sig .shits span{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+svg.stream{width:100%;height:56px;display:block}
+svg.stream .sp{fill:none;stroke-width:2.5;stroke-linecap:round;opacity:.9}
+.sp.sem{stroke:var(--purple)} .sp.kw{stroke:var(--host)} .sp.ent{stroke:var(--red)} .sp.fan{stroke:var(--faint);stroke-width:1.6;opacity:.5}
+.sp.fan.on{stroke:var(--blue);opacity:.8;stroke-width:2.2}
+.rrf-node{margin:4px auto;text-align:center;background:linear-gradient(180deg,rgba(110,168,255,.16),rgba(110,168,255,.05));border:1px solid rgba(110,168,255,.4);border-radius:14px;padding:12px 20px;width:fit-content;max-width:100%}
+.rrf-node .rrf-name{font-weight:800;color:var(--blue);font-size:18px;letter-spacing:.02em}
+.rrf-node .rrf-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+.cands{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.cand{min-width:0;background:var(--panel3);border:1px solid var(--line);border-radius:12px;padding:12px 13px;font-size:12.5px;color:var(--muted)}
+.cand .cid{font-family:var(--mono);color:var(--gold);font-weight:600}
+.cand .crank{font-family:var(--mono);font-size:10.5px;color:var(--faint);display:block;margin-top:4px}
+.cand .crank b{color:var(--blue)}
+@media (max-width:760px){.cands{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* compiler */
+.comp-flow{display:grid;grid-template-columns:1fr auto 1.25fr;gap:20px;align-items:stretch}
+@media (max-width:900px){.comp-flow{grid-template-columns:1fr;gap:14px}}
+.comp-col .col-label{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+.comp-cands{display:flex;flex-direction:column;gap:8px}
+.ccand{background:var(--panel3);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--muted)}
+.ccand .ccid{font-family:var(--mono);color:var(--gold);font-weight:600;font-size:11.5px}
+.ccand .cctxt{display:block;margin-top:2px}
+.ccand.drop{opacity:.55}
+.ccand.drop .ccid{color:var(--red)}
+.actions{display:flex;flex-direction:column;gap:8px;justify-content:center}
+.action{font-family:var(--mono);font-size:11.5px;padding:7px 12px;border-radius:8px;border:1px solid var(--line-bright);background:var(--panel3);color:var(--muted);text-align:center;white-space:nowrap}
+.action.keep{color:var(--green);border-color:rgba(126,231,135,.4)}
+.action.drop{color:var(--red);border-color:rgba(255,122,147,.4)}
+.bundle{background:linear-gradient(180deg,rgba(126,231,135,.07),rgba(126,231,135,.02));border:1px solid rgba(126,231,135,.35);border-radius:14px;padding:14px 16px}
+.bundle .bt{font-family:var(--mono);font-size:12px;color:var(--green);letter-spacing:.08em;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.bundle .bt::before{content:"✓";background:rgba(126,231,135,.15);border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+.bundle .bline{font-size:12.5px;color:var(--muted);border-left:2px solid rgba(126,231,135,.4);padding:4px 0 4px 10px;margin:7px 0}
+.bundle .bline .spn{font-family:var(--mono);font-size:10.5px;color:var(--faint);display:block;margin-top:2px}
+.gauge{margin-top:12px;background:var(--panel3);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.gauge .g-top{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:7px}
+.gauge .g-top .cap{color:var(--green)}
+.gauge .g-track{height:9px;border-radius:6px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
+.gauge .g-fill{height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--green),var(--cyan))}
+.trace{margin-top:14px;background:#06090f;border:1px dashed var(--line-bright);border-radius:12px;padding:13px 15px;font-family:var(--mono);font-size:11.5px;color:var(--faint);line-height:1.9}
+.trace b{color:var(--muted);font-weight:600}
+.trace .ok{color:var(--green)} .trace .bad{color:var(--red)}
+
+/* answer */
+.answer{display:flex;gap:16px;align-items:flex-start;background:linear-gradient(180deg,rgba(255,209,102,.08),transparent);border:1px solid rgba(255,209,102,.35);border-radius:14px;padding:20px 22px}
+.answer .awho{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.1em}
+.answer .atext{font-size:16px;margin-top:4px}
+.answer .acalls{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:8px}
+
+/* guards */
+.guards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:860px){.guards{grid-template-columns:repeat(2,minmax(0,1fr))}.cover .slide{width:94vw}}
+@media (max-width:560px){.guards{grid-template-columns:1fr}}
+.guard{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.guard .gicon{font-size:19px;margin-bottom:6px}
+.guard .gt{font-weight:700;font-size:14px;margin-bottom:5px}
+.guard .gd{font-size:12.5px;color:var(--muted)}
+table.arms{width:100%;border-collapse:collapse;margin-top:16px;font-family:var(--mono);font-size:12px}
+table.arms th,table.arms td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+table.arms th{color:var(--faint);font-weight:500;background:var(--panel3)}
+table.arms td.num{color:var(--text)}
+table.arms tr.ctl td{color:var(--green)}
+table.arms td.neg{color:var(--red)}
+
+/* cover -> end page */
+.end .slide{text-align:center}
+.end .big{font-size:clamp(30px,4.6vw,52px);font-weight:800;line-height:1.2}
+.end .lines{color:var(--muted);margin-top:22px;font-size:15.5px;line-height:2.1}
+.end .lines b{color:var(--text)}
+
+/* ---------- controls ---------- */
+.controls{position:fixed;left:0;right:0;bottom:18px;z-index:50;display:flex;justify-content:center;align-items:center;gap:18px;pointer-events:none}
+.controls .btn{pointer-events:auto;width:46px;height:46px;border-radius:50%;border:1px solid var(--line-bright);background:rgba(13,19,29,.7);color:var(--muted);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .25s;backdrop-filter:blur(4px);font-family:inherit}
+.controls .btn:hover{color:var(--text);border-color:var(--blue);box-shadow:0 0 16px rgba(110,168,255,.25);transform:translateY(-1px)}
+.controls .btn:active{transform:translateY(1px) scale(.97)}
+.controls .btn:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.controls .btn:disabled{opacity:.28;cursor:default;box-shadow:none;transform:none}
+.dots .dot:hover{background:var(--line-bright)}
+.dots .dot:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.dots{display:flex;gap:9px;pointer-events:auto;flex-wrap:wrap;justify-content:center;max-width:60vw}
+.dots .dot{width:9px;height:9px;border-radius:50%;background:#26324a;border:1px solid var(--line-bright);cursor:pointer;transition:all .3s}
+.dots .dot.on{background:var(--blue);box-shadow:0 0 10px rgba(110,168,255,.7);transform:scale(1.3)}
+.counter{position:fixed;top:18px;right:22px;z-index:50;font-family:var(--mono);font-size:12.5px;color:var(--faint);letter-spacing:.08em}
+.counter b{color:var(--blue);font-weight:600}
+@media (max-width:760px){.controls{bottom:12px}.controls .btn{width:40px;height:40px}}
+
+/* ---------- surface polish ---------- */
+.stage-card,.guard,.dup-card,.fact,.ledger .row,.map-row,.idx,.sig,.cand,.ccand,.bundle,.gauge,.trace,.msg,.rrf-node,.answer{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+body::after{content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.04;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")}
+.page::-webkit-scrollbar{width:10px}
+.page::-webkit-scrollbar-track{background:transparent}
+.page::-webkit-scrollbar-thumb{background:var(--line-bright);border-radius:6px;border:2px solid var(--bg)}
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+  <!-- P1 · cover -->
+  <section class="page cover">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="eyebrow" data-in="down" data-in-at="0"><span class="pulse"></span>engram · local-first memory engine</div>
+      <h1>
+        <span class="hl-host" data-in="up" data-in-at=".1">Agent 的对话，</span><br>
+        <span class="hl-eng" data-in="up" data-in-at=".22">在 engram 里被「扭转」成</span><br>
+        <span style="color:var(--text)" data-in="up" data-in-at=".34">可回答的记忆</span>
+      </h1>
+      <p class="sub" data-in="fade" data-in-at=".7">一段正常对话从宿主 Agent 出发，越过命名空间边界，被 <b>无损写入</b>（Evidence Ledger）→ <b>三信号混合检索</b> → <b>证据编译</b>（Evidence Bundle）→ 最终只调用一次 answerer。</p>
+      <div class="flow-chips">
+        <span class="chip host" data-in="pop" data-in-at="1.0">Agent 对话<span class="arr">→</span></span>
+        <span class="chip" data-in="pop" data-in-at="1.07">memory_ingest_v2<span class="arr">→</span></span>
+        <span class="chip green" data-in="pop" data-in-at="1.14">Evidence 无损<span class="arr">→</span></span>
+        <span class="chip cyan" data-in="pop" data-in-at="1.21">Atomic Fact<span class="arr">→</span></span>
+        <span class="chip purple" data-in="pop" data-in-at="1.28">三信号 RRF<span class="arr">→</span></span>
+        <span class="chip blue" data-in="pop" data-in-at="1.35">Evidence Compiler<span class="arr">→</span></span>
+        <span class="chip gold" data-in="pop" data-in-at="1.42">Evidence Bundle<span class="arr">→</span></span>
+        <span class="chip" data-in="pop" data-in-at="1.49">Answerer ×1</span>
+      </div>
+      <div class="nav-hint" data-in="fade" data-in-at="1.85"><span class="keys">←</span><span>翻页</span><span class="keys">→</span></div>
+    </div>
+  </section>
+
+  <!-- P2 · agent -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-host" data-in="down">01 · host</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">一个正常的 Agent，在工作</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">宿主 Agent 与用户的一段普通对话。此刻还只是「文本」，engram 尚未参与。</p>
+      <div class="chat">
+        <div class="msg u" data-in="left" data-in-gap=".16"><span class="who">user</span>小明 1 月 14 日下午两点要开家长会。<span class="sid">m1</span></div>
+        <div class="msg a" data-in="right" data-in-gap=".16"><span class="who">assistant</span>好的，我记下来了。<span class="sid">m2</span></div>
+        <div class="msg u" data-in="left" data-in-gap=".16"><span class="who">user</span>家长会那天我妈妈会去，我爸爸去不了。<span class="sid">m3</span></div>
+        <div class="msg u" data-in="left" data-in-gap=".16"><span class="who">user</span>把家长会的日期改到 1 月 15 号。<span class="sid">m4</span></div>
+        <div class="msg a" data-in="right" data-in-gap=".16"><span class="who">assistant</span>已更新：家长会改为 1 月 15 号。<span class="sid">m5</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P3 · ingest -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-blue" data-in="down">02 · ingest</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">越过边界：memory_ingest_v2</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        MCP 工具把整批消息交给引擎。<span class="badge blue">namespace 隔离</span><span class="badge blue">一 namespace = 一 DB</span><span class="badge amber">extract 默认 true</span>
+        消息格式只携带宿主的 <code class="mono">source_id / role / text / ordinal / occurred_at</code>。
+      </p>
+      <pre class="json" data-in="left" data-in-at=".25">{
+  <span class="k">"namespace"</span>: <span class="s">"acme"</span>,
+  <span class="k">"session_id"</span>: <span class="s">"sess-041"</span>,
+  <span class="k">"messages"</span>: [
+    { <span class="k">"source_id"</span>: <span class="s">"m1"</span>, <span class="k">"role"</span>: <span class="s">"user"</span>,      <span class="k">"text"</span>: <span class="s">"小明 1 月 14 日下午两点要开家长会。"</span>, <span class="k">"ordinal"</span>: <span class="n">0</span> },
+    { <span class="k">"source_id"</span>: <span class="s">"m3"</span>, <span class="k">"role"</span>: <span class="s">"user"</span>,      <span class="k">"text"</span>: <span class="s">"家长会那天我妈妈会去，我爸爸去不了。"</span>, <span class="k">"ordinal"</span>: <span class="n">2</span> },
+    { <span class="k">"source_id"</span>: <span class="s">"m4"</span>, <span class="k">"role"</span>: <span class="s">"user"</span>,      <span class="k">"text"</span>: <span class="s">"把家长会的日期改到 1 月 15 号。"</span>, <span class="k">"ordinal"</span>: <span class="n">3</span> }
+  ],
+  <span class="k">"extract"</span>: <span class="p">true</span>
+}</pre>
+    </div>
+  </section>
+
+  <!-- P4 · twist1: message -> evidence -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-green" data-in="down">03 · 第一次扭转</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">消息 → Evidence：格式被扭转，原文不动</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        每条消息被「扭转」成引擎的规范形状，并<b>新增</b>引擎生成的身份与指纹；内容一字不改。
+        <span class="badge green">append-only</span><span class="badge green">不可变</span><span class="badge green">永不覆盖</span>
+      </p>
+      <div class="cols">
+        <div class="col">
+          <div class="col-title" data-in="fade">字段映射</div>
+          <div class="map">
+            <div class="map-row" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">role</span><span class="arrow">→</span><span class="v">speaker</span><span class="gen">映射</span></div>
+            <div class="map-row" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">text</span><span class="arrow">→</span><span class="v">content</span><span class="gen">原文不动</span></div>
+            <div class="map-row" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">source_id</span><span class="arrow">→</span><span class="v">external_source_id</span><span class="gen">幂等 ID</span></div>
+            <div class="map-row" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">session_id</span><span class="arrow">→</span><span class="v">source_session_id</span><span class="gen">分组</span></div>
+            <div class="map-row new" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">＋</span><span class="arrow">→</span><span class="v">evidence_id = ULID</span><span class="gen">稳定身份</span></div>
+            <div class="map-row new" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">＋</span><span class="arrow">→</span><span class="v">content_digest = sha-256</span><span class="gen">幂等+校验</span></div>
+            <div class="map-row new" data-in="left" data-in-gap=".06" data-in-dur=".4"><span class="k">＋</span><span class="arrow">→</span><span class="v">recorded_at / state=active</span><span class="gen">生命周期</span></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="col-title" data-in="fade">Evidence Ledger · append-only</div>
+          <div class="ledger">
+            <div class="row" data-in="right" data-in-gap=".08" data-in-dur=".4"><span class="eid">ev-01M7X2</span><span class="who">user</span><span class="txt">小明 1 月 14 日下午两点要开家长会。</span><span class="st">active</span></div>
+            <div class="row" data-in="right" data-in-gap=".08" data-in-dur=".4"><span class="eid">ev-01M7X3</span><span class="who">assistant</span><span class="txt">好的，我记下来了。</span><span class="st">active</span></div>
+            <div class="row" data-in="right" data-in-gap=".08" data-in-dur=".4"><span class="eid">ev-01M7X4</span><span class="who">user</span><span class="txt">家长会那天我妈妈会去，我爸爸去不了。</span><span class="st">active</span></div>
+            <div class="row" data-in="right" data-in-gap=".08" data-in-dur=".4"><span class="eid">ev-01M7X5</span><span class="who">user</span><span class="txt">把家长会的日期改到 1 月 15 号。</span><span class="st">active</span></div>
+            <div class="row" data-in="right" data-in-gap=".08" data-in-dur=".4"><span class="eid">ev-01M7X6</span><span class="who">assistant</span><span class="txt">已更新：家长会改为 1 月 15 号。</span><span class="st">active</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P5 · extraction -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-cyan" data-in="down">04 · extraction</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">ADD-only 抽取：对话 → 原子事实</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        可选的本地 LLM sidecar 从 Evidence 抽取 <b>Atomic Fact</b>；每个 fact 携带完整
+        <b>source lineage</b>。模型失败只降级、Ledger 不受伤。
+        <span class="badge cyan">ADD-only</span><span class="badge cyan">无来源 fact = 拒绝</span>
+      </p>
+      <div class="facts">
+        <div class="fact" data-in="left" data-in-gap=".12"><span class="fid">f1</span><div class="body">
+          <div class="txt">小明 1 月 14 日下午两点开家长会</div>
+          <div class="srcline"><i>m1</i></div></div></div>
+        <div class="fact" data-in="left" data-in-gap=".12"><span class="fid">f2</span><div class="body">
+          <div class="txt">小明的妈妈会去参加家长会</div>
+          <div class="srcline"><i>m3</i></div></div></div>
+        <div class="fact" data-in="left" data-in-gap=".12"><span class="fid">f2b</span><div class="body">
+          <div class="txt">小明的爸爸不能参加家长会</div>
+          <div class="srcline"><i>m3</i></div></div></div>
+        <div class="fact" data-in="left" data-in-gap=".12"><span class="fid">f3</span><div class="body">
+          <div class="txt">小明家长会改期到 1 月 15 日</div>
+          <div class="srcline"><i>m4</i> <i>m5</i></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P6 · write dedup -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-dim" data-in="down">05 · 写入时冗余抑制</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">重复的投影，写不进去 <span class="badge amber">实验杠杆 · 默认关</span></h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        新增事实投影前做字符相似度（trigram Jaccard，阈值 0.7）冗余判定，抑制<b>重复投影</b>——
+        Evidence 无损保留。矛盾事实<b>绝不抑制</b>（供时间校正）。实测：21,860 次判定仅 20 次抑制 → 保持默认关。
+      </p>
+      <div class="dup-wrap">
+        <div class="dup-card in" data-in="pop"><div class="lbl">新消息 m6</div>
+          <div class="txt">"小明下周三下午两点有家长会，那天是 1 月 14 号"</div>
+          <span class="verdict suppress">≈ 等价 f1 · 抑制投影</span></div>
+        <div class="dup-center" data-in="pop">Jaccard 0.87 →<br>抑制<br><div class="metric">判定 <b>21,860</b> / 抑制 <b>20</b></div></div>
+        <div class="dup-card in" data-in="pop"><div class="lbl">Evidence 层</div>
+          <div class="txt">m6 原文照常 append 进 Ledger，<b>一条不丢</b>；只是不产生新投影。</div>
+          <span class="verdict keep">Evidence 保留 ✓</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P7 · projections & indexes -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-purple" data-in="down">06 · projections</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">可重建的投影 + 三类索引</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        Atomic Fact / Semantic Episode 都是<b>可从 Evidence 重建</b>的视图，不是第二份真相。
+        检索侧按投影建三类索引，供下一屏的混合检索使用。
+      </p>
+      <div class="idx-row">
+        <div class="idx vec" data-in="pop" data-in-gap=".1"><b>vector</b>cosine 语义 · embedder</div>
+        <div class="idx kw" data-in="pop" data-in-gap=".1"><b>FTS5</b>BM25 关键词 · trigram</div>
+        <div class="idx ent" data-in="pop" data-in-gap=".1"><b>entity</b>实体精确匹配</div>
+        <div class="idx fts" data-in="pop" data-in-gap=".1"><b>projection</b>atomic_fact · semantic_episode</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P8 · query + hybrid retrieval -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-host" data-in="down">07 · query + hybrid retrieval</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">用户提问 → 三信号汇流 → 冻结候选</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">语义 / 关键词 / 实体三路信号各自命中，RRF（k=60）融合成带 lineage 的排序候选。缺失信号静默退出，不整体失败。</p>
+      <div class="chat" style="margin-bottom:18px">
+        <div class="msg u" style="align-self:center;max-width:90%" data-in="pop" data-in-at=".2"><span class="who">query</span>小明家长会改到几号了？他妈妈参加吗？<span class="sid">q1</span></div>
+      </div>
+      <div class="sigs">
+        <div class="sig" data-sig="sem" data-in="left" data-in-gap=".12" data-in-at=".35">
+          <div class="sname">semantic</div><div class="sdesc">cosine · 存储向量</div>
+          <div class="shits"><span>f3</span><span>f1</span><span>f2</span></div>
+        </div>
+        <div class="sig" data-sig="kw" data-in="up" data-in-gap=".12" data-in-at=".5">
+          <div class="sname">keyword</div><div class="sdesc">FTS5 BM25 · trigram</div>
+          <div class="shits"><span>f1</span><span>f3</span><span>f2b</span></div>
+        </div>
+        <div class="sig" data-sig="ent" data-in="right" data-in-gap=".12" data-in-at=".65">
+          <div class="sname">entity</div><div class="sdesc">exact match · 家长会</div>
+          <div class="shits"><span>f2</span><span>f3</span></div>
+        </div>
+      </div>
+      <svg class="stream" viewBox="0 0 100 56" preserveAspectRatio="none" aria-hidden="true">
+        <path class="sp sem" data-in="draw" data-in-at="1.0" data-in-dur="1.1" d="M25 0 C28 26, 42 32, 50 56"></path>
+        <path class="sp kw" data-in="draw" data-in-at="1.0" data-in-dur="1.1" d="M50 0 C50 26, 50 34, 50 56"></path>
+        <path class="sp ent" data-in="draw" data-in-at="1.0" data-in-dur="1.1" d="M75 0 C72 26, 58 32, 50 56"></path>
+      </svg>
+      <div class="rrf-node" data-in="pop" data-in-at="1.8">
+        <div class="rrf-name">RRF · k=60</div>
+        <div class="rrf-sub">tuning-free 融合 · 候选冻结（ranked + lineage）</div>
+      </div>
+      <svg class="stream" viewBox="0 0 100 56" preserveAspectRatio="none" aria-hidden="true">
+        <path class="sp fan on" data-in="draw" data-in-at="2.3" data-in-dur="1.0" d="M50 0 C50 22, 20 28, 14 56"></path>
+        <path class="sp fan on" data-in="draw" data-in-at="2.3" data-in-dur="1.0" d="M50 0 C50 24, 36 28, 38 56"></path>
+        <path class="sp fan on" data-in="draw" data-in-at="2.3" data-in-dur="1.0" d="M50 0 C50 24, 64 28, 62 56"></path>
+        <path class="sp fan on" data-in="draw" data-in-at="2.3" data-in-dur="1.0" d="M50 0 C50 22, 80 28, 86 56"></path>
+      </svg>
+      <div class="cands">
+        <div class="cand" data-in="up" data-in-gap=".1" data-in-at="2.7"><span class="cid">f3</span> 家长会改期到 1 月 15 日<span class="crank">rank <b>1</b> · 0.91</span></div>
+        <div class="cand" data-in="up" data-in-gap=".1" data-in-at="2.8"><span class="cid">f2</span> 妈妈会去参加家长会<span class="crank">rank <b>2</b> · 0.74</span></div>
+        <div class="cand" data-in="up" data-in-gap=".1" data-in-at="2.9"><span class="cid">f1</span> 原定 1 月 14 日下午两点<span class="crank">rank <b>3</b> · 0.62</span></div>
+        <div class="cand" data-in="up" data-in-gap=".1" data-in-at="3.0"><span class="cid">f2b</span> 爸爸不能参加家长会<span class="crank">rank <b>4</b> · 0.48</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P9 · neighbor extend -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-dim" data-in="down">08 · 命中后邻居扩展</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">命中一个，带出相关的兄弟 <span class="badge amber">实验杠杆 · 默认关</span></h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        候选冻结后、组装前，沿共享证据 / 关系扩展<b>兄弟事实</b>（depth-1，有界）。实测整体 <b>−0.46pp</b> → 保持默认关。
+      </p>
+      <div class="facts">
+        <div class="fact" data-in="left" data-in-gap=".14"><span class="fid">f3</span><div class="body">
+          <div class="txt">命中：小明家长会改期到 1 月 15 日</div>
+          <div class="src">← 共享 session 与主题「家长会」</div></div></div>
+        <div class="fact" data-in="right" data-in-gap=".14"><span class="fid">＋</span><div class="body">
+          <div class="txt">扩展：f2 妈妈会去参加家长会 <span style="color:var(--faint)">（同主题）</span></div>
+          <div class="src">扩展后一起进入 answerer 上下文</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P10 · compiler -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-blue" data-in="down">09 · 第二次扭转</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">固定候选 → Evidence Bundle</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        编译器先声明证据需求（Evidence Need），再对固定候选执行有来源的保留/丢弃/抽取，产出<b>精确计 token</b> 的 Evidence Bundle 与可审计 Trace。
+      </p>
+      <div class="comp-flow">
+        <div class="comp-col">
+          <div class="col-label" data-in="fade">候选（已冻结）</div>
+          <div class="comp-cands">
+            <div class="ccand keep" data-in="left" data-in-gap=".1"><span class="ccid">f3</span><span class="cctxt">家长会改期到 1 月 15 日</span></div>
+            <div class="ccand keep" data-in="left" data-in-gap=".1"><span class="ccid">f2</span><span class="cctxt">妈妈会去参加家长会</span></div>
+            <div class="ccand drop" data-in="left" data-in-gap=".1"><span class="ccid">f1</span><span class="cctxt">原定 1 月 14 日下午两点</span></div>
+            <div class="ccand drop" data-in="left" data-in-gap=".1"><span class="ccid">f2b</span><span class="cctxt">爸爸不能参加家长会</span></div>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="action keep" data-in="pop" data-in-at="1.3">KEEP</div>
+          <div class="action keep" data-in="pop" data-in-at="1.4">KEEP</div>
+          <div class="action drop" data-in="pop" data-in-at="1.5">DROP · 已被取代</div>
+          <div class="action drop" data-in="pop" data-in-at="1.6">DROP · 与 query 无关</div>
+        </div>
+        <div class="comp-col">
+          <div class="col-label" data-in="fade" data-in-at="1.9">Evidence Bundle · 有来源 · 精确 token</div>
+          <div class="bundle" data-in="up" data-in-at="2.0">
+            <div class="bt">Bundle 通过来源 + token 校验</div>
+            <div class="bline">小明的家长会改期到 1 月 15 日。<span class="spn">KEEP f3 · sources m4, m5</span></div>
+            <div class="bline">小明的妈妈会去参加家长会。<span class="spn">KEEP f2 · source m3</span></div>
+          </div>
+          <div class="gauge" data-in="fade" data-in-at="2.4">
+            <div class="g-top"><span>answerer input tokens</span><span class="cap">≤ cap 3,600</span></div>
+            <div class="g-track"><div class="g-fill" data-in="gauge"></div></div>
+          </div>
+          <div class="trace" data-in="fade" data-in-at="2.8">
+            <b>Grounded Trace（审计）</b><br>
+            Need: { entities:[小明, 家长会, 妈妈], update_state: current, list: unknown }<br>
+            Actions: KEEP×2 · DROP×2 · <span class="ok">无来源 ADD = 0</span> · <span class="ok">span 复原率 100%</span><br>
+            <span class="ok">InputTokens 1,059 ≤ 3,600</span> · counter fingerprint 冻结 · <span class="ok">answerer 调用 = 0（此阶段）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P11 · answer -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-gold" data-in="down">10 · answer</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">Answerer · 恰好一次</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">
+        Bundle 通过全部校验后才调用 answerer；planning / 编译 / 补检阶段绝不试答。
+        <span class="badge green">一次调用</span><span class="badge green">≤1 次补检（有结构化 gap 才触发）</span>
+      </p>
+      <div class="answer" data-in="pop" data-in-at=".25">
+        <div><span class="awho">ANSWERER</span>
+          <div class="atext">家长会已改到 <b>1 月 15 日</b>；他妈妈会去参加，爸爸去不了。</div>
+          <div class="acalls">1 answerer call · bundle: 1,059 tok · trace digest: 9f3e…c1</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- P12 · guards -->
+  <section class="page">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="p-kicker k-purple" data-in="down">11 · 宪法保证</div>
+      <h2 class="p-title" data-in="up" data-in-gap=".05">为什么可以信任这条流水线</h2>
+      <p class="p-desc" data-in="fade" data-in-at=".15">五条不可谈判的约束，横贯写与读。</p>
+      <div class="guards">
+        <div class="guard" data-in="left" data-in-gap=".07" data-in-dur=".4"><div class="gicon">🔒</div><div class="gt">无损 Evidence Ledger</div>
+          <div class="gd">原文 append-only、永不覆盖；普通删除 = 可恢复 tombstone，显式隐私 = purge 清原文。</div></div>
+        <div class="guard" data-in="up" data-in-gap=".07" data-in-dur=".4"><div class="gicon">🧊</div><div class="gt">Namespace 隔离</div>
+          <div class="gd">一 namespace 一 DB，路径逃逸为 0；跨命名空间读取默认禁止。</div></div>
+        <div class="guard" data-in="right" data-in-gap=".08"><div class="gicon">🛰️</div><div class="gt">离线可降级</div>
+          <div class="gd">embedding / LLM / reranker 皆是可选 sidecar；缺信号逐路退出，本地写入与搜索照常。</div></div>
+        <div class="guard" data-in="left" data-in-gap=".07" data-in-dur=".4"><div class="gicon">🧪</div><div class="gt">实验杠杆默认关</div>
+          <div class="gd">冗余抑制 / 邻居扩展 / reranker 全部默认关；只有配对消融正向才谈进默认路径。</div></div>
+        <div class="guard" data-in="up" data-in-gap=".07" data-in-dur=".4"><div class="gicon">📊</div><div class="gt">Eval 回归门</div>
+          <div class="gd">任何触及检索 / 抽取 / 存储 / embedding 的变更 MUST 跑双基准配对消融，不得回归基线。</div></div>
+        <div class="guard" data-in="right" data-in-gap=".08"><div class="gicon">⚖️</div><div class="gt">诚实规模</div>
+          <div class="gd">单用户 ~100k 记忆类；ANN / 百万 token / 集群是明确未来工作，不是隐含承诺。</div></div>
+      </div>
+      <table class="arms" data-in="fade" data-in-at=".7">
+        <tr><th>同预算机制消融（LoCoMo 1540 题 · cap 3600）</th><th>overall</th><th>Δ vs control</th></tr>
+        <tr class="ctl"><td>control</td><td class="num">84.29%</td><td class="num">—</td></tr>
+        <tr><td>+ 邻居扩展</td><td class="num">83.83%</td><td class="neg">−0.46pp</td></tr>
+        <tr><td>+ 冗余抑制</td><td class="num">83.38%</td><td class="neg">−0.91pp</td></tr>
+        <tr><td>+ both</td><td class="num">82.99%</td><td class="neg">−1.30pp</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- P13 · end -->
+  <section class="page end">
+    <div class="gridlines"></div>
+    <div class="slide">
+      <div class="eyebrow" data-in="down" data-in-at="0"><span class="pulse"></span>engram · local-first memory engine</div>
+      <div class="big" data-in="up" data-in-at=".3">对话进来 →<br><span style="color:var(--green)">无损留下</span>，<span style="color:var(--blue)">按需找出</span>，<span style="color:var(--gold)">精编作答</span></div>
+      <div class="lines" data-in="fade" data-in-at=".6">
+        写：每句话成为不可覆盖的 Evidence，事实只是它的可重建投影。<br>
+        读：三信号汇流成候选，编译器把它编译成有来源、计 token 的 Bundle。<br>
+        answerer 只认真校验过的证据，恰好回答一次。<br>
+        <span style="color:var(--faint);font-size:13.5px">内容基于 engram 记忆引擎的架构与契约文档；对话与数据为示意示例。</span>
+      </div>
+      <div class="nav-hint" data-in="fade" data-in-at="1.2"><span class="keys">←</span><span>回到开头</span></div>
+    </div>
+  </section>
+</div>
+
+<!-- controls -->
+<div class="counter" id="counter"><b>1</b> / 13</div>
+<div class="controls">
+  <button class="btn" id="prev" aria-label="上一页">‹</button>
+  <div class="dots" id="dots"></div>
+  <button class="btn" id="next" aria-label="下一页">›</button>
+</div>
+
+<script>
+const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const pages = gsap.utils.toArray('.page');
+const N = pages.length;
+let cur = 0, busy = false;
+
+/* ---------- controls ---------- */
+const dotsEl = document.getElementById('dots');
+const counterEl = document.getElementById('counter');
+pages.forEach((_, i) => {
+  const d = document.createElement('div');
+  d.className = 'dot';
+  d.addEventListener('click', () => go(i));
+  dotsEl.appendChild(d);
+});
+const dots = gsap.utils.toArray('.dots .dot');
+const btnPrev = document.getElementById('prev');
+const btnNext = document.getElementById('next');
+btnPrev.addEventListener('click', () => go(cur - 1));
+btnNext.addEventListener('click', () => go(cur + 1));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); go(cur + 1); }
+  else if (e.key === 'ArrowLeft' || e.key === 'Backspace' || e.key === 'PageUp') { e.preventDefault(); go(cur - 1); }
+  else if (e.key === 'Home') { e.preventDefault(); go(0); }
+  else if (e.key === 'End') { e.preventDefault(); go(N - 1); }
+});
+
+/* touch swipe */
+let tx0 = null;
+document.addEventListener('touchstart', e => { tx0 = e.touches[0].clientX; }, { passive: true });
+document.addEventListener('touchend', e => {
+  if (tx0 === null) return;
+  const dx = e.changedTouches[0].clientX - tx0;
+  if (Math.abs(dx) > 60) go(cur + (dx < 0 ? 1 : -1));
+  tx0 = null;
+}, { passive: true });
+
+/* ---------- per-page entrance timeline ---------- */
+function fromVars(kind, el) {
+  if (kind === 'draw') {
+    if (el.tagName === 'path' || el.tagName === 'line' || el.tagName === 'polyline') {
+      const L = el.getTotalLength();
+      gsap.set(el, { strokeDasharray: L, strokeDashoffset: L });
+      return { strokeDashoffset: 0, ease: 'power1.inOut' };
+    }
+    return { autoAlpha: 0, ease: 'power2.out' };
+  }
+  if (kind === 'gauge') return null; // handled specially
+  const base = { autoAlpha: 0, ease: 'power3.out' };
+  switch (kind) {
+    case 'up': return Object.assign({}, base, { y: 46 });
+    case 'down': return Object.assign({}, base, { y: -46 });
+    case 'left': return Object.assign({}, base, { x: 70 });
+    case 'right': return Object.assign({}, base, { x: -70 });
+    case 'pop': return Object.assign({}, base, { scale: .5, ease: 'back.out(1.7)' });
+    case 'fade': return Object.assign({}, base, { ease: 'power2.out' });
+    default: return Object.assign({}, base, { y: 46 });
+  }
+}
+/* blocks whose children chain together; each block runs in parallel at base time */
+const BLOCK_SEL = '.cols,.col,.map,.ledger,.chat,.facts,.dup-wrap,.idx-row,.sigs,.cands,.comp-cands,.actions,.bundle,.gauge,.trace,.guards,.comp-flow,.answer,.dup-card,.dup-center';
+function blockRoot(el, page) {
+  let cur = el;
+  while (cur) {
+    if (cur !== el && cur.matches && cur.matches(BLOCK_SEL)) return cur;
+    if (cur.parentElement === page) return cur;
+    cur = cur.parentElement;
+  }
+  return el;
+}
+function buildEnterTl(page) {
+  const tl = gsap.timeline({ paused: true });
+  const curs = new Map(); // block-root -> cursor
+  page.querySelectorAll('[data-in]').forEach(el => {
+    const kind = el.dataset.in || 'up';
+    const dur = parseFloat(el.dataset.inDur || '.5');
+    const gap = parseFloat(el.dataset.inGap || '.08');
+    let pos = null;
+    if (el.dataset.inAt !== undefined) pos = parseFloat(el.dataset.inAt);
+    else if (el.classList.contains('p-kicker')) pos = 0;
+    else if (el.classList.contains('p-title')) pos = .12;
+    else if (el.classList.contains('p-desc')) pos = .2;
+    else {
+      const root = blockRoot(el, page);
+      pos = curs.has(root) ? curs.get(root) : .55;
+      curs.set(root, pos + dur + gap);
+    }
+    if (pos === null) return;
+    if (kind === 'gauge') {
+      tl.fromTo(el, { width: '4%' }, { width: '29.4%', duration: .6, ease: 'power2.inOut' }, pos);
+    } else {
+      const fv = fromVars(kind, el);
+      if (fv) tl.from(el, Object.assign({}, fv, { duration: dur }), pos);
+    }
+  });
+  return tl;
+}
+
+/* ---------- navigation ---------- */
+function update() {
+  counterEl.innerHTML = '<b>' + (cur + 1) + '</b> / ' + N;
+  dots.forEach((d, i) => d.classList.toggle('on', i === cur));
+  btnPrev.disabled = cur === 0;
+  btnNext.disabled = cur === N - 1;
+}
+function go(n) {
+  if (busy || n < 0 || n >= N || n === cur) return;
+  const from = pages[cur], to = pages[n];
+  const d = n > cur ? 1 : -1;
+  busy = true;
+  if (from.__tl) from.__tl.pause();
+  if (to.__tl) to.__tl.progress(0); // reset to hidden from-state BEFORE showing → no full-content frame
+  if (REDUCE) {
+    gsap.set(from, { xPercent: 0, opacity: 0 });
+    gsap.set(to, { xPercent: 0, opacity: 1, visibility: 'visible' });
+    cur = n; busy = false; update(); return;
+  }
+  gsap.set(to, { xPercent: 100 * d, opacity: 1, visibility: 'visible' });
+  gsap.timeline({ onComplete: () => {
+      gsap.set(from, { xPercent: 0, opacity: 0, visibility: 'hidden' });
+      cur = n; busy = false; update();
+    } })
+    .to(from, { xPercent: -100 * d, duration: .55, ease: 'power2.inOut' }, 0)
+    .to(to, { xPercent: 0, duration: .55, ease: 'power2.inOut' }, 0)
+    .call(() => { if (to.__tl) to.__tl.play(0); }, [], .3);
+}
+
+/* ---------- init ---------- */
+if (REDUCE) {
+  gsap.set(pages, { opacity: 0, visibility: 'hidden' });
+  gsap.set(pages[0], { opacity: 1, visibility: 'visible' });
+} else {
+  /* pre-build EVERY page's entrance timeline (applies hidden from-states immediately),
+     while pages are rendered-but-invisible so SVG path lengths are measurable.
+     Result: no frame ever shows full content before the animation. */
+  gsap.set(pages, { opacity: 0, visibility: 'visible' });
+  pages.forEach(p => { p.__tl = buildEnterTl(p); });
+  gsap.set(pages[0], { opacity: 1 });
+  pages[0].__tl.play(0);
+}
+update();
+</script>
+</body>
+</html>

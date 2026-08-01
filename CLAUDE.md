@@ -126,7 +126,7 @@ Implementation is often delegated to an external agent while this session review
 - All scratch/temp files (bench logs, downloads, drafts, throwaway probes) → the session scratchpad dir, never repo root / tracked paths / system `/tmp`. A throwaway harness placed in a source repo MUST be deleted and that repo restored to its exact prior git status.
 
 ### Exploration & Clarification
-- Ideas/design/troubleshooting: explore freely. Major changes (new engine capability, new adapter surface, algorithm change) run `superpowers:brainstorming` first, then the spec-kit chain (`specify → plan → tasks → analyze → implement`).
+- Ideas/design/troubleshooting: explore freely. Major changes (new engine capability, new adapter surface, algorithm change) run the spec-kit chain (`specify → plan → tasks → analyze → implement`).
 - Unclear requirements/scope/approach → ask first, never guess.
 
 ### Literature / Paper Research — MUST go through alphaXiv MCP (hard rule)
@@ -134,7 +134,7 @@ Implementation is often delegated to an external agent while this session review
 - Scope note: alphaXiv covers CS/math/physics/stats/EE (arXiv), **not** biomedical/life-science venues. If a needed source is genuinely outside arXiv, STOP and surface that to the maintainer rather than silently falling back to web search.
 
 ### Preferred Workflow (maintainer's standing habit)
-- Default sequence for any substantive feature: **brainstorm first (`superpowers:brainstorming`, TDD-minded — nail the failing-test/verification shape while designing), THEN the SDD chain (`specify → plan → tasks → analyze → implement`)**. Brainstorm converges the design + the free/cost gates; SDD formalizes it. Don't jump straight to `specify` for non-trivial work — the brainstorm comes first.
+- Default sequence for any substantive feature: the SDD chain (`specify → plan → tasks → analyze → implement`). Don't jump straight to `implement` for non-trivial work — spec first.
 
 ### Response Style
 - Concise and direct, no filler. Report faithfully: failed test → say so + paste output; skipped step → say it was skipped; done + verified → state it plainly.
