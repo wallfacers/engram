@@ -671,6 +671,14 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 					frozen.Candidate.RenderedCandidates = enriched
 					frozen.Candidate.CandidateSetDigest = renderedCandidateSetDigest(enriched)
 					frozen.Candidate.Mode = evalCandidateModeAnchorRendering
+					// 025 semantic_episode: the renderer aggregates a cross-message
+					// cluster into one candidate. Rebuild the expanded source set so
+					// the answer bundle carries the episode narrative (multi-source)
+					// instead of the per-source expansion, keeping candidate and
+					// bundle aligned for the episode anchor-prefix contract.
+					if opt.representationArm == ReprSemanticEpisode {
+						expanded = rebuildExpandedForEpisodes(expanded, enriched, opt.formalEvidence)
+					}
 				}
 			}
 		}

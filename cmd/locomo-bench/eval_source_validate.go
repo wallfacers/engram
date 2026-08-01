@@ -183,10 +183,43 @@ func validateActiveFormalBundleReceipt(
 	results := make([]memory.Result, 0, len(bundle.Items))
 	contextRecoverable := true
 	for _, item := range bundle.Items {
-		if len(item.Sources) != 1 || len(item.CandidateIDs) != 1 {
+		rendered, renderedExists := renderedByID[item.CandidateIDs[0]]
+		isEpisodeItem := renderedExists && rendered.Kind == string(ReprSemanticEpisode)
+		if len(item.CandidateIDs) != 1 {
 			spanOK, citationOK = false, false
 			contextRecoverable = false
-			problems = append(problems, fmt.Sprintf("B1 item %q must have exactly one candidate and one source span", item.ItemID))
+			problems = append(problems, fmt.Sprintf("B1 item %q must have exactly one candidate", item.ItemID))
+			continue
+		}
+		if isEpisodeItem {
+			// 025: an episode item aggregates a cross-message cluster. Each source
+			// must be whole-source (KEEP) and recoverable; the item text is the
+			// deterministic narrative of those sources (research.md R5).
+			recoveredNarrative, ok := recoverEpisodeNarrative(item, evidenceByID)
+			if !ok {
+				spanOK, citationOK = false, false
+				contextRecoverable = false
+				problems = append(problems, fmt.Sprintf("episode item %q narrative/span cannot be recovered", item.ItemID))
+				continue
+			}
+			if item.Text != recoveredNarrative || rendered.Text != item.Text || rendered.TextDigest != evalTextDigest(item.Text) ||
+				!sameOrderedStrings(rendered.SourceIDs, episodeItemSourceIDs(item)) {
+				citationOK = false
+				problems = append(problems, fmt.Sprintf("episode item %q differs from its frozen rendered candidate", item.ItemID))
+			}
+			for _, span := range item.Sources {
+				ev, ok := evidenceByID[span.EvidenceID]
+				if !ok {
+					continue
+				}
+				results = append(results, formalEvidenceResult(item.ItemID, ev.Content, ev))
+			}
+			continue
+		}
+		if len(item.Sources) != 1 {
+			spanOK, citationOK = false, false
+			contextRecoverable = false
+			problems = append(problems, fmt.Sprintf("B1 item %q must have exactly one source span", item.ItemID))
 			continue
 		}
 		source := item.Sources[0]
@@ -232,8 +265,7 @@ func validateActiveFormalBundleReceipt(
 			problems = append(problems, fmt.Sprintf("B1 item %q uses unsupported action %q", item.ItemID, item.Kind))
 			continue
 		}
-		rendered, exists := renderedByID[item.CandidateIDs[0]]
-		if !exists || rendered.Text != item.Text || rendered.TextDigest != evalTextDigest(item.Text) ||
+		if !renderedExists || rendered.Text != item.Text || rendered.TextDigest != evalTextDigest(item.Text) ||
 			len(rendered.SourceIDs) != 1 || rendered.SourceIDs[0] != source.EvidenceID {
 			citationOK = false
 			problems = append(problems, fmt.Sprintf("item %q differs from its frozen rendered candidate", item.ItemID))
@@ -338,6 +370,21 @@ func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFo
 	if len(candidate.Anchors) == 0 || len(candidate.RenderedCandidates) == 0 {
 		return fmt.Errorf("candidate has no ranked anchors or rendered sources")
 	}
+	// 025: a semantic_episode rendered candidate aggregates a whole cross-message
+	// cluster into one candidate (many SourceIDs), so the legacy per-source 1:1
+	// mapping below does not apply. Detect episode mode from the rendered
+	// candidate kind and switch to the episode branch.
+	isEpisode := false
+	for _, rendered := range candidate.RenderedCandidates {
+		if rendered.Kind == string(ReprSemanticEpisode) {
+			isEpisode = true
+			break
+		}
+	}
+	if isEpisode {
+		return validateFormalB1EpisodeAnchorPrefix(candidate, bundle)
+	}
+
 	renderedIndex := 0
 	validBoundaries := map[int]bool{0: true}
 	for anchorIndex, anchor := range candidate.Anchors {
@@ -390,6 +437,50 @@ func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFo
 	return nil
 }
 
+// validateFormalB1EpisodeAnchorPrefix is the 025 semantic_episode branch of the
+// ranked-anchor prefix contract. Each anchor has at most one episode rendered
+// candidate (a cross-message cluster), whose SourceIDs are the episode lineage.
+// The bundle item for that anchor carries the same text and the same source set
+// (whole-source spans), so answer context is auditable against the rendered
+// candidate. This relaxes the legacy single-source cardinality without changing
+// the chunk/raw-turn path (research.md R5, direction A).
+func validateFormalB1EpisodeAnchorPrefix(candidate evalCandidateArtifact, bundle evalFormalBundleRecord) error {
+	if len(bundle.Items) == 0 {
+		return fmt.Errorf("episode bundle has no items")
+	}
+	if len(bundle.Items) != len(candidate.RenderedCandidates) {
+		return fmt.Errorf("episode bundle item count %d differs from rendered candidate count %d", len(bundle.Items), len(candidate.RenderedCandidates))
+	}
+	for index, item := range bundle.Items {
+		rendered := candidate.RenderedCandidates[index]
+		if item.ItemID != formalBundleItemID(rendered.CandidateID) ||
+			len(item.CandidateIDs) != 1 || item.CandidateIDs[0] != rendered.CandidateID ||
+			item.Text != rendered.Text {
+			return fmt.Errorf("episode bundle item %d is not its rendered candidate %q", index, rendered.CandidateID)
+		}
+		// Every rendered source must be present as a whole-source span in the item.
+		if len(rendered.SourceIDs) == 0 || len(item.Sources) != len(rendered.SourceIDs) {
+			return fmt.Errorf("episode item %d source cardinality mismatch", index)
+		}
+		renderedSet := stringSet(rendered.SourceIDs)
+		itemSet := make(map[string]bool, len(item.Sources))
+		for _, span := range item.Sources {
+			itemSet[span.EvidenceID] = true
+		}
+		for _, id := range rendered.SourceIDs {
+			if !itemSet[id] {
+				return fmt.Errorf("episode item %d misses rendered source %q", index, id)
+			}
+		}
+		for _, span := range item.Sources {
+			if !renderedSet[span.EvidenceID] {
+				return fmt.Errorf("episode item %d has unrendered source %q", index, span.EvidenceID)
+			}
+		}
+	}
+	return nil
+}
+
 func orderedFormalSourceValues(values []string) []string {
 	seen := make(map[string]bool, len(values))
 	ordered := make([]string, 0, len(values))
@@ -412,6 +503,45 @@ func sameOrderedStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+// recoverEpisodeNarrative rebuilds the deterministic episode narrative from the
+// item's whole-source spans, matching semanticEpisodeRenderer's rendering
+// (`content + "\n"` in source order, representation_eval.go). Every span must be
+// whole-source (KEEP, offsets [0,len)) and resolvable, else the episode cannot
+// be independently recovered from the Ledger.
+func recoverEpisodeNarrative(item evalFormalBundleItem, evidenceByID map[string]memory.Evidence) (string, bool) {
+	if len(item.Sources) == 0 {
+		return "", false
+	}
+	var sb strings.Builder
+	for _, span := range item.Sources {
+		evidence, ok := evidenceByID[span.EvidenceID]
+		if !ok {
+			return "", false
+		}
+		runes := []rune(evidence.Content)
+		if span.StartChar != 0 || span.EndChar != len(runes) {
+			return "", false // whole-source only
+		}
+		content := string(runes)
+		if span.SpanDigest != evalTextDigest(content) {
+			return "", false
+		}
+		sb.WriteString(content)
+		sb.WriteString("\n")
+	}
+	return sb.String(), true
+}
+
+// episodeItemSourceIDs extracts the ordered evidence IDs from an episode item's
+// spans for comparison against the rendered candidate's SourceIDs.
+func episodeItemSourceIDs(item evalFormalBundleItem) []string {
+	ids := make([]string, len(item.Sources))
+	for i, span := range item.Sources {
+		ids[i] = span.EvidenceID
+	}
+	return ids
 }
 
 // inspectFormalBundle performs the source/span/citation checks available from
@@ -464,13 +594,47 @@ func inspectFormalBundleStructure(
 			spanOK = false
 		}
 		actions = append(actions, item.Kind)
-		if len(item.CandidateIDs) != 1 || len(item.Sources) != 1 {
+		if len(item.CandidateIDs) != 1 {
 			spanOK, citationOK = false, false
 			continue
 		}
 		rendered, exists := renderedByID[item.CandidateIDs[0]]
 		if !exists {
 			citationOK = false
+		}
+		if exists && rendered.Kind == string(ReprSemanticEpisode) {
+			// 025 episode item: every whole-source span must be allowed and
+			// resolvable; the rendered SourceIDs set must equal the item's set.
+			if len(item.Sources) == 0 || len(rendered.SourceIDs) != len(item.Sources) {
+				spanOK, citationOK = false, false
+				continue
+			}
+			itemSet := make(map[string]bool, len(item.Sources))
+			for _, source := range item.Sources {
+				itemSet[source.EvidenceID] = true
+				citedSourceIDs = append(citedSourceIDs, source.EvidenceID)
+				if strings.TrimSpace(source.EvidenceID) == "" || !allowed[source.EvidenceID] ||
+					strings.HasPrefix(source.EvidenceID, "legacy-entry:") {
+					sourceOK, citationOK = false, false
+				}
+				if source.StartChar < 0 || source.StartChar >= source.EndChar ||
+					!isDigest(source.SpanDigest) {
+					spanOK = false
+				}
+			}
+			for _, id := range rendered.SourceIDs {
+				if !itemSet[id] {
+					citationOK = false
+				}
+			}
+			if rendered.Text != item.Text || rendered.TextDigest != evalTextDigest(item.Text) {
+				citationOK = false
+			}
+			continue
+		}
+		if len(item.Sources) != 1 {
+			spanOK, citationOK = false, false
+			continue
 		}
 		source := item.Sources[0]
 		citedSourceIDs = append(citedSourceIDs, source.EvidenceID)

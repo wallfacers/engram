@@ -314,6 +314,99 @@ func packExpandedFormalInput(
 	return selected, input, count, evidenceTokens, nil
 }
 
+// rebuildExpandedForEpisodes replaces each anchor's per-source expansion with
+// the semantic_episode renderer's aggregated candidate, so the answer bundle
+// carries the episode narrative (a cross-message cluster, many whole-source
+// spans) instead of the per-source raw turns. The episode candidate text is the
+// deterministic narrative from the renderer; the item's sources are every
+// member evidence as a whole-source KEEP span. Non-episode anchors keep their
+// per-source expansion. On any resolution failure the original expansion is
+// returned (graceful degradation — the episode arm still renders, it just
+// falls back to per-source sources).
+func rebuildExpandedForEpisodes(expanded []formalExpandedAnchor, enriched []evalRenderedCandidate, reader formalEvidenceReader) []formalExpandedAnchor {
+	if reader == nil {
+		return expanded
+	}
+	// Collect every evidence ID referenced by episode candidates.
+	var allIDs []string
+	seenID := map[string]bool{}
+	for _, candidate := range enriched {
+		for _, id := range candidate.SourceIDs {
+			if !seenID[id] {
+				seenID[id] = true
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+	evidenceByID, err := reader.GetMany(context.Background(), allIDs)
+	if err != nil || len(evidenceByID) != len(allIDs) {
+		return expanded
+	}
+
+	episodeByAnchor := make(map[string]evalRenderedCandidate)
+	for _, candidate := range enriched {
+		if candidate.Kind != string(ReprSemanticEpisode) || len(candidate.ExpandedFrom) != 1 {
+			continue
+		}
+		episodeByAnchor[candidate.ExpandedFrom[0]] = candidate
+	}
+
+	out := make([]formalExpandedAnchor, 0, len(expanded))
+	for _, anchor := range expanded {
+		episode, ok := episodeByAnchor[anchor.CandidateID]
+		if !ok || len(episode.SourceIDs) == 0 {
+			out = append(out, anchor)
+			continue
+		}
+		// Build the episode source: narrative text, multi whole-source spans.
+		spans := make([]evalFormalSourceSpan, 0, len(episode.SourceIDs))
+		var results []memory.Result
+		for _, id := range episode.SourceIDs {
+			evidence, ok := evidenceByID[id]
+			if !ok {
+				out = append(out, anchor) // degrade to per-source
+				break
+			}
+			runes := []rune(evidence.Content)
+			spans = append(spans, evalFormalSourceSpan{
+				EvidenceID: id,
+				StartChar:  0,
+				EndChar:    len(runes),
+				SpanDigest: evalTextDigest(evidence.Content),
+			})
+			results = append(results, formalEvidenceResult(episode.CandidateID, evidence.Content, evidence))
+		}
+		if len(spans) != len(episode.SourceIDs) {
+			out = append(out, anchor)
+			continue
+		}
+		item := evalFormalBundleItem{
+			ItemID:       formalBundleItemID(episode.CandidateID),
+			Kind:         "KEEP",
+			Text:         episode.Text,
+			CandidateIDs: []string{episode.CandidateID},
+			Sources:      spans,
+		}
+		// One aggregated source per anchor: the episode narrative as Result.
+		source := formalExpandedSource{
+			Evidence: evidenceByID[episode.SourceIDs[0]],
+			Result: memory.Result{
+				Name:     episode.CandidateID,
+				Content:  episode.Text,
+				Score:    anchor.Hit.Score,
+				ProjectionID: anchor.Hit.ProjectionID,
+			},
+			Candidate: episode,
+			Item:      item,
+		}
+		outAnchor := anchor
+		outAnchor.Sources = []formalExpandedSource{source}
+		outAnchor.SourceIDs = append([]string(nil), episode.SourceIDs...)
+		out = append(out, outAnchor)
+	}
+	return out
+}
+
 func formalBundleItems(sources []formalExpandedSource) []evalFormalBundleItem {
 	items := make([]evalFormalBundleItem, 0, len(sources))
 	for _, source := range sources {
