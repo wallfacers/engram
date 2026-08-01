@@ -422,7 +422,14 @@ func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
 		}
 		return formalTreatmentFreeze{Stage: "compiler", Arm: opt.compilerArm, MechanismFlags: map[string]bool{"compiler": true}}, nil
 	case "representation":
-		return formalTreatmentFreeze{Stage: "representation_navigation", Arm: string(opt.representationArm), MechanismFlags: map[string]bool{"representation": true}}, nil
+		flags := map[string]bool{"representation": true}
+		if opt.episodeCluster {
+			// 025 cross-session semantic episode clustering: the semantic_episode
+			// arm additionally rebuilds episodes across sessions before rendering.
+			// Kept as its own flag so the treatment freeze binds the mechanism.
+			flags["episode_cluster"] = true
+		}
+		return formalTreatmentFreeze{Stage: "representation_navigation", Arm: string(opt.representationArm), MechanismFlags: flags}, nil
 	case "event":
 		if !validEventProjection(opt.eventProjection) {
 			return formalTreatmentFreeze{}, fmt.Errorf("--event-projection must be E0 | E1 | E2 | E3, got %q", opt.eventProjection)
