@@ -347,12 +347,15 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 // --representation, but the frozen manifest difference is the episode_cluster
 // key alone). They are deliberately NOT part of formalTreatmentForOptions — a
 // density flag never replaces the legacy B1 control, it extends it.
-var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster"}
+var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster", "compiler"}
 
-// densityMechanismFlagsForOptions returns the 024 additive mechanism flags
-// derived from the CLI. Absent flags are omitted so a run with neither
-// mechanism set stays byte-identical to the legacy B1 control manifest
-// (mechanism-bindings rule: new keys default to false / absent = false).
+// densityMechanismFlagsForOptions returns the additive mechanism flags derived
+// from the CLI. Absent flags are omitted so a run with neither mechanism set
+// stays byte-identical to the legacy B1 control manifest (mechanism-bindings
+// rule: new keys default to false / absent = false). 024 density keys and the
+// 026 compiler arm are all b1-stage additive mechanisms: the compiler arm
+// swaps the answer-bundle packer inside the same b1 retrieval→pack→answer
+// path, exactly as episode_cluster swaps the representation.
 func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	flags := make(map[string]bool)
 	if opt.writeDedup {
@@ -363,6 +366,9 @@ func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	}
 	if opt.episodeCluster {
 		flags["episode_cluster"] = true
+	}
+	if opt.compilerArm != "" {
+		flags["compiler"] = true
 	}
 	return flags
 }
@@ -397,11 +403,14 @@ type formalTreatmentFreeze struct {
 // CLI flags, enforcing that at most one mechanism is requested and that
 // dependent flags (gap-refetch requires event-projection) are consistent.
 // An empty result (no treatment flags) is the legacy B1 control.
+//
+// compiler-arm is NOT a treatment here: like episode_cluster / write_dedup /
+// neighbor_extend it is a b1-stage additive mechanism (densityMechanismFlagsFor
+// Options), so it is excluded from the treatment freeze — a b1+compiler
+// manifest freezes as arm=legacy_count_packer with mechanism_flags{compiler:true}
+// bound to a control protocol hash, exactly mirroring 024/025.
 func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
 	active := make([]string, 0, 3)
-	if opt.compilerArm != "" {
-		active = append(active, "compiler")
-	}
 	if opt.representationArm != "" && opt.representationArm != ReprChunk900 {
 		active = append(active, "representation")
 	}
@@ -420,13 +429,6 @@ func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
 		return formalTreatmentFreeze{}, nil
 	}
 	switch active[0] {
-	case "compiler":
-		switch opt.compilerArm {
-		case "extractive", "planner", "exact_token":
-		default:
-			return formalTreatmentFreeze{}, fmt.Errorf("--compiler-arm must be extractive | planner | exact_token, got %q", opt.compilerArm)
-		}
-		return formalTreatmentFreeze{Stage: "compiler", Arm: opt.compilerArm, MechanismFlags: map[string]bool{"compiler": true}}, nil
 	case "representation":
 		flags := map[string]bool{"representation": true}
 		if opt.episodeCluster {
@@ -566,7 +568,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	}
 	for name := range flags {
 		switch name {
-		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster":
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler":
 			continue
 		default:
 			return false
@@ -576,8 +578,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 }
 
 func formalTreatmentMechanismRequested(opt options) bool {
-	return opt.compilerArm != "" ||
-		(opt.representationArm != "" && opt.representationArm != ReprChunk900) ||
+	return (opt.representationArm != "" && opt.representationArm != ReprChunk900) ||
 		opt.eventProjection != "" || opt.gapRefetch
 }
 

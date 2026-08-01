@@ -447,7 +447,7 @@ func validateFormalFrozenPayload(protocol evalProtocol, candidate evalCandidateA
 		len(bundle.SourceIDs) == 0 || !isDigest(bundle.AnswerPromptDigest) {
 		return fmt.Errorf("invalid formal bundle for question %q", candidate.QuestionID)
 	}
-	if err := validateFormalB1AnchorPrefix(candidate, bundle); err != nil {
+	if err := validateFormalB1AnchorPrefix(protocol, candidate, bundle); err != nil {
 		return fmt.Errorf("formal bundle ranked-anchor prefix failed for question %q: %w", candidate.QuestionID, err)
 	}
 	sourceOK, spanOK, citationOK := inspectFormalBundle(candidate, trace, bundle)

@@ -1745,10 +1745,14 @@ func validateMechanismArms(opt options) error {
 		}
 	}
 	switch opt.compilerArm {
-	case "", "extractive", "planner":
+	case "", "extractive", "planner", "exact_token":
 	default:
-		return fmt.Errorf("--compiler-arm must be extractive or planner, got %q", opt.compilerArm)
+		return fmt.Errorf("--compiler-arm must be extractive | planner | exact_token, got %q", opt.compilerArm)
 	}
+	// T114 is complete: a treatment freeze binds exactly one mechanism to its
+	// frozen B1 control protocol hash (--control-protocol). freezeFormalProtocol
+	// enforces the control-hash requirement; the pre-T114 blanket rejection is
+	// removed so compiler/representation/event treatment manifests can freeze.
 	if opt.eventProjection != "" {
 		switch opt.eventProjection {
 		case "E0", "E1", "E2", "E3":
@@ -1762,9 +1766,10 @@ func validateMechanismArms(opt options) error {
 	if opt.gapRefetch && opt.eventProjection == "" {
 		return fmt.Errorf("--gap-refetch requires --event-projection")
 	}
-	if strings.TrimSpace(opt.evalFreezeProtocol) != "" && formalTreatmentMechanismRequested(opt) {
-		return fmt.Errorf("--eval-freeze-protocol cannot bind --compiler-arm/--representation/--event-projection/--gap-refetch until T114")
-	}
+	// T114 is complete: freezeFormalProtocol requires --control-protocol for any
+	// treatment mechanism (buildFormalExperiment enforces isDigest(controlHash)).
+	// The pre-T114 blanket freeze rejection was removed so treatment manifests can
+	// freeze; a mechanism without a control hash still fails closed below.
 	return nil
 }
 

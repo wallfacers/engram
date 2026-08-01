@@ -36,6 +36,7 @@ func TestMechanismArmsRequireFormalProtocolContext(t *testing.T) {
 	for name, mutate := range map[string]func(*options){
 		"representation": func(opt *options) { opt.representationArm = ReprRawTurnWindow },
 		"compiler":       func(opt *options) { opt.compilerArm = "extractive" },
+		"compiler exact_token": func(opt *options) { opt.compilerArm = "exact_token" },
 		"event gap": func(opt *options) {
 			opt.eventProjection = "E1"
 			opt.gapRefetch = true
@@ -56,8 +57,9 @@ func TestMechanismArmsRequireFormalProtocolContext(t *testing.T) {
 
 			formalFreeze := diagnostic
 			formalFreeze.evalFreezeProtocol = "protocol.json"
-			if err := validateMechanismArms(formalFreeze); err == nil {
-				t.Fatalf("formal-freeze %s mechanism was accepted before T114 can bind it", name)
+			formalFreeze.controlProtocolPath = "control.json"
+			if err := validateMechanismArms(formalFreeze); err != nil {
+				t.Fatalf("formal-freeze %s mechanism rejected after T114 bound it via --control-protocol: %v", name, err)
 			}
 		})
 	}
@@ -381,7 +383,6 @@ func TestFreezeFormalProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *t
 		"suffixed recipe":  func(opt *options) { opt.retrieval = "hybrid+rerank" },
 		"build mode":       func(opt *options) { opt.doc2queryBuild = true },
 		"diagnostic mode":  func(opt *options) { opt.coverageOnly = true },
-		"compiler arm":     func(opt *options) { opt.compilerArm = "extractive" },
 		"representation":   func(opt *options) { opt.representationArm = ReprRawTurnWindow },
 		"event projection": func(opt *options) { opt.eventProjection = "E1" },
 		"gap refetch":      func(opt *options) { opt.gapRefetch = true },
@@ -399,6 +400,28 @@ func TestFreezeFormalProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *t
 				t.Fatalf("formal freeze reached dataset I/O before rejecting the mode: %v", err)
 			}
 		})
+	}
+}
+
+// TestFreezeFormalProtocolAcceptsCompilerArm: the compiler arm is a b1-stage
+// additive mechanism (026), so a formal freeze with --compiler-arm must be
+// accepted (mirrors episode_cluster), producing a b1 manifest carrying the
+// compiler flag — not rejected as an alternate execution mode.
+func TestFreezeFormalProtocolAcceptsCompilerArm(t *testing.T) {
+	base := options{
+		evalBudgetProfile:   "low",
+		answerInputTokenCap: 1100,
+		counterFingerprint:  "sha256:counter",
+		retrieval:           "hybrid",
+		compilerArm:         "extractive",
+	}
+	if err := freezeFormalProtocol(base, nil, ""); err == nil {
+		return // accepted, as intended
+	} else if strings.Contains(err.Error(), "read benchmark") {
+		// reached dataset I/O — the recipe/mode gate passed; compiler arm is accepted
+		return
+	} else {
+		t.Fatalf("formal freeze rejected compiler arm before recipe gate: %v", err)
 	}
 }
 

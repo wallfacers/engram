@@ -13,8 +13,23 @@ import (
 // evidencecompiler.Candidate format expected by Compile. Each source maps to
 // one candidate with its evidence text, rank, and score.
 func buildCompileCandidates(sources []formalExpandedSource) []evidencecompiler.Candidate {
+	// 026: the flat source list carries one entry per navigation hit, and
+	// several hits can reference the same rendered candidate (e.g. an evidence
+	// span surfaced by multiple projections or anchors). Without dedup the
+	// compiler receives the same candidate twice, emits duplicate bundle items,
+	// and the formal 1:1 item->candidate contract fails. First occurrence wins,
+	// mirroring compileSourceByCandidateID.
+	seen := make(map[string]bool, len(sources))
 	candidates := make([]evidencecompiler.Candidate, 0, len(sources))
 	for _, source := range sources {
+		// A blank rendered candidate ID (offline mocks, degenerate hits) is kept
+		// as-is; only non-blank duplicates of the same candidate are collapsed.
+		if source.Candidate.CandidateID != "" {
+			if seen[source.Candidate.CandidateID] {
+				continue
+			}
+			seen[source.Candidate.CandidateID] = true
+		}
 		candidates = append(candidates, evidencecompiler.Candidate{
 			ID:    source.Candidate.CandidateID,
 			Kind:  evidencecompiler.CandidateKind(source.Candidate.Kind),
@@ -40,10 +55,18 @@ type formalCompileRenderer struct {
 }
 
 func (r formalCompileRenderer) RenderAnswerInput(query string, renderedEvidence string) evidencecompiler.AnswerInput {
+	// 026: the compiler's budget decision must cover the same text the answer
+	// provider will actually see. The formal answer input is question + rendered
+	// evidence (buildAnswerContextPrompt), so counting only the evidence here
+	// lets the compiler overshoot the token cap and makes every frozen
+	// AnswerInputTokens disagree with the harness preflight at answer time.
+	// Including the query keeps the compiler's admit/drop arithmetic on the same
+	// scale as the harness preflight (the exact final count is re-derived from
+	// the harness counter in buildCompileBundle).
 	return evidencecompiler.AnswerInput{
 		Model:  r.model,
 		System: r.system,
-		User:   renderedEvidence,
+		User:   query + "\n" + renderedEvidence,
 	}
 }
 
@@ -151,6 +174,17 @@ func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options,
 	sourceIDs = stableStrings(sourceIDs)
 	sourceValid := len(items) > 0 && len(sourceIDs) > 0
 
+	// 026: the frozen AnswerInputTokens must equal the harness counter's count
+	// over the exact answer input (System+User), because prepareFrozenFormalB1Answer
+	// re-derives it with the same counter at answer time and treats any mismatch
+	// as answer_preflight_or_runtime_failed. The compiler engine's own count
+	// (compiledBundle.InputTokens, renderer-shaped) is not comparable, so the
+	// formal record is pinned to the harness preflight instead.
+	finalCount, err := preflightFormalAnswer(ctx, protocol, opt.formalCounter, answerInput)
+	if err != nil {
+		return evalFormalBundleRecord{}, 0, evidencecompiler.TokenCount{}, err
+	}
+
 	bundle := evalFormalBundleRecord{
 		evalArtifactRecord: evalArtifactRecord{
 			Schema:       evalProtocolSchema,
@@ -166,15 +200,15 @@ func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options,
 		RenderedContext:    answerInput.User,
 		RenderedDigest:     evalTextDigest(answerInput.User),
 		EvidenceTokens:     compiledBundle.EvidenceTokens,
-		AnswerInputTokens:  compiledBundle.InputTokens,
+		AnswerInputTokens:  finalCount.InputTokens,
 		TokenCap:           protocol.Budget.AnswerInputTokenCap,
 		CounterFingerprint: protocol.Budget.CounterFingerprint,
-		WithinCap:          compiledBundle.InputTokens > 0 && compiledBundle.InputTokens <= compiledBundle.TokenCap,
+		WithinCap:          finalCount.InputTokens > 0 && finalCount.InputTokens <= protocol.Budget.AnswerInputTokenCap,
 		SourceValid:        sourceValid,
 		AnswerPromptDigest: evalTextDigest(answerInput.System),
 	}
 
-	return bundle, compiledBundle.InputTokens, evidencecompiler.TokenCount{InputTokens: compiledBundle.InputTokens, Fingerprint: compiledBundle.CounterFingerprint}, nil
+	return bundle, finalCount.InputTokens, finalCount, nil
 }
 
 // compileFormalSources converts expanded sources to compiler Candidates and

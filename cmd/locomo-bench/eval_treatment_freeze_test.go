@@ -72,14 +72,14 @@ func TestFormalTreatmentForOptions(t *testing.T) {
 		wantErr   bool
 	}{
 		{"no mechanism is legacy", options{representationArm: ReprChunk900}, "", "", nil, false},
-		{"compiler extractive", options{compilerArm: "extractive"}, "compiler", "extractive", map[string]bool{"compiler": true}, false},
-		{"compiler exact_token", options{compilerArm: "exact_token"}, "compiler", "exact_token", map[string]bool{"compiler": true}, false},
+		{"compiler extractive", options{compilerArm: "extractive"}, "", "", nil, false},
+		{"compiler exact_token", options{compilerArm: "exact_token"}, "", "", nil, false},
 		{"representation", options{representationArm: "semantic_episode"}, "representation_navigation", "semantic_episode", map[string]bool{"representation": true}, false},
 		{"event projection", options{eventProjection: "E1"}, "event", "event_e1", map[string]bool{"event_projection": true}, false},
 		{"gap refetch with projection", options{eventProjection: "E1", gapRefetch: true}, "gap", "structured_gap_refetch", map[string]bool{"event_projection": true, "gap_refetch": true}, false},
 		{"gap without projection", options{gapRefetch: true}, "", "", nil, true},
-		{"two mechanisms", options{compilerArm: "extractive", eventProjection: "E1"}, "", "", nil, true},
-		{"bad compiler arm", options{compilerArm: "hybrid"}, "", "", nil, true},
+		{"two treatments", options{representationArm: "semantic_episode", eventProjection: "E1"}, "", "", nil, true},
+		{"bad compiler arm", options{compilerArm: "hybrid"}, "", "", nil, false},
 		{"bad event projection", options{eventProjection: "E9"}, "", "", nil, true},
 	}
 	for _, tc := range cases {
@@ -109,12 +109,25 @@ func TestBuildFormalExperiment(t *testing.T) {
 	if legacy.Stage != "b1" || legacy.Arm != "legacy_count_packer" || legacy.ControlProtocolHash != "" || !isFormalLegacyControlMechanismFlags(legacy.MechanismFlags) {
 		t.Fatalf("unexpected legacy experiment: %#v", legacy)
 	}
-	treatment, err := buildFormalExperiment(options{compilerArm: "extractive"}, controlHash)
+	// 026: compiler-arm is a b1-stage additive mechanism (like episode_cluster),
+	// so a compiler treatment freezes as b1/legacy_count_packer with the compiler
+	// flag set — the runtime picks the packer/compiler path from opt.compilerArm,
+	// not from a distinct stage.
+	compiler, err := buildFormalExperiment(options{compilerArm: "extractive"}, controlHash)
 	if err != nil {
-		t.Fatalf("build treatment experiment: %v", err)
+		t.Fatalf("build compiler experiment: %v", err)
 	}
-	if treatment.Stage != "compiler" || treatment.Arm != "extractive" || treatment.ControlProtocolHash != controlHash || !treatment.MechanismFlags["compiler"] {
-		t.Fatalf("unexpected treatment experiment: %#v", treatment)
+	if compiler.Stage != "b1" || compiler.Arm != "legacy_count_packer" || !compiler.MechanismFlags["compiler"] || !compiler.MechanismFlags["idk_retry"] == false {
+		t.Fatalf("unexpected compiler experiment: %#v", compiler)
+	}
+	// A standalone treatment (representation/event) still freezes as its own
+	// stage bound to the control hash.
+	rep, err := buildFormalExperiment(options{representationArm: ReprRawTurnWindow}, controlHash)
+	if err != nil {
+		t.Fatalf("build representation experiment: %v", err)
+	}
+	if rep.Stage != "representation_navigation" || rep.Arm != "raw_turn_window" || rep.ControlProtocolHash != controlHash {
+		t.Fatalf("unexpected representation experiment: %#v", rep)
 	}
 }
 
@@ -122,14 +135,14 @@ func TestValidateFormalMechanismBindingTreatment(t *testing.T) {
 	controlHash := "sha256:feedface"
 	treatmentProtocol := testFormalProtocolBase(t)
 	treatmentProtocol.Experiment = evalExperimentProtocol{
-		Stage: "compiler", Arm: "extractive", PrimaryCohort: "all",
-		MechanismFlags: map[string]bool{"compiler": true}, ControlProtocolHash: controlHash,
+		Stage: "representation_navigation", Arm: "raw_turn_window", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{"representation": true}, ControlProtocolHash: controlHash,
 	}
-	matching := options{compilerArm: "extractive"}
+	matching := options{representationArm: ReprRawTurnWindow}
 	if err := validateFormalMechanismBinding(treatmentProtocol, matching); err != nil {
 		t.Fatalf("matching treatment binding refused: %v", err)
 	}
-	mismatched := options{compilerArm: "planner"}
+	mismatched := options{representationArm: ReprSemanticEpisode}
 	if err := validateFormalMechanismBinding(treatmentProtocol, mismatched); err == nil {
 		t.Fatal("mismatched treatment arm was accepted")
 	}
@@ -155,6 +168,27 @@ func TestValidateFormalMechanismBindingTreatment(t *testing.T) {
 	}
 }
 
+// TestValidateFormalMechanismBindingCompilerAdditive: the compiler arm is a
+// b1-stage additive mechanism (026), so a b1 manifest carrying the compiler
+// flag must match CLI --compiler-arm via the density mechanism binding, exactly
+// like episode_cluster.
+func TestValidateFormalMechanismBindingCompilerAdditive(t *testing.T) {
+	compilerProtocol := testFormalProtocolBase(t)
+	compilerProtocol.Experiment = evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{"compiler": true, "idk_retry": false, "iris": false, "rerank": false},
+	}
+	if err := validateFormalMechanismBinding(compilerProtocol, options{compilerArm: "extractive"}); err != nil {
+		t.Fatalf("matching compiler additive binding refused: %v", err)
+	}
+	if err := validateFormalMechanismBinding(compilerProtocol, options{compilerArm: "exact_token"}); err != nil {
+		t.Fatalf("matching compiler additive binding refused: %v", err)
+	}
+	if err := validateFormalMechanismBinding(compilerProtocol, options{}); err == nil {
+		t.Fatal("compiler manifest without --compiler-arm was accepted")
+	}
+}
+
 func TestFreezeFormalTreatmentManifestRoundTrip(t *testing.T) {
 	controlHash := "sha256:feedface"
 	base := testFormalProtocolBase(t)
@@ -175,11 +209,10 @@ func TestFreezeFormalTreatmentManifestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read frozen treatment manifest: %v", err)
 	}
-	if loaded.Experiment.Stage != "compiler" || loaded.Experiment.Arm != "exact_token" {
+	// 026: compiler-arm is a b1 additive mechanism — the round-trip keeps
+	// arm=legacy_count_packer with the compiler flag set.
+	if loaded.Experiment.Stage != "b1" || loaded.Experiment.Arm != "legacy_count_packer" {
 		t.Fatalf("round-trip experiment mismatch: %#v", loaded.Experiment)
-	}
-	if loaded.Experiment.ControlProtocolHash != controlHash {
-		t.Fatalf("round-trip control hash mismatch: %q", loaded.Experiment.ControlProtocolHash)
 	}
 	if !loaded.Experiment.MechanismFlags["compiler"] {
 		t.Fatalf("round-trip mechanism flags mismatch: %#v", loaded.Experiment.MechanismFlags)

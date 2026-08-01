@@ -113,7 +113,7 @@ func validateActiveFormalBundleReceipt(
 	if err := validateFormalActiveBundleEnvelope(protocol, candidate, trace, bundle); err != nil {
 		invalidateAll("formal Bundle envelope: " + err.Error())
 	}
-	if err := validateFormalB1AnchorPrefix(candidate, bundle); err != nil {
+	if err := validateFormalB1AnchorPrefix(protocol, candidate, bundle); err != nil {
 		citationOK = false
 		problems = append(problems, "ranked anchor prefix: "+err.Error())
 	}
@@ -386,7 +386,7 @@ func isGenuineEpisodeRendered(rendered evalRenderedCandidate) bool {
 // of complete navigation anchors. Candidate membership alone is insufficient:
 // it would permit skipping a large first anchor, reordering sources, or
 // admitting only part of a multi-source anchor while still citing valid IDs.
-func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFormalBundleRecord) error {
+func validateFormalB1AnchorPrefix(protocol evalProtocol, candidate evalCandidateArtifact, bundle evalFormalBundleRecord) error {
 	if len(candidate.Anchors) == 0 || len(candidate.RenderedCandidates) == 0 {
 		return fmt.Errorf("candidate has no ranked anchors or rendered sources")
 	}
@@ -405,6 +405,18 @@ func validateFormalB1AnchorPrefix(candidate evalCandidateArtifact, bundle evalFo
 	}
 	if isEpisode {
 		return validateFormalB1EpisodeAnchorPrefix(candidate, bundle)
+	}
+	// 026: the query-time compiler arm (--compiler-arm) deliberately re-orders
+	// and re-selects evidence by query relevance inside the frozen candidate
+	// pool, so its bundle is not a mechanical ranked-anchor prefix. It is still
+	// fully auditable: every bundle item must map 1:1 to a rendered candidate
+	// (its candidate IDs and whole-source spans must resolve against the
+	// candidate artifact), but item count/order need not be a prefix boundary.
+	// This is the contract increment approved for 026 (density-mechanism-hypothesis
+	// closed → post-hit verbatim coverage), mirroring how 025 relaxed the
+	// per-source cardinality for episodes.
+	if protocol.Experiment.MechanismFlags["compiler"] {
+		return validateFormalB1CompilerAnchorPrefix(candidate, bundle)
 	}
 
 	renderedIndex := 0
@@ -537,6 +549,67 @@ func validateFormalB1EpisodeAnchorPrefix(candidate evalCandidateArtifact, bundle
 			if !renderedSet[span.EvidenceID] {
 				return fmt.Errorf("episode item %d has unrendered source %q", index, span.EvidenceID)
 			}
+		}
+	}
+	return nil
+}
+
+// validateFormalB1CompilerAnchorPrefix is the 026 query-time compiler branch of
+// the ranked-anchor contract. The compiler arm re-orders and re-selects evidence
+// by query relevance inside the frozen candidate pool (extractive / exact-token /
+// verbatim-first), so the bundle is not a mechanical ranked-anchor prefix.
+// Auditable guarantees kept: every bundle item maps 1:1 to a rendered candidate
+// (candidate ID resolves; item text equals the rendered source text; the item's
+// whole-source span is allowed and resolvable). Item count/order may differ from
+// the prefix boundary because the compiler chooses by relevance — that is the
+// mechanism under test (026), not a packing defect.
+func validateFormalB1CompilerAnchorPrefix(candidate evalCandidateArtifact, bundle evalFormalBundleRecord) error {
+	if len(candidate.RenderedCandidates) == 0 {
+		return fmt.Errorf("compiler candidate has no rendered sources")
+	}
+	if len(bundle.Items) == 0 {
+		return fmt.Errorf("compiler bundle has no items")
+	}
+	renderedByID := make(map[string]evalRenderedCandidate, len(candidate.RenderedCandidates))
+	allowedSourceIDs := make([]string, 0, len(candidate.RenderedCandidates))
+	for _, rendered := range candidate.RenderedCandidates {
+		if rendered.CandidateID == "" {
+			return fmt.Errorf("compiler rendered candidate has empty ID")
+		}
+		renderedByID[rendered.CandidateID] = rendered
+		allowedSourceIDs = append(allowedSourceIDs, rendered.SourceIDs...)
+	}
+	allowed := stringSet(stableStrings(allowedSourceIDs))
+
+	seen := make(map[string]bool, len(bundle.Items))
+	for index, item := range bundle.Items {
+		if strings.TrimSpace(item.ItemID) == "" || strings.TrimSpace(item.Text) == "" || seen[item.ItemID] {
+			return fmt.Errorf("compiler bundle item %d has empty/duplicate identity or text", index)
+		}
+		seen[item.ItemID] = true
+		if item.Kind != "KEEP" && item.Kind != "EXTRACT" {
+			return fmt.Errorf("compiler bundle item %d has non-verbatim kind %q (only KEEP/EXTRACT allowed)", index, item.Kind)
+		}
+		if len(item.CandidateIDs) != 1 {
+			return fmt.Errorf("compiler bundle item %d must reference exactly one candidate", index)
+		}
+		rendered, ok := renderedByID[item.CandidateIDs[0]]
+		if !ok {
+			return fmt.Errorf("compiler bundle item %d references unrendered candidate %q", index, item.CandidateIDs[0])
+		}
+		if item.Text != rendered.Text {
+			return fmt.Errorf("compiler bundle item %d text differs from rendered candidate %q", index, rendered.CandidateID)
+		}
+		if len(item.Sources) != 1 {
+			return fmt.Errorf("compiler bundle item %d must carry exactly one source span", index)
+		}
+		span := item.Sources[0]
+		if strings.TrimSpace(span.EvidenceID) == "" || !allowed[span.EvidenceID] ||
+			strings.HasPrefix(span.EvidenceID, "legacy-entry:") {
+			return fmt.Errorf("compiler bundle item %d has disallowed source %q", index, span.EvidenceID)
+		}
+		if span.StartChar < 0 || span.StartChar >= span.EndChar || !isDigest(span.SpanDigest) {
+			return fmt.Errorf("compiler bundle item %d has invalid span", index)
 		}
 	}
 	return nil

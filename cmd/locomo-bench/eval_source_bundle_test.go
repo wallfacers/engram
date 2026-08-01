@@ -621,3 +621,56 @@ func TestFormalSemanticEpisodeMixedGenuineAndFallbackPrefixValidates(t *testing.
 		t.Fatalf("frozen validator rejected genuine+fallback prefix bundle: %v", err)
 	}
 }
+
+// TestFormalB1CompilerBundleAllowsReorderedNonPrefix: the 026 query-time
+// compiler arm re-orders and re-selects evidence by relevance inside the frozen
+// candidate pool, so its bundle is not a mechanical ranked-anchor prefix. The
+// compiler branch of the anchor-prefix contract accepts a reordered/partial
+// bundle whose every item still maps 1:1 to a rendered candidate and resolves a
+// whole-source allowed span — while the same bundle stays rejected under the
+// legacy protocol (no compiler mechanism flag).
+func TestFormalB1CompilerBundleAllowsReorderedNonPrefix(t *testing.T) {
+	ctx := context.Background()
+	protocol := sourceTestProtocol()
+	system := answerPromptForRegime(4, false, false, false)
+	qa := locomoQA{QuestionID: "locomo:0:compiler", Question: "What was said?", Category: 4}
+	reader := formalEvidenceMap{}
+
+	firstA := formalSourceTestEvidence("e-comp-first-a", "first source alpha", memory.EvidenceMessage)
+	firstB := formalSourceTestEvidence("e-comp-first-b", "first source beta", memory.EvidenceMessage)
+	second := formalSourceTestEvidence("e-comp-second", "second source", memory.EvidenceMessage)
+	for _, evidence := range []memory.Evidence{firstA, firstB, second} {
+		reader[evidence.ID] = evidence
+	}
+	anchors := []formalExpandedAnchor{
+		formalSourceTestAnchor(t, "projection:first", 0.9, firstA, firstB),
+		formalSourceTestAnchor(t, "projection:second", 0.8, second),
+	}
+	formalSourceTestRankAnchors(anchors)
+	candidate := buildExpandedFormalCandidateArtifact(protocol, qa, anchors, nil, 1)
+
+	// Compiler selects the second anchor's source BEFORE the first anchor's —
+	// a reordered, non-prefix bundle that is still fully auditable (each item is
+	// a rendered candidate with a whole-source allowed span).
+	reordered := []formalExpandedSource{anchors[1].Sources[0], anchors[0].Sources[1]}
+	reorderedInput := formalSourceTestInput(protocol, system, qa, reordered)
+	reorderedTrace, reorderedBundle := formalSourceTestBundle(protocol, system, qa, candidate, reordered)
+	reorderedBundle.AnswerInputTokens = len([]rune(reorderedInput.System + reorderedInput.User))
+	reorderedBundle.EvidenceTokens = reorderedBundle.AnswerInputTokens
+	reorderedBundle.WithinCap = true
+
+	// Legacy protocol must reject the reordered bundle.
+	if err := validateActiveFormalBundle(ctx, reader, protocol, options{}, qa, candidate, reorderedTrace, reorderedBundle); err == nil {
+		t.Fatal("legacy validator accepted a reordered non-prefix compiler bundle")
+	}
+
+	// Compiler protocol must accept it.
+	compilerProtocol := protocol
+	compilerProtocol.Experiment = evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: map[string]bool{"compiler": true, "idk_retry": false, "iris": false, "rerank": false},
+	}
+	if err := validateActiveFormalBundle(ctx, reader, compilerProtocol, options{}, qa, candidate, reorderedTrace, reorderedBundle); err != nil {
+		t.Fatalf("compiler validator rejected reordered auditable bundle: %v", err)
+	}
+}
