@@ -828,6 +828,12 @@ func revalidateFrozenFormalSources(
 	revalidated.Bundle.SourceValid = receipt.SourceValid && receipt.InvalidCount == 0
 	revalidated.Bundle.Valid = revalidated.Bundle.Valid && receipt.Valid() && !sourceStateDrift
 	revalidated.Trace.Valid = revalidated.Trace.Valid && receipt.Valid() && !sourceStateDrift
+	// 026: Valid was just mutated from the receipt, but TraceDigest was computed
+	// before this mutation. Without a re-derive, a later envelope check
+	// (trace.TraceDigest == formalTraceDigest(trace)) fails and invalidates the
+	// whole bundle on the second pass, surfacing as source_state_drift.
+	revalidated.Trace.TraceDigest = formalTraceDigest(revalidated.Trace)
+	revalidated.Bundle.TraceDigest = revalidated.Trace.TraceDigest
 	if sourceStateDrift {
 		revalidated.InvalidReasons = stableStrings(append(
 			revalidated.InvalidReasons,

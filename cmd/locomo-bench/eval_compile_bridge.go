@@ -92,18 +92,31 @@ func compileSourceByCandidateID(expanded []formalExpandedAnchor) map[string]form
 // that expansion already materialized; we reuse expansion's evalFormalBundleItem
 // (verbatim ref span + span text) so the formal source/span/citation contract
 // holds. The compiler's grounded text is a selection signal only.
+//
+// 026: the formal contract is one item per rendered candidate. The compiler's
+// admission is keyed by Evidence source, so a candidate that spans several
+// sources can surface as several KEEP items carrying the same CandidateIDs[0]
+// (same rendered candidate, identical grounded text). Emitting them all would
+// duplicate the item identity and fail the 1:1 structural check; the first
+// occurrence wins, mirroring buildCompileCandidates and compileSourceByCandidateID.
 func compileBundleItems(protocol evalProtocol, compiledItems []evidencecompiler.BundleItem, sourceByCandidate map[string]formalExpandedSource) []evalFormalBundleItem {
+	seen := make(map[string]bool, len(compiledItems))
 	items := make([]evalFormalBundleItem, 0, len(compiledItems))
 	for _, compiled := range compiledItems {
 		if len(compiled.CandidateIDs) == 0 || len(compiled.Sources) == 0 {
 			continue
 		}
-		source, ok := sourceByCandidate[compiled.CandidateIDs[0]]
+		key := compiled.CandidateIDs[0]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		source, ok := sourceByCandidate[key]
 		if !ok {
 			continue
 		}
 		item := source.Item
-		item.ItemID = formalBundleItemID(compiled.CandidateIDs[0])
+		item.ItemID = formalBundleItemID(key)
 		items = append(items, item)
 	}
 	return items
@@ -184,6 +197,21 @@ func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options,
 	if err != nil {
 		return evalFormalBundleRecord{}, 0, evidencecompiler.TokenCount{}, err
 	}
+	// 026: EvidenceTokens must be on the same counter scale as AnswerInputTokens
+	// (both harness preflight) or the citation gate
+	// (EvidenceTokens <= AnswerInputTokens) fails on every question. The
+	// compiler engine's EvidenceTokens is renderer-shaped and not comparable.
+	// Evidence tokens = full answer input minus the static question/system prompt.
+	staticInput := answerInput
+	staticInput.User = buildAnswerContextPrompt(qa.Question, nil, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+	staticCount, err := preflightFormalAnswer(ctx, protocol, opt.formalCounter, staticInput)
+	if err != nil {
+		return evalFormalBundleRecord{}, 0, evidencecompiler.TokenCount{}, err
+	}
+	evidenceTokens := finalCount.InputTokens - staticCount.InputTokens
+	if evidenceTokens < 0 {
+		evidenceTokens = 0
+	}
 
 	bundle := evalFormalBundleRecord{
 		evalArtifactRecord: evalArtifactRecord{
@@ -199,7 +227,7 @@ func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options,
 		SourceIDs:          sourceIDs,
 		RenderedContext:    answerInput.User,
 		RenderedDigest:     evalTextDigest(answerInput.User),
-		EvidenceTokens:     compiledBundle.EvidenceTokens,
+		EvidenceTokens:     evidenceTokens,
 		AnswerInputTokens:  finalCount.InputTokens,
 		TokenCap:           protocol.Budget.AnswerInputTokenCap,
 		CounterFingerprint: protocol.Budget.CounterFingerprint,
