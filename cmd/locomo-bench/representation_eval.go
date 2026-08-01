@@ -243,6 +243,32 @@ func (r *semanticEpisodeRenderer) Render(ctx context.Context, anchors []evalRank
 
 	for _, anchor := range anchors {
 		refs := sourcesByID[anchor.CandidateID]
+		if len(refs) == 0 && r.episodes != nil && len(anchor.SourceIDs) > 0 {
+			// 025 cross-session semantic episodes: the anchor is a fact/chunk, not
+			// an episode projection. Resolve its evidence lineage to the episodes
+			// that reference it, and render the first (deterministic) episode so
+			// the whole cross-message cluster enters answer context (research.md
+			// R5). EpisodesForEvidence is a reverse lineage lookup, not retrieval.
+			episodesByEv, epErr := r.episodes.EpisodesForEvidence(ctx, anchor.SourceIDs)
+			if epErr == nil {
+				for _, evID := range anchor.SourceIDs {
+					projs := episodesByEv[evID]
+					if len(projs) == 0 {
+						continue
+					}
+					if r.projections == nil {
+						break
+					}
+					epRefs, refErr := r.projections.SourcesByProjectionIDs(ctx, []string{projs[0].ID})
+					if refErr == nil {
+						refs = epRefs[projs[0].ID]
+					}
+					if len(refs) > 0 {
+						break
+					}
+				}
+			}
+		}
 		if len(refs) == 0 {
 			// Fallback: render from the anchor's source IDs directly.
 			for _, sourceID := range anchor.SourceIDs {

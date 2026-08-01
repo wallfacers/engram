@@ -33,7 +33,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -190,6 +192,14 @@ type options struct {
 	// formalEpisodes is the runtime-only EpisodeStore, required by the
 	// semantic_episode representation renderer. Nil when not available.
 	formalEpisodes *memory.EpisodeStore
+	// episodeCluster enables 025 cross-session semantic episode clustering:
+	// rebuild semantic_episode projections before rendering (default off).
+	episodeCluster bool
+	// clusterMinKeywordJaccard / clusterEmbedThresh / clusterMaxEvidence tune the
+	// 025 SemanticClusterer when --episode-cluster is on (research.md R3/R4).
+	clusterMinKeywordJaccard float64
+	clusterEmbedThresh        float64
+	clusterMaxEvidence        int
 }
 
 func main() {
@@ -242,6 +252,10 @@ func run() error {
 	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
 	flag.BoolVar(&opt.writeDedup, "write-dedup", false, "024 write-time redundancy suppression: suppress duplicate fact projections (additive mechanism flag; formal context required)")
 	flag.BoolVar(&opt.neighborExtend, "neighbor-extend", false, "024 hit-time neighbor extension: add shared-evidence sibling facts to answer context (additive mechanism flag; formal context required)")
+	flag.BoolVar(&opt.episodeCluster, "episode-cluster", false, "025 cross-session semantic episode clustering: rebuild semantic_episode projections from the clusterer before rendering (additive mechanism flag; semantic_episode representation required)")
+	flag.Float64Var(&opt.clusterMinKeywordJaccard, "cluster-min-keyword-jaccard", 0.25, "025 offline clustering shared-keyword Jaccard threshold (used with --episode-cluster)")
+	flag.Float64Var(&opt.clusterEmbedThresh, "cluster-embed-thresh", 0.9, "025 clustering embedding-cosine overlay threshold (used with --episode-cluster; needs EMBED endpoint)")
+	flag.IntVar(&opt.clusterMaxEvidence, "cluster-max-evidence", 8, "025 per-episode evidence cap (used with --episode-cluster)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -1487,6 +1501,14 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	}
 	var chunkTurns map[string][]string
 	var turnEvidence map[string]string
+	// clusterConfigHash fingerprints the 025 clustering config so different
+	// thresholds rebuild episodes under a distinct config hash (idempotent
+	// within one config, isolated across configs).
+	clusterConfigHash := func(opt options) string {
+		h := sha256.New()
+		fmt.Fprintf(h, "jaccard=%g;embed=%g;max=%d", opt.clusterMinKeywordJaccard, opt.clusterEmbedThresh, opt.clusterMaxEvidence)
+		return hex.EncodeToString(h.Sum(nil))[:12]
+	}
 	if opt.chunks {
 		if turns, evidence, n, err := ingestChunks(ctx, es, conv); err != nil {
 			logger.Warn("chunk ingest failed", "conversation", conv.ID, "err", err)
@@ -1513,6 +1535,29 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		logger.Warn("embedding backfill failed", "conversation", conv.ID, "err", err)
 	}
 	embedder.Close()
+	// 025 cross-session semantic episode clustering: rebuild semantic_episode
+	// projections from all active Evidence (across sessions) before answering.
+	// Default off; with semantic_episode representation the renderer then has
+	// real episode projections to expand instead of falling back to raw anchors.
+	if opt.episodeCluster {
+		opts := memory.ClusterOptions{
+			MinKeywordJaccard:   opt.clusterMinKeywordJaccard,
+			MaxEvidencePerEpisode: opt.clusterMaxEvidence,
+			EmbedThresh:         opt.clusterEmbedThresh,
+		}
+		var clusterer memory.SemanticClusterer
+		if embClient != nil {
+			clusterer = memory.NewHybridClusterer(opts, embClient)
+		} else {
+			clusterer = memory.NewOfflineClusterer(opts)
+		}
+		projs, err := episodes.RebuildAll(ctx, clusterer, "025", "episode-cluster:"+clusterConfigHash(opt))
+		if err != nil {
+			logger.Warn("episode clustering failed; semantic_episode arm will fall back", "conversation", conv.ID, "err", err)
+		} else {
+			logger.Info("episode clustering rebuilt", "conversation", conv.ID, "episodes", len(projs))
+		}
+	}
 	if aliasShadowEnabled(opt) {
 		count, err := enforceAliasShadowStoreMode(ctx, st.DB(), opt.aliasShadow)
 		if err != nil {

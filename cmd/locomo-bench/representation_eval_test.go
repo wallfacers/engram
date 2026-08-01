@@ -545,3 +545,100 @@ func TestRepresentationKindConstants(t *testing.T) {
 		t.Errorf("expected 3 distinct representation kinds, got %d", len(kinds))
 	}
 }
+
+// TestRepresentationSemanticEpisodeRouteViaFactAnchor covers 025 US1 wiring:
+// when the anchor is a fact/chunk (not an episode projection), the renderer
+// resolves its evidence lineage to the cross-session semantic_episode built by
+// RebuildAll and renders the whole episode narrative (research.md R5). Before
+// this routing existed, the renderer fell back to the anchor's own source.
+func TestRepresentationSemanticEpisodeRouteViaFactAnchor(t *testing.T) {
+	ledger, projections, episodes, _ := newRepresentationTestStore(t)
+	ctx := context.Background()
+	evA, evB := seedRepresentationEvidence(t, ledger)
+	_ = evB
+
+	// Build a cross-session episode over session-a evidence via RebuildAll. The
+	// offline clusterer groups the four session-a turns (shared tokens like
+	// "capital") into one episode.
+	clusterer := memory.NewOfflineClusterer(memory.ClusterOptions{})
+	projs, err := episodes.RebuildAll(ctx, clusterer, "1.0.0", "route-hash")
+	if err != nil {
+		t.Fatalf("RebuildAll: %v", err)
+	}
+	if len(projs) == 0 {
+		t.Fatal("expected at least one cross-session episode")
+	}
+
+	// Anchor is a fact: its CandidateID is the fact (here the evidence ID), not
+	// the episode projection. SourceIDs carry the fact's evidence lineage.
+	anchor := evalRankedAnchor{
+		CandidateID: "fact:evA0",
+		Rank:        1,
+		Score:       0.9,
+		TextDigest:  evalTextDigest(evA[0].Content),
+		SourceIDs:   []string{evA[0].ID, evA[1].ID},
+	}
+
+	renderer := NewSemanticEpisodeRenderer(projections, ledger, episodes)
+	candidates, err := renderer.Render(ctx, []evalRankedAnchor{anchor})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("semantic_episode must route a fact anchor to an episode")
+	}
+	c := candidates[0]
+	if c.Kind != string(ReprSemanticEpisode) {
+		t.Fatalf("candidate kind = %q, want %q", c.Kind, ReprSemanticEpisode)
+	}
+	// The episode narrative should span more than the single anchor source.
+	if c.ExpansionCount < 1 {
+		t.Fatalf("expected episode to expand beyond the anchor, expansion=%d", c.ExpansionCount)
+	}
+	// Every source must be from the seeded set.
+	for _, id := range c.SourceIDs {
+		found := false
+		for _, ev := range append(append([]memory.Evidence{}, evA...), evB...) {
+			if ev.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("rendered source %s not in seeded evidence", id)
+		}
+	}
+}
+
+// TestRepresentationSemanticEpisodeFallbackNoEpisodes preserves 022 zero-change
+// behavior: with no episode projections built, a fact anchor renders via the
+// fallback (anchor's own source), byte-identical to pre-025 behavior.
+func TestRepresentationSemanticEpisodeFallbackNoEpisodes(t *testing.T) {
+	ledger, projections, episodes, _ := newRepresentationTestStore(t)
+	ctx := context.Background()
+	evA, _ := seedRepresentationEvidence(t, ledger)
+
+	// No RebuildAll / RebuildSession: episode store is empty.
+	anchor := evalRankedAnchor{
+		CandidateID: "fact:evA0",
+		Rank:        1,
+		Score:       0.9,
+		TextDigest:  evalTextDigest(evA[0].Content),
+		SourceIDs:   []string{evA[0].ID},
+	}
+	renderer := NewSemanticEpisodeRenderer(projections, ledger, episodes)
+	candidates, err := renderer.Render(ctx, []evalRankedAnchor{anchor})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected fallback single candidate, got %d", len(candidates))
+	}
+	c := candidates[0]
+	if c.ExpansionCount != 0 {
+		t.Fatalf("fallback must not expand, got expansion=%d", c.ExpansionCount)
+	}
+	if c.Text != evA[0].Content {
+		t.Fatalf("fallback text must be the anchor source verbatim")
+	}
+}
