@@ -241,6 +241,139 @@ func (s *EpisodeStore) buildEpisodeTx(
 	}, nil
 }
 
+// RebuildAll builds semantic_episode projections from the clusterer's
+// cross-session clusters over all active Evidence in this namespace. Unlike
+// RebuildSession, it does not require same-session continuous ordinals: a
+// cluster may span several source_session_id values (research.md R2). Rebuild
+// with the same config hash deletes the old episodes first, making the call
+// idempotent. Clusterer must not be nil; a nil or empty cluster result is a
+// valid no-op (zero episodes).
+func (s *EpisodeStore) RebuildAll(
+	ctx context.Context,
+	clusterer SemanticClusterer,
+	builderVersion string,
+	configHash string,
+) ([]Projection, error) {
+	if clusterer == nil {
+		return nil, ErrEpisodeClustererRequired
+	}
+	if s == nil || s.db == nil || s.ledger == nil || s.projections == nil {
+		return nil, fmt.Errorf("memory: nil episode store")
+	}
+
+	// Read all active Evidence across sessions in deterministic order.
+	evidence, err := s.ledger.ListActiveEvidence(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("memory: episode list active evidence: %w", err)
+	}
+	if len(evidence) == 0 {
+		return []Projection{}, nil
+	}
+
+	clusters, err := clusterer.Cluster(ctx, evidence)
+	if err != nil {
+		return nil, fmt.Errorf("memory: episode clusterer: %w", err)
+	}
+	if len(clusters) == 0 {
+		return []Projection{}, nil
+	}
+
+	// Build an index: evidence ID → Evidence.
+	index := make(map[string]Evidence, len(evidence))
+	for _, ev := range evidence {
+		index[ev.ID] = ev
+	}
+
+	// Persist each cluster in one transaction that also deletes prior episodes
+	// with the same config hash.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("memory: begin episode rebuild-all: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := s.deleteByConfigTx(ctx, tx, configHash); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	projections := make([]Projection, 0, len(clusters))
+	for _, cluster := range clusters {
+		if len(cluster.EvidenceIDs) == 0 {
+			continue
+		}
+		sources := make([]Evidence, len(cluster.EvidenceIDs))
+		for i, id := range cluster.EvidenceIDs {
+			ev, ok := index[id]
+			if !ok {
+				return nil, fmt.Errorf("memory: episode cluster references unknown evidence %q", id)
+			}
+			sources[i] = ev
+		}
+		proj, err := s.buildEpisodeTx(ctx, tx, sources, builderVersion, configHash, now)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, proj)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("memory: commit episode rebuild-all: %w", err)
+	}
+	return projections, nil
+}
+
+// EpisodesForEvidence returns the active semantic_episode projections that
+// directly reference any of the given evidence IDs, keyed by evidence ID in
+// deterministic projection order. A hit maps an anchor (fact/chunk) lineage to
+// its episode for rendering; no hit returns an empty map so the renderer falls
+// back to reading the anchor source directly (research.md R5). It batches IDs to
+// stay below SQLite bind limits.
+func (s *EpisodeStore) EpisodesForEvidence(ctx context.Context, evidenceIDs []string) (map[string][]Projection, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("memory: nil episode store")
+	}
+	unique := uniqueNonEmptyStrings(evidenceIDs)
+	out := make(map[string][]Projection, len(unique))
+	if len(unique) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(unique))
+	args := make([]any, len(unique))
+	for index, id := range unique {
+		placeholders[index] = "?"
+		args[index] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ps.evidence_id, p.id, p.kind, p.object_key, p.state, p.builder,
+			p.builder_version, p.config_hash, p.built_at, p.revision
+		FROM memory_projection_sources AS ps
+		JOIN memory_projections AS p ON p.id = ps.projection_id
+		WHERE ps.evidence_id IN (`+strings.Join(placeholders, ",")+`)
+		  AND p.kind = 'semantic_episode'
+		  AND p.state = 'active'
+		ORDER BY ps.evidence_id ASC, p.id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("memory: episodes for evidence: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	for rows.Next() {
+		var evidenceID string
+		var projection Projection
+		var kind string
+		var builtAt int64
+		if err := rows.Scan(&evidenceID, &projection.ID, &kind, &projection.ObjectKey, &projection.State,
+			&projection.Builder, &projection.BuilderVersion, &projection.ConfigHash,
+			&builtAt, &projection.Revision); err != nil {
+			return nil, fmt.Errorf("memory: scan episode for evidence: %w", err)
+		}
+		projection.Kind = ProjectionKind(kind)
+		projection.BuiltAt = time.UnixMicro(builtAt).UTC()
+		out[evidenceID] = append(out[evidenceID], projection)
+	}
+	return out, rows.Err()
+}
+
 // DeleteByConfig removes all episode projections and their payloads that were
 // built with the given config hash. It does NOT delete any Evidence records.
 // Projections with a different config hash are left untouched.

@@ -436,6 +436,39 @@ func (s *LedgerStore) ListSession(ctx context.Context, sourceSessionID string, i
 	return evidence, nil
 }
 
+// ListActiveEvidence enumerates every active Evidence across all sessions in
+// this namespace in deterministic order (ordinal, recorded_at, id). It is the
+// cross-session enumeration the semantic clusterer needs for RebuildAll; the
+// per-session ListSession remains for session-scoped reads.
+func (s *LedgerStore) ListActiveEvidence(ctx context.Context) ([]Evidence, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("%w: nil ledger store", ErrInvalidEvidence)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+evidenceSelectColumns+`
+		FROM memory_evidence AS e
+		JOIN memory_evidence_heads AS h ON h.evidence_id = e.id
+		WHERE h.state = 'active'
+		ORDER BY e.source_session_id ASC, e.ordinal ASC, e.recorded_at ASC, e.id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("memory: list active evidence: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var evidence []Evidence
+	for rows.Next() {
+		item, err := scanEvidence(rows)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan active evidence: %w", err)
+		}
+		evidence = append(evidence, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: list active evidence rows: %w", err)
+	}
+	return evidence, nil
+}
+
 // Tombstone immediately removes Evidence from active source recovery while
 // retaining its canonical content for an explicit Restore. Projection
 // invalidation is added with the projection store; this method owns the
