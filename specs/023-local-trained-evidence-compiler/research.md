@@ -48,10 +48,11 @@ compiler-eligible residual = { 题 : 题 ∈ G 且 题 ∉ D }
    产出 `fixed_gold_oracle_summary.json` + B1 `results-*.jsonl`。
 4. **比对**：用逐题 answer 对拍 G 与 D，输出 residual 清单（脚本进 `training/planner/`）。
 
-## P0.4 — 底模选型记录
+## P0.4 — 底模选型记录（T004）
 
-- **默认：Qwen2.5-7B-Instruct（Apache-2.0）** —— 许可可分发/可推荐（Llama-3.1/Gemma-2 均 gated + 商用条款受限）；7.6B BF16 ~15 GiB，单卡 24 GiB LoRA 训练 + p95≤2s 推理可行；同族 3B/1.5B 可降级（tokenizer 一致）。
-- 冻结点：T004（validation 前正式冻结，tokenizer/chat-template 摘要记录）。
+- **默认：Qwen2.5-7B-Instruct（Apache-2.0）** —— 许可可分发/可推荐（Llama-3.1/Gemma-2 均 gated + 商用条款受限）；7.6B（7,615.6M，qwen2 架构）BF16 ~15 GiB，单卡 24 GiB LoRA 训练 + p95≤2s 推理可行；同族 3B/1.5B 可降级（tokenizer 一致）。
+- **tokenizer**：Qwen2.5 tokenizer（GPT2 风格 BPE，vocab 151,936）；**chat template**：ChatML（`<|im_start|>`/`<|im_end|>`）。train_lora.py 用 `apply_chat_template`，与 local_planner.go 的 system/user 渲染保持一致。
+- **摘要/digest**（validation 冻结时用 HF transformers 计算并记录，FR-022）：tokenizer digest、chat-template 摘要、模型 SHA。本记录为已知事实，正式 digest 待冻结。
 - 来源：[plan.md Key Decision 1](plan.md) · [spec.md Amendment 2](spec.md)。
 
 ## 待办挂钩

@@ -1,0 +1,20 @@
+# 023 supervised arm — frozen training configuration (FR-015).
+# One full rebuild must stay ≤ 24 GPU-hours on a single 24 GiB GPU (FR-034).
+# QLoRA 4-bit keeps headroom; raise batch/seq only if measured OOM allows.
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+training:
+  per_device_batch_size: 2
+  grad_accum: 8          # effective batch 16
+  learning_rate: 2.0e-4
+  epochs: 1
+  max_seq_length: 2048
+  logging_steps: 10
+  save_steps: 250
+
+# tokenizer/chat-template: Qwen2.5 ChatML; digest recorded at T004 freeze.

@@ -1,0 +1,15 @@
+# 023 training pipeline — heavy artifacts never tracked.
+# Scripts are tracked; weights, data, caches, and run outputs are not.
+
+data/raw/
+data/processed/
+data/*.jsonl
+models/
+runs/
+*.safetensors
+*.bin
+*.gguf
+__pycache__/
+*.pyc
+.venv/
+*.log
