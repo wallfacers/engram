@@ -111,6 +111,47 @@ type fixedGoldEvidenceReader interface {
 	GetMany(context.Context, []string) (map[string]memory.Evidence, error)
 }
 
+// fixedGoldEmptyEvidenceQuestionIDs returns dataset question IDs whose gold
+// evidence annotation is empty. The fixed-gold oracle is defined over gold
+// evidence: a question with no dataset evidence cannot be reconstructed as an
+// answer input, so these are skipped (excluded from the diagnostic denominator)
+// rather than failing the whole run. B1 is unaffected — it retrieves evidence
+// from the conversation store instead of relying on the dataset annotation.
+func fixedGoldEmptyEvidenceQuestionIDs(convs []conversation) []string {
+	var skipped []string
+	for _, conv := range convs {
+		for _, qa := range conv.QA {
+			if len(qa.Evidence) == 0 {
+				skipped = append(skipped, qa.QuestionID)
+			}
+		}
+	}
+	return skipped
+}
+
+// fixedGoldFilterEmptyEvidenceQuestions drops any selected question that has no
+// dataset gold evidence, keeping the in-memory record order aligned with the
+// expected set built by buildFixedGoldExpectedQuestions.
+func fixedGoldFilterEmptyEvidenceQuestions(selected []selectedQuestion) []selectedQuestion {
+	filtered := selected[:0]
+	for _, sq := range selected {
+		if len(sq.QA.Evidence) == 0 {
+			continue
+		}
+		filtered = append(filtered, sq)
+	}
+	return filtered
+}
+
+func fixedGoldContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // evalFixedGoldOracleDiagnostic is intentionally not an eval metrics artifact.
 // It can diagnose whether the frozen answerer stack reaches the paper target
 // when given all gold sources, but cannot be consumed by formal promotion.
@@ -186,6 +227,7 @@ type evalFixedGoldOracleSummary struct {
 	AnswerCalls         int                           `json:"answer_calls"`
 	JudgeCalls          int                           `json:"judge_calls"`
 	Valid               bool                          `json:"valid"`
+	EmptyEvidenceSkipped int                          `json:"empty_evidence_skipped,omitempty"`
 	InvalidReasons      []string                      `json:"invalid_reasons,omitempty"`
 	OracleDiagnostic    *evalFixedGoldOracleAggregate `json:"oracle_diagnostic,omitempty"`
 }
@@ -835,13 +877,21 @@ func runFixedGoldOracleDataset(
 		evalJSONDigest(expectedIDs) != protocol.Benchmark.QuestionIDsDigest {
 		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle denominator differs from control protocol")
 	}
+	// The oracle is defined over gold evidence. Dataset questions that carry no
+	// evidence annotation (LoCoMo has a few) cannot be reconstructed as answer
+	// inputs, so they are skipped and excluded from the diagnostic denominator.
+	skippedIDs := fixedGoldEmptyEvidenceQuestionIDs(convs)
+	questionsExpected := len(expectedIDs) - len(skippedIDs)
+	if questionsExpected <= 0 {
+		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle has no questions after skipping empty-evidence questions")
+	}
 	if len(fixedGoldOrderedDatasetSourceIDs(expectedIDs)) != len(expectedIDs) {
 		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle question IDs are blank or duplicated")
 	}
 	if strings.TrimSpace(opt.runDir) == "" {
 		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle requires --run-dir")
 	}
-	files, err := createFixedGoldOracleRunFiles(opt.runDir, protocol, len(expectedIDs))
+	files, err := createFixedGoldOracleRunFiles(opt.runDir, protocol, questionsExpected)
 	if err != nil {
 		return evalFixedGoldOracleSummary{}, err
 	}
@@ -854,10 +904,10 @@ func runFixedGoldOracleDataset(
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 
-	records := make([]evalFixedGoldOracleDiagnostic, 0, len(expectedIDs))
+	records := make([]evalFixedGoldOracleDiagnostic, 0, questionsExpected)
 	stopAfterConversation := false
 	for _, conv := range convs {
-		selected := selectQuestions(conv, opt)
+		selected := fixedGoldFilterEmptyEvidenceQuestions(selectQuestions(conv, opt))
 		if len(selected) == 0 {
 			continue
 		}
@@ -986,7 +1036,7 @@ func buildFixedGoldExpectedQuestions(
 ) ([]fixedGoldExpectedQuestion, error) {
 	expected := make([]fixedGoldExpectedQuestion, 0, protocol.Benchmark.QuestionCount)
 	for _, conv := range convs {
-		selected := selectQuestions(conv, opt)
+		selected := fixedGoldFilterEmptyEvidenceQuestions(selectQuestions(conv, opt))
 		if len(selected) == 0 {
 			continue
 		}
@@ -1214,9 +1264,25 @@ func validateFixedGoldOracleReadback(
 		return nil, evalFixedGoldOracleSummary{}, fmt.Errorf("read fixed-gold call journal digest: %w", err)
 	}
 	summary.CallJournalDigest = evalTextDigest(string(rawJournal))
-	if len(expectedIDs) != protocol.Benchmark.QuestionCount ||
-		evalJSONDigest(expectedIDs) != protocol.Benchmark.QuestionIDsDigest {
+	fullIDs := formalQuestionIDs(opt.datasetFormat, convs)
+	if len(fullIDs) != protocol.Benchmark.QuestionCount ||
+		evalJSONDigest(fullIDs) != protocol.Benchmark.QuestionIDsDigest {
 		invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
+	}
+	skippedIDs := fixedGoldEmptyEvidenceQuestionIDs(convs)
+	summary.EmptyEvidenceSkipped = len(skippedIDs)
+	if len(expectedIDs)+len(skippedIDs) != len(fullIDs) {
+		invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
+	}
+	for _, skipped := range skippedIDs {
+		if !fixedGoldContainsString(fullIDs, skipped) {
+			invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
+		}
+	}
+	for _, expectedID := range expectedIDs {
+		if fixedGoldContainsString(skippedIDs, expectedID) {
+			invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
+		}
 	}
 	if protocol.Models.Answerer.PromptDigest != formalAnswerPromptDigest(opt) ||
 		protocol.Models.Judge.PromptDigest != evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode())) {
