@@ -32,3 +32,6 @@ tags: [operations, evaluation, gpu, remote]
 ## 与评测 recipe 的关系
 
 远端机器只提供执行资源，不定义结果。具体 recipe、环境变量和 run 后验证见[LoCoMo 评测运行手册](locomo-runbook.md)。
+
+023 特性专用的远端环境完整复现（vllm 参数、模型指纹、B1/oracle 跑法、已知数据缺陷）见
+[023 eval 环境手册](environment-023-eval-box.md)。
