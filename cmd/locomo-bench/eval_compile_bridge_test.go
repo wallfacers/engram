@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
 
 // TestBuildCompileCandidatesDedupsByCandidateID: the flat source list carries
@@ -47,5 +48,29 @@ func TestFormalCompileRendererIncludesQueryInUser(t *testing.T) {
 	}
 	if input.Model != "answerer-x" || input.System != "sys" {
 		t.Fatalf("RenderAnswerInput passthrough broken: %#v", input)
+	}
+}
+
+// TestCompileBundleItemsDedupsCandidate: the compiler admits by Evidence
+// source, so one rendered candidate spanning several sources can surface as
+// several KEEP items with the same CandidateIDs[0]. The formal contract is one
+// item per rendered candidate; the bridge must collapse them (first wins) or
+// the duplicate item identity fails the 1:1 structural check.
+func TestCompileBundleItemsDedupsCandidate(t *testing.T) {
+	sourceByCandidate := map[string]formalExpandedSource{
+		"cand:X": {Item: evalFormalBundleItem{Text: "shared text", Sources: []evalFormalSourceSpan{{EvidenceID: "ev:1"}}}},
+	}
+	compiled := []evidencecompiler.BundleItem{
+		{CandidateIDs: []string{"cand:X"}, Sources: []evidencecompiler.SourceSpan{{SourceID: "ev:1"}}},
+		{CandidateIDs: []string{"cand:X"}, Sources: []evidencecompiler.SourceSpan{{SourceID: "ev:2"}}}, // same candidate, second source
+		{CandidateIDs: []string{"cand:Y"}, Sources: []evidencecompiler.SourceSpan{{SourceID: "ev:3"}}},
+	}
+	protocol := testFormalProtocolBase(t)
+	items := compileBundleItems(protocol, compiled, sourceByCandidate)
+	if len(items) != 1 {
+		t.Fatalf("compileBundleItems returned %d items, want 1 (dup candidate collapsed)", len(items))
+	}
+	if items[0].ItemID != formalBundleItemID("cand:X") || items[0].Text != "shared text" {
+		t.Fatalf("kept item wrong: %#v", items[0])
 	}
 }
