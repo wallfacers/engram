@@ -277,6 +277,7 @@ func compileFormalSources(
 		CounterFingerprint: protocol.Budget.CounterFingerprint,
 		MaxCandidates:      len(candidates),
 		MaxSources:         len(srcIDs),
+		Planner:            opt.planner, // nil → deterministic extractive fallback (023 FR-019)
 		Counter:            opt.formalCounter,
 		Resolver:           resolver,
 		Renderer:           renderer,

@@ -167,6 +167,10 @@ type options struct {
 	// used by formal source expansion and the independent pre-answer
 	// span/citation validator. It is runtime-only and is never serialized.
 	formalEvidence formalEvidenceReader
+	// planner is the runtime-only local Planner sidecar adapter wired into the
+	// evidencecompiler engine when --compiler-arm planner is configured with a
+	// sidecar. It is never serialized.
+	planner evidencecompiler.Planner
 	// representationArm selects the source-representation renderer for the
 	// formal B1 pipeline. ReprChunk900 is the legacy default and is
 	// byte-identical to the pre-022 split-chunk expansion.
@@ -175,6 +179,13 @@ type options struct {
 	// B1 pipeline. "" means legacy ranked-prefix packer; "extractive" and
 	// "planner" use the evidencecompiler engine (planner Nil →extractive fallback).
 	compilerArm string
+	// plannerBaseURL/plannerModel configure the local Planner sidecar
+	// (vllm/ollama, OpenAI-compatible). They are only consumed when
+	// --compiler-arm planner; if empty the planner stays nil and the compiler
+	// degrades to the deterministic extractive fallback (023 FR-019).
+	plannerBaseURL string
+	plannerModel    string
+	plannerTimeout  time.Duration // 0 → defaultPlannerTimeout
 	// eventProjection selects the event-projection shadow mode for
 	// structured-gap refetch (E0/E1/E2/E3). "" means off.
 	eventProjection string
@@ -248,6 +259,9 @@ func run() error {
 		}
 	})
 	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner | exact_token (unset = legacy ranked-prefix packer)")
+	flag.StringVar(&opt.plannerBaseURL, "planner-base-url", "", "local planner sidecar base URL (OpenAI-compatible; enables --compiler-arm planner; empty = extractive fallback)")
+	flag.StringVar(&opt.plannerModel, "planner-model", "", "planner model served by the sidecar (e.g. Qwen2.5-7B-Instruct)")
+	flag.DurationVar(&opt.plannerTimeout, "planner-timeout", 0, "planner proposal timeout (0 = default 6s)")
 	flag.StringVar(&opt.eventProjection, "event-projection", "", "event projection shadow mode for structured-gap refetch: E0 | E1 | E2 | E3")
 	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
 	flag.BoolVar(&opt.writeDedup, "write-dedup", false, "024 write-time redundancy suppression: suppress duplicate fact projections (additive mechanism flag; formal context required)")
@@ -696,6 +710,30 @@ func run() error {
 	judgeProv, err := buildBenchProvider(judgeConfig.Provider, judgeConfig.APIKey, judgeConfig.BaseURL, opt.maxTokens, "JUDGE_PROVIDER")
 	if err != nil {
 		return err
+	}
+	if opt.compilerArm == "planner" {
+		// A configured planner arm consumes a self-hosted sidecar through the
+		// same provider abstraction as the answerer/judge. Without a sidecar
+		// config the planner stays nil and the compiler degrades to the
+		// deterministic extractive fallback (023 FR-019) — a hard error here
+		// would break the frozen 026/027 "planner arm runs as extractive"
+		// behavior.
+		if strings.TrimSpace(opt.plannerBaseURL) != "" && strings.TrimSpace(opt.plannerModel) != "" {
+			plannerProv, err := buildBenchProvider("openai", apiKey, opt.plannerBaseURL, opt.maxTokens, "PLANNER_PROVIDER")
+			if err != nil {
+				return fmt.Errorf("configure planner provider: %w", err)
+			}
+			lp, err := newLocalPlanner(localPlannerConfig{
+				Provider: plannerProv, Model: opt.plannerModel,
+				MaxTokens: opt.maxTokens, Timeout: opt.plannerTimeout,
+			})
+			if err != nil {
+				return fmt.Errorf("configure local planner: %w", err)
+			}
+			opt.planner = lp
+		} else {
+			logger.Warn("--compiler-arm planner without --planner-base-url/--planner-model; degrading to deterministic extractive fallback")
+		}
 	}
 	sem := make(chan struct{}, opt.concurrency)
 	if opt.formalProtocol != nil {
