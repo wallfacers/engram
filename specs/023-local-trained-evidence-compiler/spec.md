@@ -11,6 +11,34 @@
 本地 Evidence Planner；不得重做 022 已拥有的 Ledger、表示、确定性 Compiler 或评测
 基础设施。"
 
+## Amendment (2026-08-02)
+
+**maintainer 决策**：开启 023 实施。022 依赖代码已冻结（Compiler/Planner 合同、fixed-gold
+oracle、LoCoMo B1 85.19% 收口）；缺失件由 023 前置任务补全。本节修正/补充以下条款，与
+正文冲突时以本节为准：
+
+1. **启动门禁 → 最小充分集（修正 FR-003）**：023 正式启动（数据构建/训练/集成/评测）的
+   依赖收据最小充分集 = 022 Compiler/Planner 合同冻结 ✅ + Primary Benchmark（LoCoMo）B1
+   有效 ✅ + fixed-gold oracle 可用 ✅ + `local_planner.go` 接入点就绪（023 前置任务补全，
+   harness 侧 adapter，engine 零改动）+ Primary Cohort residual 量化（023 前置任务产出）。
+   LongMemEval-S B1、双 reviewer audit、miss attribution 降为 Cross-Benchmark Guard /
+   后补项，不阻塞启动。已知风险如实记录：residual 归因在双基准收口前基于单基准（LoCoMo），
+   提升不得跨基准外推。
+2. **底模选型（补充 Assumptions）**：默认底模 **Qwen2.5-7B-Instruct**（Apache-2.0，无
+   gating/商用上限，产物可分发可推荐；7.6B，BF16 ~15 GiB，单卡 24 GiB 上 LoRA/QLoRA 训练
+   与 p95≤2s 推理均可行）。备选同族 Qwen2.5-3B/1.5B（tokenizer/chat-template 一致，可降级）。
+   validation 正式冻结前可更换；冻结后所有模型臂共用同一底模。
+3. **训练数据机制（FR-013 落地）**：V1 训练资产主路径 = **本地合成 + 自举**：本地 Qwen 生成
+   虚构多会话记忆对话 → 灌入 engram（离线）提取/建索引 → 生成 query → 用 fixed-gold oracle
+   + 规则确定期望 Need/actions 标签；辅路径 = 公共许可语料（逐语料确认许可/隐私，如 MIT 系）
+   跑同一 pipeline。付费托管 teacher 调用数 MUST 为 0。
+4. **参考硬件（FR-034 落地）**：单卡 24 GiB（L40S / RTX 4090 / A10G / AutoDL 对应档）；一次
+   正式重建 ≤ 24 GPU-hours（含数据构建验证 + LoRA 训练 + 冻结重放），并发 1 Planner p95
+   ≤ 2.0s。
+5. **SaaS 边界（补充 Out of Scope）**：95%+ / 模型助手 / SaaS 方向为**独立后续计划**
+   （maintainer 2026-08-02 决定），不进本 spec。023 产物为纯离线、可自托管本地 Planner；
+   付费云端 answerer/Planner 作为正式涨点路径仍被禁止（FR-013/021/033 不变）。
+
 ## Clarifications
 
 ### Session 2026-07-30
@@ -260,10 +288,13 @@ GO/HOLD/STOP，并独立执行最终 recipe 相对 deterministic control 的产�
   记录为一份不可变依赖收据。
 - **FR-002**: 依赖收据 MUST 为每个必需项给出 expected、observed、validity 和来源；
   只允许产生唯一的 `READY`、`NOT_NEEDED`、`NOT_ELIGIBLE` 或 `BLOCKED` verdict。
-- **FR-003**: 只有当 022 F0=`CONTINUE`、US3 deterministic Compiler/Planner 合同与结果
-  已冻结，且预注册 residual 证明 candidate evidence 足够、fixed-gold 可答、确定性
-  Compiler 仍失败时，依赖收据才可为 `READY`，系统才可启动正式数据构建、训练、集成
-  和评测。
+- **FR-003**: 当依赖收据的最小充分集满足时可为 `READY` 并启动正式数据构建、训练、集成
+  和评测：022 Compiler/Planner 合同冻结、Primary Benchmark（LoCoMo）B1 有效、fixed-gold
+  oracle 可用、`local_planner.go` 接入点就绪（023 前置补全，harness 侧 adapter，engine
+  零改动）、Primary Cohort residual 已量化。LongMemEval-S B1、judge audit、miss
+  attribution 为 Guard 后补项，不阻塞启动；在其完成前，任何跨基准推广声明 MUST 禁止。
+  （见 [Amendment 2026-08-02](#amendment-2026-08-02)；其余非 `READY` 分流：F0=`STOP` 记
+  `NOT_ELIGIBLE`、核心已达双目标记 `NOT_NEEDED`、依赖不完整记 `BLOCKED`。）
 - **FR-004**: 当 022 已达 LoCoMo 1,425/1,540 与 LongMemEval-S 473/500、没有
   compiler-eligible residual 时，023 MUST 记录 `NOT_NEEDED`；当 F0=`STOP`、answerer
   ceiling 不足时 MUST 记录 `NOT_ELIGIBLE` 并转交独立本地 answerer/eval-stack 特性；
