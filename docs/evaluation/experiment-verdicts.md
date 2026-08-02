@@ -38,6 +38,12 @@ tags: [evaluation, verdicts, evidence]
 | 024 | closed-negative | 「同预算记忆密度」四臂(write_dedup × neighbor_extend)全负：control 84.29% > neighbor 83.83%(−0.46pp) > dedup 83.38%(−0.91pp) > both 82.99%(−1.30pp)，随机制叠加单调下降。dedup 几乎不触发(21,860 判定仅 20 抑制、误伤 5)；dedup 的 multi-hop +3.2pp 被 open-domain −4.2pp 抵消。LongMemEval-S 四臂因 LoCoMo 已收口不再执行。结论：MemOS 的"写时去重 + 命中邻居扩展"机械密度杠杆在 engram 同预算下不涨点。 | 两机制默认关，不进默认路径（FR-011）。 | [spec 024](../../specs/024-memory-density/spec.md) · [配对报告](reports/memory-density-four-arm.md) · [登记](../../specs/024-memory-density/benchmark-registration.md) |
 | 025 | closed-negative | 「跨消息语义聚类 episode 表示」同一 store、候选逐字节一致配对下：multi-hop(目标 cohort) 84.0% vs chunk_900 84.0%，**Δ=0.0pp 零提升**；OVERALL 74.6% vs 82.3%（**−7.7pp**），single-hop −8.1pp、temporal −16.0pp。机制：episode 聚合在 token cap 内挤掉逐证据覆盖（candidate_miss 231→351）。两臂 validity 全绿（契约方向 A 修复生效）。结论：跨消息证据"聚合叙事"伤简单类目且不提升 multi-hop；密度差距不来自候选聚合。 | `--episode-cluster` 默认关，不进默认路径（FR-011）。 | [spec 025](../../specs/025-semantic-episode-cluster/spec.md) · [配对报告](reports/semantic-episode-cluster.md) · [登记](../../specs/025-semantic-episode-cluster/benchmark-registration.md) |
 
+## 规划中的评估（未裁决，不进裁决表）
+
+| Feature / 文档 | 状态 | 范围及结论 | 出货影响 | 证据 |
+|---|---|---|---|---|
+| 023 | draft | 训练式本地 Evidence Planner：消费 022 冻结 contract，只输出 Need/actions proposal，fail-closed 退回确定性 Compiler。评估认为其价值在沉淀合同/候选/合规基建，**涨点收益受 compiler-eligible residual 规模限制**，最可能 HOLD/STOP/NOT_NEEDED；启动前提是 022 US3 收口并量化 residual（当前 022=`PARTIAL`）。**95%+ 是 SaaS 层目标，非本地口径能力**：本地基线 85.19%，强 answerer 探针 89.03%，离 95 差 ~6pp，且「agent 多步推理 + 预算放大」两块无固定口径证据，须开独立 SaaS spec 用同一套预注册纪律验证。 | 不改变默认路径；SaaS 方向为独立 opt-in 产品线，分数单独口径声明，不得回填为本地涨点（死亡规则不变）。 | [spec 023](../../specs/023-local-trained-evidence-compiler/spec.md) · [可行性 + SaaS 缺口评估](reports/planner-023-saas-direction.md) |
+
 ## 判定规则
 
 coverage、离线代理指标或单次差值都不能单独成为出货依据。对默认行为有影响的实验必须至少说明端到端结果、对照条件、噪声标尺、适用范围与明确 verdict；尚未收口的研究不得写入本索引。
