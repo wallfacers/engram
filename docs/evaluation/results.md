@@ -28,7 +28,7 @@ tags: [evaluation, locomo, longmemeval, results]
 | LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local-first、3 次答题多数 | 80.80% | 历史 full 500 本地栈测量；见下方口径更正 |
 | LongMemEval-S（cleaned） | 500 | deepseek-v4-pro | deepseek-v4-flash | 与本地臂相同检索、3 次答题多数 | 86.00% | 历史强 answerer 探针；同受下方口径更正约束 |
 
-## 022 当前证据：正式双基准仍未完成
+## 022/027 证据：B0 连续性 + B1 正式基线（85% 级已登记）
 
 022 已产生一个有效但不具 promotion 资格的 LoCoMo B0 continuity：三次原始结果为
 1,297、1,313、1,320/1,540，多数票 1,314/1,540（85.32%）。它真实记录 4,627 次
@@ -37,6 +37,27 @@ answer、7 次 rewrite 和 4,620 次 judge；protocol hash 为
 summary 文件 SHA-256 为
 `4463576a0b65586d575cf08d09159960dc5bbf2ecc36f6579215cc682146fff8`。
 B0 仅用于历史连续性，不能作为 B1 control 或 SC-002 结果。
+
+### 027 B1 正式基线已登记：85% 级达成
+
+027 修复了 B1 control 的打包粒度（chunk-verbatim fold：bundle 打包投影原文
+而非 source-expand 成单条消息）并把默认 `answer-input-cap` 从 3600 提到 5000
+（78.4% 的题在 3600 下被截断，实测 max answer input 4,153 tok，cap 5000 覆盖
+100%）。LoCoMo B1 正式基线（Qwen3.6-35B-A3B-FP8 / bge-large-en-v1.5 /
+deepseek-v4-flash，local hybrid、3 次答题多数）在 022 历史 store（restored）上：
+
+| 口径 | 结果 | 说明 |
+|---|---:|---|
+| 3 次答题多数（与 B0 同口径） | **1,312/1,540（85.19%）** | ≥85% 级达成 |
+| OVERALL（stats 类别均值，与 026 同口径） | 84.7% | 相对 026 control（82.6%）+2.1pp |
+
+- validity 全绿：candidate/source/span/citation/within-cap rate 全为 1，protocol
+  hash `sha256:263b52b6…`（cap 5000，store schema 7）。
+- 同 store 当前环境 B0 continuity = 1,308/1,540（84.94%），B1 已追平/略超；历史
+  B0 85.32%（2026-07）含 ~0.4–1.4pp 的 vllm/judge 环境漂移，当前环境两路径均为
+  ~84.9–85.2% 量级。
+- B1 协议禁止 legacy IDK retry（`validateEvalExperiment`），故 B0 靠 7–9 题
+  rewrite 获得的 ~0.45pp 结构性不可达；B1 majority 在当前环境约 85.2% 封顶。
 
 后续两个 LoCoMo 单次探针均不进入上方当前结果矩阵：
 
@@ -53,10 +74,12 @@ Cost artifact 的 `actual_usd=0` 只表示 Qwen/BGE/DeepSeek 三个模型均未�
 不是 judge 免费；它记录 1,540 judge calls、5,572,719 answer input tokens 和
 674,721 judge input tokens。
 
-截至 2026-07-31，修复排序合同后的 LoCoMo low/high B1、LongMemEval-S low/high B1、
-两 benchmark fixed-gold diagnostic、两位独立 reviewer 的 judge audit 和正式配对消融
-均未形成完整有效产物。故 1,425/1,540 与 473/500 两个最终目标都没有 accepted result，
-022 唯一合法状态仍为 `HOLD`。
+截至 2026-08-02，LoCoMo B1 正式基线已登记（上表，85% 级 majority 85.19%），
+LongMemEval-S low/high B1、两 benchmark fixed-gold diagnostic、两位独立 reviewer
+的 judge audit 和正式配对消融仍未形成完整有效产物。故 1,425/1,540 目标已由
+027 修复达成 majority 85.19%（statistics 口径 84.7%），473/500 目标仍无
+accepted result；022 状态由 `HOLD` 转为 `PARTIAL`（LoCoMo B1 基线已收口，
+双基准与 audit 未完成）。
 
 ## LongMemEval-S 口径更正待刷新
 

@@ -185,6 +185,7 @@ func validateActiveFormalBundleReceipt(
 	for _, item := range bundle.Items {
 		rendered, renderedExists := renderedByID[item.CandidateIDs[0]]
 		isEpisodeItem := renderedExists && isGenuineEpisodeRendered(rendered)
+		isChunkVerbatimItem := renderedExists && isChunkVerbatimRendered(rendered)
 		if len(item.CandidateIDs) != 1 {
 			spanOK, citationOK = false, false
 			contextRecoverable = false
@@ -219,6 +220,57 @@ func validateActiveFormalBundleReceipt(
 					spanOK = false
 					contextRecoverable = false
 					problems = append(problems, fmt.Sprintf("episode item %q first source cannot be resolved", item.ItemID))
+				} else {
+					result := formalEvidenceResult(item.CandidateIDs[0], item.Text, first)
+					results = append(results, result)
+				}
+			}
+			continue
+		}
+		if isChunkVerbatimItem {
+			// 027: a chunk-verbatim item packs the projection's own text with
+			// every member evidence as a whole-source span. The text equals the
+			// frozen rendered candidate's text (it may be a verbatim chunk
+			// concatenation or a condensed fact that no single span can recover),
+			// so citation is proven against the rendered candidate while each
+			// span stays independently recoverable from the Ledger.
+			spanGood := true
+			for _, span := range item.Sources {
+				evidence, ok := evidenceByID[span.EvidenceID]
+				if !ok {
+					spanOK = false
+					contextRecoverable = false
+					problems = append(problems, fmt.Sprintf("chunk-verbatim item %q cites unavailable Evidence %q", item.ItemID, span.EvidenceID))
+					spanGood = false
+					continue
+				}
+				runes := []rune(evidence.Content)
+				if span.StartChar != 0 || span.EndChar != len(runes) ||
+					span.SpanDigest != evalTextDigest(evidence.Content) {
+					spanOK = false
+					contextRecoverable = false
+					problems = append(problems, fmt.Sprintf("chunk-verbatim item %q span %q is not whole-source", item.ItemID, span.EvidenceID))
+					spanGood = false
+				}
+			}
+			if !spanGood {
+				continue
+			}
+			if rendered.Text != item.Text || rendered.TextDigest != evalTextDigest(item.Text) ||
+				!sameSet(rendered.SourceIDs, episodeItemSourceIDs(item)) {
+				citationOK = false
+				problems = append(problems, fmt.Sprintf("chunk-verbatim item %q differs from its frozen rendered candidate", item.ItemID))
+			}
+			// The item is one aggregated text in the answer input, so
+			// reconstruction appends exactly one result whose identity matches
+			// the packer's folded Result (Name = the folded candidate ID);
+			// session/date identity comes from the first whole-source span.
+			if len(item.Sources) > 0 {
+				first, ok := evidenceByID[item.Sources[0].EvidenceID]
+				if !ok {
+					spanOK = false
+					contextRecoverable = false
+					problems = append(problems, fmt.Sprintf("chunk-verbatim item %q first source cannot be resolved", item.ItemID))
 				} else {
 					result := formalEvidenceResult(item.CandidateIDs[0], item.Text, first)
 					results = append(results, result)
@@ -382,6 +434,15 @@ func isGenuineEpisodeRendered(rendered evalRenderedCandidate) bool {
 	return rendered.Kind == string(ReprSemanticEpisode) && strings.HasSuffix(rendered.CandidateID, "/episode")
 }
 
+// isChunkVerbatimRendered reports whether a rendered candidate was folded by
+// rebuildExpandedForChunkVerbatim: one candidate carrying the projection's own
+// text (verbatim chunk concatenation or condensed fact) with every member
+// evidence as a whole-source span. It is the chunk_900 analogue of the 025
+// episode shape.
+func isChunkVerbatimRendered(rendered evalRenderedCandidate) bool {
+	return rendered.Kind == chunkVerbatimKind && strings.HasSuffix(rendered.CandidateID, "/verbatim")
+}
+
 // validateFormalB1AnchorPrefix proves that B1 packed exactly a ranked prefix
 // of complete navigation anchors. Candidate membership alone is insufficient:
 // it would permit skipping a large first anchor, reordering sources, or
@@ -404,6 +465,23 @@ func validateFormalB1AnchorPrefix(protocol evalProtocol, candidate evalCandidate
 		}
 	}
 	if isEpisode {
+		return validateFormalB1EpisodeAnchorPrefix(candidate, bundle)
+	}
+	// 027: a chunk-verbatim rendered candidate folds each whole-source anchor
+	// into one multi-source item (projection text + every member span), the
+	// same one-candidate-per-anchor shape as a genuine episode. The episode
+	// prefix branch already validates exactly that invariant (bundle is a
+	// ranked prefix of anchors, each selected anchor contributes one item whose
+	// text equals its rendered candidate and whose spans cover the rendered
+	// source set), so it is reused rather than duplicated.
+	isChunkVerbatim := false
+	for _, rendered := range candidate.RenderedCandidates {
+		if isChunkVerbatimRendered(rendered) {
+			isChunkVerbatim = true
+			break
+		}
+	}
+	if isChunkVerbatim {
 		return validateFormalB1EpisodeAnchorPrefix(candidate, bundle)
 	}
 	// 026: the query-time compiler arm (--compiler-arm) deliberately re-orders
@@ -627,6 +705,20 @@ func orderedFormalSourceValues(values []string) []string {
 	return ordered
 }
 
+// sameSet compares two string slices as unordered sets.
+func sameSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	leftSet := stringSet(left)
+	for _, value := range right {
+		if !leftSet[value] {
+			return false
+		}
+	}
+	return true
+}
+
 func sameOrderedStrings(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -736,9 +828,10 @@ func inspectFormalBundleStructure(
 		if !exists {
 			citationOK = false
 		}
-		if exists && isGenuineEpisodeRendered(rendered) {
-			// 025 episode item: every whole-source span must be allowed and
-			// resolvable; the rendered SourceIDs set must equal the item's set.
+		if exists && (isGenuineEpisodeRendered(rendered) || isChunkVerbatimRendered(rendered)) {
+			// 025 episode / 027 chunk-verbatim multi-source item: every span must
+			// be allowed and resolvable; the rendered SourceIDs set must equal the
+			// item's set; the item text must equal the rendered candidate's text.
 			if len(item.Sources) == 0 || len(rendered.SourceIDs) != len(item.Sources) {
 				spanOK, citationOK = false, false
 				continue

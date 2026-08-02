@@ -422,6 +422,94 @@ func rebuildExpandedForEpisodes(expanded []formalExpandedAnchor, enriched []eval
 	return out
 }
 
+// chunkVerbatimKind marks a rendered candidate folded by
+// rebuildExpandedForChunkVerbatim: it carries the projection's own text
+// (verbatim chunk concatenation or the condensed fact) plus every source as a
+// whole-source span. The validator treats it like a multi-source item (the 025
+// episode shape) rather than the legacy one-item-per-source expansion.
+const chunkVerbatimKind = "chunk_verbatim"
+
+// rebuildExpandedForChunkVerbatim folds each anchor whose expansion is entirely
+// whole-source (KEEP) back to the projection's own text, so the answer bundle
+// packs what the legacy B0 product path packs — the projection原文 (a verbatim
+// chunk concatenation or a semantically condensed fact) — instead of
+// source-expanding it into one item per raw message, which lost the projection's
+// information density and measured as the ~1.8pp B1-vs-B0 packing gap. Each
+// folded anchor becomes a single item carrying hit.Content (the frozen rendered
+// text) with every member evidence as a whole-source KEEP span, keeping the
+// span/citation contract auditable. Anchors containing an EXTRACT span keep
+// their per-source expansion: an extract's text is already the exact projection
+// span, so folding would only add noise.
+func rebuildExpandedForChunkVerbatim(expanded []formalExpandedAnchor) []formalExpandedAnchor {
+	out := make([]formalExpandedAnchor, 0, len(expanded))
+	for _, anchor := range expanded {
+		allKeep := len(anchor.Sources) > 0
+		for _, source := range anchor.Sources {
+			if source.Item.Kind != "KEEP" {
+				allKeep = false
+				break
+			}
+		}
+		if !allKeep {
+			out = append(out, anchor)
+			continue
+		}
+		candidateID := anchor.CandidateID + "/verbatim"
+		// anchor.SourceIDs carries the projection's references in SourceOrder
+		// (expandFormalEvidence already ordered them); the folded item cites them
+		// all as whole-source spans.
+		sourceIDs := append([]string(nil), anchor.SourceIDs...)
+		// The projection text is the retrieval product of this hit, byte-frozen
+		// in the candidate artifact; it may be a verbatim multi-message
+		// concatenation or a condensed fact, either way it is what B0 packed.
+		text := anchor.Hit.Content
+		item := evalFormalBundleItem{
+			ItemID:       formalBundleItemID(candidateID),
+			Kind:         "KEEP",
+			Text:         text,
+			CandidateIDs: []string{candidateID},
+			Sources:      make([]evalFormalSourceSpan, 0, len(anchor.Sources)),
+		}
+		for _, source := range anchor.Sources {
+			runes := []rune(source.Evidence.Content)
+			item.Sources = append(item.Sources, evalFormalSourceSpan{
+				EvidenceID: source.Evidence.ID,
+				StartChar:  0,
+				EndChar:    len(runes),
+				SpanDigest: evalTextDigest(source.Evidence.Content),
+			})
+		}
+		rendered := evalRenderedCandidate{
+			CandidateID:    candidateID,
+			Kind:           chunkVerbatimKind,
+			Score:          anchor.Hit.Score,
+			Text:           text,
+			TextDigest:     evalTextDigest(text),
+			SourceIDs:      sourceIDs,
+			ExpandedFrom:   []string{anchor.CandidateID},
+			ExpansionCount: len(anchor.Sources) - 1,
+		}
+		// One folded source per anchor. The Result identity must match what the
+		// active validator reconstructs for the same item
+		// (formalEvidenceResult on the folded candidate ID, first whole-source
+		// span), so the reconstructed answer prompt is byte-identical.
+		foldedResult := formalEvidenceResult(candidateID, text, anchor.Sources[0].Evidence)
+		foldedResult.Score = anchor.Hit.Score
+		foldedResult.ProjectionID = anchor.Hit.ProjectionID
+		folded := formalExpandedSource{
+			Evidence:  anchor.Sources[0].Evidence,
+			Result:    foldedResult,
+			Candidate: rendered,
+			Item:      item,
+		}
+		outAnchor := anchor
+		outAnchor.Sources = []formalExpandedSource{folded}
+		outAnchor.SourceIDs = sourceIDs
+		out = append(out, outAnchor)
+	}
+	return out
+}
+
 func formalBundleItems(sources []formalExpandedSource) []evalFormalBundleItem {
 	items := make([]evalFormalBundleItem, 0, len(sources))
 	for _, source := range sources {

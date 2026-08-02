@@ -58,6 +58,17 @@
 
 三臂同 store、同 frozen 协议家族（protocol hash 稳定）、compiler 臂共享同一 flat candidate list（T114 candidate-replay 逐字节一致）。本结果数字基于有效配对。
 
+## 027 更新：control 打包粒度修复（control 基线已更新）
+
+027 修复了 B1 control 的打包粒度（`rebuildExpandedForChunkVerbatim`：bundle 打包投影原文
+而非 source-expand 成单条消息）并把默认 `answer-input-cap` 从 3600 提到 5000。该修复
+**明确排除 compiler 臂**（`materializeFormalB1Question` 仅在 `compilerArm == ""` 时启用
+fold），故本表三臂的候选逐字节一致与 compiler 负收益的方向结论不受影响；但 `compiler:false`
+的 control 参照从 82.6% 更新为 **84.7%**（stats OVERALL 口径，027 cap5000 于 022 历史
+store；3 次多数 majority 85.19%，validity 全绿，protocol `sha256:263b52b6…`）。
+compiler 相对**旧** control 的 −4.5pp/−3.6pp 幅度不能直接平移；在新 control 基线下
+重新配对验证（同一新 store + 新 frozen 协议族）尚未运行，compiler 保持默认关的结论不变。
+
 ## 资产位置
 
 - 三臂 run 目录：`/root/026-runs/{control,extractive,exact-token}`（AutoDL，协议冻结于 `/root/026-runs/frozen/`）。

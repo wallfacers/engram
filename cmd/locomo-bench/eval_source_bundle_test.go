@@ -674,3 +674,151 @@ func TestFormalB1CompilerBundleAllowsReorderedNonPrefix(t *testing.T) {
 		t.Fatalf("compiler validator rejected reordered auditable bundle: %v", err)
 	}
 }
+
+// TestFormalChunkVerbatimFoldPacksProjectionText reproduces the B1-control
+// packing fix: the bundle must pack the projection's own text (verbatim chunk
+// concatenation or condensed fact) instead of source-expanding it into one item
+// per raw message. rebuildExpandedForChunkVerbatim folds each whole-source
+// anchor into one chunk-verbatim item carrying hit.Content with every member
+// evidence as a whole-source span; the folded bundle must still pass the active
+// Ledger reread and the frozen-payload gate. Anchors containing an EXTRACT span
+// must keep their per-source expansion untouched.
+func TestFormalChunkVerbatimFoldPacksProjectionText(t *testing.T) {
+	ctx := context.Background()
+	protocol := sourceTestProtocol()
+	system := answerPromptForRegime(4, false, false, false)
+	qa := locomoQA{QuestionID: "locomo:0:chunkverbatim", Question: "What was said?", Category: 4}
+	reader := formalEvidenceMap{}
+
+	evChunk1 := formalSourceTestEvidence("e-chunk-1", "Caroline: first message", memory.EvidenceMessage)
+	evChunk2 := formalSourceTestEvidence("e-chunk-2", "John: second message", memory.EvidenceMessage)
+	evFact := formalSourceTestEvidence("e-fact-1", "Caroline: full raw message", memory.EvidenceMessage)
+	evExtract := formalSourceTestEvidence("e-extract-1", "full raw message to extract from", memory.EvidenceMessage)
+	for _, evidence := range []memory.Evidence{evChunk1, evChunk2, evFact, evExtract} {
+		reader[evidence.ID] = evidence
+	}
+
+	chunk := formalSourceTestAnchor(t, "projection:chunk", 0.9, evChunk1, evChunk2)
+	chunk.Hit.Content = evChunk1.Content + "\n" + evChunk2.Content
+	fact := formalSourceTestAnchor(t, "projection:fact", 0.8, evFact)
+	fact.Hit.Content = "condensed plan fact"
+
+	// A partial-source anchor: its expansion is already the exact projection
+	// span, so folding must not touch it.
+	extractStart, extractEnd := 0, 7
+	extractRef := memory.EvidenceRef{
+		EvidenceID: evExtract.ID, SourceOrder: 0, StartChar: &extractStart, EndChar: &extractEnd,
+		SpanDigest: strings.TrimPrefix(evalTextDigest(string([]rune(evExtract.Content)[extractStart:extractEnd])), "sha256:"),
+	}
+	extractText, extractSpan, extractKind, err := formalEvidenceRefSpan(evExtract, extractRef)
+	if err != nil {
+		t.Fatalf("build extract source: %v", err)
+	}
+	extractRenderedID := formalRenderedSourceID("projection:extract", 0, evExtract.ID)
+	extract := formalExpandedAnchor{
+		Hit:         memory.Result{ProjectionID: "projection:extract", Content: extractText, Score: 0.7},
+		CandidateID: "projection:extract",
+		SourceIDs:   []string{evExtract.ID},
+		Sources: []formalExpandedSource{{
+			Ref: extractRef, Evidence: evExtract,
+			Result: formalEvidenceResult(extractRenderedID, extractText, evExtract),
+			Candidate: evalRenderedCandidate{
+				CandidateID: extractRenderedID, Kind: "raw_turn", Rank: 1, Score: 0.7,
+				Text: extractText, TextDigest: evalTextDigest(extractText),
+				SourceIDs: []string{evExtract.ID}, ExpandedFrom: []string{"projection:extract"},
+				ExpansionCount: 0,
+			},
+			Item: evalFormalBundleItem{
+				ItemID: formalBundleItemID(extractRenderedID), Kind: extractKind, Text: extractText,
+				CandidateIDs: []string{extractRenderedID}, Sources: []evalFormalSourceSpan{extractSpan},
+			},
+		}},
+	}
+
+	anchors := []formalExpandedAnchor{chunk, fact, extract}
+	formalSourceTestRankAnchors(anchors)
+	rebuilt := rebuildExpandedForChunkVerbatim(anchors)
+	if len(rebuilt) != 3 {
+		t.Fatalf("rebuilt anchors = %d, want 3", len(rebuilt))
+	}
+	// Chunk anchor folds into one multi-source item carrying the projection text.
+	if len(rebuilt[0].Sources) != 1 || len(rebuilt[0].Sources[0].Item.Sources) != 2 {
+		t.Fatalf("chunk anchor must fold into one 2-source item, got %d items %d sources",
+			len(rebuilt[0].Sources), len(rebuilt[0].Sources[0].Item.Sources))
+	}
+	chunkItem := rebuilt[0].Sources[0].Item
+	if chunkItem.Text != chunk.Hit.Content || !isChunkVerbatimRendered(rebuilt[0].Sources[0].Candidate) {
+		t.Fatalf("chunk item text = %q, want projection text %q (kind %q)",
+			chunkItem.Text, chunk.Hit.Content, rebuilt[0].Sources[0].Candidate.Kind)
+	}
+	if len(chunkItem.CandidateIDs) != 1 || chunkItem.CandidateIDs[0] != rebuilt[0].Sources[0].Candidate.CandidateID {
+		t.Fatalf("chunk item candidate IDs = %v, want the folded rendered candidate", chunkItem.CandidateIDs)
+	}
+	if !strings.HasSuffix(rebuilt[0].Sources[0].Candidate.CandidateID, "/verbatim") {
+		t.Fatalf("folded candidate ID %q must carry the /verbatim marker", rebuilt[0].Sources[0].Candidate.CandidateID)
+	}
+	// Single-source fact anchor also folds to its condensed projection text.
+	if len(rebuilt[1].Sources) != 1 || rebuilt[1].Sources[0].Item.Text != fact.Hit.Content {
+		t.Fatalf("fact anchor must fold to its condensed projection text, got %d sources text=%q",
+			len(rebuilt[1].Sources), rebuilt[1].Sources[0].Item.Text)
+	}
+	// EXTRACT anchor keeps its per-source expansion.
+	if len(rebuilt[2].Sources) != 1 || rebuilt[2].Sources[0].Item.Kind != "EXTRACT" {
+		t.Fatalf("extract anchor must keep its per-source expansion, got %d sources kind=%q",
+			len(rebuilt[2].Sources), rebuilt[2].Sources[0].Item.Kind)
+	}
+	// Both folded anchors cite all their member sources as whole-source spans.
+	for _, folded := range rebuilt[:2] {
+		want := len(folded.SourceIDs)
+		if len(folded.Sources[0].Item.Sources) != want {
+			t.Fatalf("folded anchor %q cites %d sources, want %d", folded.CandidateID, len(folded.Sources[0].Item.Sources), want)
+		}
+		for _, span := range folded.Sources[0].Item.Sources {
+			evidence := reader[span.EvidenceID]
+			if span.StartChar != 0 || span.EndChar != len([]rune(evidence.Content)) || span.SpanDigest != evalTextDigest(evidence.Content) {
+				t.Fatalf("folded anchor %q span %q is not whole-source", folded.CandidateID, span.EvidenceID)
+			}
+		}
+	}
+
+	candidate := buildExpandedFormalCandidateArtifact(protocol, qa, rebuilt[:2], nil, 1)
+	if len(candidate.RenderedCandidates) != 2 {
+		t.Fatalf("rendered candidates = %d, want 2 folded candidates", len(candidate.RenderedCandidates))
+	}
+	for index, rendered := range candidate.RenderedCandidates {
+		if rendered.Rank != index+1 {
+			t.Fatalf("rendered candidate %d rank = %d, want %d", index, rendered.Rank, index+1)
+		}
+	}
+
+	// Token cap admits only the first folded anchor (the prefix boundary at 1 item).
+	firstOnlyInput := formalSourceTestInput(protocol, system, qa, rebuilt[0].Sources)
+	protocol.Budget.AnswerInputTokenCap = len([]rune(firstOnlyInput.System + firstOnlyInput.User))
+	selected, input, count, evidenceTokens, err := packExpandedFormalInput(
+		ctx, protocol, lengthCounter{fingerprint: protocol.Budget.CounterFingerprint}, system, qa, rebuilt[:2], false,
+	)
+	if err != nil {
+		t.Fatalf("pack prefix bundle: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("selected sources = %d, want only the first folded anchor", len(selected))
+	}
+	trace := buildFormalTraceForItems(protocol, qa.QuestionID, candidate, formalBundleItems(selected))
+	bundle := buildExpandedFormalBundle(protocol, qa.QuestionID, candidate, trace, selected, input)
+	bundle.AnswerInputTokens = count.InputTokens
+	bundle.EvidenceTokens = evidenceTokens
+	bundle.WithinCap = true
+
+	opt := options{formalEvidence: reader}
+	if err := validateActiveFormalBundle(ctx, reader, protocol, opt, qa, candidate, trace, bundle); err != nil {
+		t.Fatalf("active validator rejected folded chunk-verbatim prefix bundle: %v", err)
+	}
+	// The frozen payload gate additionally requires an independent Ledger
+	// receipt, which the production path derives via revalidateFrozenFormalSources.
+	frozen := revalidateFrozenFormalSources(ctx, protocol, opt, qa, formalFrozenQuestion{
+		Candidate: candidate, Trace: trace, Bundle: bundle,
+	})
+	if err := validateFormalFrozenPayload(protocol, frozen.Candidate, frozen.Trace, frozen.Bundle); err != nil {
+		t.Fatalf("frozen validator rejected folded chunk-verbatim prefix bundle: %v", err)
+	}
+}

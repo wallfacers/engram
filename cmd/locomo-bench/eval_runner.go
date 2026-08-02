@@ -657,6 +657,19 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		sourceByCandidate, _ := formalCandidateSources(ctx, projections, hits)
 		frozen.Candidate = buildFormalCandidateArtifact(protocol, qa, hits, chunkTurns, sourceByCandidate, turnEvidence, retrievalCalls)
 	} else {
+		// B1 control (chunk_900): pack the projection原文 instead of the
+		// source-expanded raw messages. expandFormalEvidence resolves each hit
+		// to its active Ledger spans, but for a verbatim chunk (or condensed
+		// fact) the projection's own text is the higher-density packing that the
+		// legacy B0 product path used. Folding whole-source anchors back to
+		// hit.Content keeps every member message as a whole-source span, so
+		// auditability holds while the bundle stops paying the expansion tax.
+		// The compiler arm (026) is excluded: its frozen protocol and validator
+		// operate on the per-source expansion, and the fold would break the
+		// byte-identical candidate replay across compiler arms.
+		if opt.representationArm == ReprChunk900 && opt.compilerArm == "" {
+			expanded = rebuildExpandedForChunkVerbatim(expanded)
+		}
 		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, retrievalCalls)
 		// When a non-chunk_900 representation is selected, re-render the
 		// anchors through the representation renderer so the candidate
