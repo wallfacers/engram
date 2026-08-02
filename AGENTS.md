@@ -56,6 +56,11 @@ go run ./cmd/locomo-bench --data <locomo.json> --run-dir ./.locomo-run --retriev
 
 **Remote eval box (near-free answer/extract model)** — full-scale eval runs its answer+extract model on a **rented cloud GPU** (vllm, OpenAI-compatible) so the run is near-free (only tiny judge tokens paid). Runbook + what-changes-on-restart: [docs/operations/evaluation/remote-gpu-runbook.md](docs/operations/evaluation/remote-gpu-runbook.md). Non-negotiables: (1) **省钱 — 空闲必停**, it's metered; never leave it idle. (2) Its **SSH host/port/password rotate every restart** and vllm may need re-launching — credentials are supplied live by the maintainer and go **only** through env/tunnel, **never** into a tracked file, log, or tool response. (3) The box is eval infra only; the engine stays local-first/offline and never depends on it.
 
+**AutoDL disk layout & hygiene (hard)** — on the AutoDL box the **system disk is only ~30G** (overlay root) while the **data disk is `/root/autodl-tmp` (~250G, 33% used)**; `/autodl-pub` is a 14T read-only network share. Eval run dirs fill the system disk fast — 022/024/025/026 runs piled up ~22.4G on `/` (a corrupted `lme-store` was 8G alone; each run's `formal_calls.jsonl` is 400–500M). Rules:
+- **Every eval `--run-dir` lives under `/root/autodl-tmp/`, never under `/root`.** Models, venvs, and caches go on the data disk; the system disk holds only code.
+- Check `df -h /` before any eval; if >80%, `du -x --max-depth=1 /root` finds the top consumer (usually `NNN-runs/`, `.cache/`, `miniconda3/pkgs/`).
+- **Before deleting run artifacts, back up the small result files** (`*.json`, `*.log`, `*.sh`, and the `store/` dir) to `/root/autodl-tmp/eval-backup-<ts>/`; `rm -rf NNN-runs` is fine after that, since `formal_calls.jsonl` logs are regenerable. Keep `miniconda3`, the in-use HF/bge model cache, and the `engram/` working copy.
+
 ## Constitution — the five non-negotiables
 
 Full text: [.specify/memory/constitution.md](.specify/memory/constitution.md) (v1.0.0). Every spec/plan/PR review MUST check against these:
