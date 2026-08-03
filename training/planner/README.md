@@ -60,11 +60,22 @@ serve.sh lora ──▶ local_planner.go（--compiler-arm planner --planner-base
   （KEEP/EXTRACT）+ 双独立标签（A/B）+ 独立裁决 + per-conversation split（FR-012）+
   content_digest（FR-010）。候选未覆盖 → `gap` 负样本（FR-016 fail-closed）。
 
-## 待实现（T009–T013）
+## 工具状态（T009–T013 已落地，正式执行待数据/人工）
 
-- T009 公共语料辅路径（OASST1/ultrachat_200k 改造，跑同一 pipeline）。
-- T010 双标签 + 独立裁决正式执行（label.py 机制已就位）；T011 ≥200 分层随机人审；
-  T012 provenance/许可/污染/近重复/privacy 审计；T013 确定性重建验证。
+- **T009** `corpus_adapter.py`：ultrachat-jsonl / oasst-jsonl → convos.jsonl + 许可清单；
+  `data_build.py --gen-queries-only` 复用 query 生成。
+- **T010** label.py 双标签（labeler_a/b）+ 独立裁决（adjudicate）机制已就位。
+- **T011** `review.py`：分层随机抽样人审表 + 语义充分率 Wilson 95% CI 门（≥95% 且下界 ≥90%）。
+- **T012** `audit.py`：provenance/许可/schema/split/近重复/污染（8-gram benchmark 扫描）/privacy。
+- **T013** `rebuild_check.py`：两次独立构建样本集/split/content-digest/全局摘要一致率 100%。
+- 全部自测固化于 `test_tools.py`（14 测试）；正式数据构建（合成生成/语料下载）、人审、
+  两次构建验证需租机端点 + maintainer 参与。
+
+运行全部工具自测：
+
+```bash
+cd training/planner && python3 -m unittest test_tools -v
+```
 
 ## 运行（租机后，数据盘）
 

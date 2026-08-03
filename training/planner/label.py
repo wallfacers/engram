@@ -103,7 +103,7 @@ _REL_TIME_RE = re.compile(
     re.IGNORECASE,
 )
 _COUNT_RE = re.compile(r"\b(how many|what all|list|count|how much)\b", re.IGNORECASE)
-_UPDATE_RE = re.compile(r"\b(now|current|latest|recent|most recent|still|updated)\b", re.IGNORECASE)
+_UPDATE_RE = re.compile(r"\b(now|current(?:ly)?|latest|recent|most recent|still|updated)\b", re.IGNORECASE)
 _OPERAND_RE = re.compile(r"\b(count|compare|older than|newer than|more than|less than|before|after)\b", re.IGNORECASE)
 
 
@@ -249,6 +249,7 @@ def _sample_dict(line, label, split, build_version):
     """Emit the Training Example with content_digest over normalized JSON."""
     sample = {
         "id": f"{build_version}-{line['id']}",
+        "conversation_id": line["conversation_id"],
         "query": line["query"],
         "query_date": line["query_date"],
         "category": line["category"],

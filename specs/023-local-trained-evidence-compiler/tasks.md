@@ -38,13 +38,23 @@
   **[X] 2026-08-03：data_build.py（turn_id+query/gold 标注）、`cmd/planner-build/`（灌入+检索
   冻结候选+gold coverage，单测/集成/CLI smoke 绿）、`training/planner/label.py`（Need 解析+
   Actions 规则/oracle+双标签机制）落地；双标签正式执行在 T010**
-- [ ] T009 公共语料辅路径：OASST1（Apache-2.0）/ ultrachat_200k（MIT）改造，跑同一 pipeline；
-  逐语料确认许可与隐私。
-- [ ] T010 双独立标签 + 独立裁决：两判不一致 → 裁决唯一，否则排除（FR-009）。
-- [ ] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。
-- [ ] T012 审计：provenance/许可/污染/近重复/privacy 全绿；LoCoMo/LongMemEval test 内容、
+- [X] T009 公共语料辅路径：OASST1（Apache-2.0）/ ultrachat_200k（MIT）改造，跑同一 pipeline；
+  逐语料确认许可与隐私。**[X] 2026-08-03 工具落地：`corpus_adapter.py`（ultrachat-jsonl/oasst-jsonl
+  适配 + 许可清单 manifest）+ `data_build.py --gen-queries-only` 复用 query 生成；测试绿。
+  正式执行（下载语料 + 跑 pipeline）待租机/网络**
+- [X] T010 双独立标签 + 独立裁决：两判不一致 → 裁决唯一，否则排除（FR-009）。
+  **[X] 2026-08-03 机制落地：label.py `labeler_a/b`（独立停用词/cap）+ `adjudicate`（并集/保守
+  裁决），差异样本裁决或排除；正式双标签统计待数据构建运行**
+- [X] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。
+  **[X] 2026-08-03 工具落地：`review.py`（分层随机抽样人审表 + Wilson 95% CI 充分率门）；测试绿。
+  实际人审待 maintainer 参与 + 数据**
+- [X] T012 审计：provenance/许可/污染/近重复/privacy 全绿；LoCoMo/LongMemEval test 内容、
   任何 namespace 数据、付费 teacher 零进入（FR-011/013/014）。
-- [ ] T013 确定性重建验证：同输入构建两次，样本/split/全局摘要一致率 100%（FR-010）。
+  **[X] 2026-08-03 工具落地：`audit.py`（provenance/许可/schema/split/近重复/污染 8-gram/privacy，
+  含 benchmark 扫描）；测试绿。正式审计待数据构建**
+- [X] T013 确定性重建验证：同输入构建两次，样本/split/全局摘要一致率 100%（FR-010）。
+  **[X] 2026-08-03 工具落地：`rebuild_check.py`（样本集/split/content-digest/全局摘要对比，
+  100% 才 OK）；测试绿。正式两次构建验证待数据**
 
 ## Phase 3 — 训练（租用 24 GiB 单卡）
 

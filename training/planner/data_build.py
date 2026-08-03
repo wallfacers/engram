@@ -191,6 +191,23 @@ def _parse_query(text):
 
 # --------------------------------------------------------------------- main
 
+def annotate_conv(conv, cfg):
+    """Attach annotated queries to a conversation (shared by the synthetic path
+    and --gen-queries-only). Returns (conversation, kept, dropped)."""
+    valid_turn_ids = {t["turn_id"] for s in conv["sessions"] for t in s["turns"]}
+    queries = gen_queries(cfg, conv)
+    kept = []
+    dropped = 0
+    for q in queries:
+        if set(q["gold_source_turn_ids"]) <= valid_turn_ids:
+            kept.append(q)
+        else:
+            dropped += 1
+    if kept:
+        conv["queries"] = kept
+    return conv, len(kept), dropped
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--base-url", default=os.environ.get("PLANNER_BASE_URL", "http://localhost:8000/v1"))
@@ -199,13 +216,34 @@ def main():
     ap.add_argument("--sessions", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="data/raw/convos.jsonl")
+    # Read an existing convos.jsonl (e.g. from corpus_adapter.py) and annotate
+    # queries in place — same generation path as the synthetic build (T009).
+    ap.add_argument("--gen-queries-only", default=None, metavar="CONVOS.JSONL")
     args = ap.parse_args()
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
     cfg = {"base_url": args.base_url, "model": args.model}
+
+    if args.gen_queries_only:
+        in_path = args.gen_queries_only
+        out_path = args.out if args.out != "data/raw/convos.jsonl" else in_path
+        total = kept = dropped = 0
+        with open(in_path) as f:
+            convos = [json.loads(line) for line in f if line.strip()]
+        for conv in convos:
+            _, k, dr = annotate_conv(conv, cfg)
+            kept += k
+            dropped += dr
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        with open(out_path, "w") as f:
+            for c in convos:
+                f.write(json.dumps(c, ensure_ascii=False) + "\n")
+        print(f"annotated {kept} queries over {len(convos)} conversations "
+              f"({dropped} dropped: bad turn ids) → {out_path}", file=sys.stderr)
+        return 0
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     rng = random.Random(args.seed)
 
-    seen = set()
     n_queries = 0
     n_dropped = 0
     with open(args.out, "w") as f:
@@ -213,18 +251,10 @@ def main():
             conv_id = f"{args.seed}-{i:05d}"
             persona = rng.choice(PERSONAS)
             sessions = gen_sessions(cfg, persona, conv_id, args.sessions, args.seed)
-            conv = {"conversation_id": conv_id, "persona": persona, "sessions": sessions}
-            valid_turn_ids = {t["turn_id"] for s in sessions for t in s["turns"]}
-            queries = gen_queries(cfg, conv)
-            kept = []
-            for q in queries:
-                if set(q["gold_source_turn_ids"]) <= valid_turn_ids:
-                    kept.append(q)
-                else:
-                    n_dropped += 1
-            if kept:
-                conv["queries"] = kept
-            n_queries += len(kept)
+            conv, kept, dropped = annotate_conv(
+                {"conversation_id": conv_id, "persona": persona, "sessions": sessions}, cfg)
+            n_queries += kept
+            n_dropped += dropped
             f.write(json.dumps(conv, ensure_ascii=False) + "\n")
             if i % 10 == 0:
                 print(f"generated {i}/{args.convos}", file=sys.stderr)
