@@ -22,13 +22,13 @@
 
 ## Phase 1 — 设计与契约
 
-- [ ] T005 写 `data-model.md`：训练样本 schema（query + 冻结 candidate 摘要 + source lineage +
+- [X] T005 写 `data-model.md`：训练样本 schema（query + 冻结 candidate 摘要 + source lineage +
   期望 Need/actions + 来源/许可/split/构建版本 + 内容摘要）；proposal 目标标签由 fixed-gold
-  oracle + 规则确定（无新 LLM judge）。
-- [ ] T006 写 `contracts/`：local_planner 接入形状（sidecar URL、合同版本校验、模型摘要核对、
-  超时语义、cancellation 传播）。
-- [ ] T007 冻结三臂配对协议：deterministic / prompt-only / supervised；同 store、候选逐字节
-  一致、只差训练状态；validity 与统计判据（FR-028/029）。
+  oracle + 规则确定（无新 LLM judge）。**[X] 2026-08-03 核对完整（schema §1、标签 §2、pipeline §3、split §4、冻结 §5）**
+- [X] T006 写 `contracts/`：local_planner 接入形状（sidecar URL、合同版本校验、模型摘要核对、
+  超时语义、cancellation 传播）。**[X] 2026-08-03 → [planner-contract.md](contracts/planner-contract.md)（023.v1）**
+- [X] T007 冻结三臂配对协议：deterministic / prompt-only / supervised；同 store、候选逐字节
+  一致、只差训练状态；validity 与统计判据（FR-028/029）。**[X] 2026-08-03 → [paired-eval-protocol.md](contracts/paired-eval-protocol.md)（023.v1）**
 
 ## Phase 2 — 数据构建（离线）
 
