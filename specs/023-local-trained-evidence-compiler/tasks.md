@@ -6,19 +6,19 @@
 
 ## Phase 0 — 依赖收据 + 补全 + residual 量化（无 GPU）
 
-- [ ] T001 [P] 生成 Dependency Receipt（最小充分集，Amendment 1）：记录 022 Compiler/Planner
+- [X] T001 [P] 生成 Dependency Receipt（最小充分集，Amendment 1）：记录 022 Compiler/Planner
   合同版本与摘要、LoCoMo B1（85.19%，`sha256:263b52b6…`）、fixed-gold oracle 可用性、
   `local_planner.go` 缺口状态、Primary Cohort residual 量化结果 → 唯一 `READY`/
-  `NOT_NEEDED`/`NOT_ELIGIBLE`/`BLOCKED` verdict 到 `research.md`。
-- [ ] T002 [P] 实现 `cmd/locomo-bench/local_planner.go`（补全 022 T070）：可替换本地 Planner
+  `NOT_NEEDED`/`NOT_ELIGIBLE`/`BLOCKED` verdict 到 `research.md`。**[X] 2026-08-03 → `READY`**
+- [X] T002 [P] 实现 `cmd/locomo-bench/local_planner.go`（补全 022 T070）：可替换本地 Planner
   adapter——sidecar 接入（vllm/ollama，复用 provider 抽象）、只提议 Need/actions、无
   Store/Search/Bundle 写/answer 权限、超时/崩溃/合同版本漂移 fail-closed 退回确定性 Compiler。
-  先写失败测试（`local_planner_test.go`，mock sidecar + 越权/非法/无来源/超时夹具）。
-- [ ] T003 [P] 量化 Primary Cohort residual：LoCoMo B1 正式协议 + fixed-gold oracle 复算，
+  先写失败测试（`local_planner_test.go`，mock sidecar + 越权/非法/无来源/超时夹具）。**[X] `2ed473a`**
+- [X] T003 [P] 量化 Primary Cohort residual：LoCoMo B1 正式协议 + fixed-gold oracle 复算，
   冻结 compiler-eligible cohort（evidence 足够 + oracle 可答 + deterministic 未答对），产出逐题
-  清单 + 类别分布 + 短差（相对 85.19%）。residual 为空 → 记 `NOT_NEEDED` 并停。
-- [ ] T004 [P] 冻结底模：Qwen2.5-7B-Instruct（Apache-2.0），记录 tokenizer/chat-template
-  摘要；validation 冻结前可换同族 3B/1.5B。
+  清单 + 类别分布 + 短差（相对 85.19%）。residual 为空 → 记 `NOT_NEEDED` 并停。**[X] 2026-08-03 → residual 149 题，verdict `READY`**（见 [residual-cohort.json](residual-cohort.json)；oracle 完整跑通需先修复 3 类 bug，见 research.md）
+- [X] T004 [P] 冻结底模：Qwen2.5-7B-Instruct（Apache-2.0），记录 tokenizer/chat-template
+  摘要；validation 冻结前可换同族 3B/1.5B。**[X] research.md P0.4 已记录**
 
 ## Phase 1 — 设计与契约
 
