@@ -765,6 +765,14 @@ func run() error {
 	extractCall := pipeline.ModelCaller(gate(sem, newModelCallerWithUsage(prov, extractModel, opt.maxTokens, "extract", recordUsage)))
 
 	if opt.fixedGoldOracle {
+		// The fixed-gold oracle is diagnostic-only — never a formal score arm — so
+		// its answer/judge calls may transparently retry once to absorb transient
+		// infrastructure failures. Without this, one dead relay / vllm hiccup on a
+		// single question fails the entire fail-closed run (observed 2026-08-03:
+		// the same input succeeded on repetition 1 and failed on repetition 2).
+		// B1's formal one-call contract above is untouched.
+		answerUsageCall = gateUsage(sem, answerProviderCall)
+		judgeUsageCall = gateUsage(sem, judgeProviderCall)
 		summary, err := runFixedGoldOracleDataset(
 			context.Background(), *opt.formalProtocol, opt, convs, answerUsageCall, judgeUsageCall,
 		)

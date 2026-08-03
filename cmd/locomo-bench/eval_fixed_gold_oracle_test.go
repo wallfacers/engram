@@ -1046,3 +1046,131 @@ func fixedGoldHasReason(reasons []string, want string) bool {
 	}
 	return false
 }
+
+func TestFixedGoldSplitEvidenceDatasetIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"single", []string{"D8:6"}, []string{"D8:6"}},
+		{"packed semicolon", []string{"D8:6; D9:17"}, []string{"D8:6", "D9:17"}},
+		{"packed comma", []string{"A1, B2"}, []string{"A1", "B2"}},
+		{"mixed with blanks", []string{"X1 ; Y2,", " Z3 "}, []string{"X1", "Y2", "Z3"}},
+		{"blank only", []string{"  "}, []string{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := fixedGoldSplitEvidenceDatasetIDs(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %v want %v", got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// conv-0-q-37 的真实数据集标注把两个 source 打包进一个元素（"D8:6; D9:17"）。
+// 拆分后必须能解析出两个 evidence；拆分前会 unresolvable 并让整个 oracle run 失效。
+func TestFixedGoldSplitThenResolvePackedEvidenceAnnotation(t *testing.T) {
+	packed := []string{"D8:6; D9:17"}
+	split := fixedGoldSplitEvidenceDatasetIDs(packed)
+	if len(split) != 2 || split[0] != "D8:6" || split[1] != "D9:17" {
+		t.Fatalf("split = %v, want [D8:6 D9:17]", split)
+	}
+	evidenceByDatasetID := map[string]string{
+		"D8:6":  "evidence-a",
+		"D9:17": "evidence-b",
+	}
+	resolved, unresolved, err := resolveDatasetSourceIDs(split, evidenceByDatasetID)
+	if err != nil {
+		t.Fatalf("resolve err: %v", err)
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("unresolved = %v, want empty (packed annotation must resolve both sources)", unresolved)
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("resolved = %v, want 2", resolved)
+	}
+	// 不拆分的对照：打包元素直接进 resolve 必然 unresolved。
+	rawResolved, rawUnresolved, err := resolveDatasetSourceIDs(packed, evidenceByDatasetID)
+	if err != nil {
+		t.Fatalf("raw resolve err: %v", err)
+	}
+	if len(rawUnresolved) != 1 || rawUnresolved[0] != "D8:6; D9:17" {
+		t.Fatalf("raw unresolved = %v, want [D8:6; D9:17] (demonstrates the bug split fixes)", rawUnresolved)
+	}
+	if len(rawResolved) != 0 {
+		t.Fatalf("raw resolved = %v, want 0", rawResolved)
+	}
+}
+
+func TestFixedGoldSplitEvidenceDatasetIDsSpaceAndZeroPad(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"space separated multi", []string{"D9:1 D4:4 D4:6"}, []string{"D9:1", "D4:4", "D4:6"}},
+		{"leading zero turn", []string{"D30:05"}, []string{"D30:5"}},
+		{"mixed separators", []string{"A1;B2 C3", "D4"}, []string{"A1", "B2", "C3", "D4"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := fixedGoldSplitEvidenceDatasetIDs(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %v want %v", got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// 数据集证据标注的真实变体：空格打包、前导零、缺失/破损 source。
+// 空格打包与前导零必须解析成功；缺失/破损 source 的题必须归入 Unresolved 跳过。
+func TestFixedGoldUnanswerableQuestionIDsClassifiesDatasetAnnotations(t *testing.T) {
+	conv := conversation{
+		ID: 0,
+		Sessions: []session{{Turns: []turn{
+			{DiaID: "D8:6"},
+			{DiaID: "D9:17"},
+			{DiaID: "D30:5"},
+		}}},
+		QA: []locomoQA{
+			{QuestionID: "q-empty", Evidence: nil},
+			{QuestionID: "q-packed", Evidence: []string{"D8:6; D9:17"}},
+			{QuestionID: "q-space", Evidence: []string{"D8:6 D9:17"}},
+			{QuestionID: "q-zeropad", Evidence: []string{"D30:05"}},
+			{QuestionID: "q-missing", Evidence: []string{"D8:6", "D10:19"}},
+			{QuestionID: "q-malformed", Evidence: []string{"D"}},
+		},
+	}
+	skipped := fixedGoldUnanswerableQuestionIDs([]conversation{conv})
+	gotEmpty := map[string]bool{}
+	for _, id := range skipped.Empty {
+		gotEmpty[id] = true
+	}
+	gotUnresolved := map[string]bool{}
+	for _, id := range skipped.Unresolved {
+		gotUnresolved[id] = true
+	}
+	if len(gotEmpty) != 1 || !gotEmpty["q-empty"] {
+		t.Fatalf("Empty = %v, want [q-empty]", skipped.Empty)
+	}
+	if len(gotUnresolved) != 2 || !gotUnresolved["q-missing"] || !gotUnresolved["q-malformed"] {
+		t.Fatalf("Unresolved = %v, want [q-missing q-malformed]", skipped.Unresolved)
+	}
+	for _, id := range []string{"q-packed", "q-space", "q-zeropad"} {
+		if gotEmpty[id] || gotUnresolved[id] {
+			t.Fatalf("%s must resolve, Empty=%v Unresolved=%v", id, skipped.Empty, skipped.Unresolved)
+		}
+	}
+}

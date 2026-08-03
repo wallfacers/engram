@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -111,34 +112,84 @@ type fixedGoldEvidenceReader interface {
 	GetMany(context.Context, []string) (map[string]memory.Evidence, error)
 }
 
-// fixedGoldEmptyEvidenceQuestionIDs returns dataset question IDs whose gold
-// evidence annotation is empty. The fixed-gold oracle is defined over gold
-// evidence: a question with no dataset evidence cannot be reconstructed as an
-// answer input, so these are skipped (excluded from the diagnostic denominator)
-// rather than failing the whole run. B1 is unaffected — it retrieves evidence
-// from the conversation store instead of relying on the dataset annotation.
-func fixedGoldEmptyEvidenceQuestionIDs(convs []conversation) []string {
-	var skipped []string
+// fixedGoldSkippedQuestions splits skipped dataset questions by why they cannot
+// be reconstructed into a complete gold-answer input.
+type fixedGoldSkippedQuestions struct {
+	Empty      []string // evidence annotation is empty
+	Unresolved []string // annotation references a source missing from the conversation
+}
+
+func (s fixedGoldSkippedQuestions) All() []string {
+	all := make([]string, 0, len(s.Empty)+len(s.Unresolved))
+	all = append(all, s.Empty...)
+	all = append(all, s.Unresolved...)
+	return all
+}
+
+// fixedGoldConversationDiaIDs returns the set of canonical dataset source IDs
+// present in a conversation's turns (normalized the same way evidence IDs are),
+// used to detect evidence annotations that reference a missing/malformed source.
+func fixedGoldConversationDiaIDs(conv conversation) map[string]bool {
+	diaIDs := make(map[string]bool)
+	for _, session := range conv.Sessions {
+		for _, t := range session.Turns {
+			for _, id := range fixedGoldSplitEvidenceDatasetIDs([]string{t.DiaID}) {
+				diaIDs[id] = true
+			}
+		}
+	}
+	return diaIDs
+}
+
+// fixedGoldEvidenceComplete reports whether a question's gold evidence annotation
+// can be fully resolved against the conversation: non-empty and every referenced
+// source exists.
+func fixedGoldEvidenceComplete(diaIDs map[string]bool, qa locomoQA) bool {
+	ids := fixedGoldSplitEvidenceDatasetIDs(qa.Evidence)
+	if len(ids) == 0 {
+		return false
+	}
+	for _, id := range ids {
+		if !diaIDs[id] {
+			return false
+		}
+	}
+	return true
+}
+
+// fixedGoldUnanswerableQuestionIDs returns dataset question IDs whose gold
+// evidence cannot be reconstructed into a complete answer input — either the
+// annotation is empty or it references a source that does not exist in the
+// conversation (missing turn / malformed id). These are skipped (excluded from
+// the diagnostic denominator) rather than failing the whole run. B1 is
+// unaffected — it retrieves evidence from the conversation store instead of
+// relying on the dataset annotation.
+func fixedGoldUnanswerableQuestionIDs(convs []conversation) fixedGoldSkippedQuestions {
+	var skipped fixedGoldSkippedQuestions
 	for _, conv := range convs {
+		diaIDs := fixedGoldConversationDiaIDs(conv)
 		for _, qa := range conv.QA {
-			if len(qa.Evidence) == 0 {
-				skipped = append(skipped, qa.QuestionID)
+			switch {
+			case len(fixedGoldSplitEvidenceDatasetIDs(qa.Evidence)) == 0:
+				skipped.Empty = append(skipped.Empty, qa.QuestionID)
+			case !fixedGoldEvidenceComplete(diaIDs, qa):
+				skipped.Unresolved = append(skipped.Unresolved, qa.QuestionID)
 			}
 		}
 	}
 	return skipped
 }
 
-// fixedGoldFilterEmptyEvidenceQuestions drops any selected question that has no
-// dataset gold evidence, keeping the in-memory record order aligned with the
-// expected set built by buildFixedGoldExpectedQuestions.
-func fixedGoldFilterEmptyEvidenceQuestions(selected []selectedQuestion) []selectedQuestion {
+// fixedGoldFilterUnanswerableQuestions drops any selected question whose gold
+// evidence cannot be fully resolved, keeping the in-memory record order aligned
+// with the expected set built by buildFixedGoldExpectedQuestions.
+func fixedGoldFilterUnanswerableQuestions(conv conversation, selected []selectedQuestion) []selectedQuestion {
+	diaIDs := fixedGoldConversationDiaIDs(conv)
 	filtered := selected[:0]
 	for _, sq := range selected {
-		if len(sq.QA.Evidence) == 0 {
-			continue
+		if fixedGoldEvidenceComplete(diaIDs, sq.QA) {
+			filtered = append(filtered, sq)
 		}
-		filtered = append(filtered, sq)
 	}
 	return filtered
 }
@@ -227,7 +278,8 @@ type evalFixedGoldOracleSummary struct {
 	AnswerCalls         int                           `json:"answer_calls"`
 	JudgeCalls          int                           `json:"judge_calls"`
 	Valid               bool                          `json:"valid"`
-	EmptyEvidenceSkipped int                          `json:"empty_evidence_skipped,omitempty"`
+	EmptyEvidenceSkipped      int `json:"empty_evidence_skipped,omitempty"`
+	UnresolvedEvidenceSkipped int `json:"unresolved_evidence_skipped,omitempty"`
 	InvalidReasons      []string                      `json:"invalid_reasons,omitempty"`
 	OracleDiagnostic    *evalFixedGoldOracleAggregate `json:"oracle_diagnostic,omitempty"`
 }
@@ -443,7 +495,7 @@ func runFixedGoldOracleQuestionWithJournal(
 	if reason != "" {
 		return fail(reason)
 	}
-	diagnostic.DatasetSourceIDs = fixedGoldOrderedDatasetSourceIDs(qa.Evidence)
+	diagnostic.DatasetSourceIDs = fixedGoldOrderedDatasetSourceIDs(fixedGoldSplitEvidenceDatasetIDs(qa.Evidence))
 	diagnostic.EmptyEvidenceAbstention = len(evidenceIDs) == 0
 
 	input := buildFixedGoldAnswerInput(protocol, opt, qa, evidenceIDs, evidence)
@@ -477,6 +529,7 @@ func runFixedGoldOracleQuestionWithJournal(
 			return fail("call_journal_failed")
 		}
 		if answerErr != nil {
+			fmt.Fprintf(os.Stderr, "fixed-gold oracle %s run %d answer failed: %v\n", qa.QuestionID, runIndex, answerErr)
 			return fail("answer_failed")
 		}
 		judgeSystem := judgeSystemPromptFor(opt.judgeAlignmentMode())
@@ -501,6 +554,7 @@ func runFixedGoldOracleQuestionWithJournal(
 			return fail("call_journal_failed")
 		}
 		if judgeErr != nil {
+			fmt.Fprintf(os.Stderr, "fixed-gold oracle %s run %d judge failed: %v\n", qa.QuestionID, runIndex, judgeErr)
 			return fail("judge_failed")
 		}
 		correct := parseJudgeVerdict(verdict)
@@ -552,7 +606,8 @@ func loadFixedGoldEvidence(
 	if reader == nil {
 		return nil, nil, "gold_evidence_unavailable"
 	}
-	resolved, unresolved, err := resolveDatasetSourceIDs(qa.Evidence, evidenceByDatasetID)
+	evidenceIDs := fixedGoldSplitEvidenceDatasetIDs(qa.Evidence)
+	resolved, unresolved, err := resolveDatasetSourceIDs(evidenceIDs, evidenceByDatasetID)
 	if err != nil || len(unresolved) > 0 || len(resolved) == 0 {
 		return nil, nil, "gold_evidence_unresolved"
 	}
@@ -575,14 +630,42 @@ func loadFixedGoldEvidence(
 			return nil, nil, "gold_evidence_corrupt"
 		}
 	}
-	for _, rawDatasetID := range qa.Evidence {
-		datasetID := strings.TrimSpace(rawDatasetID)
+	for _, datasetID := range evidenceIDs {
 		sourceID := strings.TrimSpace(evidenceByDatasetID[datasetID])
 		if sourceID == "" || strings.TrimSpace(sources[sourceID].ExternalSourceID) != datasetID {
 			return nil, nil, "gold_evidence_mapping_mismatch"
 		}
 	}
 	return resolved, sources, ""
+}
+
+// fixedGoldEvidenceIDSplitRE separates packed dataset source IDs. LoCoMo
+// evidence elements pack multiple IDs joined by ';' (e.g. "D8:6; D9:17") or
+// spaces (e.g. "D9:1 D4:4 D4:6"); some carry a leading-zero turn like "D30:05".
+var (
+	fixedGoldEvidenceIDSplitRE = regexp.MustCompile(`[\s;,\x00]+`)
+	fixedGoldEvidenceZeroPadRE = regexp.MustCompile(`:0+([0-9]+)$`)
+)
+
+// fixedGoldSplitEvidenceDatasetIDs normalizes dataset evidence annotations into
+// one canonical dataset source ID per element: packed multi-ID elements are
+// split on whitespace/';'/',' and a leading-zero turn ("D30:05") is normalized
+// to "D30:5". Splitting before lineage resolution lets a packed annotation
+// resolve to every underlying source instead of one unresolvable ID that would
+// otherwise fail the whole oracle run.
+func fixedGoldSplitEvidenceDatasetIDs(sourceIDs []string) []string {
+	out := make([]string, 0, len(sourceIDs))
+	for _, raw := range sourceIDs {
+		for _, part := range fixedGoldEvidenceIDSplitRE.Split(raw, -1) {
+			id := strings.TrimSpace(part)
+			if id == "" {
+				continue
+			}
+			id = fixedGoldEvidenceZeroPadRE.ReplaceAllString(id, ":$1")
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func fixedGoldOrderedDatasetSourceIDs(sourceIDs []string) []string {
@@ -880,10 +963,11 @@ func runFixedGoldOracleDataset(
 	// The oracle is defined over gold evidence. Dataset questions that carry no
 	// evidence annotation (LoCoMo has a few) cannot be reconstructed as answer
 	// inputs, so they are skipped and excluded from the diagnostic denominator.
-	skippedIDs := fixedGoldEmptyEvidenceQuestionIDs(convs)
+	skipped := fixedGoldUnanswerableQuestionIDs(convs)
+	skippedIDs := skipped.All()
 	questionsExpected := len(expectedIDs) - len(skippedIDs)
 	if questionsExpected <= 0 {
-		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle has no questions after skipping empty-evidence questions")
+		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle has no questions after skipping unanswerable-evidence questions")
 	}
 	if len(fixedGoldOrderedDatasetSourceIDs(expectedIDs)) != len(expectedIDs) {
 		return evalFixedGoldOracleSummary{}, fmt.Errorf("fixed-gold oracle question IDs are blank or duplicated")
@@ -907,7 +991,7 @@ func runFixedGoldOracleDataset(
 	records := make([]evalFixedGoldOracleDiagnostic, 0, questionsExpected)
 	stopAfterConversation := false
 	for _, conv := range convs {
-		selected := fixedGoldFilterEmptyEvidenceQuestions(selectQuestions(conv, opt))
+		selected := fixedGoldFilterUnanswerableQuestions(conv, selectQuestions(conv, opt))
 		if len(selected) == 0 {
 			continue
 		}
@@ -1036,7 +1120,7 @@ func buildFixedGoldExpectedQuestions(
 ) ([]fixedGoldExpectedQuestion, error) {
 	expected := make([]fixedGoldExpectedQuestion, 0, protocol.Benchmark.QuestionCount)
 	for _, conv := range convs {
-		selected := fixedGoldFilterEmptyEvidenceQuestions(selectQuestions(conv, opt))
+		selected := fixedGoldFilterUnanswerableQuestions(conv, selectQuestions(conv, opt))
 		if len(selected) == 0 {
 			continue
 		}
@@ -1055,7 +1139,11 @@ func buildFixedGoldExpectedQuestions(
 		for _, selectedQuestion := range selected {
 			qa := selectedQuestion.QA
 			item := fixedGoldExpectedQuestion{
-				QA: qa, DatasetSourceIDs: fixedGoldOrderedDatasetSourceIDs(qa.Evidence),
+				// The expected set must canonicalize dataset evidence the same way
+				// the runtime record does (split packed annotations, normalize
+				// leading-zero turns); otherwise the final reconstruction check
+				// flags a phantom source drift on every packed annotation.
+				QA: qa, DatasetSourceIDs: fixedGoldOrderedDatasetSourceIDs(fixedGoldSplitEvidenceDatasetIDs(qa.Evidence)),
 				EmptyAbstention: len(qa.Evidence) == 0 && fixedGoldAllowsEmptyEvidence(protocol, qa),
 			}
 			evidenceIDs, evidence, reason := loadFixedGoldEvidence(
@@ -1269,13 +1357,15 @@ func validateFixedGoldOracleReadback(
 		evalJSONDigest(fullIDs) != protocol.Benchmark.QuestionIDsDigest {
 		invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
 	}
-	skippedIDs := fixedGoldEmptyEvidenceQuestionIDs(convs)
-	summary.EmptyEvidenceSkipped = len(skippedIDs)
+	skipped := fixedGoldUnanswerableQuestionIDs(convs)
+	skippedIDs := skipped.All()
+	summary.EmptyEvidenceSkipped = len(skipped.Empty)
+	summary.UnresolvedEvidenceSkipped = len(skipped.Unresolved)
 	if len(expectedIDs)+len(skippedIDs) != len(fullIDs) {
 		invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
 	}
-	for _, skipped := range skippedIDs {
-		if !fixedGoldContainsString(fullIDs, skipped) {
+	for _, skippedID := range skippedIDs {
+		if !fixedGoldContainsString(fullIDs, skippedID) {
 			invalidateFixedGoldSummary(&summary, "denominator_or_order_drift")
 		}
 	}
