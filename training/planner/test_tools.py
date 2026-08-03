@@ -115,6 +115,45 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(assign_split("c7", 42), assign_split("c7", 42))
 
 
+class TestLabelMain(unittest.TestCase):
+    def _cline(self, cid, query, gold, candidates):
+        """A candidates.jsonl-shaped row (planner-build output)."""
+        return {
+            "id": f"023-btest-r1-{cid}-q0", "conversation_id": cid,
+            "query": query, "query_date": "2026-01-01",
+            "category": "single-hop", "query_digest": "t",
+            "gold_answer": gold, "gold_source_turn_ids": ["t0"],
+            "candidates": candidates, "sources": {},
+            "gold_coverage": {"gold_source_evidence_ids": [], "candidate_evidence_union": [],
+                              "covered_source_count": 0, "candidate_covered": False},
+            "build_version": "023-btest-r1",
+        }
+
+    def test_main_excludes_empty_candidates(self):
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        with tempfile.TemporaryDirectory() as d:
+            cand = _os.path.join(d, "c.jsonl")
+            rows = [
+                self._cline("c0", "What project does Dana maintain?", "homelab", []),
+                self._cline("c1", "When did Dana buy a server?", "May 2026",
+                            [{"id": "e1", "kind": "atomic_fact", "rank": 0, "score": 0.5,
+                              "text": "Dana bought a server.", "text_digest": "t", "source_ids": ["s1"]}]),
+            ]
+            write_jsonl(cand, rows)
+            out = _os.path.join(d, "train.jsonl")
+            r = _sp.run([_sys.executable, _os.path.join(here, "label.py"),
+                         "--candidates", cand, "--out", out,
+                         "--build-version", "023-btest-r1"],
+                        capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            kept = [json.loads(l) for l in open(out) if l.strip()]
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(kept[0]["conversation_id"], "c1")
+
+
 class TestDualLabelerAdjudicate(unittest.TestCase):
     def test_adjudication_union(self):
         line = sample("c0", "What project does Dana maintain?", "homelab")

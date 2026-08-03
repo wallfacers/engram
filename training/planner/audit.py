@@ -20,8 +20,12 @@ Checks:
   4. split      — only train/validation; per-conversation isolation (FR-012).
   5. near-dup   — cross-split conversation pairs whose character 6-gram Jaccard
      similarity exceeds a threshold are blocking (FR-012 whole-group rule).
-  6. contamination — sample query/gold_answer text 6-grams vs the benchmark
-     content (LoCoMo/LongMemEval-S) — any shared 6-gram is blocking (FR-011).
+  6. contamination — sample query/gold_answer/candidate text 20-grams vs the
+     benchmark content (LoCoMo/LongMemEval-S) — a sustained shared 20-gram
+     overlap (>= 15, i.e. a verbatim fragment of roughly a clause) is blocking
+     (FR-011). 20-character grams avoid false positives from common English word
+     sequences (e.g. "for the") and question templates ("when did sam start w"),
+     while still catching a verbatim copied sentence (30+ shared grams).
   7. privacy    — no namespace keys, no obvious PII patterns (FR-013).
 
 Exit non-zero when any blocking item is non-zero.
@@ -55,9 +59,10 @@ def ngram(text, n=6):
 
 
 def build_benchmark_ngrams(paths):
-    """Extract 8-grams from benchmark question/answer/evidence text. 8-grams are
-    long enough that common names/words do not collide, yet short enough to catch
-    a verbatim copied sentence (FR-011)."""
+    """Extract 20-grams from benchmark question/answer/evidence text. 20-char
+    grams are long enough that common English word sequences (\"for the\", \"plan
+    to\") do not collide across unrelated dialogs, yet short enough to catch a
+    verbatim copied sentence (FR-011)."""
     grams = set()
     for path in paths or []:
         if not os.path.exists(path):
@@ -71,9 +76,9 @@ def build_benchmark_ngrams(paths):
                 for field in ("question", "answer"):
                     v = q.get(field)
                     if isinstance(v, str):
-                        grams |= ngram(v, n=8)
+                        grams |= ngram(v, n=20)
                 for e in q.get("evidence", []) or []:
-                    grams |= ngram(str(e), n=8)
+                    grams |= ngram(str(e), n=20)
     return grams
 
 
@@ -162,16 +167,18 @@ def audit(train_path, benchmark_paths, build_version=None):
 
     report["near_dup"]["hits"] = near_dup_cross_split(samples)
 
-    # contamination: shared 8-grams between any sample text and benchmark.
-    # A single shared 8-gram is noise; a sustained overlap (>= 3) is a verbatim
-    # fragment from the benchmark (FR-011).
+    # contamination: shared 20-grams between any sample text and benchmark.
+    # 20-grams remove common-word noise ("for the"), but question templates like
+    # "when did sam start w" still collide across unrelated dialogs (count ~3-12).
+    # A verbatim copied sentence shares 30+ grams, so >= 15 separates real copied
+    # content (>= ~35 contiguous chars) from template coincidence (FR-011).
     if bn:
         for s in samples:
             text = s.get("query", "") + " " + json.dumps(s.get("gold_answer", "") if "gold_answer" in s else "", ensure_ascii=False)
             for c in s.get("candidates", []):
                 text += " " + c.get("text", "")
-            shared = ngram(text, n=8) & bn
-            if len(shared) >= 3:
+            shared = ngram(text, n=20) & bn
+            if len(shared) >= 15:
                 report["contamination"]["hits"].append({
                     "id": s.get("id"), "shared_ngram_count": len(shared),
                     "sample_ngram": next(iter(shared)),

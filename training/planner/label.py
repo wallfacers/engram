@@ -309,6 +309,12 @@ def main():
                 raise SystemExit(
                     f"build_version mismatch: line has {ln.get('build_version')!r}, expected {args.build_version!r}"
                 )
+            if not ln.get("candidates"):
+                # No retrieved candidates at all: nothing for the Planner to
+                # decide on, and audit treats an empty candidates list as a
+                # missing required field (FR-014). Exclude.
+                excluded += 1
+                continue
             a = labeler_a(ln)
             b = labeler_b(ln)
             label, changed = adjudicate(a, b)
