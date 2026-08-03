@@ -15,6 +15,7 @@ import unittest
 
 import audit as audit_mod
 import corpus_adapter as ca
+import data_build as db
 import rebuild_check as rc
 import review as rv
 from label import (STOPWORDS_A, adjudicate, assign_split, label_actions,
@@ -145,6 +146,30 @@ class TestRebuildCheck(unittest.TestCase):
             ok, report = rc.compare(rc.load_lines(p1), rc.load_lines(p2))
             self.assertFalse(ok)
             self.assertEqual(report["split_assignment"]["mismatch_count"], 1)
+
+
+class TestDataBuildParse(unittest.TestCase):
+    """data_build.py model-output parsing must tolerate JSON arrays, JSONL (the
+    Qwen2.5-7B behavior under the full prompt), fences, and surrounding prose."""
+
+    def test_parse_turns_jsonl_and_array(self):
+        t = db._parse_turns('{"speaker":"assistant","text":"Hi"}\n'
+                            '{"speaker":"user","text":"Sure"}')
+        self.assertEqual([x["speaker"] for x in t], ["assistant", "user"])
+        t2 = db._parse_turns('[{"speaker":"user","text":"a"},{"speaker":"assistant","text":"b"}]')
+        self.assertEqual([x["text"] for x in t2], ["a", "b"])
+
+    def test_parse_turns_fenced(self):
+        t = db._parse_turns('```json\n[{"speaker":"user","text":"x"}]\n```')
+        self.assertEqual(t[0]["text"], "x")
+
+    def test_parse_query_embedded_and_jsonl(self):
+        q = db._parse_query('here is my answer {"question":"q","answer":"a",'
+                            '"source_turn_ids":["t0-0-0"]} hope that helps')
+        self.assertEqual(q["query"], "q")
+        q2 = db._parse_query('{"question":"bad","answer":"","source_turn_ids":[]}\n'
+                             '{"question":"q3","answer":"a3","source_turn_ids":["t1"]}')
+        self.assertEqual(q2["query"], "q3")  # skips incomplete object
 
 
 class TestCorpusAdapter(unittest.TestCase):

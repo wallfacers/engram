@@ -169,8 +169,129 @@ func buildModelCaller(baseURL, model, apiKey string) (pipeline.ModelCaller, erro
 				}
 			}
 		}
-		return sb.String(), nil
+		return normalizeExtractionOutput(sb.String()), nil
 	}, nil
+}
+
+// normalizeExtractionOutput makes the sidecar's extraction reply parseable by
+// the frozen pipeline parser (which expects {"facts":[...]}). Qwen2.5-7B under
+// the extraction prompt emits fact objects as a stream rather than a JSON array:
+// JSONL, compact `},{"fact":...}`, adjacent `}{"fact":...}`, or repeated whole
+// {"facts":[...]} objects joined by commas. A streaming decoder walks every
+// top-level value and merges their facts into one array — the only shape the
+// frozen pipeline parser accepts. An object that already has a "facts" key, or
+// a reply that is not a fact stream, passes through untouched. Engine internals
+// are not changed.
+func normalizeExtractionOutput(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return trimmed
+	}
+	// Fast path: a single object that already carries a "facts" key passes through.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &probe); err == nil {
+		if _, ok := probe["facts"]; ok {
+			return trimmed
+		}
+	}
+	var facts []json.RawMessage
+	// Case 2: a bare JSON array of fact objects — the 7B output under the STRICT
+	// prompt is exactly [{"fact":...},{"fact":...}] with no "facts" wrapper.
+	var arr []json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &arr); err == nil {
+		for _, raw := range arr {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &m); err == nil {
+				if _, ok := m["fact"]; ok {
+					facts = append(facts, raw)
+				}
+			}
+		}
+		if len(facts) > 0 {
+			out, err := json.Marshal(map[string]any{"facts": facts})
+			if err == nil {
+				return string(out)
+			}
+		}
+	}
+	// Case 3: a stream of top-level objects (JSONL, compact `},{"fact":...}`,
+	// adjacent `}{"fact":...}`, repeated whole {"facts":[...]} objects). Strip
+	// top-level separators to whitespace, then walk each value.
+	dec := json.NewDecoder(strings.NewReader(stripTopLevelCommas(trimmed)))
+	for {
+		var m map[string]json.RawMessage
+		if err := dec.Decode(&m); err != nil {
+			break // io.EOF, or trailing garbage — keep the facts already collected
+		}
+		if raws, ok := m["facts"]; ok {
+			var fa []json.RawMessage
+			if err := json.Unmarshal(raws, &fa); err == nil {
+				facts = append(facts, fa...)
+			}
+		} else if _, ok := m["fact"]; ok {
+			raw, err := json.Marshal(m)
+			if err == nil {
+				facts = append(facts, raw)
+			}
+		}
+	}
+	if len(facts) > 0 {
+		out, err := json.Marshal(map[string]any{"facts": facts})
+		if err == nil {
+			return string(out)
+		}
+	}
+	if os.Getenv("PLANNER_DUMP_EXTRACT") != "" {
+		s := trimmed
+		if len(s) > 500 {
+			s = s[:500] + "..."
+		}
+		fmt.Fprintf(os.Stderr, "DBG_EXTRACT raw=%q\n", s)
+	}
+	return trimmed
+}
+
+// stripTopLevelCommas rewrites every comma that sits outside a quoted string AND
+// outside any {…} or […] container (i.e. at depth 0) to a newline — a clean value
+// boundary the streaming decoder can walk past. Commas inside a container (key:
+// value separators, array elements) and inside strings are preserved.
+func stripTopLevelCommas(s string) string {
+	var b strings.Builder
+	inStr, escaped := false, false
+	depth := 0
+	for _, r := range s {
+		if inStr {
+			b.WriteRune(r)
+			if escaped {
+				escaped = false
+			} else if r == '\\' {
+				escaped = true
+			} else if r == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inStr = true
+			b.WriteRune(r)
+		case '{', '[':
+			depth++
+			b.WriteRune(r)
+		case '}', ']':
+			depth--
+			b.WriteRune(r)
+		case ',':
+			if depth == 0 {
+				b.WriteByte('\n')
+			} else {
+				b.WriteRune(r)
+			}
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // ---------------------------------------------------------------------------

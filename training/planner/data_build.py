@@ -94,22 +94,44 @@ def _chat_completion(cfg, system, user_msg):
     return data["choices"][0]["message"]["content"]
 
 def _parse_turns(text):
-    """Extract a JSON array of turns from the model reply (tolerates fences)."""
+    """Extract a list of turns from the model reply, tolerating a JSON array,
+    JSONL (one object per line — Qwen2.5 often emits this under the full prompt),
+    code fences, and surrounding prose."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    # Case 1: a JSON array, possibly embedded in prose.
     m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return None
-    try:
-        turns = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(turns, list):
-        return None
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+            if isinstance(arr, list):
+                out = _normalize_turns(arr)
+                if out:
+                    return out
+        except json.JSONDecodeError:
+            pass
+    # Case 2: JSONL — every non-blank, non-list line is one turn object.
     out = []
-    for t in turns:
+    for line in text.splitlines():
+        line = line.strip().rstrip(",")
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj.get("speaker") in ("user", "assistant"):
+            txt = str(obj.get("text", "")).strip()
+            if txt:
+                out.append({"speaker": obj["speaker"], "text": txt})
+    return out or None
+
+
+def _normalize_turns(arr):
+    out = []
+    for t in arr:
         if not isinstance(t, dict) or t.get("speaker") not in ("user", "assistant"):
             continue
         txt = str(t.get("text", "")).strip()
@@ -162,32 +184,49 @@ def gen_queries(client_cfg, conv):
     return queries
 
 def _parse_query(text):
-    """Extract a {question, answer, source_turn_ids} object, tolerating fences."""
+    """Extract a {question, answer, source_turn_ids} object, tolerating fences,
+    embedded prose, and JSONL (first complete object that has the fields)."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    candidates = []
     try:
         obj = json.loads(text)
+        if isinstance(obj, dict):
+            candidates.append(obj)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return None
+        pass
+    for m in re.finditer(r"\{.*?\}", text, re.S):
         try:
             obj = json.loads(m.group(0))
+            if isinstance(obj, dict):
+                candidates.append(obj)
         except json.JSONDecodeError:
-            return None
-    if not isinstance(obj, dict):
-        return None
-    q = str(obj.get("question", "")).strip()
-    a = str(obj.get("answer", "")).strip()
-    src = obj.get("source_turn_ids")
-    if not q or not a or not isinstance(src, list) or not src:
-        return None
-    src = [str(s).strip() for s in src if str(s).strip()]
-    if not src:
-        return None
-    return {"query": q, "gold_answer": a, "gold_source_turn_ids": src}
+            continue
+    for line in text.splitlines():
+        line = line.strip().rstrip(",")
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            candidates.append(obj)
+    for obj in candidates:
+        if not isinstance(obj, dict):
+            continue
+        q = str(obj.get("question", "")).strip()
+        a = str(obj.get("answer", "")).strip()
+        src = obj.get("source_turn_ids")
+        if not q or not a or not isinstance(src, list) or not src:
+            continue
+        src = [str(s).strip() for s in src if str(s).strip()]
+        if not src:
+            continue
+        return {"query": q, "gold_answer": a, "gold_source_turn_ids": src}
+    return None
 
 # --------------------------------------------------------------------- main
 

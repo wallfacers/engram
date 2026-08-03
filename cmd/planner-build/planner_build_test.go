@@ -74,6 +74,59 @@ func TestSessionMessagesTurnIDs(t *testing.T) {
 	}
 }
 
+func TestNormalizeExtractionOutput(t *testing.T) {
+	// JSONL fact stream (Qwen2.5-7B behavior) must be wrapped into {"facts":[...]}.
+	jsonl := `{"fact":"Dana runs homelab.","source_ids":["e1"]},
+{"fact":"Dana bought a server.","source_ids":["e2"]}`
+	got := normalizeExtractionOutput(jsonl)
+	var out struct {
+		Facts []struct {
+			Fact      string   `json:"fact"`
+			SourceIDs []string `json:"source_ids"`
+		} `json:"facts"`
+	}
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("normalized output not JSON: %v\n%s", err, got)
+	}
+	if len(out.Facts) != 2 || out.Facts[0].Fact != "Dana runs homelab." || out.Facts[1].SourceIDs[0] != "e2" {
+		t.Fatalf("facts: %#v", out.Facts)
+	}
+	// Compact single-line stream: {"fact":...},{"fact":...}
+	compact := `{"fact":"a","source_ids":["e1"]},{"fact":"b","source_ids":["e2"]}`
+	if err := json.Unmarshal([]byte(normalizeExtractionOutput(compact)), &out); err != nil || len(out.Facts) != 2 {
+		t.Fatalf("compact stream: err=%v facts=%#v", err, out.Facts)
+	}
+	// Adjacent objects without a comma: {"fact":...}{"fact":...}
+	adjacent := `{"fact":"a","source_ids":["e1"]}{"fact":"b","source_ids":["e2"]}`
+	if err := json.Unmarshal([]byte(normalizeExtractionOutput(adjacent)), &out); err != nil || len(out.Facts) != 2 {
+		t.Fatalf("adjacent stream: err=%v facts=%#v", err, out.Facts)
+	}
+	// Repeated whole {"facts":[...]} objects joined by commas — the actual 7B
+	// failure mode that produced "invalid character ',' after top-level value".
+	multiWrapped := `{"facts":[{"fact":"a","source_ids":["e1"]}]},{"facts":[{"fact":"b","source_ids":["e2"]}]}`
+	if err := json.Unmarshal([]byte(normalizeExtractionOutput(multiWrapped)), &out); err != nil || len(out.Facts) != 2 {
+		t.Fatalf("multi-wrapped stream: err=%v facts=%#v", err, out.Facts)
+	}
+	// Bare array — the actual 7B output under the STRICT prompt: no "facts"
+	// wrapper, just [{"fact":...},{"fact":...}].
+	bare := `[{"fact":"a","source_ids":["e1"]},{"fact":"b","source_ids":["e2"]}]`
+	if err := json.Unmarshal([]byte(normalizeExtractionOutput(bare)), &out); err != nil || len(out.Facts) != 2 {
+		t.Fatalf("bare array: err=%v facts=%#v", err, out.Facts)
+	}
+	// Already-wrapped output passes through.
+	if s := normalizeExtractionOutput(`{"facts":[{"fact":"x","source_ids":["e1"]}]}`); !strings.Contains(s, "facts") {
+		t.Fatalf("wrapped output must pass through: %s", s)
+	}
+	// Commas inside a quoted string must survive stripping untouched.
+	if got := stripTopLevelCommas(`{"fact":"a,b","source_ids":["e1","e2"]}`); got != `{"fact":"a,b","source_ids":["e1","e2"]}` {
+		t.Fatalf("in-string commas must be preserved: %q", got)
+	}
+	// Non-fact prose passes through untouched.
+	if s := normalizeExtractionOutput("I don't know."); s != "I don't know." {
+		t.Fatalf("prose must pass through: %q", s)
+	}
+}
+
 func TestReadConvosSkipsNoQuery(t *testing.T) {
 	lines := []string{
 		`{"conversation_id":"c0","persona":"p","sessions":[],"queries":[{"question_id":"q0","query":"q?","type":"direct","gold_answer":"a","gold_source_turn_ids":["c0-0-0"]}]}`,
