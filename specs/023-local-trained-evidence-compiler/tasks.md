@@ -32,9 +32,12 @@
 
 ## Phase 2 — 数据构建（离线）
 
-- [ ] T008 合成数据 pipeline：本地 Qwen2.5-7B-Instruct 生成虚构多会话记忆对话（人物/项目/
+- [X] T008 合成数据 pipeline：本地 Qwen2.5-7B-Instruct 生成虚构多会话记忆对话（人物/项目/
   时间线/更新/跨会话引用）→ 灌 engram 离线提取/建索引 → 生成 query（direct/time/multi-hop/
   update）→ oracle + 规则 → 期望 proposal。到 `training/planner/data_build.py`。
+  **[X] 2026-08-03：data_build.py（turn_id+query/gold 标注）、`cmd/planner-build/`（灌入+检索
+  冻结候选+gold coverage，单测/集成/CLI smoke 绿）、`training/planner/label.py`（Need 解析+
+  Actions 规则/oracle+双标签机制）落地；双标签正式执行在 T010**
 - [ ] T009 公共语料辅路径：OASST1（Apache-2.0）/ ultrachat_200k（MIT）改造，跑同一 pipeline；
   逐语料确认许可与隐私。
 - [ ] T010 双独立标签 + 独立裁决：两判不一致 → 裁决唯一，否则排除（FR-009）。

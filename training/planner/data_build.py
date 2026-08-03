@@ -19,7 +19,15 @@ Usage:
 
 Output: one JSON object per line in data/raw/convos.jsonl:
   {"conversation_id": "...", "persona": "...", "sessions": [
-     {"session_id": "...", "date": "2026-..", "turns": [{"speaker":"user|assistant","text":"..."}]}]}
+     {"session_id": "...", "date": "2026-..", "turns": [
+        {"turn_id": "<conv_id>-<sess_idx>-<turn_idx>", "speaker":"user|assistant","text":"..."}]}],
+   "queries": [
+     {"question_id": "<conv_id>-q<j>", "query": "...", "type": "direct|time|multi_hop|update",
+      "gold_answer": "...", "gold_source_turn_ids": ["<turn_id>", ...]}]}
+
+Every turn carries a stable turn_id; query generation annotates each recall
+question with the concise gold answer and the turn ids that contain its facts,
+so the Go planner-build tool can run oracle coverage over the frozen candidates.
 """
 
 import argparse
@@ -63,6 +71,9 @@ def gen_sessions(client_cfg, persona, conv_id, n_sessions, seed):
         if not turns:
             turns = [{"speaker": "user", "text": prompt},
                      {"speaker": "assistant", "text": "(generation failed)"}]
+        # Stable per-turn id the Go planner-build tool can trace through engram.
+        for j, t in enumerate(turns):
+            t["turn_id"] = f"{conv_id}-{i}-{j}"
         sessions.append({"session_id": f"s{conv_id}-{i}", "date": date, "turns": turns})
     return sessions
 
@@ -117,7 +128,12 @@ PERSONAS = [
 ]
 
 def gen_queries(client_cfg, conv):
-    """Generate recall queries for a conversation (direct/time/multi-hop/update)."""
+    """Generate recall queries for a conversation (direct/time/multi-hop/update).
+
+    Each query carries the concise gold answer and the exact source turn ids so
+    the Go planner-build tool can run oracle coverage (which candidates contain
+    the answer's evidence) over the frozen retrieval output.
+    """
     qtypes = ["direct", "time", "multi_hop", "update"]
     prompts = {
         "direct": "Ask a direct factual question answerable from one session.",
@@ -126,16 +142,52 @@ def gen_queries(client_cfg, conv):
         "update": "Ask about the current/latest state of something.",
     }
     queries = []
-    for qt in qtypes:
-        prompt = (f"From this conversation, write one {qt} recall question "
-                  f"({prompts[qt]}) answerable ONLY from the given sessions. "
-                  "Output a single JSON string: \"the question\".")
+    for j, qt in enumerate(qtypes):
+        prompt = (
+            f"From this conversation, write one {qt} recall question "
+            f"({prompts[qt]}) answerable ONLY from the given sessions.\n"
+            "Output a single JSON object with EXACTLY these keys:\n"
+            '{"question": "...", "answer": "<concise factual answer>", '
+            '"source_turn_ids": ["<exact turn id>", ...]}\n'
+            "Use ONLY the turn ids present in the conversation below. Never invent "
+            "a turn id; the answer must be a plain fact stated in the source turns."
+        )
         user_msg = {"role": "user", "content": prompt + "\n\n" + json.dumps(conv["sessions"], ensure_ascii=False)}
         text = _chat_completion(client_cfg, SYSTEM, user_msg)
-        text = text.strip().strip('"').strip()
-        if text:
-            queries.append({"question": text, "type": qt})
+        parsed = _parse_query(text)
+        if parsed:
+            parsed["type"] = qt
+            parsed["question_id"] = f"{conv['conversation_id']}-q{j}"
+            queries.append(parsed)
     return queries
+
+def _parse_query(text):
+    """Extract a {question, answer, source_turn_ids} object, tolerating fences."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(obj, dict):
+        return None
+    q = str(obj.get("question", "")).strip()
+    a = str(obj.get("answer", "")).strip()
+    src = obj.get("source_turn_ids")
+    if not q or not a or not isinstance(src, list) or not src:
+        return None
+    src = [str(s).strip() for s in src if str(s).strip()]
+    if not src:
+        return None
+    return {"query": q, "gold_answer": a, "gold_source_turn_ids": src}
 
 # --------------------------------------------------------------------- main
 
@@ -154,19 +206,32 @@ def main():
     rng = random.Random(args.seed)
 
     seen = set()
+    n_queries = 0
+    n_dropped = 0
     with open(args.out, "w") as f:
         for i in range(args.convos):
             conv_id = f"{args.seed}-{i:05d}"
             persona = rng.choice(PERSONAS)
             sessions = gen_sessions(cfg, persona, conv_id, args.sessions, args.seed)
             conv = {"conversation_id": conv_id, "persona": persona, "sessions": sessions}
+            valid_turn_ids = {t["turn_id"] for s in sessions for t in s["turns"]}
+            queries = gen_queries(cfg, conv)
+            kept = []
+            for q in queries:
+                if set(q["gold_source_turn_ids"]) <= valid_turn_ids:
+                    kept.append(q)
+                else:
+                    n_dropped += 1
+            if kept:
+                conv["queries"] = kept
+            n_queries += len(kept)
             f.write(json.dumps(conv, ensure_ascii=False) + "\n")
             if i % 10 == 0:
                 print(f"generated {i}/{args.convos}", file=sys.stderr)
-    print(f"wrote {args.convos} conversations to {args.out}", file=sys.stderr)
+    print(f"wrote {args.convos} conversations to {args.out}; "
+          f"{n_queries} queries kept, {n_dropped} dropped (bad turn ids)", file=sys.stderr)
 
-    # Query generation is a separate pass (optional at build time); the Go
-    # planner-build tool consumes convos.jsonl and emits candidates.jsonl.
+    # The Go planner-build tool consumes convos.jsonl and emits candidates.jsonl.
     print("next: run the Go planner-build tool on this file "
           "(see specs/023/data-model.md §3)", file=sys.stderr)
 
