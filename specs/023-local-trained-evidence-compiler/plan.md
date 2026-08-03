@@ -187,3 +187,27 @@ training/planner/                 # [023] Python 训练 pipeline（独立于 Go 
    candidate oracle 区分 compiler miss vs candidate miss；小 delta 不单独作 promotion 依据。
 6. **训练是 Python 工具链，不进 CGO 门**：`training/planner/` 独立于 Go build；Go 侧 CI 只验
    证 engine 测试 + local_planner mock 测试 + 配对桥的 byte-replay。
+
+## 后续工作（本 feature 之外）——Planner 生产接线
+
+023 交付边界 = 模型产物 + 三臂配对评测证明 + model card；**生产侧接线不在 023 范围**。
+训练好的 Planner 目前只在 `cmd/locomo-bench` eval harness 生效；本地 MCP / CLI / Agent Skill
+场景尚未接入。
+
+- **现状**：`mcpserver` 的 `memory_search`（`mcpserver/tools.go:236`）直接返回检索 chunks，
+  不经过 `evidencecompiler`；`cmd/engram search` 同理；020 skill 的 intent 映射
+  （`specs/020-engram-agent-skill/contracts/workflow-routing.md`）没有 compile 工具。
+- **需要的接线**（engine 零改动 adapter 特性，留给后续 feature）：
+  1. 本地 vllm/ollama sidecar serve 冻结产物（合并 LoRA 的 Qwen2.5-7B）；
+  2. MCP/CLI 加编译工具/开关（如 `memory_compile`，或 `memory_search` 加 compile 选项），
+     复用 `memory/evidencecompiler` public API + `local_planner.go` 式 adapter；
+  3. 020 skill intent 映射加一行，使 agent 搜索时自动走编译。
+- **约束**：Planner 只提议 Need/actions，过 022 fail-closed；模型缺失/超时退回确定性
+  Compiler；`git diff --name-only -- memory embedding provider store internal` 必须为空。
+- **开关（硬）**：Planner/编译必须是**显式 opt-in、默认关**——7B 模型要 GPU，不是所有部署者
+  都有能力跑；只有显式配置 sidecar（`--compiler-arm planner` + `--planner-base-url` +
+  `--planner-model`，对齐 `local_planner.go` 构造条件）才启用。未配置/无 GPU 的机器
+  `memory_search` 行为与现状完全 parity（直接返回 chunks / 确定性 Compiler），绝不因可选
+  模型改变基础搜索或拖慢默认路径。
+
+记录：2026-08-03（maintainer 要求后续衔接）。
