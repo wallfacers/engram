@@ -223,7 +223,9 @@ func plannerGapToContract(g plannerGap) (evidencecompiler.StructuredGap, error) 
 			return evidencecompiler.StructuredGap{}, err
 		}
 	}
-	kind := evidencecompiler.GapKind(strings.ToUpper(g.Kind))
+	// Contract constants are lower-case ("entity" / "time_range" / "second_operand");
+	// normalize the planner's kind to lower case so any casing maps onto them.
+	kind := evidencecompiler.GapKind(strings.ToLower(g.Kind))
 	switch kind {
 	case evidencecompiler.GapEntity, evidencecompiler.GapTimeRange, evidencecompiler.GapSecondOperand:
 	default:

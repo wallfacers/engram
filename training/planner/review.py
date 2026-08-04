@@ -13,8 +13,9 @@ Usage:
   # score the filled-in sheet (semantic_sufficiency column: pass|fail)
   python3 review.py --results review.csv
 
-Output review.csv: id, category, split, query, gold_answer, candidates (top 5
-texts), target_need, target_actions, semantic_sufficiency, notes.
+Output review.csv: id, category, split, query, gold_answer, candidates (every
+candidate text), candidate_ids/ranks/sources (JSON lineage), target_need,
+target_actions, semantic_sufficiency, notes.
 """
 
 import argparse
@@ -67,13 +68,19 @@ def draw_sample(rows, n, seed):
 def sheet_rows(samples):
     rows = []
     for s in samples:
-        cands = " || ".join(c.get("text", "") for c in s.get("candidates", [])[:5])
+        cands = s.get("candidates", [])
         need = json.dumps(s.get("target", {}).get("need", {}), ensure_ascii=False)
         actions = json.dumps(s.get("target", {}).get("actions", []), ensure_ascii=False)
         rows.append({
             "id": s.get("id", ""), "category": s.get("category", ""),
             "split": s.get("split", ""), "query": s.get("query", ""),
-            "gold_answer": s.get("gold_answer", ""), "candidates": cands,
+            "gold_answer": s.get("gold_answer", ""),
+            # Every candidate, not a truncated top-5, with the id/rank/source
+            # lineage so a reviewer can name the exact candidate and turn.
+            "candidates": " || ".join(c.get("text", "") for c in cands),
+            "candidate_ids": json.dumps([c.get("id", "") for c in cands], ensure_ascii=False),
+            "candidate_ranks": json.dumps([c.get("rank", "") for c in cands], ensure_ascii=False),
+            "candidate_sources": json.dumps([c.get("source_ids", []) for c in cands], ensure_ascii=False),
             "target_need": need, "target_actions": actions,
             "semantic_sufficiency": "", "notes": "",
         })

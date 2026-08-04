@@ -240,3 +240,31 @@ func TestPlannerProposeIncludesQueryAndCandidates(t *testing.T) {
 		}
 	}
 }
+
+// TestPlannerGapToContractKindCasing: planner gap kinds come in any casing; the
+// contract constants are lower-case, so "entity"/"ENTITY" must both map onto
+// GapEntity and unknown kinds must be rejected (the ToUpper bug rejected every
+// legal gap).
+func TestPlannerGapToContractKindCasing(t *testing.T) {
+	for _, kind := range []string{"entity", "ENTITY", "Entity"} {
+		g, err := plannerGapToContract(plannerGap{Kind: kind, SourceNeed: "entity:X"})
+		if err != nil {
+			t.Fatalf("kind %q: %v", kind, err)
+		}
+		if g.Kind != evidencecompiler.GapEntity {
+			t.Fatalf("kind %q mapped to %q, want %q", kind, g.Kind, evidencecompiler.GapEntity)
+		}
+	}
+	for _, kind := range []string{"time_range", "TIME_RANGE"} {
+		g, err := plannerGapToContract(plannerGap{Kind: kind, Start: "2026-01-01", SourceNeed: "time:2026-01-01"})
+		if err != nil {
+			t.Fatalf("kind %q: %v", kind, err)
+		}
+		if g.Kind != evidencecompiler.GapTimeRange {
+			t.Fatalf("kind %q mapped to %q, want %q", kind, g.Kind, evidencecompiler.GapTimeRange)
+		}
+	}
+	if _, err := plannerGapToContract(plannerGap{Kind: "nonsense"}); err == nil {
+		t.Fatal("unknown gap kind must be rejected")
+	}
+}

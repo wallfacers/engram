@@ -65,6 +65,18 @@ STOPWORDS_B = STOPWORDS_A | {
 
 _QUOTE_RE = re.compile(r'"([^"]+)"')
 
+# Function words that never pin a reference answer; the answer-coverage guard
+# uses them to strip non-content words from gold_answer before matching.
+_ANSWER_STOP = {
+    "about", "after", "again", "already", "also", "another", "back", "been",
+    "before", "being", "between", "both", "came", "come", "current", "currently",
+    "during", "final", "finalized", "first", "from", "have", "into", "last",
+    "latest", "made", "make", "next", "only", "other", "over", "plan", "planned",
+    "recent", "said", "same", "scheduled", "since", "some", "start", "started",
+    "still", "take", "taken", "their", "then", "there", "these", "they", "this",
+    "three", "two", "updated", "updates", "went", "were", "when", "will", "with",
+}
+
 
 def _candidate_entities(text, stopwords):
     """English proper-noun heuristics: capitalized tokens + quoted phrases,
@@ -158,14 +170,22 @@ def parse_need(query, gold_answer, stopwords):
 
 
 def _gap_kind(need, gold_covered):
-    """A negative sample (no required candidate) records a structured gap."""
+    """A negative sample (no required candidate) records a structured gap. The
+    source_need mirrors the 022 compiler's auditable requirement strings
+    ("entity:X" / "time:..." / "operand:..."), which validateStructuredGap
+    requires to be non-empty (need.go validateStructuredGap)."""
     if gold_covered or need["gap"] is not None:
         return need["gap"]
     if need["time_constraints"]:
-        return {"kind": "time_range", "entity": "", "start": None, "end": None, "operand": "", "source_need": ""}
+        return {"kind": "time_range", "entity": "", "start": None, "end": None,
+                "operand": "", "source_need": "time:" + ",".join(need["time_constraints"])}
     if need["entities"]:
-        return {"kind": "entity", "entity": need["entities"][0], "start": None, "end": None, "operand": "", "source_need": ""}
-    return {"kind": "second_operand", "entity": "", "start": None, "end": None, "operand": "", "source_need": ""}
+        ent = need["entities"][0]
+        return {"kind": "entity", "entity": ent, "start": None, "end": None,
+                "operand": "", "source_need": "entity:" + ent}
+    op = need["operands"][0]["name"] if need["operands"] else ""
+    return {"kind": "second_operand", "entity": "", "start": None, "end": None,
+            "operand": op, "source_need": ("operand:" + op) if op else ""}
 
 
 # --------------------------------------------------------------------------
@@ -181,9 +201,67 @@ def _required_candidates(line):
     return required
 
 
+def _answer_keys(answer):
+    """Concrete tokens that pin the reference answer: years, ordinal days,
+    month names, quoted phrases (kept whole), and stopword-free content words
+    of >= 5 chars. A candidate carrying all of them fully answers."""
+    a = answer or ""
+    keys = []
+    keys += re.findall(r"\b\d{4}\b", a)
+    keys += [m.lower() for m in re.findall(r"\b\d{1,2}(?:st|nd|rd|th)\b", a)]
+    for m in re.finditer(r"(?i)\b([a-z]{3,9})\b", a):
+        w = m.group(1).lower()
+        if w in MONTHS:
+            keys.append(w)
+    for q in _QUOTE_RE.findall(a):
+        q = q.strip().lower()
+        if q and len(q) >= 3:
+            keys.append(q)
+    for tok in re.split(r"[^A-Za-z0-9'-]+", a):
+        t = tok.strip("'").lower()
+        if (len(t) >= 5 and not t.isdigit() and t not in MONTHS
+                and t not in _ANSWER_STOP and t not in STOPWORDS_A):
+            keys.append(t)
+    return keys
+
+
+def _answer_covered(text, answer):
+    """True when the candidate text carries every key token of the reference
+    answer. Quoted phrases match as substrings; tokens match at word
+    boundaries. Empty/underspecified answers, and answers pinned by a single
+    loose token (e.g. just a month name), are never "covered"."""
+    keys = _answer_keys(answer)
+    if len(keys) < 2:
+        return False
+    low = text.lower()
+    for k in keys:
+        if " " in k:
+            if k not in low:
+                return False
+        elif not re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", low):
+            return False
+    return True
+
+
+def _answer_covered_candidates(line):
+    """false-gap guard: when no gold-source candidate exists but a candidate
+    fully carries the reference answer (e.g. an equivalent sentence from a
+    different source), that candidate is required. Deterministic, no LLM."""
+    gold = line.get("gold_answer", "")
+    if not gold:
+        return []
+    out = []
+    for cand in line["candidates"]:
+        if _answer_covered(cand.get("text", ""), gold):
+            out.append(cand)
+    return out
+
+
 def label_actions(line, need, cap_chars):
     """Minimal required set → KEEP/EXTRACT within the frozen cap. No LLM."""
     required = _required_candidates(line)
+    if not required:
+        required = _answer_covered_candidates(line)
     if not required:
         return []
     actions = []
@@ -253,6 +331,7 @@ def _sample_dict(line, label, split, build_version):
         "query": line["query"],
         "query_date": line["query_date"],
         "category": line["category"],
+        "gold_answer": line.get("gold_answer", ""),
         "candidates": line["candidates"],
         "sources": line["sources"],
         "target": label,

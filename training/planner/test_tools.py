@@ -18,8 +18,8 @@ import corpus_adapter as ca
 import data_build as db
 import rebuild_check as rc
 import review as rv
-from label import (STOPWORDS_A, adjudicate, assign_split, label_actions,
-                   labeler_a, labeler_b, parse_need)
+from label import (STOPWORDS_A, _sample_dict, adjudicate, assign_split,
+                   label_actions, labeler_a, labeler_b, parse_need)
 
 
 def digest_of(obj):
@@ -245,11 +245,83 @@ class TestCorpusAdapter(unittest.TestCase):
         self.assertEqual([t["text"] for t in turns], ["root", "reply", "follow"])
 
 
+class TestAnswerCoverage(unittest.TestCase):
+    """false-gap fix: a candidate that fully carries the reference answer must
+    be KEPT even when its source is not a gold source; partial answers keep the
+    gap (fail-closed); gap.source_need must be non-empty (022 contract)."""
+
+    def test_full_answer_from_other_source_is_kept(self):
+        line = sample("c0", "When is Lily's birthday?", "June 15th", covered=False)
+        line["candidates"] = [{"id": "e1", "kind": "atomic_fact", "rank": 0, "score": 0.5,
+                               "text": "Lily's birthday is on June 15th.", "text_digest": "t",
+                               "source_ids": ["ev1"]}]
+        label = labeler_a(line)
+        self.assertEqual(label["actions"], [{"kind": "KEEP", "candidate_id": "e1", "source_id": "ev1"}])
+        self.assertIsNone(label["need"]["gap"])
+
+    def test_partial_answer_stays_gap(self):
+        line = sample("c0", "When are the two release dates?", "May 5th and September 2026", covered=False)
+        line["candidates"] = [{"id": "e1", "rank": 0,
+                               "text": "The beta release is planned for May 5th.", "source_ids": ["ev1"]}]
+        label = labeler_a(line)
+        self.assertEqual(label["actions"], [])
+        self.assertIsNotNone(label["need"]["gap"])
+
+    def test_content_words_full_coverage(self):
+        line = sample("c0", "What did Sam compare in his thesis?",
+                      "client-server, peer-to-peer, and hybrid", covered=False)
+        line["candidates"] = [{"id": "e1", "rank": 0,
+                               "text": "Sam decided to compare client-server, peer-to-peer, and hybrid architectures.",
+                               "source_ids": ["ev1"]}]
+        label = labeler_a(line)
+        self.assertEqual(label["actions"], [{"kind": "KEEP", "candidate_id": "e1", "source_id": "ev1"}])
+
+    def test_gap_source_need_nonempty(self):
+        line = sample("c0", "When did Dana buy a server?", "May 2026", covered=False)
+        line["candidates"] = [{"id": "e9", "rank": 0,
+                               "text": "Dana prefers coffee over tea.", "source_ids": ["ev9"]}]
+        label = labeler_a(line)
+        gap = label["need"]["gap"]
+        self.assertIsNotNone(gap)
+        self.assertTrue(gap["source_need"].startswith("entity:"))
+
+
+class TestSampleDict(unittest.TestCase):
+    def test_gold_answer_preserved(self):
+        line = {"id": "c0-q0", "conversation_id": "c0", "query": "q",
+                "query_date": "2026-01-01", "category": "single-hop",
+                "gold_answer": "May 2026", "gold_source_turn_ids": ["t0"],
+                "candidates": [], "sources": {},
+                "gold_coverage": {}, "build_version": "023-btest-r1"}
+        s = _sample_dict(line, {"need": {}, "actions": []}, "train", "023-btest-r1")
+        self.assertEqual(s["gold_answer"], "May 2026")
+
+
 class TestReview(unittest.TestCase):
     def test_wilson_ci(self):
         lo, hi = rv.wilson_ci(190, 200)
         self.assertLess(lo, 0.95)  # CI lower bound below point estimate
         self.assertLess(hi, 1.0)
+
+    def test_sheet_rows_full_candidates_with_lineage(self):
+        # Two candidates — the review sheet must carry every candidate (no [:5]
+        # truncation) plus id/rank/source lineage so a reviewer can build a
+        # contract-valid corrective action.
+        r = sample("c0", "What project does Dana maintain?", "homelab")
+        r2 = dict(r)
+        r2["candidates"] = [
+            {"id": "e1", "kind": "atomic_fact", "rank": 0, "score": 0.5,
+             "text": "first", "text_digest": "t", "source_ids": ["s1"]},
+            {"id": "e2", "kind": "atomic_fact", "rank": 1, "score": 0.4,
+             "text": "second", "text_digest": "t", "source_ids": ["s2"]},
+        ]
+        sheets = rv.sheet_rows([r, r2])
+        s2 = {s["id"]: s for s in sheets}["023-btest-r1-c0-q0"]
+        self.assertEqual(json.loads(s2["candidate_ids"]), ["e1", "e2"])
+        self.assertEqual(json.loads(s2["candidate_ranks"]), [0, 1])
+        self.assertEqual(json.loads(s2["candidate_sources"]), [["s1"], ["s2"]])
+        self.assertIn("first", s2["candidates"])
+        self.assertIn("second", s2["candidates"])
 
     def test_gate_met_at_95(self):
         rows = [{"semantic_sufficiency": "pass"} for _ in range(190)] + \
