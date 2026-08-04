@@ -45,9 +45,12 @@
 - [X] T010 双独立标签 + 独立裁决：两判不一致 → 裁决唯一，否则排除（FR-009）。
   **[X] 2026-08-03 机制落地：label.py `labeler_a/b`（独立停用词/cap）+ `adjudicate`（并集/保守
   裁决），差异样本裁决或排除；正式双标签统计待数据构建运行**
-- [X] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。
+- [ ] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。
   **[X] 2026-08-03 工具落地：`review.py`（分层随机抽样人审表 + Wilson 95% CI 充分率门）；测试绿。
-  实际人审待 maintainer 参与 + 数据**
+  **[BLOCKED] 2026-08-04：r1 审查流程无效且门失败；13 个确认 false-gap，另 6 个部分回答样本的
+  `gap` 合理。宽松重计 187/200=93.5%，Wilson 下界 89.20%，两门均失败；且审查表缺
+  `gold_answer`、只导出前 5 候选。见 [audit/t011-fails-023-b20260803-r1.md](audit/t011-fails-023-b20260803-r1.md)。
+  修复、升 build version、重建并完成独立全量复核前保持未完成。**
 - [X] T012 审计：provenance/许可/污染/近重复/privacy 全绿；LoCoMo/LongMemEval test 内容、
   任何 namespace 数据、付费 teacher 零进入（FR-011/013/014）。
   **[X] 2026-08-03 工具落地：`audit.py`（provenance/许可/schema/split/近重复/污染 8-gram/privacy，
