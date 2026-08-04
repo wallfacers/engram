@@ -156,7 +156,9 @@ def main():
         num_train_epochs=cfg["training"]["epochs"],
         logging_steps=cfg["training"]["logging_steps"],
         save_steps=cfg["training"]["save_steps"],
-        max_steps=args.max_steps if args.max_steps else None,
+        # transformers 5.x validates max_steps against num_train_epochs;
+        # None would raise TypeError. 0 (unset) -> -1 = "use epochs".
+        max_steps=args.max_steps if args.max_steps > 0 else -1,
         bf16=True,
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
