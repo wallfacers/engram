@@ -51,6 +51,14 @@
   `gap` 合理。宽松重计 187/200=93.5%，Wilson 下界 89.20%，两门均失败；且审查表缺
   `gold_answer`、只导出前 5 候选。见 [audit/t011-fails-023-b20260803-r1.md](audit/t011-fails-023-b20260803-r1.md)。
   修复、升 build version、重建并完成独立全量复核前保持未完成。**
+  **[X] 2026-08-04 代码层修复 + r2 标注层重建：local_planner gap 大小写、label 保留
+  gold_answer、review 导出全部候选+lineage、label false-gap coverage 规则+source_need
+  （045b402）；label.py 支持 --candidates-build-version 分离候选层/标注层版本（ddf4847）。
+  r2 = 冻结 r1 candidates + 重建标注层：gap 244→190（54 个确凿漏标纠正为 KEEP）、KEEP
+  429→485；audit r2 全绿、rebuild_check 100%。r1 收据部分 FAIL 经 gold_answer 核对实为
+  误判（候选含不同答案）。r2 审查表 [audit/review-r2-023-b20260803-r2.csv]
+  (audit/review-r2-023-b20260803-r2.csv) 含 gold_answer(200/200)+lineage，独立全量
+  复核前保持 BLOCKED。**
 - [X] T012 审计：provenance/许可/污染/近重复/privacy 全绿；LoCoMo/LongMemEval test 内容、
   任何 namespace 数据、付费 teacher 零进入（FR-011/013/014）。
   **[X] 2026-08-03 工具落地：`audit.py`（provenance/许可/schema/split/近重复/污染 8-gram/privacy，
