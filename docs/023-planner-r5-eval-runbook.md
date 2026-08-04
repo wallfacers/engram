@@ -117,3 +117,26 @@ python -m vllm.entrypoints.openai.api_server --model ... \
 **80G 提速实测**：answer generation 345 vs 49G 260 tok/s（~1.3×），但整体每题仍受
 retrieval + compiler + judge（deepseek API）制约。评测总时长瓶颈不在 GPU 算力，
 而在 judge 与 pipeline 阶段。
+
+**正式跑实测速率（2026-08-04，concurrency 16）**：主阶段 ~31 answers/min →
+det 单臂 ~2.5h（repeats=3 majority，4620 answers）。早前记忆"6.6 calls/min / 11h/臂"
+来自 49G + concurrency 8 且混入 ingestion 阶段，已过时。前 ~25 分钟是 chunks
+ingestion（10 conversations；复用 extraction 的 8 个秒级完成，conv-1/2/4 新提取
+各 1-17 分钟），之后才是 candidate/answer/judge 主阶段。
+
+## 7B planner max-model-len 8192（关键坑，2026-08-04）
+
+planner prompt = query + 30 candidates（`Candidate.Text = hit.Content`），实测
+Content 合计 ~10.3k chars ≈ 3.2k tokens 平均、最坏 ~7k。若 sidecar `--max-model-len`
+低于此，vllm 直接 400 拒绝 → `local_planner.Propose` 报 errPlannerUnavailable →
+**静默 fallback 到 deterministic extractive** → prompt-only/supervised 臂退化成 det，
+三臂配对白跑。Qwen2.5-7B 原生支持 32k，设 8192 安全：
+`--max-model-len 8192 --max-num-seqs 64 --gpu-memory-utilization 0.25`。
+
+## 显存共存（80G 实测）
+
+35B answerer `util 0.80` ≈ 79G 占满 98G 卡（无 7B 空间）。planner 臂需 35B + 7B 共存：
+35B slim `util 0.62`（max-num-seqs 128）+ 7B `util 0.25` + embed 2.3G ≈ 87G < 98G ✓。
+切换顺序（det 后、prompt-only 前）：kill 35B → 轮询 nvidia-smi 等显存释放 → 起 slim
+35B → 起 7B base → 跑 prompt-only；完成后切 7B LoRA 跑 supervised。全部由
+`master-orchestrator.sh`（等 det pid 退出 → 自动切换 → 串行跑两臂）后台执行。
