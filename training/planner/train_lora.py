@@ -31,9 +31,10 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    DataCollatorForLanguageModeling,
+    Trainer,
     TrainingArguments,
 )
-from trl import SFTTrainer
 
 # ---- Prompt templates. MUST mirror cmd/locomo-bench/local_planner.go ----
 SYSTEM_PROMPT = (
@@ -75,6 +76,9 @@ def format_example(ex):
 
 def build_dataset(path, tokenizer, max_seq, seed):
     ds = load_dataset("json", data_files=path, split="train")
+    # Only training-split rows: the file carries a per-conversation "split"
+    # field (train|validation); validation rows must not leak into training.
+    ds = ds.filter(lambda x: x.get("split") == "train")
     rng = random.Random(seed)
 
     def tokenize(batch):
@@ -108,6 +112,8 @@ def main():
     ap.add_argument("--out", default="models/planner-lora")
     ap.add_argument("--config", default="configs/train.yaml")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--max-steps", type=int, default=0,
+                    help=">0 caps training steps (smoke/CI); 0 = full epochs from config")
     args = ap.parse_args()
 
     with open(args.config) as f:
@@ -150,6 +156,7 @@ def main():
         num_train_epochs=cfg["training"]["epochs"],
         logging_steps=cfg["training"]["logging_steps"],
         save_steps=cfg["training"]["save_steps"],
+        max_steps=args.max_steps if args.max_steps else None,
         bf16=True,
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
@@ -157,13 +164,15 @@ def main():
         report_to=[],
         save_total_limit=2,
     )
-    trainer = SFTTrainer(
+    # build_dataset already tokenizes to input_ids; a language-modeling collator
+    # pads per batch. Using transformers.Trainer avoids the trl legacy-API churn
+    # across trl versions.
+    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
-        tokenizer=tokenizer,
-        dataset_text_field="input_ids",  # already tokenized via build_dataset
-        max_seq_length=cfg["training"]["max_seq_length"],
+        data_collator=collator,
     )
     trainer.train()
     trainer.save_model(args.out)
