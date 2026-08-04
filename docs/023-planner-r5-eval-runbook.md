@@ -90,3 +90,30 @@ GPU 实测：35B @ 0.85 util ≈ 42.4G / 49G，free 仅 6G；7B ≈ 8G。**两�
 - Guard overall（prompt-only vs supervised 全类 non-regression）≥ −0.5pp
 - validity 全绿（candidate/source/span/citation/within-cap、answerer=1、retrieval=0）
 - 类目 non-regression
+
+## 80G Blackwell (RTX PRO 6000) 服务启动踩坑（2026-08-04 实测）
+
+vllm 0.26 + flashinfer 0.6.14 对 Blackwell sm_120/CUDA 13 支持不完整，35B MoE 启动
+连踩 6 个 kernel 编译错误。最终可用组合（serve-ans80g.sh）：
+
+```bash
+export FLASHINFER_CUDA_ARCH_LIST="12.0"          # flashinfer arch 自动检测失败
+export CUDA_HOME=/root/autodl-tmp/023-venv/lib/python3.12/site-packages/nvidia/cu13
+export CUDA_PATH=$CUDA_HOME                     # flashinfer 误用系统 nvcc 12.8
+export VLLM_USE_FLASHINFER_SAMPLER=0            # 跳过 flashinfer 采样 JIT（CUDA13/CCCL 头不兼容）
+python -m vllm.entrypoints.openai.api_server --model ... \
+  --moe-backend triton \                          # deepgemm/cutlass FP8 MoE 均不可用
+  --max-num-seqs 256 --gpu-memory-utilization 0.80
+```
+
+踩坑链（每步一个错误，逐步定位）：
+1. `FlashInfer requires sm75+` → FLASHINFER_CUDA_ARCH_LIST=12.0
+2. `SM 12.x requires CUDA >= 12.9` → CUDA_HOME 指向 torch 的 cu13（否则用系统 nvcc 12.8）
+3. `deepgemm NVCC compilation failed` → --moe-backend triton
+4. `CUTLASS FP8 MoE disabled` → 换 triton
+5. `CUDA compiler and toolkit headers incompatible` → VLLM_USE_FLASHINFER_SAMPLER=0
+   （注意：该 env 需要整数 0/1，不是 "false"——会 `int()` 解析报错）
+
+**80G 提速实测**：answer generation 345 vs 49G 260 tok/s（~1.3×），但整体每题仍受
+retrieval + compiler + judge（deepseek API）制约。评测总时长瓶颈不在 GPU 算力，
+而在 judge 与 pipeline 阶段。
