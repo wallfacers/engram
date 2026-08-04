@@ -362,10 +362,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--candidates", required=True, help="candidates.jsonl from planner-build")
     ap.add_argument("--out", default="data/processed/train.jsonl")
-    ap.add_argument("--build-version", required=True, help="frozen build version (FR-015)")
+    ap.add_argument("--build-version", required=True, help="frozen build version for the TRAINING asset (FR-015)")
+    ap.add_argument("--candidates-build-version", default=None,
+                    help="expected build_version of candidates.jsonl; defaults to --build-version. "
+                         "Allows a relabeling rebuild (e.g. r2 labels over r1 frozen candidates) "
+                         "to record both versions in the train asset.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--val-ratio", type=float, default=0.15)
     args = ap.parse_args()
+    expected_cand_version = args.candidates_build_version or args.build_version
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     lines = []
@@ -384,9 +389,10 @@ def main():
     covered = 0
     with open(args.out, "w") as f:
         for ln in lines:
-            if ln.get("build_version") != args.build_version:
+            if ln.get("build_version") != expected_cand_version:
                 raise SystemExit(
-                    f"build_version mismatch: line has {ln.get('build_version')!r}, expected {args.build_version!r}"
+                    f"build_version mismatch: line has {ln.get('build_version')!r}, "
+                    f"expected {expected_cand_version!r} (candidates layer)"
                 )
             if not ln.get("candidates"):
                 # No retrieved candidates at all: nothing for the Planner to

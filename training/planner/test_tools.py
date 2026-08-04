@@ -153,6 +153,29 @@ class TestLabelMain(unittest.TestCase):
             self.assertEqual(len(kept), 1)
             self.assertEqual(kept[0]["conversation_id"], "c1")
 
+    def test_build_version_separation(self):
+        # r2 labels over r1 frozen candidates: the train asset carries r2 while
+        # the candidates layer is validated against r1.
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        with tempfile.TemporaryDirectory() as d:
+            cand = _os.path.join(d, "c.jsonl")
+            row = self._cline("c1", "When did Dana buy a server?", "May 2026",
+                              [{"id": "e1", "rank": 0,
+                                "text": "Dana bought a server in May 2026.", "source_ids": ["s1"]}])
+            write_jsonl(cand, [row])
+            out = _os.path.join(d, "t.jsonl")
+            r = _sp.run([_sys.executable, _os.path.join(here, "label.py"),
+                         "--candidates", cand, "--out", out,
+                         "--build-version", "023-btest-r2",
+                         "--candidates-build-version", "023-btest-r1"],
+                        capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            kept = [json.loads(l) for l in open(out) if l.strip()]
+            self.assertEqual(kept[0]["build_version"], "023-btest-r2")
+
 
 class TestDualLabelerAdjudicate(unittest.TestCase):
     def test_adjudication_union(self):
