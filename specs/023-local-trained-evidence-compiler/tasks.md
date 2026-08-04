@@ -59,6 +59,11 @@
   误判（候选含不同答案）。r2 审查表 [audit/review-r2-023-b20260803-r2.csv]
   (audit/review-r2-023-b20260803-r2.csv) 含 gold_answer(200/200)+lineage，独立全量
   复核前保持 BLOCKED。**
+  **[PASS] 2026-08-04 r5 门通过：外部 AI 全量标注 607（all-607-labeled.jsonl）+ gap 复审
+  （gap-recheck.jsonl 48 可疑 → 修正 3：0-00001-q2/0-00026-q1/q2）→ 合并
+  all-607-labeled-r5.jsonl → train-r5（607, train 510/val 97, gap 317/keep 290）。
+  外部 AI 独立审查 200 条：199/200 (99.5%)，Wilson 95% CI [97.22%, 99.91%]，双门满足。
+  收据 [audit/t011-review-r5-023-b20260803-r5.md](audit/t011-review-r5-023-b20260803-r5.md)。**
 - [X] T012 审计：provenance/许可/污染/近重复/privacy 全绿；LoCoMo/LongMemEval test 内容、
   任何 namespace 数据、付费 teacher 零进入（FR-011/013/014）。
   **[X] 2026-08-03 工具落地：`audit.py`（provenance/许可/schema/split/近重复/污染 8-gram/privacy，
@@ -69,10 +74,19 @@
 
 ## Phase 3 — 训练（租用 24 GiB 单卡）
 
-- [ ] T014 [P] 训练环境：租机数据盘布局（`/root/autodl-tmp/023-runs/`）、Python venv、TRL/
+- [X] T014 [P] 训练环境：租机数据盘布局（`/root/autodl-tmp/023-runs/`）、Python venv、TRL/
   PEFT、vllm/ollama sidecar；系统盘只放代码（<30G 纪律）。
-- [ ] T015 supervised 臂训练：TRL SFT + LoRA（QLoRA 备选），seq ≤2048，r=16，单 epoch；冻结
+  **[X] 2026-08-04 就绪：AutoDL 数据盘 `/root/autodl-tmp/`（系统盘 8%）、023-venv
+  （torch 2.11 / transformers 5.14.1 / peft 0.20.0 / bnb 0.50.0 / vllm 0.26.0）、
+  Qwen2.5-7B-Instruct 底模 modelscope snapshot、系统盘只放代码。**
+- [X] T015 supervised 臂训练：TRL SFT + LoRA（QLoRA 备选），seq ≤2048，r=16，单 epoch；冻结
   配置（数据摘要/底模摘要/config/随机性/输出摘要/完成状态，FR-015）；一次重建 ≤24 GPU-hours。
+  **[X] 2026-08-04 完成：train-r5（510 样本）QLoRA 4bit，r16/alpha32/dropout0.05/qkv_o_proj，
+  batch2×8=16，lr 2e-4，1 epoch，seq2048；32 steps / 360.7s / loss 1.741（RTX 4090，
+  远低于 24 GPU-hours）；adapter `/root/autodl-tmp/023-runs/models/planner-lora/`，
+  `train_summary.json` 冻结摘要（FR-015）。train_lora.py 用 transformers.Trainer（无 trl）；
+  修 max_steps None→-1（transformers 5.x _validate_args）。runbook：
+  docs/023-planner-r5-train-runbook.md。HF 模型 wallfacers/engram-planner-lora（private）。**
 - [ ] T016 prompt-only 对照：同底模零训练，仅 prompt 模板；与 supervised 除训练状态外全同。
 - [ ] T017 合并 LoRA → 冻结推理产物（含权重/adapter 摘要、tokenizer 摘要、合同版本、许可）。
 
