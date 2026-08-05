@@ -4,7 +4,31 @@
 （residual 149 题）上，planner 臂（prompt-only + supervised）能否救回足够多的题。
 先导只跑 planner 臂 × residual 149 题，det 复用已冻结结果。
 
-## 判据（先导 gate，非正式 verdict）
+## 执行结果（2026-08-05 已完成）
+
+**verdict：STOP。planner 从未真正参与——supervised（LoRA）149/149 `planner_error`，
+即使 `--planner-timeout 20s` 修复了超时，proposal 仍全部被 `ValidateAction` 拒绝
+（LoRA 输出引用不存在的 candidate_id 等，见全量报告根因 3）。**
+
+| 指标 | 值 |
+|---|---|
+| 先导运行 | supervised × residual 149 × 3 rep（formal 子集模式，~35 分钟） |
+| supervised majority | 26/149 |
+| det majority（paired-det-full） | 31/149 |
+| planner_error | **149/149**（全部 fallback） |
+| paired 2×2 | both=22 / det_only=9 / sup_only=4 / both_wrong=114 → **net −5** |
+
+- 由于 planner 全 fallback，supervised 26 与 det 31 的差是 **extractive 行为 + 跨 run
+  噪声（answerer temp=1.0）**，不能归因于 planner 效果。
+- **residual-cohort 的"det 未答对"假设不成立**：cohort 基于 t003-b1-v3 分类生成，
+  而 paired-det-full（正式 det 臂）实际 majority 答对 31/149。det judge_failed 在
+  cohort 内为 0（baseline 干净）。
+- **结论**：planner 连合法 proposal 都生成不了（proposal 质量是硬伤，非超时）；
+  008 铁律下证据选择端到端不转化已被历史反复验证 → **继续投入（修 proposal
+  prompt / 重训 LoRA / 修正 candidate_id）预期收益低，023 收口 STOP**，不再跑
+  prompt-only / 全量三臂。
+
+## 判据（先导 gate，非正式 verdict；实际结果见上）
 
 | 先导结果（planner 臂 majority 在 149 题上的正确数） | 决策 |
 |---|---|
@@ -21,10 +45,12 @@
    先导用 `--planner-timeout 20s`（契约 flag 已存在，`main.go:264`）。
    ⚠️ FR-034 要求 p95 ≤ 2.0s——20s 只适用于研究先导；若 GO 需降 planner 输入
    token（见修复清单 3）才能成为推荐配置。
-2. **`--only-questions`（本次已实现 + build/test 验证）**：locomo-bench 新增 flag，
-   按 `conv-N-q-M` 白名单过滤（`readQuestionWhitelist`，与 formal B0/B1 互斥）。
-   residual-cohort.json 的 `residual_questions` key 与 `questionID()` 格式逐字节一致，
-   可直接作为输入，零转换。
+2. **`--only-questions`（本次已实现 + build/test + 云机实跑验证）**：locomo-bench 新增
+   flag，按 `conv-N-q-M` 白名单过滤（`readQuestionWhitelist`）。residual-cohort.json 的
+   `residual_questions` key 与 `questionID()` 格式逐字节一致，零转换直用。
+   **formal 子集模式**：`--only-questions` 现允许与 formal B0/B1 组合——跳过 git
+   provenance 校验（研究子集跑的是修改后的 harness），结尾的 materialize/validate
+   完整性校验会报错（149≠1540），**per-question 结果从 run journal 读取**。
 3. **det 98 条 judge_failed 重判**：推迟到全量确认阶段（先导只关心 planner 臂相对
    det 的救回数，det 分数不参与先导 gate）。
 

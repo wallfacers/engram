@@ -284,7 +284,7 @@ func run() error {
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
 	flag.IntVar(&opt.onlyCategory, "only-category", 0, "evaluate only this question category (0 = all)")
 	flag.BoolVar(&opt.onlyEnumeration, "only-enumeration", false, "evaluate only enumeration questions")
-	flag.StringVar(&opt.onlyQuestionsFile, "only-questions", "", "run only these question IDs (one `conv-N-q-M` per line, # = comment; for residual-cohort pilots, incompatible with formal B0/B1)")
+	flag.StringVar(&opt.onlyQuestionsFile, "only-questions", "", "run only these question IDs (one `conv-N-q-M` per line, # = comment; research-subset mode — formal B0/B1 allowed, terminal coverage validation reports an error on subsets)")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
@@ -426,8 +426,13 @@ func run() error {
 		if err := validateB0ContinuityRunnerOptions(protocol, prepared, arms); err != nil {
 			return err
 		}
-		if err := verifyFormalGitProvenance(protocol); err != nil {
-			return err
+		// Research-subset mode (--only-questions) waives git provenance: the
+		// pilot runs a modified harness, so the worktree cannot match the
+		// frozen commit. Full-cohort runs keep the strict check.
+		if opt.onlyQuestionsFile == "" {
+			if err := verifyFormalGitProvenance(protocol); err != nil {
+				return err
+			}
 		}
 		opt = prepared
 		opt.b0Protocol = &protocol
@@ -446,8 +451,13 @@ func run() error {
 		if err := validateFormalRunnerOptions(protocol, prepared, arms); err != nil {
 			return err
 		}
-		if err := verifyFormalGitProvenance(protocol); err != nil {
-			return err
+		// Research-subset mode (--only-questions) waives git provenance: the
+		// pilot runs a modified harness, so the worktree cannot match the
+		// frozen commit. Full-cohort runs keep the strict check.
+		if opt.onlyQuestionsFile == "" {
+			if err := verifyFormalGitProvenance(protocol); err != nil {
+				return err
+			}
 		}
 		opt = prepared
 		opt.formalProtocol = &protocol
@@ -522,9 +532,13 @@ func run() error {
 		opt.onlyQuestions = ids
 	}
 	if opt.formalProtocol != nil || opt.b0Protocol != nil {
-		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 || opt.onlyQuestions != nil {
+		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
 			return fmt.Errorf("022 B0/B1 evaluation refuses dataset/question sampling")
 		}
+		// --only-questions is permitted under B0/B1 as a research-subset mode:
+		// the run answers only the whitelisted questions, then the terminal
+		// materialize/validate step (which asserts full-cohort coverage) errors
+		// on the subset — read per-question results from the run journal.
 		protocol := opt.formalProtocol
 		if protocol == nil {
 			protocol = opt.b0Protocol
