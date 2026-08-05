@@ -608,6 +608,12 @@ func admitFormalQuestion(ctx context.Context, gate chan struct{}) (func(), error
 // answer call and then byte-replayed by every repetition.
 func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt options, retriever *memory.Retriever, projections *memory.ProjectionStore, entries *memory.EntryStore, qa locomoQA, chunkTurns map[string][]string, turnEvidence map[string]string) formalFrozenQuestion {
 	frozen := formalFrozenQuestion{}
+	// 027: temporal resolution engages ONLY when the query carries temporal
+	// semantics. Degraded queries (no time meaning, no explicit entity) fall
+	// through to the legacy chunk-verbatim packer — byte-identical to the
+	// control arm — so the mechanism never perturbs non-temporal questions
+	// (spec: ResolutionDegraded = baseline behavior, zero extra tokens).
+	temporalActive := opt.temporalResolution && classifyQueryMode(qa.Question) != ResolutionDegraded
 	if retriever == nil {
 		frozen.InvalidReasons = []string{"retriever_unavailable"}
 		return frozen
@@ -619,7 +625,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	var hits []memory.Result
 	retrievalCalls := 0
 	var retrieveErr error
-	if (opt.compilerArm != "" || opt.temporalResolution) && strings.TrimSpace(opt.runDir) != "" {
+	if (opt.compilerArm != "" || temporalActive) && strings.TrimSpace(opt.runDir) != "" {
 		replay, replayErr := loadFormalCandidateReplay(opt.runDir, protocol.ProtocolHash, qa.QuestionID, qa.Question)
 		if replayErr == nil {
 			hits = replay.Hits
@@ -673,7 +679,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		// expansion, and the fold would break the byte-identical candidate replay
 		// across arms (and would collapse multi-version evidence into one
 		// /verbatim candidate, defeating 027's version separation).
-		if opt.representationArm == ReprChunk900 && opt.compilerArm == "" && !opt.temporalResolution {
+		if opt.representationArm == ReprChunk900 && opt.compilerArm == "" && !temporalActive {
 			expanded = rebuildExpandedForChunkVerbatim(expanded)
 		}
 		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, retrievalCalls)
@@ -723,7 +729,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	var evidenceTokens int
 	var packErr error
 	if sourceErr == nil {
-		if opt.compilerArm != "" || opt.temporalResolution {
+		if opt.compilerArm != "" || temporalActive {
 			// Compile arm: use the evidencecompiler engine instead of the
 			// legacy ranked-prefix packer. The compiler selects items under
 			// the real token counter and produces an auditable trace. The
@@ -738,7 +744,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 			var compileErr error
 			if opt.compilerArm == "exact_token" {
 				compiledBundle, compiledTrace, compileErr = compileExactTokenArm(qa.Question, buildCompileCandidates(formalCompileSourceList(expanded)), protocol.Retrieval.CandidateLimit)
-			} else if opt.temporalResolution {
+			} else if temporalActive {
 				compiledBundle, compiledTrace, resolutionAudit, compileErr = compileTemporalResolutionArm(qa.Question, expanded, protocol.Retrieval.CandidateLimit)
 			} else {
 				compiledBundle, compiledTrace, compileErr = compileFormalSources(ctx, protocol, opt, qa, expanded)
@@ -762,7 +768,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 						System: system,
 						User:   bundle.RenderedContext,
 					}
-					if opt.temporalResolution {
+					if temporalActive {
 						// 027 FR-008/contract Rule 7: 记录 per-question 解析审计供
 						// US2/US3 归因。写入失败 fail closed (审计产物不完整)。
 						if auditErr := appendResolutionAudit(opt.runDir, qa.QuestionID, resolutionAudit); auditErr != nil {
@@ -785,7 +791,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	if input.Model == "" {
 		input.Model = protocol.Models.Answerer.ID
 	}
-	if opt.compilerArm == "" && !opt.temporalResolution {
+	if opt.compilerArm == "" && !temporalActive {
 		items := formalBundleItems(packedSources)
 		frozen.Trace = buildFormalTraceForItems(protocol, qa.QuestionID, frozen.Candidate, items)
 		frozen.Bundle = buildExpandedFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedSources, input)
