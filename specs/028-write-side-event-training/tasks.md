@@ -41,13 +41,13 @@
 
 ### Tests for Foundational ⚠️
 
-- [ ] T003 写训练数据 schema 校验失败测试在 `specs/028-write-side-event-training/tools/test_build_training_data.py`（contract `training-data-schema.md` 5 条：ValidateLenient、绝对时间格式、含时间必带 abs_time_label、human_refined 必有 revision_notes、id 唯一；用 fixture 合法/非法各一组）
+- [x] T003 写训练数据 schema 校验失败测试在 `specs/028-write-side-event-training/tools/test_build_training_data.py`（contract `training-data-schema.md` 5 条：ValidateLenient、绝对时间格式、含时间必带 abs_time_label、human_refined 必有 revision_notes、id 唯一；用 fixture 合法/非法各一组）✓ 全绿
 
 ### Implementation for Foundational
 
-- [ ] T004 实现 `specs/028-write-side-event-training/tools/build_training_data.py`：教师标注（DeepSeek API + 锚定 prompt）→ 事件级训练 JSONL（contract `training-data-schema.md`）+ `audit.json`（n_total/success/schema_fail/anchor_fail、时间锚定率、source 分布、修订率）
-- [ ] T005 [P] 实现 `specs/028-write-side-event-training/tools/audit_anchoring.py`：时间锚定率/合法率/幻觉抽样计算（`data-model.md` E3 指标），含单元测试（合成 event JSON 数组验证计数正确）
-- [ ] T006 [P] 实现 `specs/028-write-side-event-training/tools/teacher_extract.py`：教师抽取器（DeepSeek-v4-pro + 锚定强化 prompt，contract `teacher-extract-prompt.md`）→ 027 Event schema JSON 数组，并打包成 027 `Project` 格式（对齐 `memory/eventstore/project.go` 的 Write/Load 序列化，供 harness `--event-project` 加载）；fail-closed：schema 失败跳过该事件
+- [x] T004 实现 `specs/028-write-side-event-training/tools/build_training_data.py`：教师标注（DeepSeek API + 锚定 prompt）→ 事件级训练 JSONL（contract `training-data-schema.md`）+ `audit.json`（n_total/success/schema_fail/anchor_fail、时间锚定率、source 分布、修订率）✓ 产出 5313 条；修复 dia_id 跨 conv 重复匹配 bug（key=conv_id:dia_id）
+- [x] T005 [P] 实现 `specs/028-write-side-event-training/tools/audit_anchoring.py`：时间锚定率/合法率/幻觉抽样计算（`data-model.md` E3 指标），含单元测试（合成 event JSON 数组验证计数正确）✓ 全绿
+- [x] T006 [P] 实现 `specs/028-write-side-event-training/tools/teacher_extract.py`：教师抽取器（DeepSeek + 锚定强化 prompt，contract `teacher-extract-prompt.md`）→ 027 Event schema JSON 数组，并打包成 027 `Project` 格式（对齐 `memory/eventstore/project.go` 序列化，供 harness `--event-project` 加载）；fail-closed + parse/json 重试 ✓ 实测 5518 events
 
 **Checkpoint**: schema 校验/审计/教师抽取脚本可用（TDD 全绿）。US1 可开始。
 
@@ -61,12 +61,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] 跑教师抽取：`python3 tools/teacher_extract.py --data locomo.json --store-dir 009-bge-chunks-store --out teacher-project.json`（5882 消息，DeepSeek-v4-pro + 锚定 prompt；参考 `quickstart.md` US1 步骤 1）
-- [ ] T008 [US1] 审计教师抽取：`python3 tools/audit_anchoring.py teacher-project.json` → 时间锚定率 ≥50 绝对点（对比 7B 的 5%）、合法率、教师成本记录（`data-model.md` E4）；不过则评估换教师/STOP
-- [ ] T009 [US1] 跑 84 题配对：`--representation event --event-project teacher-project.json` vs chunk 臂（同 answerer/judge/token cap，3 reps，`quickstart.md` US1 步骤 2）
-- [ ] T010 [US1] 配对分析 + verdict：本机 `pair_analysis.py`（majority + McNemar），写 `specs/028-write-side-event-training/diagnosis/us1-verdict.md`；GO（锚定率 ≥50 且 event−chunk ≥ −10pp）→ 进 US2 / STOP 记录负结论（008 铁律）
+- [x] T007 [US1] 跑教师抽取：`python3 tools/teacher_extract.py --data testdata/locomo/locomo.json --out teacher-project.json`（5882 消息，DeepSeek-flash + 锚定 prompt）✓ 5518 events（1.8h，pro→flash 提速 5-8 倍锚定一致）
+- [x] T008 [US1] 审计教师抽取：`python3 tools/audit_anchoring.py teacher-project.json` → **语义锚定率 86.4%**（7B 5%）、合法率 100%、失败 6.2% ✓ 门过
+- [x] T009 [US1] 跑 84 题配对：`--representation event --event-project teacher-project.json` vs chunk 臂（同 answerer/judge/token cap，3 reps）✓ run-1/2/3 = 46.4/40.5/42.9%
+- [x] T010 [US1] 配对分析 + verdict：majority 44.0% vs chunk 50.0%（**−6.0pp，p=0.44 不显著**）→ [us1-verdict.md](diagnosis/us1-verdict.md) **GO**（锚定率 86.4% ≥50 + event−chunk −6.0 ≥ −10）→ 进 US2
 
-**Checkpoint**: US1 verdict 产出。GO 才进 US2。
+**Checkpoint**: US1 verdict 产出 = **GO**（教师时间锚定把 event 臂从 −26.2pp 收窄到 −6.0pp）。进 US2。
 
 ---
 

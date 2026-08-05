@@ -41,10 +41,15 @@ def validate_sample(s, samples):
 
 
 def load_message_index(data_path):
-    """dia_id -> (speaker, session_date, text, context_prev3)."""
+    """'<conv_id>:<dia_id>' -> (speaker, session_date, text, context_prev3).
+
+    LoCoMo re-numbers dia_ids per conversation (each conv has its own D1:1..),
+    so the key MUST include the conv_id or later convs would shadow earlier ones.
+    """
     idx = {}
     convs = json.load(open(data_path))
     for ci, conv in enumerate(convs):
+        conv_id = f"conv-{ci}"
         conv_data = conv["conversation"]
         sessions = sorted((k for k in conv_data if re.fullmatch(r"session_\d+", k)),
                           key=lambda k: int(k.split("_")[1]))
@@ -57,8 +62,8 @@ def load_message_index(data_path):
                 if not text:
                     continue
                 ctx = [f"{u.get('speaker','?')}: {u.get('text','')}" for u in turns[max(0, i - 3):i] if u.get("text")]
-                idx[t.get("dia_id")] = {
-                    "conv_id": f"conv-{ci}",
+                idx[f"{conv_id}:{t.get('dia_id')}"] = {
+                    "conv_id": conv_id,
                     "speaker": t.get("speaker", "?"),
                     "session_date": sdate,
                     "text": text,
@@ -74,7 +79,7 @@ def build(project_path, data_path, out_jsonl, out_audit, human_refined_path=None
     seen, samples = set(), []
     for i, ev in enumerate(events):
         sid = (ev.get("source_ledger_ids") or [""])[0]
-        m = msg_idx.get(sid)
+        m = msg_idx.get(f"{ev.get('conversation_id')}:{sid}")
         if not m:
             continue
         sample = {
