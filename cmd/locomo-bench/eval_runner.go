@@ -689,7 +689,20 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		// The bundle items remain derived from the canonical source
 		// expansion to preserve formal auditability.
 		if opt.representationArm != ReprChunk900 {
-			renderer, rendererErr := formalRepresentationRendererWithEpisodes(opt.representationArm, projections, opt.formalEvidence, opt.formalEpisodes)
+			var renderer RepresentationRenderer
+			var rendererErr error
+			if opt.representationArm == ReprEvent {
+				fullReader, ok := opt.formalEvidence.(evidenceReader)
+				if !ok {
+					rendererErr = fmt.Errorf("formal evidence reader does not satisfy evidenceReader")
+				} else if opt.eventProject == nil {
+					rendererErr = fmt.Errorf("event representation requires --event-project")
+				} else {
+					renderer = NewEventProjectionRenderer(opt.eventProject, fullReader)
+				}
+			} else {
+				renderer, rendererErr = formalRepresentationRendererWithEpisodes(opt.representationArm, projections, opt.formalEvidence, opt.formalEpisodes)
+			}
 			if rendererErr == nil {
 				anchors := buildFormalRankedAnchors(expanded)
 				enriched, renderErr := renderer.Render(ctx, anchors)

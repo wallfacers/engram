@@ -50,6 +50,7 @@ import (
 	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/curation"
+	"github.com/wallfacers/engram/memory/eventstore"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/provider"
@@ -197,6 +198,18 @@ type options struct {
 	// eventProjection selects the event-projection shadow mode for
 	// structured-gap refetch (E0/E1/E2/E3). "" means off.
 	eventProjection string
+	// eventProjectPath is the 027 write-side event projection file consumed by
+	// the event representation renderer (--representation event). Build it with
+	// --build-event-project. Empty disables event rendering.
+	eventProjectPath string
+	// eventProject is the runtime-loaded projection. Never serialized.
+	eventProject *eventstore.Project
+	// buildEventProjectOut, when set, builds the event projection to this path
+	// and exits (no answer/judge). Extraction LLM configured via eventLLM*.
+	buildEventProjectOut string
+	eventLLMBaseURL      string
+	eventLLMModel        string
+	eventLLMAPIKey       string
 	// gapRefetch enables structured-gap refetch retrieval. Only valid in
 	// formal B1 runs; requires --event-projection.
 	gapRefetch bool
@@ -259,11 +272,11 @@ func run() error {
 	flag.StringVar(&opt.tokenCounterBaseURL, "token-counter-base-url", "", "local vLLM base URL for formal 022 answer-input preflight (for example http://127.0.0.1:8000/v1)")
 	flag.Func("representation", "source representation: chunk_900 | raw_turn_window | semantic_episode (default chunk_900)", func(s string) error {
 		switch RepresentationKind(s) {
-		case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode:
+		case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode, ReprEvent:
 			opt.representationArm = RepresentationKind(s)
 			return nil
 		default:
-			return fmt.Errorf("invalid representation %q: must be chunk_900, raw_turn_window, or semantic_episode", s)
+			return fmt.Errorf("invalid representation %q: must be chunk_900, raw_turn_window, semantic_episode, or event", s)
 		}
 	})
 	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner | exact_token (unset = legacy ranked-prefix packer)")
@@ -273,6 +286,11 @@ func run() error {
 	flag.DurationVar(&opt.plannerTimeout, "planner-timeout", 0, "planner proposal timeout (0 = default 6s)")
 	flag.StringVar(&opt.eventProjection, "event-projection", "", "event projection shadow mode for structured-gap refetch: E0 | E1 | E2 | E3")
 	flag.BoolVar(&opt.gapRefetch, "gap-refetch", false, "enable structured-gap refetch retrieval (requires --event-projection)")
+	flag.StringVar(&opt.eventProjectPath, "event-project", "", "path to the 027 write-side event projection JSON (build with --build-event-project); required for --representation event")
+	flag.StringVar(&opt.buildEventProjectOut, "build-event-project", "", "build the 027 event projection JSON to this path (read convs + extract events via --event-llm-*) and exit; no answer/judge")
+	flag.StringVar(&opt.eventLLMBaseURL, "event-llm-base-url", "", "event extraction LLM base URL (OpenAI-compatible local sidecar; also via ENGRAM/EVENT_LLM_BASE_URL)")
+	flag.StringVar(&opt.eventLLMModel, "event-llm-model", "", "event extraction LLM model name")
+	flag.StringVar(&opt.eventLLMAPIKey, "event-llm-api-key", "", "event extraction LLM API key (secrets via env only; leave empty for local sidecars)")
 	flag.BoolVar(&opt.writeDedup, "write-dedup", false, "024 write-time redundancy suppression: suppress duplicate fact projections (additive mechanism flag; formal context required)")
 	flag.BoolVar(&opt.neighborExtend, "neighbor-extend", false, "024 hit-time neighbor extension: add shared-evidence sibling facts to answer context (additive mechanism flag; formal context required)")
 	flag.BoolVar(&opt.episodeCluster, "episode-cluster", false, "025 cross-session semantic episode clustering: rebuild semantic_episode projections from the clusterer before rendering (additive mechanism flag; semantic_episode representation required)")
@@ -883,6 +901,27 @@ func run() error {
 			runtime.Close()
 		}
 	}()
+
+	// 027 write-side event projection: load it once when the event representation
+	// is requested (before any answer/judge work), and build it on demand via
+	// --build-event-project.
+	if opt.buildEventProjectOut != "" {
+		if err := runBuildEventProject(ctx, opt, convs, runtimes, logger); err != nil {
+			return err
+		}
+		return nil
+	}
+	if opt.representationArm == ReprEvent {
+		if strings.TrimSpace(opt.eventProjectPath) == "" {
+			return fmt.Errorf("--representation event requires --event-project")
+		}
+		proj, err := eventstore.LoadProject(opt.eventProjectPath)
+		if err != nil {
+			return fmt.Errorf("load event project %q: %w", opt.eventProjectPath, err)
+		}
+		opt.eventProject = proj
+		logger.Info("event projection loaded", "path", opt.eventProjectPath, "events", len(proj.Events))
+	}
 
 	if opt.coverageOnly {
 		// Retrieval-only bake-off: no answer/judge tokens are spent, so the only
@@ -1811,6 +1850,9 @@ func validateMechanismArms(opt options) error {
 	formalContext := strings.TrimSpace(opt.evalProtocolPath) != "" || strings.TrimSpace(opt.evalFreezeProtocol) != ""
 	if !formalContext {
 		switch {
+		case opt.representationArm == ReprEvent && strings.TrimSpace(opt.onlyQuestionsFile) != "":
+			// 027 research-subset: the event representation runs in the
+			// --only-questions pilot without a frozen-protocol binding.
 		case opt.representationArm != "" && opt.representationArm != ReprChunk900:
 			return fmt.Errorf("--representation requires --eval-protocol or --eval-freeze-protocol")
 		case opt.compilerArm != "":
@@ -1857,7 +1899,7 @@ func validateMechanismArms(opt options) error {
 
 func validateRepresentationArm(arm RepresentationKind) error {
 	switch arm {
-	case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode:
+	case ReprChunk900, ReprRawTurnWindow, ReprSemanticEpisode, ReprEvent:
 		return nil
 	default:
 		return fmt.Errorf("invalid representation %q", arm)
@@ -2239,6 +2281,13 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 			logger.Warn("retrieve failed; question scored wrong", "err", err)
 			return false, "", provider.Usage{}, false, nil, retrievalMeta
 		}
+	}
+	// 027 event representation (research-subset): replace the retrieved hits
+	// with the query-relevant event projection so the answer context carries
+	// relational structure (facts + relations + temporal anchors) instead of
+	// flat chunk/fact text.
+	if opt.representationArm == ReprEvent && opt.eventProject != nil && len(hits) > 0 {
+		hits = renderEventHitsForQuery(qa, hits, opt.eventProject, opt.topK)
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics

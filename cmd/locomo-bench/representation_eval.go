@@ -4,18 +4,21 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/eventstore"
 )
 
-// RepresentationKind identifies one of the three bake-off arms.
+// RepresentationKind identifies one of the bake-off arms.
 type RepresentationKind string
 
 const (
-	ReprChunk900         RepresentationKind = "chunk_900"
-	ReprRawTurnWindow    RepresentationKind = "raw_turn_window"
-	ReprSemanticEpisode  RepresentationKind = "semantic_episode"
+	ReprChunk900        RepresentationKind = "chunk_900"
+	ReprRawTurnWindow   RepresentationKind = "raw_turn_window"
+	ReprSemanticEpisode RepresentationKind = "semantic_episode"
+	ReprEvent           RepresentationKind = "event"
 )
 
 // RepresentationRenderer produces rendered candidates from the same set of
@@ -352,4 +355,118 @@ func (r *semanticEpisodeRenderer) Render(ctx context.Context, anchors []evalRank
 		})
 	}
 	return candidates, nil
+}
+
+// eventProjectionRenderer renders anchors through the write-side event
+// projection (027). It loads the conversation event projection once and
+// renders every event sharing evidence with an anchor, so relational context
+// (dual-perspective facts + relations + temporal anchors) enters the answer
+// context. Anchors whose evidence belongs to no event degrade gracefully to
+// their raw source text (fail-closed, zero behavior change when the projection
+// is absent).
+type eventProjectionRenderer struct {
+	evidence evidenceReader
+	project  *eventstore.Project
+	maxRunes int
+}
+
+// NewEventProjectionRenderer creates the event representation arm. A nil
+// project is a valid no-op renderer (renders raw sources only); pass it only
+// when the projection was built.
+func NewEventProjectionRenderer(project *eventstore.Project, evidence evidenceReader) RepresentationRenderer {
+	return &eventProjectionRenderer{evidence: evidence, project: project, maxRunes: 4000}
+}
+
+func (r *eventProjectionRenderer) Render(ctx context.Context, anchors []evalRankedAnchor) ([]evalRenderedCandidate, error) {
+	if len(anchors) == 0 {
+		return nil, nil
+	}
+	// Reverse lineage: evidence ID → the events that reference it.
+	eventsByEvidence := make(map[string][]*eventstore.Event)
+	if r.project != nil {
+		for i := range r.project.Events {
+			ev := &r.project.Events[i]
+			for _, src := range ev.SourceLedgerIDs {
+				eventsByEvidence[src] = append(eventsByEvidence[src], ev)
+			}
+		}
+	}
+	var candidates []evalRenderedCandidate
+	rank := 0
+	seen := make(map[string]bool)
+	totalRunes := 0
+	for _, anchor := range anchors {
+		var related []*eventstore.Event
+		for _, srcID := range anchor.SourceIDs {
+			related = append(related, eventsByEvidence[srcID]...)
+		}
+		if len(related) == 0 {
+			// Graceful degradation: render the anchor's raw sources directly.
+			for _, sourceID := range anchor.SourceIDs {
+				if r.evidence == nil {
+					continue
+				}
+				ev, err := r.evidence.Get(ctx, sourceID)
+				if err != nil {
+					continue
+				}
+				rank++
+				candidates = append(candidates, evalRenderedCandidate{
+					CandidateID:    fmt.Sprintf("%s/event-fallback:%s", anchor.CandidateID, sourceID),
+					Kind:           string(ReprEvent),
+					Rank:           rank,
+					Score:          anchor.Score,
+					Text:           ev.Content,
+					TextDigest:     evalTextDigest(ev.Content),
+					SourceIDs:      []string{ev.ID},
+					ExpandedFrom:   []string{anchor.CandidateID},
+					ExpansionCount: 0,
+				})
+			}
+			continue
+		}
+		for _, ev := range related {
+			if seen[ev.ID] {
+				continue
+			}
+			seen[ev.ID] = true
+			text := renderEventText(ev)
+			if r.maxRunes > 0 && totalRunes+utf8.RuneCountInString(text) > r.maxRunes {
+				continue
+			}
+			totalRunes += utf8.RuneCountInString(text)
+			rank++
+			candidates = append(candidates, evalRenderedCandidate{
+				CandidateID:    "event:" + ev.ID,
+				Kind:           string(ReprEvent),
+				Rank:           rank,
+				Score:          anchor.Score,
+				Text:           text,
+				TextDigest:     evalTextDigest(text),
+				SourceIDs:      ev.SourceLedgerIDs,
+				ExpandedFrom:   []string{anchor.CandidateID},
+				ExpansionCount: len(ev.SourceLedgerIDs) - 1,
+			})
+		}
+	}
+	return candidates, nil
+}
+
+func renderEventText(ev *eventstore.Event) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[EVENT] (speaker: %s", ev.Speaker)
+	if ev.AbsoluteTS != "" {
+		fmt.Fprintf(&b, ", %s", ev.AbsoluteTS)
+	}
+	if ev.RelativeRef != "" {
+		fmt.Fprintf(&b, ", rel: %q", ev.RelativeRef)
+	}
+	b.WriteString(")\n")
+	for _, f := range ev.FactEntries {
+		fmt.Fprintf(&b, "  FACT: %s\n", f.Text)
+	}
+	for _, rel := range ev.RelationEntries {
+		fmt.Fprintf(&b, "  RELATION (%s): %s\n", rel.RelationType, rel.Text)
+	}
+	return b.String()
 }
