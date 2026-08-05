@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -240,6 +241,48 @@ func TestEstimateReportPricesJudgeWithJudgeModel(t *testing.T) {
 	}
 	if report.ByRole["judge"].USD == tokenUSD(prices["answer-model"], estimateJudgeIn, estimateJudgeOut) {
 		t.Fatal("judge estimate used answer model pricing")
+	}
+}
+
+func TestSelectQuestionsOnlyQuestionsWhitelist(t *testing.T) {
+	conv := conversation{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
+		{Question: "a", Answer: []byte(`"1"`), Category: 4, QuestionID: "conv-1-q-0"},
+		{Question: "b", Answer: []byte(`"2"`), Category: 4, QuestionID: "conv-1-q-1"},
+		{Question: "c", Answer: []byte(`"3"`), Category: 4, QuestionID: "conv-1-q-2"},
+	}}
+	opt := options{datasetFormat: "locomo", onlyQuestions: map[string]bool{"conv-1-q-1": true}}
+	selected := selectQuestions(conv, opt)
+	if len(selected) != 1 || selected[0].QA.Question != "b" {
+		t.Fatalf("whitelist selection = %+v, want only conv-1-q-1", selected)
+	}
+	if got := countSelectedQuestions([]conversation{conv}, opt); got != 1 {
+		t.Fatalf("countSelectedQuestions = %d, want 1", got)
+	}
+}
+
+func TestReadQuestionWhitelist(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/ids.txt"
+	content := "# residual pilot\nconv-0-q-106\n\nconv-3-q-2  \n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := readQuestionWhitelist(path)
+	if err != nil {
+		t.Fatalf("readQuestionWhitelist: %v", err)
+	}
+	if len(set) != 2 || !set["conv-0-q-106"] || !set["conv-3-q-2"] {
+		t.Fatalf("whitelist = %+v, want 2 IDs with whitespace/comments stripped", set)
+	}
+	empty := dir + "/empty.txt"
+	if err := os.WriteFile(empty, []byte("# only comments\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readQuestionWhitelist(empty); err == nil {
+		t.Fatal("empty whitelist must error, not silently run the full dataset")
+	}
+	if _, err := readQuestionWhitelist(dir + "/missing.txt"); err == nil {
+		t.Fatal("missing whitelist file must error")
 	}
 }
 

@@ -111,6 +111,8 @@ type options struct {
 	maxQuestions              int
 	onlyCategory              int
 	onlyEnumeration           bool
+	onlyQuestionsFile         string          // --only-questions: path to a question-ID whitelist
+	onlyQuestions             map[string]bool // parsed whitelist (nil = no filter)
 	topK                      int
 	maxTokens                 int
 	concurrency               int
@@ -184,8 +186,8 @@ type options struct {
 	// --compiler-arm planner; if empty the planner stays nil and the compiler
 	// degrades to the deterministic extractive fallback (023 FR-019).
 	plannerBaseURL string
-	plannerModel    string
-	plannerTimeout  time.Duration // 0 → defaultPlannerTimeout
+	plannerModel   string
+	plannerTimeout time.Duration // 0 → defaultPlannerTimeout
 	// eventProjection selects the event-projection shadow mode for
 	// structured-gap refetch (E0/E1/E2/E3). "" means off.
 	eventProjection string
@@ -209,8 +211,8 @@ type options struct {
 	// clusterMinKeywordJaccard / clusterEmbedThresh / clusterMaxEvidence tune the
 	// 025 SemanticClusterer when --episode-cluster is on (research.md R3/R4).
 	clusterMinKeywordJaccard float64
-	clusterEmbedThresh        float64
-	clusterMaxEvidence        int
+	clusterEmbedThresh       float64
+	clusterMaxEvidence       int
 }
 
 func main() {
@@ -282,6 +284,7 @@ func run() error {
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
 	flag.IntVar(&opt.onlyCategory, "only-category", 0, "evaluate only this question category (0 = all)")
 	flag.BoolVar(&opt.onlyEnumeration, "only-enumeration", false, "evaluate only enumeration questions")
+	flag.StringVar(&opt.onlyQuestionsFile, "only-questions", "", "run only these question IDs (one `conv-N-q-M` per line, # = comment; for residual-cohort pilots, incompatible with formal B0/B1)")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
@@ -511,8 +514,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if opt.onlyQuestionsFile != "" {
+		ids, err := readQuestionWhitelist(opt.onlyQuestionsFile)
+		if err != nil {
+			return err
+		}
+		opt.onlyQuestions = ids
+	}
 	if opt.formalProtocol != nil || opt.b0Protocol != nil {
-		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
+		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 || opt.onlyQuestions != nil {
 			return fmt.Errorf("022 B0/B1 evaluation refuses dataset/question sampling")
 		}
 		protocol := opt.formalProtocol
@@ -1587,9 +1597,9 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	// real episode projections to expand instead of falling back to raw anchors.
 	if opt.episodeCluster {
 		opts := memory.ClusterOptions{
-			MinKeywordJaccard:   opt.clusterMinKeywordJaccard,
+			MinKeywordJaccard:     opt.clusterMinKeywordJaccard,
 			MaxEvidencePerEpisode: opt.clusterMaxEvidence,
-			EmbedThresh:         opt.clusterEmbedThresh,
+			EmbedThresh:           opt.clusterEmbedThresh,
 		}
 		var clusterer memory.SemanticClusterer
 		if embClient != nil {
@@ -2605,6 +2615,9 @@ func selectQuestions(conv conversation, opt options) []selectedQuestion {
 	selected := make([]selectedQuestion, 0, len(conv.QA))
 	answered, adversarial := 0, 0
 	for index, qa := range conv.QA {
+		if opt.onlyQuestions != nil && !opt.onlyQuestions[qa.QuestionID] {
+			continue
+		}
 		if opt.onlyCategory > 0 && qa.Category != opt.onlyCategory {
 			continue
 		}
@@ -2626,6 +2639,28 @@ func selectQuestions(conv conversation, opt options) []selectedQuestion {
 		answered++
 	}
 	return selected
+}
+
+// readQuestionWhitelist parses a `conv-N-q-M` question-ID whitelist (one per
+// line, `#`-prefixed lines ignored) into a set. Empty files are an error so a
+// typo'd path or empty residual list cannot silently run the full dataset.
+func readQuestionWhitelist(path string) (map[string]bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read --only-questions: %w", err)
+	}
+	set := make(map[string]bool)
+	for _, ln := range strings.Split(string(raw), "\n") {
+		id := strings.TrimSpace(ln)
+		if id == "" || strings.HasPrefix(id, "#") {
+			continue
+		}
+		set[id] = true
+	}
+	if len(set) == 0 {
+		return nil, fmt.Errorf("--only-questions file %q contains no question IDs", path)
+	}
+	return set, nil
 }
 
 func countSelectedQuestions(convs []conversation, opt options) int {
