@@ -210,3 +210,22 @@ engram 当前数值北极星指向其后续托管平台自报的 LoCoMo 92.5% / 
 而不是上述论文结果。该托管结果包含开源 SDK 不具备的优化和较大检索预算，无法同栈
 复现。因此，engram 可以把它作为严格数值门，但只有冻结数据、answerer、judge、
 prompt、候选与上下文预算后的配对实验，才能支撑“受控优于 Mem0”的声明。
+
+## 026 查询期 verbatim 编译证据更新（2026-08-06）
+
+- [Fidelity-Before-Structure](https://www.alphaxiv.org/abs/2601.00821)固定 pipeline 内只
+  换存储表示：verbatim chunks 比 LLM-extracted artifacts 高 **15.9pp（LoCoMo）/
+  22.0pp（LongMemEval-S）**，机制是 lossy distillation（write-time 丢弃的信息
+  retrieval 救不回），69% 的失败来自 extractor 从未写下的 write-time loss。方向性支持
+  “query-time 选原文 > write-time 提取”，但不保证在固定候选池内必涨。
+- Penfield Labs audit（[dial481/locomo-audit](https://github.com/dial481/locomo-audit)，
+  被 [CogniFold](https://www.alphaxiv.org/abs/2605.13438) 引用）：LoCoMo-10 有
+  **6.4% 答案键错误**（99/1,540 改分错误，multi-hop 9.9%），完美系统理论上限
+  ≈93.6%。engram 配对必须记录答案键噪声，小 delta 不单独作 promotion 依据。
+- **026 实测（2026-08-02，LoCoMo B1-high 配对）**：query-time verbatim 编译在固定
+  候选池内是**负结果**——compiler 相对 control 82.6% 为 extractive 78.1%（−4.5pp）/
+  exact-token 79.0%（−3.6pp），multi-hop 目标类别也无提升。机制：need 剪枝把 answer
+  input token 压掉 33%/24%，simple 类目更依赖精确逐证据命中。这**不证伪**
+  Fidelity-Before-Structure（它比较的是表示层 verbatim vs artifact，而非 query-time 在
+  固定池内剪枝）；但它说明 “query-time 剪枝式编译”不是当前固定候选口径下的有效杠杆，
+  `--compiler-arm` 保持默认关。
