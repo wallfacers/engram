@@ -51,6 +51,55 @@ func TestMissAttributionIsMutuallyExclusiveAndOrdered(t *testing.T) {
 	}
 }
 
+// TestTemporalResolutionCandidateOracle (T021) — candidate-oracle 归因:
+// 每题 superseded/current 版本在池判定, 区分 resolution miss (版本在池但未解析,
+// 027 可救) 与 candidate miss (版本不在池, 027 救不了)。
+func TestTemporalResolutionCandidateOracle(t *testing.T) {
+	// (1) current_value query + 池内含 2 版本 → resolution applicable + superseded 在池。
+	v := resolveTemporalOracle("What is Alice's current email address?", []int{2})
+	if !v.ResolutionApplicable || !v.SupersededInPool || v.PoolVersionCount != 2 {
+		t.Fatalf("expected applicable+superseded verdict, got %+v", v)
+	}
+	if !v.ResolutionMiss || v.CandidateMiss {
+		t.Fatalf("expected resolution miss (versions in pool), got %+v", v)
+	}
+	// base candidate_miss 细化 → resolution_miss。
+	if got := classifyTemporalMiss(evalMissCandidate, v); got != evalMissResolution {
+		t.Fatalf("base candidate_miss refined to %q, want resolution_miss", got)
+	}
+	// 其它 miss 类不细化。
+	if got := classifyTemporalMiss(evalMissAnswerer, v); got != evalMissAnswerer {
+		t.Fatalf("answerer_miss must not be refined, got %q", got)
+	}
+
+	// (2) current_value query + 池内只有 1 版本 → 无 supersede, candidate miss。
+	single := resolveTemporalOracle("What is Alice's current email address?", []int{1})
+	if !single.ResolutionApplicable || single.SupersededInPool {
+		t.Fatalf("expected applicable single-version verdict, got %+v", single)
+	}
+	if single.ResolutionMiss || !single.CandidateMiss {
+		t.Fatalf("expected candidate miss (no superseded version in pool), got %+v", single)
+	}
+	if got := classifyTemporalMiss(evalMissCandidate, single); got != evalMissCandidate {
+		t.Fatalf("single-version candidate miss must stay candidate_miss, got %q", got)
+	}
+
+	// (3) 无 temporal 语义 query → 解析不适用, 不归因到 resolution。
+	degraded := resolveTemporalOracle("what happened in the meeting", []int{2})
+	if degraded.ResolutionApplicable {
+		t.Fatalf("degraded query must not be resolution-applicable: %+v", degraded)
+	}
+	if degraded.ResolutionMiss || degraded.CandidateMiss {
+		t.Fatalf("degraded query must not claim a temporal miss: %+v", degraded)
+	}
+
+	// (4) 无实体分组 (空版本列表) → candidate miss (无版本可判定 supersede)。
+	noGroup := resolveTemporalOracle("What is Alice's current email address?", nil)
+	if noGroup.SupersededInPool || !noGroup.CandidateMiss {
+		t.Fatalf("ungrouped pool must be candidate miss, got %+v", noGroup)
+	}
+}
+
 func TestFixedGoldOracleIsDiagnosticOnly(t *testing.T) {
 	oracle := evalFixedGoldOracleRequest{
 		Stage:          evalStageFixedGoldOracle,

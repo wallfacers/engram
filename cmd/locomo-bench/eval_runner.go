@@ -347,7 +347,7 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 // --representation, but the frozen manifest difference is the episode_cluster
 // key alone). They are deliberately NOT part of formalTreatmentForOptions — a
 // density flag never replaces the legacy B1 control, it extends it.
-var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster", "compiler"}
+var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution"}
 
 // densityMechanismFlagsForOptions returns the additive mechanism flags derived
 // from the CLI. Absent flags are omitted so a run with neither mechanism set
@@ -369,6 +369,9 @@ func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	}
 	if opt.compilerArm != "" {
 		flags["compiler"] = true
+	}
+	if opt.temporalResolution {
+		flags["temporal_resolution"] = true
 	}
 	return flags
 }
@@ -553,9 +556,10 @@ func isFormalLegacyControlMechanismFlags(flags map[string]bool) bool {
 
 // isFormalControlMechanismFlags accepts the legacy 3-key B1 control, optionally
 // extended with the 024 density additive keys (write_dedup / neighbor_extend,
-// contracts/mechanism-bindings.md). Legacy keys must be present and false;
-// density keys may be true or false; no unknown key is allowed. A pure legacy
-// control (3 keys) satisfies this — backward compatible with frozen 022 assets.
+// contracts/mechanism-bindings.md) and the 027 temporal_resolution additive key.
+// Legacy keys must be present and false; density keys may be true or false; no
+// unknown key is allowed. A pure legacy control (3 keys) satisfies this —
+// backward compatible with frozen 022 assets.
 func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	if len(flags) < 3 {
 		return false
@@ -568,7 +572,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	}
 	for name := range flags {
 		switch name {
-		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler":
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution":
 			continue
 		default:
 			return false
@@ -615,7 +619,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	var hits []memory.Result
 	retrievalCalls := 0
 	var retrieveErr error
-	if opt.compilerArm != "" && strings.TrimSpace(opt.runDir) != "" {
+	if (opt.compilerArm != "" || opt.temporalResolution) && strings.TrimSpace(opt.runDir) != "" {
 		replay, replayErr := loadFormalCandidateReplay(opt.runDir, protocol.ProtocolHash, qa.QuestionID, qa.Question)
 		if replayErr == nil {
 			hits = replay.Hits
@@ -664,10 +668,12 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		// legacy B0 product path used. Folding whole-source anchors back to
 		// hit.Content keeps every member message as a whole-source span, so
 		// auditability holds while the bundle stops paying the expansion tax.
-		// The compiler arm (026) is excluded: its frozen protocol and validator
-		// operate on the per-source expansion, and the fold would break the
-		// byte-identical candidate replay across compiler arms.
-		if opt.representationArm == ReprChunk900 && opt.compilerArm == "" {
+		// The compiler arm (026) and the temporal-resolution arm (027) are
+		// excluded: their frozen protocol and validator operate on the per-source
+		// expansion, and the fold would break the byte-identical candidate replay
+		// across arms (and would collapse multi-version evidence into one
+		// /verbatim candidate, defeating 027's version separation).
+		if opt.representationArm == ReprChunk900 && opt.compilerArm == "" && !opt.temporalResolution {
 			expanded = rebuildExpandedForChunkVerbatim(expanded)
 		}
 		frozen.Candidate = buildExpandedFormalCandidateArtifact(protocol, qa, expanded, turnEvidence, retrievalCalls)
@@ -717,17 +723,23 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	var evidenceTokens int
 	var packErr error
 	if sourceErr == nil {
-		if opt.compilerArm != "" {
+		if opt.compilerArm != "" || opt.temporalResolution {
 			// Compile arm: use the evidencecompiler engine instead of the
 			// legacy ranked-prefix packer. The compiler selects items under
 			// the real token counter and produces an auditable trace. The
 			// exact-token arm uses the same candidate list but a local,
-			// token-level relevance selection.
+			// token-level relevance selection. 027's temporal-resolution arm
+			// (mutually exclusive with --compiler-arm) shares the same
+			// candidate list and bundle/trace builders, adding deterministic
+			// query-time time organization plus a per-question audit.
 			var compiledBundle evidencecompiler.Bundle
 			var compiledTrace evidencecompiler.Trace
+			var resolutionAudit ResolutionAudit
 			var compileErr error
 			if opt.compilerArm == "exact_token" {
 				compiledBundle, compiledTrace, compileErr = compileExactTokenArm(qa.Question, buildCompileCandidates(formalCompileSourceList(expanded)), protocol.Retrieval.CandidateLimit)
+			} else if opt.temporalResolution {
+				compiledBundle, compiledTrace, resolutionAudit, compileErr = compileTemporalResolutionArm(qa.Question, expanded, protocol.Retrieval.CandidateLimit)
 			} else {
 				compiledBundle, compiledTrace, compileErr = compileFormalSources(ctx, protocol, opt, qa, expanded)
 			}
@@ -750,6 +762,13 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 						System: system,
 						User:   bundle.RenderedContext,
 					}
+					if opt.temporalResolution {
+						// 027 FR-008/contract Rule 7: 记录 per-question 解析审计供
+						// US2/US3 归因。写入失败 fail closed (审计产物不完整)。
+						if auditErr := appendResolutionAudit(opt.runDir, qa.QuestionID, resolutionAudit); auditErr != nil {
+							packErr = fmt.Errorf("resolution audit: %w", auditErr)
+						}
+					}
 					_ = inputTokens
 				}
 			}
@@ -766,7 +785,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 	if input.Model == "" {
 		input.Model = protocol.Models.Answerer.ID
 	}
-	if opt.compilerArm == "" {
+	if opt.compilerArm == "" && !opt.temporalResolution {
 		items := formalBundleItems(packedSources)
 		frozen.Trace = buildFormalTraceForItems(protocol, qa.QuestionID, frozen.Candidate, items)
 		frozen.Bundle = buildExpandedFormalBundle(protocol, qa.QuestionID, frozen.Candidate, frozen.Trace, packedSources, input)

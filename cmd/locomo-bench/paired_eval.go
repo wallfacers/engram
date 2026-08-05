@@ -99,6 +99,38 @@ type evalCategoryComparison struct {
 	PValue   float64
 }
 
+// pairedCategoryComparison aggregates one category's paired per-question
+// outcomes into DeltaPP + exact-McNemar p (027 US2/T017, shared by the US2
+// category report). control and treatment must be equal-length outcome slices;
+// discordant pairs drive the exact two-sided McNemar test (never chi-square).
+func pairedCategoryComparison(category string, control, treatment []bool) (evalCategoryComparison, error) {
+	if len(control) == 0 || len(control) != len(treatment) {
+		return evalCategoryComparison{}, fmt.Errorf("paired category %q requires equal non-empty outcomes", category)
+	}
+	delta := 0
+	controlOKTreatmentWrong := 0
+	controlWrongTreatmentOK := 0
+	for index := range control {
+		switch {
+		case control[index] && !treatment[index]:
+			controlOKTreatmentWrong++
+			delta--
+		case !control[index] && treatment[index]:
+			controlWrongTreatmentOK++
+			delta++
+		}
+	}
+	p, err := exactMcNemarTwoSided(controlOKTreatmentWrong, controlWrongTreatmentOK)
+	if err != nil {
+		return evalCategoryComparison{}, err
+	}
+	return evalCategoryComparison{
+		Category: category,
+		DeltaPP:  float64(delta) / float64(len(control)) * 100,
+		PValue:   p,
+	}, nil
+}
+
 type evalCategoryGateResult struct {
 	Category                string  `json:"category"`
 	DeltaPP                 float64 `json:"delta_pp"`

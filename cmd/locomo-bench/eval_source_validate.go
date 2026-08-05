@@ -492,8 +492,12 @@ func validateFormalB1AnchorPrefix(protocol evalProtocol, candidate evalCandidate
 	// candidate artifact), but item count/order need not be a prefix boundary.
 	// This is the contract increment approved for 026 (density-mechanism-hypothesis
 	// closed → post-hit verbatim coverage), mirroring how 025 relaxed the
-	// per-source cardinality for episodes.
-	if protocol.Experiment.MechanismFlags["compiler"] {
+	// per-source cardinality for episodes. 027's temporal-resolution arm
+	// re-organizes the same candidate pool by query-time time semantics
+	// (current-value / evolution-chain / temporal-window), so its bundle is also
+	// not a mechanical ranked-anchor prefix — it maps 1:1 to rendered candidates
+	// inside the pool and shares the compiler audit contract.
+	if protocol.Experiment.MechanismFlags["compiler"] || protocol.Experiment.MechanismFlags["temporal_resolution"] {
 		return validateFormalB1CompilerAnchorPrefix(candidate, bundle)
 	}
 
