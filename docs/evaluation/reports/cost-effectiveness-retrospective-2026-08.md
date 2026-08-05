@@ -146,9 +146,29 @@ agent 化多步推理在 LoCoMo/LongMemEval 被动 QA 上无干净支持，008 �
 | 方向 | 升降级 | 依据 |
 |---|---|---|
 | A（answerer 侧多步推理） | **降级**——多步本身无支持；若做走「SaaS 强模型 + 结构化检索」，不是多步导航 | MemCog 消融 −0.35pp |
-| B（写入侧 event-centric 时序结构） | **升级**——唯一有干净固定变量消融、且命中已收敛缺口（temporal/multi-hop） | SEGTREEMEM + StructMem |
+| B（写入侧 event-centric 时序结构） | **升级→已实测证伪（027）**——纸上消融干净，但 7B 本地抽取实测丢绝对时间锚定、端到端 −26.2pp（p=0.0016）；重试前提=抽取侧锚定修复 | SEGTREEMEM + StructMem · [027 实测](027-write-side-event-verdict.md) |
 | C（评测纪律） | **升级**——已被定量背书；补 cross-model 稳定性即可 | MemDelta |
 
 B 的落地约束：两篇都是 LLM 写入侧（event 抽取 / node summary）。engram 若做，需本地
 sidecar 抽取 event——比 023 的 planner proposal 简单得多，但仍属写入侧改造，须先证明
 端到端转化（008 铁律）。SaaS 层若启动，B 的结构可作其检索侧基底。
+
+### 6.5 方向 B 实测证伪（027，2026-08-05）
+
+027 spec 按 B 落地：双视角 event 抽取 + 时间锚定 + 可重建投影（SEGTREEMEM/StructMem 同构），
+7B 本地 sidecar 抽 5870 event，配对 84 题（temporal 59 + multi-hop 25，3 reps majority）。
+**实测端到端大降**：chunk 50.0% vs event 23.8%（**−26.2pp，McNemar p=0.0016**）；temporal
+p=0.0135（独对 24 vs 9）、multi-hop p=0.092（独对 10 vs 3）方向一致。
+
+**机制**：7B 抽取把绝对日期泛化成相对词（build-event 仅 5% 带绝对时间锚定；63 错题中 47
+题 predicted 含相对时间词、25 题 gold 含绝对日期），写侧结构化以丢失原文保真为代价，
+relation 结构未能补偿。信息最保真的写入形态仍是原文 chunk。
+
+**教训**：纸上消融干净 ≠ 本地可复制。两篇文献的写侧抽取用强模型（gpt-4o-mini / 训练模型）；
+engram 的 7B 非训练条件丢绝对时间锚定，是**结构性差距**而非工程 bug（fail-closed/schema
+校验均正常，失败在结构内信息保真）。B 从「升级」改为「**有条件重试**」：仅在抽取侧解决
+绝对时间锚定（更强抽取模型 / 确定性 date 解析回填 / 原文时间戳直通）后重过同一配对门；
+否则维持原文 chunk 写入。
+
+成本：两臂 3 reps 共 1512 次 answer/judge 调用，近零（本地 vllm + DeepSeek judge），
+本方向验证未烧钱。

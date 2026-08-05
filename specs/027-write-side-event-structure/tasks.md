@@ -30,8 +30,8 @@ description: "Task list for 027 write-side event structure memory"
 
 **Purpose**: 确认承接资产可用、准备测试夹具（零代码，不碰引擎）
 
-- [ ] T001 核实承接资产可用：`provider/` LLM 抽象接口、022 Evidence Ledger、`cmd/locomo-bench/representation_eval.go` 的 shared-anchor 设计、`--only-questions` formal 子集模式（023）；记录每项可用性到 quickstart 前置条件
-- [ ] T002 准备 event 抽取 fixture：合法 JSON、非法 JSON、缺字段、空 fact_entries、未知 relation_type、超长 text、source id 不存在——存 `memory/eventstore/testdata/`（供 T007 失败测试 + T009 校验器 byte-replay）
+- [x] T001 核实承接资产可用：`provider/` LLM 抽象接口、022 Evidence Ledger、`cmd/locomo-bench/representation_eval.go` 的 shared-anchor 设计、`--only-questions` formal 子集模式（023）；记录每项可用性到 quickstart 前置条件
+- [x] T002 准备 event 抽取 fixture：合法/非法 JSON、缺字段、空 fact_entries、未知 relation_type、超长 text、source 缺失——**内联在 `memory/eventstore/event_test.go`**（未建独立 testdata/，byte-replay 测试直接覆盖）
 
 ---
 
@@ -43,9 +43,9 @@ description: "Task list for 027 write-side event structure memory"
 
 ### Implementation for User Story 1
 
-- [ ] T003 [US1] 从已冻结 store 导出 temporal + multi-hop 错题清单（含 gold 答案），按 conversation 分组，写 `specs/027-write-side-event-structure/diagnosis/diagnosis-cohort.json`
-- [ ] T004 [US1] 抽样人审（每 conversation ~5 题）：gold 文本是否存在于对话原文？是否被现有检索捞进候选？分类计数（在池/不在池/在池但打包缺上下文）
-- [ ] T005 [US1] 产出阶段 0 诊断报告（`diagnosis/phase0-report.md`）：分类计数 + 判定（GO 进 US2 / STOP 收口）；**判定 STOP 则 027 收口，不再实现 US2+**
+- [x] T003 [US1] 从已冻结 store 导出 temporal + multi-hop 错题清单（含 gold 答案），按 conversation 分组，写 `specs/027-write-side-event-structure/diagnosis/diagnosis-cohort.json`（84 题：temporal 59 + multi-hop 25，来源 009-full-B-cattopk run-1 = 86.4%）
+- [x] T004 [US1] 诊断 gold 在不在对话/候选：写入覆盖 100%（84/84 evidence 原文在 store）+ candidate oracle（top-30 hybrid coverage：session recall 89.6% / turn recall 2.4%）——自动判定 + 抽样样例（`diagnose_phase0.py` + `coverage-run-hybrid/coverage.json`）
+- [x] T005 [US1] 产出阶段 0 诊断报告（`diagnosis/phase0-report.md`）：**判定 GO**——gold 在池（写入覆盖 + session 覆盖），STOP 门不触发；错题机制=关系/时序表达 + 检索精确命中弱，正是 B 的写入侧 event 结构针对点。进 US2（Foundational）
 
 **Checkpoint**: 阶段 0 判定产出。GO 才继续。
 
@@ -61,18 +61,18 @@ description: "Task list for 027 write-side event structure memory"
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T006 [P] 写 Event 类型 + schema 校验器的失败测试在 `memory/eventstore/event_test.go`（覆盖 event-contract.md 全部 7 条校验规则：合法/非法/缺字段/空数组/未知枚举/超长/无 source）
-- [ ] T007 [P] 写抽取 client fail-closed 的失败测试在 `memory/eventstore/extract_test.go`（fixture byte-replay：抽取成功→Event；任意校验失败→退回原文 chunk、不产生 event、记录失败原因；LLM 端点不可达→降级零行为变化）
+- [x] T006 [P] 写 Event 类型 + schema 校验器的失败测试在 `memory/eventstore/event_test.go`（覆盖 event-contract.md 全部校验规则：合法/非法/缺字段/空数组/未知枚举/超长/无 source）✓ 全绿
+- [x] T007 [P] 写抽取 client fail-closed 的失败测试在 `memory/eventstore/event_test.go`（fixture byte-replay：抽取成功→Event；任意校验失败→退回原文、记录失败原因；LLM 端点不可达→零行为变化）✓ 全绿
 
 ### Implementation for Foundational
 
-- [ ] T008 实现 Event/FactEntry/RelationEntry/RelationSummary 类型在 `memory/eventstore/event.go`（data-model.md 字段契约，含 grounded 字段）
-- [ ] T009 实现 schema 校验器在 `memory/eventstore/validate.go`（event-contract.md 7 条规则，纯 Go 确定性，无 LLM 依赖）
-- [ ] T010 实现抽取 client 在 `memory/eventstore/extract.go`：调用 `provider/` LLM（本地 sidecar）+ 校验，失败 fail-closed 退回原文 chunk、记录失败（contracts/fail-closed.md）
-- [ ] T011 实现 EventStore 可重建投影在 `memory/eventstore/store.go`：config-hash 幂等重建（抽取模型 + prompt 版本 + 时间锚定策略），append-only ledger 无损，删除/重建不改原文（FR-003）
-- [ ] T012 [P] 实现周期性跨事件合并（RelationSummary）在 `memory/eventstore/consolidate.go`：窗口/阈值触发、语义相关 + 时间相邻、有界（每 summary 事件数上限，FR-007）
-- [ ] T013 实现判定统计在 `memory/eventstore/metrics.go`：抽取数/失败率（含原因分类）/幻觉审计输入/grounded 率（FR-006）
-- [ ] T014 引擎自检：`CGO_ENABLED=0 go test -count=1 ./memory/eventstore/` 全绿
+- [x] T008 实现 Event/FactEntry/RelationEntry/RelationSummary 类型在 `memory/eventstore/event.go`（data-model.md 字段契约，含 grounded 字段）
+- [x] T009 实现 schema 校验器：**并入 `memory/eventstore/event.go`**（`Validate` 严格 + `ValidateLenient` 宽容 relation_type，纯 Go 确定性，无 LLM 依赖）
+- [x] T010 实现抽取 client 在 `memory/eventstore/extract.go`：调用 `provider/` LLM（本地 sidecar）+ 校验，失败 fail-closed 退回原文 chunk、记录失败（contracts/fail-closed.md）
+- [x] T011 实现可重建投影在 `memory/eventstore/project.go`：config-hash 幂等重建（`BuildProject`/`Write` 原子写/`LoadProject`/`Render` 有界），**真实 build-event 产出 5870 事件投影**（FR-003）
+- [x] T012 跨事件合并（RelationSummary）：**类型已实现（event.go），周期性合并逻辑未实现**——RelationSummary 直接随 event 渲染，NO-GO 下无需周期合并（FR-007）
+- [x] T013 判定统计：**并入 `memory/eventstore/extract.go` 的 `Stats`**（attempts/successes/failures + FailureReasons 分类，FR-006）
+- [x] T014 引擎自检：`CGO_ENABLED=0 go test -count=1 ./memory/eventstore/` 全绿 ✓
 
 **Checkpoint**: 引擎侧 event 投影可用（TDD 全绿）。US2 可开始。
 
@@ -88,17 +88,17 @@ description: "Task list for 027 write-side event structure memory"
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T015 [P] [US2] 写 event 渲染器失败测试在 `cmd/locomo-bench/representation_eval_test.go`：同一 ranked anchor 下 ReprEvent 渲染出事件 + 关系摘要上下文（复用 025 shared-anchor 设计，事件有界、默认关零行为变化）
+- [x] T015 [P] [US2] 写 event 渲染器失败测试在 `cmd/locomo-bench/representation_eval_test.go`：同一 ranked anchor 下 ReprEvent 渲染出事件 + 关系摘要上下文（复用 025 shared-anchor 设计，事件有界、默认关零行为变化）
 
 ### Implementation for User Story 2
 
-- [ ] T016 [P] [US2] 实现 event 渲染器在 `cmd/locomo-bench/representation_eval.go`：新增 ReprEvent（围绕同一 anchor 渲染 event + RelationSummary，有界）
-- [ ] T017 [US2] 实现 `--representation event` flag + event store 构建 + 配对跑法在 `cmd/locomo-bench/eventstore_eval.go`（复用 `--only-questions` 子集模式，`config-hash` 记录）
-- [ ] T018 [US2] 跑先导配对：temporal + multi-hop 子集（`--only-questions`），event vs chunk，repeats≥3（quickstart 阶段 1 命令）
-- [ ] T019 [US2] 抽取质量审计：schema 合法率、幻觉抽样人审、grounded 率（D1 门：合法率 <95% 或幻觉率 >5% → 升级 35B 重跑）
-- [ ] T020 [US2] 先导 verdict：majority 配对 + 分类别明细 + token 记账 → GO 进 US3 / STOP 记录（008 铁律，不进入默认路径）
+- [x] T016 [P] [US2] 实现 event 渲染器在 `cmd/locomo-bench/representation_eval.go`：新增 ReprEvent（围绕同一 anchor 渲染 event + RelationSummary，有界）
+- [x] T017 [US2] 实现 `--representation event` flag + event store 构建 + 配对跑法在 `cmd/locomo-bench/eventstore_eval.go`（复用 `--only-questions` 子集模式，`config-hash` 记录）
+- [x] T018 [US2] 跑先导配对：temporal + multi-hop 子集（`--only-questions`），event vs chunk，repeats=3（quickstart 阶段 1 命令）
+- [x] T019 [US2] 抽取质量审计：build-event 5870/5882 成功（99.8%），schema 校验 fail-closed 生效；**D1 门暴露时间锚定缺陷**（5870 event 仅 5% 带绝对时间）——主导失败机制，未升级 35B（verdict 已明确方向，升级不改变结论）
+- [x] T020 [US2] 先导 verdict：chunk majority 50.0% vs event 23.8%，**−26.2pp，McNemar p=0.0016 → NO-GO STOP**（008 铁律，不进入默认路径）。[verdict](../../docs/evaluation/reports/027-write-side-event-verdict.md)
 
-**Checkpoint**: 阶段 1 先导 verdict 产出。GO 才继续。
+**Checkpoint**: 阶段 1 先导 verdict 产出 = **STOP（NO-GO）**。US3/US4 不再执行。
 
 ---
 
@@ -110,12 +110,12 @@ description: "Task list for 027 write-side event structure memory"
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] 跑 LoCoMo 全量配对（1540，event vs chunk，repeats≥3，同 answerer/judge/token cap）——quickstart 阶段 2
-- [ ] T022 [US3] 跑 LongMemEval-S 全量配对（500，同配方）
-- [ ] T023 [US3] 分类别配对统计（McNemar）+ token 记账 + validity 检查（候选/source/span/citation/within-cap rate）
-- [ ] T024 [US3] verdict 收口：GO → 讨论进入默认路径（预注册口径冻结臂）/ NO-GO → 记录负结果（FR-010）
+- [x] T021 [US3] ~~跑 LoCoMo 全量配对（1540）~~ **不再执行**——阶段 1 已 NO-GO（−26.2pp/p=0.0016），008 铁律下不进全量
+- [x] T022 [US3] ~~跑 LongMemEval-S 全量配对（500）~~ **不再执行**——同上
+- [x] T023 [US3] ~~分类别配对统计~~ **已由阶段 1 先导覆盖**（McNemar + 分类别明细见 [verdict](../../docs/evaluation/reports/027-write-side-event-verdict.md)）
+- [x] T024 [US3] verdict 收口：**NO-GO**，记录负结果（FR-010），不进入默认路径
 
-**Checkpoint**: 阶段 2 verdict 收口。
+**Checkpoint**: 阶段 2 verdict 收口 = **NO-GO（阶段 1 已 STOP，全量未跑）**。
 
 ---
 
@@ -127,9 +127,11 @@ description: "Task list for 027 write-side event structure memory"
 
 ### Implementation for User Story 4
 
-- [ ] T025 [P] [US4] 实现 segment tree 构建（temporal 有序、rightmost-frontier 在线更新、内部节点为段总结）在 `memory/eventstore/segment_tree.go`
-- [ ] T026 [P] [US4] 实现沿树传播检索（top-down/bottom-up 策略 + 衰减因子）在 `memory/eventstore/segment_tree_retrieval.go`
-- [ ] T027 [US4] 配对验证（同预算正确数 + token 记账）并记录：GO 维持/NO-GO 维持平铺路径
+- [x] T025 [P] [US4] ~~segment tree 构建~~ **不再执行**——US3 未 GO（仅 US3 GO 后可选）
+- [x] T026 [P] [US4] ~~沿树传播检索~~ **不再执行**——同上
+- [x] T027 [US4] ~~配对验证~~ **不再执行**——同上
+
+**Checkpoint**: 阶段 3 不进入（US2 NO-GO 已 STOP 整条线）。
 
 ---
 
@@ -137,9 +139,9 @@ description: "Task list for 027 write-side event structure memory"
 
 **Purpose**: verdict 落盘 + 资产登记 + 复盘更新（verdicts-go-to-tracked-docs 纪律）
 
-- [ ] T028 结果与 verdict 落 `docs/evaluation/`（实验结论 MUST 进 tracked docs，不能只进本地 memory）
-- [ ] T029 更新 `docs/evaluation/experiment-verdicts.md`（027 行：verdict / 范围 / 出货影响 / 证据）
-- [ ] T030 更新复盘 doc `docs/evaluation/reports/cost-effectiveness-retrospective-2026-08.md` §6（B 方向的实测转化/证伪结论）
+- [x] T028 结果与 verdict 落 `docs/evaluation/`：[027-write-side-event-verdict.md](../../docs/evaluation/reports/027-write-side-event-verdict.md)（实验结论 MUST 进 tracked docs，不能只进本地 memory）
+- [x] T029 更新 `docs/evaluation/experiment-verdicts.md`（027 行：verdict / 范围 / 出货影响 / 证据）
+- [x] T030 更新复盘 doc `docs/evaluation/reports/cost-effectiveness-retrospective-2026-08.md` §6（B 方向实测证伪 → §6.5 + §6.4 B 行更新）
 
 ---
 

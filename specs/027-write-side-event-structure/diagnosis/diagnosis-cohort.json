@@ -1,0 +1,42 @@
+{
+  "feature": "027-write-side-event-structure",
+  "phase": "phase0-diagnosis",
+  "created": "2026-08-05",
+  "run_source": ".locomo-run/009-full-B-cattopk/run-1/results-hybrid.jsonl",
+  "run_score": "1330/1540 = 86.4% (本地最接近当前基线; 022 B1 85.19% 在远端 AutoDL)",
+  "store_used": ".locomo-run/009-bge-chunks-store (bge-large 1024d, fact+chunk 混合, --chunks 建)",
+  "cohort": {
+    "definition": "temporal + multi-hop 错题 (correct=false)",
+    "total": 84,
+    "by_category": {"temporal": 59, "multi-hop": 25}
+  },
+  "diagnosis": {
+    "write_coverage": "84/84 = 100%: 所有错题的 gold evidence 原文在 store memory_entries 中可匹配 (diagnose_phase0.py, token 重叠判定)",
+    "candidate_oracle_top30_hybrid": {
+      "turn_recall": 0.024,
+      "session_recall": 0.896,
+      "note": "top_k=30, retrieval=hybrid, coverage-only (零 answer/judge 调用). turn_recall 只认 chunk→turn 映射 (fact 命中不计), session_recall 用 hit.SourceSessionID (fact 命中计入).",
+      "by_category": {
+        "multi-hop": {"n": 25, "turn_recall": 0.04, "session_recall": 0.897},
+        "temporal": {"n": 59, "turn_recall": 0.017, "session_recall": 0.895}
+      }
+    }
+  },
+  "verdict": "GO — B 方向有救, 进阶段 1",
+  "verdict_rationale": [
+    "写入覆盖 100%: gold evidence 原文全在 store, 信息在写入侧没有丢失",
+    "session recall 89.6%: 检索 top-30 命中的条目覆盖了 gold 所在会话 (fact 命中计入), 信息在检索可达的池里",
+    "turn recall 2.4%: 精确证据 turn 的 chunk 极少被命中 — 错题机制是『关系/时序表达 + 检索精确命中弱』, 正是 B 的写入侧 event 结构(双视角+关系+时间锚定)针对的问题",
+    "STOP 门不触发: gold 不在对话/不在池的条件不成立"
+  ],
+  "boundaries": [
+    "turn_recall 低含伪影: fact 命中计入 session 但不计入 turn, 真实的『gold 信息在 top-30』介于 2.4% 与 89.6% 之间",
+    "per-question top-30 命中内容未逐条导出 (harness 未存), 人审抽样仅覆盖写入覆盖层",
+    "009-full-B-cattopk 为本地最接近当前基线 (86.4%); 022 B1 (85.19%) 错题集合应高度重叠但未在本地直接验证"
+  ],
+  "artifacts": {
+    "whitelist": "phase0-ids.txt (84 题, conv-N-q-M)",
+    "script": "diagnose_phase0.py (写入覆盖 token 重叠判定)",
+    "coverage_json": "coverage-run-hybrid/coverage.json"
+  }
+}
