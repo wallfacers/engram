@@ -242,6 +242,7 @@ mem0-aligned prompt。
 | 数据集 (n) | 框架 | 答题模型 | 判题模型 | 得分 |
 |---|---|---|---|---:|
 | **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.71%** |
+| LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · 默认 |
 | LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 83.77% |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
 | LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
@@ -295,13 +296,17 @@ engram ~3.4 倍的上下文预算，而非记忆机制优势。
 
 ### 读侧证据中介 —— 预算高效（trace）
 
-可选的读侧阶段（`--trace-mediation`，[spec 030](specs/030-evidence-mediation/spec.md)）：
-先用一个小中介把检索候选蒸馏成一条有据可依的证据，再交给答题模型；一道确定性的
-fail-closed 门保证每个引用都落在检索边界内。在全量 1540 题 LoCoMo 上，答题上下文
-从 ~3,614 token 降到 ~468 token（约 1/7.7），3 次多数 **85.91%**（vs base 单次
-84.9% / 历史多数 85.19%）——更少 token、正确率更高，类别无回落。由于 token 节省
-在任何正确率差值下都成立，这是上面"预算驱动 +3.20pp"的预算高效对应物——预算对齐
-视角下第一个"更少 token、更多信号"的结果。该阶段保持 opt-in、默认关闭。
+读侧阶段（`--trace-mediation`，[spec 030](specs/030-evidence-mediation/spec.md)），
+**在评测 harness 中默认开启**：先用一个小中介把检索候选蒸馏成一条有据可依的证据，
+再交给答题模型；一道确定性的 fail-closed 门保证每个引用都落在检索边界内。在全量
+1540 题 LoCoMo 上，答题上下文从 ~3,614 token 降到 ~468 token（约 1/7.7），3 次多数
+**85.91%**（vs base 单次 84.9% / 历史多数 85.19%）——更少 token、正确率更高，类别
+无回落。分类别（trace，3 次多数）：single-hop 88.23% · multi-hop 87.23% ·
+temporal 84.42% · open-domain 66.67%。由于 token 节省在任何正确率差值下都成立，
+这是上面"预算驱动 +3.20pp"的预算高效对应物——预算对齐视角下第一个"更少 token、
+更多信号"的结果。该阶段默认开启：需要已配置的 answerer LLM 作为 sidecar，sidecar
+不可用时优雅降级为 legacy 路径（字节一致）；`--trace-mediation=false` 可显式回到
+legacy 路径。
 
 Mem0 的 92.5% / 94.4% 来自托管平台，其中包含开源 SDK 未提供的优化，并使用
 `top_200` 检索预算，因此无法在同栈条件下复现，对 Mem0 的真实受控差距仍然
