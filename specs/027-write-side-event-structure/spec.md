@@ -4,9 +4,20 @@
 
 **Created**: 2026-08-05
 
-**Status**: Draft
+**Status**: **Closed（NO-GO 收口，2026-08-05）**——阶段 0 诊断 GO，阶段 1 先导配对 NO-GO，US3/US4 不再执行。实际结果见下方「实际收口」。
 
 **Input**: User description: "方向 B——写入侧 event-centric 时序结构记忆：借鉴 SEGTREEMEM（时间有序 segment tree）与 StructMem（事件双视角抽取 + 周期性跨事件合并）的干净消融证据，验证在 engram 本地口径（纯 Go + 本地 sidecar，不付费云）下，把『存文字片段』改为『写入时按事件组织、保留时间与关系』能否端到端提升 temporal + multi-hop。来源：docs/evaluation/reports/cost-effectiveness-retrospective-2026-08.md 第 6 节调研。"
+
+## 实际收口（2026-08-05，NO-GO）
+
+本 feature 已按门禁执行完并收口为 **NO-GO**。阶段判定与证据如下：
+
+- **阶段 0（US1，GO）**：84 题（temporal 59 + multi-hop 25）gold 原文 100% 在池、session recall 89.6% → 信息在池，错题机制 = 关系/时序表达弱，正是写入侧 event 结构针对点。见 [diagnosis/phase0-report.md](diagnosis/phase0-report.md)。
+- **阶段 1（US2，NO-GO）**：7B sidecar 抽 5870/5882 event（99.8%），但**时间锚定仅 5%**（绝对日期被泛化成相对词，如 `[EVENT] (rel: "Yesterday")` 对 gold `"January 9, 2023"`）。84 题 × 3 reps majority 配对：**chunk 50.0% vs event 23.8%（−26.2pp，McNemar p=0.0016）**；temporal p=0.0135、multi-hop p=0.092 方向一致。event 表示替换原文 chunk 端到端大降。完整见 [docs/evaluation/reports/027-write-side-event-verdict.md](../../docs/evaluation/reports/027-write-side-event-verdict.md)。
+- **失败机制**：7B 无训练抽取丢绝对时间锚定（63 错题中 47 题 predicted 含相对时间词、25 题 gold 含绝对日期）；写侧结构化以丢失原文保真为代价，relation 结构未补偿。是**抽取能力（结构性差距）**而非工程 bug（fail-closed/schema 校验全绿）。
+- **US3/US4（阶段 2/3）不再执行**：008 铁律下阶段 1 未转化即 STOP。
+- **出货影响（FR-010 已触发）**：event 投影 / `--representation event` / `--build-event-project` 保持 **default-off**；`memory/eventstore/` 保留为可重建投影基建。tasks.md 已如实收口（US2 NO-GO、US3/4 不再执行）。
+- **后续（028）**：NO-GO 教训「7B 抽取能力不足」被 [028 写侧 event 训练化](../028-write-side-event-training/spec.md) 承接——US1 已证教师时间锚定（语义锚定 86.4%）能把 event 臂拉回 chunk 持平（−6.0pp），训练抽取器为其 US2。
 
 ## Clarifications
 
