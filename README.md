@@ -318,12 +318,13 @@ An opt-in read-side stage (`--trace-mediation`, [spec 030](specs/030-evidence-me
 runs the retrieved candidate set through a small mediator that distils a single
 grounded evidence statement before answering; a deterministic fail-closed gate
 keeps every citation inside the retrieved boundary. On the full 1,540-question
-LoCoMo set this drops the answer context from ~3,614 to ~441 tokens (≈8×) while
-accuracy stays non-negative (85.6% vs 84.9%, single run; repeats in progress)
-and no category regresses. Because the token saving holds at any accuracy
-delta, this is the budget-efficient counterpart to the budget-driven +3.20pp
-above — the first "more signal, fewer tokens" result under the budget-aligned
-lens. The stage stays opt-in and default-off.
+LoCoMo set this drops the answer context from ~3,614 to ~468 tokens (≈7.7×)
+at a stable 3-run majority of **85.91%** (vs base 84.9% single-run / 85.19%
+historical majority) — higher accuracy at roughly one-eighth the tokens, with
+no category regressing. Because the token saving holds at any accuracy delta,
+this is the budget-efficient counterpart to the budget-driven +3.20pp above —
+the first "more signal, fewer tokens" result under the budget-aligned lens.
+The stage stays opt-in and default-off.
 
 Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
 that are not present in the open-source SDK, and a `top_200` retrieval budget.

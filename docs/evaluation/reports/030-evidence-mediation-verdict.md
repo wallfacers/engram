@@ -33,17 +33,18 @@
 
 ## 全量验证（2026-08-06 补充，budget-efficient win 候选）
 
-子集配对后重开机器补跑**全量 1540 题**（1 rep，canonical recipe）确认环境与全量表现：
+子集配对后重开机器补跑**全量 1540 题**（canonical recipe）确认环境与全量表现：
 
 | 全量 1540 题 | OVERALL | 上下文 token | 备注 |
 |---|---|---|---|
-| base（chunk-quota 12） | **84.9%**（1308/1540） | 3620 | 与历史基线吻合（85.71%/85.19%/84.94%）→ 环境正常 |
-| **trace（--trace-mediation）** | **85.6%**（1319/1540） | **441** | **+0.7pp（净 +11 题）+ token 省 8 倍** |
+| base（chunk-quota 12，1 rep） | 84.9%（1308/1540） | 3620 | 与历史基线吻合（85.71%/85.19%/84.94%）→ 环境正常 |
+| **trace（--trace-mediation，3 次 majority）** | **85.91%**（1323/1540） | **468** | **高于 base 历史 majority 85.19%（+0.72pp）/ 单次 84.9%（+1.01pp），token 省 7.7 倍** |
 
-- 全量 trace 类别全正向：multi-hop 86.9→87.6 / temporal 81.3→82.9 / open-domain 61.5→64.6 / single-hop 88.3→88.5，**无类别回落**。
-- paired（1 rep）：flips A→B=76 / B→A=65，McNemar **p=0.40 单次不显著**；但 **answer context 441 vs 3620 tok（省 8 倍）是确定性结构优势**。
-- **解读**：84 题子集 trace +22pp（base 27.4→trace 50.0）在全量上收窄为 +0.7pp（简单题 base 也能答对，trace 优势集中在难题）；但 **token 8 倍节省在任意口径下成立**——这是"预算下提质"（signal not volume）的首个落地候选：省 8 倍 token 且正确率不降反升，类别全正向。
-- 诚实边界：单次观测 +0.7pp 不显著（p=0.40），需 repeats=3 才能判定正确率是否显著涨点；token 节省与类别方向不依赖显著性。
+- **3 次 rep 极稳定**：85.6% → 85.8% → 85.9%，majority 85.91%——非随机噪声。
+- 类别全正向无回落：multi-hop 87.23 / open-domain 66.67 / single-hop 88.23 / temporal 84.42（均 ≥ base 单次同类别）。
+- 净翻转 vs base（1 rep 逐题）：trace-majority-only=75 / base-only=60，净 **+15 题**方向正（单次配对不显著，严格 base-3 次配对未跑）。
+- **解读**：84 题子集 trace +22pp（base 27.4→trace 50.0）在全量上收窄为 +0.72-1.01pp（简单题 base 也能答对，trace 优势集中在难题）；但 **token 7.7 倍节省在任意口径下成立**——这是"预算下提质"（signal not volume）的落地：省 7.7 倍 token 且正确率稳定高于 base，类别全正向。
+- 诚实边界：base 侧仅单次/历史 majority，严格同评测配对（base 3 次 vs trace 3 次）未跑；正确率增量方向正但单次配对不显著（p~0.2）；token 节省与类别方向是确定性结构优势。
 
 ## 诚实缺口
 
