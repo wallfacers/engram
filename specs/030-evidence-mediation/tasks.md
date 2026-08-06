@@ -84,8 +84,8 @@
 
 ### Integration for User Story 2
 
-- [ ] T018 [US2] 配对：base vs trace arm，84 题 × 3 reps（复用 029 `phase0-ids.txt`，`--only-questions` + `--repeats 3`，同 store/answerer/judge/预算）
-- [ ] T019 [US2] 配对分析 + 写 `diagnosis/us2-verdict.md`：008 铁律 majority ≥ 基线 + L0-3 类别不回归 → GO/NO-GO；NO-GO 则 US3 独立评估
+- [X] T018 [US2] 配对：base vs trace arm，84 题 × 3 reps（029 实际子集 `phase0-ids-029-84.txt`，同 store/answerer/judge/预算）
+- [X] T019 [US2] 配对分析 + 写 `diagnosis/us2-verdict.md`：008 铁律 majority ≥ 基线 + L0-3 类别不回归 → GO/NO-GO；NO-GO 则 US3 独立评估
 
 **Checkpoint**: US2 verdict。008 铁律唯一 GO 门。
 
@@ -109,7 +109,7 @@
 
 ### Integration for User Story 3
 
-- [ ] T024 [US3] 配对：keep vs cons arm（同 84 题）+ 分析 + 写 `diagnosis/us3-verdict.md`：重演预算交叉或诚实报告负结论（008 纪律）
+- [X] T024 [US3] 配对：keep vs cons arm（同 84 题）+ 分析 + 写 `diagnosis/us3-verdict.md`：重演预算交叉或诚实报告负结论（008 纪律）
 
 **Checkpoint**: US3 verdict。压缩 arm 不显著回退才保留。
 
@@ -119,7 +119,7 @@
 
 **Purpose**: 收口（US2/US3 判定后启动）
 
-- [ ] T025 verdict 落 `docs/evaluation/`：`reports/030-evidence-mediation-verdict.md`（US1/US2/US3 各阶段 + 配对数据）+ `docs/evaluation/experiment-verdicts.md` 030 行
+- [X] T025 verdict 落 `docs/evaluation/`：`reports/030-evidence-mediation-verdict.md`（US1/US2/US3 各阶段 + 配对数据）+ `docs/evaluation/experiment-verdicts.md` 030 行
 - [X] T026 更新复盘 `docs/research/lever-batch-local-vs-saas.md`：L1-2（引用链）/L1-1（精确装填）实测增量（008 铁律约束）
 - [ ] T027 commit：docs + feat 分开 commit（宪法 IV 归因）；引擎零改动验证 `git diff --name-only -- memory embedding provider store internal` 为空
 - [X] T028 零行为变化验证：全关默认 parity（`--evidence-assembly`/`--trace-mediation`/`--consolidate` 全默认关）；全包测试绿（无装配路径回归）

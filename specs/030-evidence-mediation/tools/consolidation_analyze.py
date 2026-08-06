@@ -25,9 +25,13 @@ def parse_args(argv):
 
 
 def _find_paired(run_dir):
-    candidates = [run_dir / "paired.json"]
+    candidates = [run_dir / "paired.json", run_dir / "compare.json"]
     if (run_dir / "cons").exists():
         candidates.append(run_dir / "cons" / "paired.json")
+        candidates.append(run_dir / "cons" / "compare.json")
+    if (run_dir / "keep").exists():
+        candidates.append(run_dir / "keep" / "compare.json")
+        candidates.append(run_dir / "keep" / "paired.json")
     for p in candidates:
         if p.exists():
             return p

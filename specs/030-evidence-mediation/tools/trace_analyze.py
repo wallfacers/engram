@@ -27,10 +27,14 @@ def parse_args(argv):
 
 
 def _find_paired(run_dir):
-    """paired.json may live at run_dir/ or inside an arm subdir."""
-    candidates = [run_dir / "paired.json"]
+    """paired/compare.json may live at run_dir/ or inside an arm subdir."""
+    candidates = [run_dir / "paired.json", run_dir / "compare.json"]
     if (run_dir / "trace").exists():
         candidates.append(run_dir / "trace" / "paired.json")
+        candidates.append(run_dir / "trace" / "compare.json")
+    if (run_dir / "base").exists():
+        candidates.append(run_dir / "base" / "compare.json")
+        candidates.append(run_dir / "base" / "paired.json")
     for p in candidates:
         if p.exists():
             return p
@@ -68,9 +72,9 @@ def main(argv=None):
             if q.get("flip"):
                 cat = q.get("category", "unknown")
                 cat_flips.setdefault(cat, {"a_to_b": 0, "b_to_a": 0})
-                if q["flip"] == "a_to_b":
+                if q["flip"] in ("a_to_b", "a-to-b"):
                     cat_flips[cat]["a_to_b"] += 1
-                elif q["flip"] == "b_to_a":
+                elif q["flip"] in ("b_to_a", "b-to-a"):
                     cat_flips[cat]["b_to_a"] += 1
         report["paired"] = {
             "verdict": paired.get("verdict"),
