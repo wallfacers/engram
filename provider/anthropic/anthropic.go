@@ -281,6 +281,11 @@ func encodeRequest(r provider.Request, defaultMax int) ([]byte, error) {
 			Type:         "enabled",
 			BudgetTokens: r.ThinkingBudgetTokens,
 		}
+	} else if r.ThinkingDisabled {
+		// Upstreams (e.g. DeepSeek) default to thinking mode when the field is
+		// absent; an explicit disabled is required to opt out. Anthropic's own
+		// API treats disabled as the default and accepts the field unchanged.
+		body.Thinking = &thinkingReq{Type: "disabled"}
 	} else if r.Temperature > 0 {
 		body.Temperature = r.Temperature
 	}

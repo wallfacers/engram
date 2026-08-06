@@ -120,6 +120,56 @@ func TestOpenAI_DefaultRequestOmitsStreamOptions(t *testing.T) {
 	}
 }
 
+// DeepSeek-style default-on thinking: an explicit disabled toggle must be
+// encoded into the request body.
+func TestOpenAI_ThinkingDisabledEncoding(t *testing.T) {
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p := openai.New(openai.Options{APIKey: "k", BaseURL: srv.URL})
+
+	// Default request must not carry the thinking field.
+	ch, err := p.Stream(context.Background(), provider.Request{Model: "deepseek-v4-flash"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	drain(t, ch)
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(captured, &body); err != nil {
+		t.Fatalf("request body: %v", err)
+	}
+	if _, ok := body["thinking"]; ok {
+		t.Fatalf("default request unexpectedly carries thinking: %s", captured)
+	}
+
+	// Explicitly disabled must encode {"thinking":{"type":"disabled"}}.
+	captured = nil
+	ch, err = p.Stream(context.Background(), provider.Request{
+		Model:            "deepseek-v4-flash",
+		ThinkingDisabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Stream (thinking disabled): %v", err)
+	}
+	drain(t, ch)
+	var body2 map[string]any
+	if err := json.Unmarshal(captured, &body2); err != nil {
+		t.Fatalf("request body: %v", err)
+	}
+	tv, ok := body2["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking field missing when disabled: %s", captured)
+	}
+	if tv["type"] != "disabled" {
+		t.Errorf("thinking.type = %v, want disabled", tv["type"])
+	}
+}
+
 // Scenario from spec: 并发 tool_calls 累积（index 字段）.
 func TestOpenAI_ConcurrentToolCalls(t *testing.T) {
 	wire := chunks(

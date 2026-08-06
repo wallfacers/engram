@@ -36,6 +36,12 @@ type Request struct {
 
 	ThinkingEnabled      bool
 	ThinkingBudgetTokens int
+	// ThinkingDisabled explicitly requests non-thinking (thinking:
+	// {"type":"disabled"}) from providers whose upstream defaults to thinking
+	// mode (e.g. DeepSeek). Anthropic's own API treats the parameter as the
+	// default and is unaffected; unknown upstreams that reject the field opt
+	// out by leaving it false.
+	ThinkingDisabled bool
 }
 
 // ToolSchema is one JSON-schema tool advertised to the model. The InputSchema

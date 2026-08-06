@@ -232,6 +232,9 @@ func encodeRequest(r provider.Request, includeUsage bool) ([]byte, error) {
 	if includeUsage {
 		out.StreamOpts = &streamOpts{IncludeUsage: true}
 	}
+	if r.ThinkingDisabled {
+		out.Thinking = &thinkingReq{Type: "disabled"}
+	}
 	if r.System != "" {
 		out.Messages = append(out.Messages, openaiMsg{Role: "system", Content: r.System})
 	}

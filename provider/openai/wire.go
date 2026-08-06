@@ -12,6 +12,14 @@ type openaiReq struct {
 	StreamOpts  *streamOpts  `json:"stream_options,omitempty"`
 	MaxTokens   int          `json:"max_tokens,omitempty"`
 	Temperature float64      `json:"temperature,omitempty"`
+	Thinking    *thinkingReq `json:"thinking,omitempty"`
+}
+
+// thinkingReq carries DeepSeek's reasoning toggle in the OpenAI-compatible
+// shape: {"thinking":{"type":"disabled"}}. OpenAI's own API ignores unknown
+// fields, so a disabled toggle is harmless there.
+type thinkingReq struct {
+	Type string `json:"type"`
 }
 
 type streamOpts struct {

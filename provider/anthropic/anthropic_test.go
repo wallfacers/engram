@@ -264,6 +264,24 @@ func TestAnthropic_ThinkingRequestEncoding(t *testing.T) {
 	if _, ok := receivedBody["thinking"]; ok {
 		t.Error("thinking field must not be present when not enabled")
 	}
+
+	// Explicitly disabled (DeepSeek-style default-on thinking upstreams).
+	receivedBody = nil
+	ch, err = p.Stream(context.Background(), provider.Request{
+		Model:            "claude-sonnet-4-6",
+		ThinkingDisabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Stream (thinking disabled): %v", err)
+	}
+	drain(t, ch)
+
+	tv, ok := receivedBody["thinking"].(map[string]any)
+	if !ok {
+		t.Error("thinking field must be present when explicitly disabled")
+	} else if tv["type"] != "disabled" {
+		t.Errorf("thinking.type = %v, want disabled", tv["type"])
+	}
 }
 
 // Task 8.2: beta header.
