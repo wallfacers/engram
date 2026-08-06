@@ -13,6 +13,7 @@ import json
 import random
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -23,6 +24,20 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
+
+
+def causal_lm_loss(outputs, labels, num_items_in_batch=None):
+    """Standard causal-LM next-token CE.
+
+    transformers 5.x moved loss computation out of model forward; Trainer only
+    computes a loss itself when a compute_loss_func / label_smoother is set.
+    This mirrors Qwen2's original internal loss (shift logits, ignore -100).
+    """
+    logits = outputs["logits"] if isinstance(outputs, dict) else outputs[0]
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+    return F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
+                           shift_labels.view(-1), ignore_index=-100)
 
 SYSTEM_PROMPT = (
     "You extract structured, time-anchored events from a conversation message for a memory system.\n"
@@ -37,7 +52,12 @@ SYSTEM_PROMPT = (
 )
 
 
-def to_example(s, tokenizer):
+def to_example(s, tokenizer, max_len=1024):
+    """Returns {input_ids, attention_mask, labels} with labels = -100 on the
+    prompt (system+user) and real ids on the assistant event JSON; None if the
+    assistant tail was fully truncated away. (transformers 5.x: labels must be
+    explicit — DataCollatorForSeq2Seq does not synthesize them.)
+    """
     ctx = "\n".join(f"  {c}" for c in s["context_turns"][-3:])
     speaker = s["input_text"].split(":", 1)[0]
     user = f"[source_id={s['source_msg_id']}]\n[session date: {s['session_date']}]\n{ctx}\nMessage: {s['input_text']}"
@@ -47,7 +67,14 @@ def to_example(s, tokenizer):
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant},
     ]
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    prompt_text = tokenizer.apply_chat_template(messages[:-1], tokenize=False, add_generation_prompt=True)
+    full_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+    full_ids = tokenizer(full_text, add_special_tokens=False, truncation=True, max_length=max_len)["input_ids"]
+    if len(prompt_ids) >= len(full_ids):
+        return None  # assistant response fully truncated out — nothing to learn
+    labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
+    return {"input_ids": full_ids, "attention_mask": [1] * len(full_ids), "labels": labels}
 
 
 def main():
@@ -87,12 +114,14 @@ def main():
                       lora_dropout=0.05, bias="none", task_type="CAUSAL_LM")
     model = get_peft_model(model, lora)
 
-    texts = [to_example(s, tokenizer) for s in samples]
-    ds = Dataset.from_dict({"text": texts})
-
-    def tok(batch):
-        return tokenizer(batch["text"], truncation=True, max_length=1024, padding=False)
-    ds = ds.map(tok, batched=True, remove_columns=["text"])
+    rows = []
+    for s in samples:
+        ex = to_example(s, tokenizer)
+        if ex is not None:
+            rows.append(ex)
+    print(f"examples: {len(rows)} / {len(samples)} samples "
+          f"(skipped {len(samples) - len(rows)} truncated-assistant)", flush=True)
+    ds = Dataset.from_list(rows)
 
     tr_args = TrainingArguments(
         output_dir=args.out,
@@ -108,7 +137,8 @@ def main():
         report_to=[],
     )
     Trainer(model=model, args=tr_args, train_dataset=ds,
-            data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8)).train()
+            data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8),
+            compute_loss_func=causal_lm_loss).train()
 
     model.save_pretrained(f"{args.out}/lora")
     tokenizer.save_pretrained(f"{args.out}/lora")
