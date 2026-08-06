@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/provider"
 )
+
+// benchNoThinking suppresses reasoning tokens for bench JSON tasks (extraction,
+// answer, judge). Some upstreams (e.g. DeepSeek) default to thinking mode,
+// which both slows batch runs and burns 3-5x output tokens without helping
+// structured JSON output. On by default; LOCOMO_NO_THINKING=0 re-enables it.
+var benchNoThinking = os.Getenv("LOCOMO_NO_THINKING") != "0"
 
 // modelCaller is one text-in/text-out call against the benchmark model.
 type modelCaller func(ctx context.Context, system, user string) (string, error)
@@ -103,10 +110,11 @@ func newUsageModelCallerWithUsage(p provider.Provider, model string, maxTokens i
 func newUsageModelCaller(p provider.Provider, model string, maxTokens int, temperature float64, role string, record func(role, model string, usage provider.Usage)) usageModelCaller {
 	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
 		req := provider.Request{
-			Model:       model,
-			System:      system,
-			MaxTokens:   maxTokens,
-			Temperature: temperature,
+			Model:            model,
+			System:           system,
+			MaxTokens:        maxTokens,
+			Temperature:      temperature,
+			ThinkingDisabled: benchNoThinking,
 			Messages: []provider.Message{{
 				Role:    provider.RoleUser,
 				Content: []provider.ContentBlock{{Type: provider.BlockText, Text: user}},

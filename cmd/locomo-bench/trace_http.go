@@ -60,7 +60,11 @@ func newTraceSidecarCaller(cfg traceSidecarConfig) (usageModelCaller, error) {
 			},
 			"max_tokens":          maxTokens,
 			"temperature":         0,
+			// chat_template_kwargs is the vLLM toggle; thinking is the OpenAI-
+			// compatible toggle DeepSeek honours. Unknown fields are ignored,
+			// so sending both is safe across both sidecars.
 			"chat_template_kwargs": map[string]bool{"enable_thinking": false},
+			"thinking":             map[string]string{"type": "disabled"},
 		}
 		payload, err := json.Marshal(body)
 		if err != nil {

@@ -936,7 +936,17 @@ func run() error {
 		if traceErr != nil {
 			logger.Warn("trace sidecar caller unavailable; --trace-mediation (default on) degrades to the legacy byte-identical path", "err", traceErr)
 		} else {
-			opt.traceSidecarCaller = traceCall
+			// Bind the bench usage ledger so the trace sidecar's token spend is
+			// visible in cost.json (previously discarded at the call site,
+			// silently under-reporting the trace arm).
+			base := traceCall
+			opt.traceSidecarCaller = func(ctx context.Context, system, user string) (string, provider.Usage, error) {
+				text, usage, err := base(ctx, system, user)
+				if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+					recordUsage("trace", model, usage)
+				}
+				return text, usage, err
+			}
 		}
 	}
 	if opt.consolidate {
@@ -949,7 +959,14 @@ func run() error {
 		if consErr != nil {
 			logger.Warn("consolidation sidecar unavailable; over-cap degrades to truncation", "err", consErr)
 		} else {
-			opt.consolidateCall = consCall
+			base := consCall
+			opt.consolidateCall = func(ctx context.Context, system, user string) (string, provider.Usage, error) {
+				text, usage, err := base(ctx, system, user)
+				if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+					recordUsage("consolidate", model, usage)
+				}
+				return text, usage, err
+			}
 		}
 	}
 	if opt.formalProtocol != nil {
