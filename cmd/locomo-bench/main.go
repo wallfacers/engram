@@ -258,6 +258,32 @@ type options struct {
 	// HTTP with thinking disabled — fast pure-JSON tool calls). Nil falls back
 	// to answerCall. Never serialized.
 	navDecideCall usageModelCaller
+	// 030 read-side evidence assembly (specs/030). All flags default OFF;
+	// when off the answer-context path is byte-identical to the legacy path
+	// (SC-004 parity). Engine untouched (FR-001).
+	evidenceAssembly bool   // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure)
+	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir
+	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar opt-in; fail-closed gate)
+	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled)
+	// assemblyCounter is the runtime-only exact tokenizer for 030 evidence
+	// assembly (chat-aware /tokenize, reuses the formal 022 counter config).
+	// Never serialized; nil → estimate-ledger fallback (tokens_estimated=true).
+	assemblyCounter *assemblyTokenCounter
+	// assemblyJournal is the runtime-only, concurrency-safe writer for the 030
+	// US1 assembly audit (--assembly-diagnose → run-dir/assembly-diagnose.jsonl).
+	// Never serialized.
+	assemblyJournal *assemblyJournal
+	// traceSidecarCaller is the runtime-only 030 US2 grounded-trace generator
+	// (DeepSeek-flash via harness-side vLLM HTTP). Nil → legacy path (byte-
+	// identical, SC-004). Never serialized.
+	traceSidecarCaller usageModelCaller
+	// traceGateJournal is the runtime-only, concurrency-safe writer for the 030
+	// US2 fail-closed gate audit (run-dir/trace-gate.jsonl). Never serialized.
+	traceGateJournal *traceGateJournal
+	// consolidateCall is the runtime-only 030 US3 compression generator (reuses
+	// the trace-sidecar JSON caller). Nil → deterministic truncation on over-cap.
+	// Never serialized.
+	consolidateCall usageModelCaller
 }
 
 func main() {
@@ -387,6 +413,11 @@ func run() error {
 	flag.IntVar(&opt.outrankCap, "outrank-cap", 5, "maximum non-gold hits to record before the first gold hit")
 	flag.IntVar(&opt.widePool, "wide-pool", 0, "candidate pool size for gold_in_pool (0 = max(300, top-k*6))")
 	flag.Float64Var(&opt.factCoverageTau, "fact-coverage-tau", defaultFactCoverageTau, "attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it")
+	// 030 read-side evidence assembly flags (specs/030). All default OFF.
+	flag.BoolVar(&opt.evidenceAssembly, "evidence-assembly", false, "030 US1: assemble retrieved evidence (exact token accounting + chunk-first + category structure) before answering; off = legacy byte-identical path")
+	flag.BoolVar(&opt.assemblyDiagnose, "assembly-diagnose", false, "030 US1 retrieval-only: emit per-question evidence-assembly audit (chunk_fraction / total_tokens / structure / tokens_estimated) to run-dir/assembly-diagnose.jsonl (needs --store-dir + --run-dir + --chunks + --evidence-assembly)")
+	flag.BoolVar(&opt.traceMediation, "trace-mediation", false, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via opt-in sidecar; fail-closed gate in pure Go); off = legacy path")
+	flag.BoolVar(&opt.consolidate, "consolidate", false, "030 US3: conditional consolidation — compress only when evidence exceeds the answer-context cap AND this flag is set; off = retain raw (default)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -682,6 +713,19 @@ func run() error {
 		}
 		return runNavDiagnoseCLI(context.Background(), opt, convs, arms, embClient, logger)
 	}
+	if opt.assemblyDiagnose {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if sampledConversations > 0 {
+			logger.Info("sampling conversations", "limit", sampledConversations)
+		}
+		// Retrieval-only: build only the embedding client (never an
+		// answer/judge/extraction caller); the exact tokenizer is optional.
+		var embClient embedding.Client
+		if hasArm(arms, "hybrid") {
+			embClient = buildBenchEmbeddingClient(logger, nil)
+		}
+		return runAssemblyDiagnoseCLI(context.Background(), opt, convs, arms, embClient, logger)
+	}
 	if opt.recallDiagnostic {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 		if sampledConversations > 0 {
@@ -865,6 +909,45 @@ func run() error {
 			opt.navDecideCall = navDecide
 		}
 	}
+	if opt.evidenceAssembly || opt.assemblyDiagnose {
+		// 030 US1 exact tokenizer for evidence assembly (specs/030, research
+		// decision 1). Reuses the formal 022 /tokenize counter config so the
+		// assembly's TotalTokens is the same chat-aware count the answerer
+		// consumes. Unavailable → estimate-ledger fallback (tokens_estimated).
+		counter, counterErr := newVLLMTokenCounter(vllmTokenCounterConfig{
+			BaseURL: opt.tokenCounterBaseURL, APIKey: apiKey, Fingerprint: opt.counterFingerprint,
+		})
+		if counterErr != nil {
+			logger.Warn("assembly exact tokenizer unavailable; falling back to estimate ledger", "err", counterErr)
+		} else {
+			opt.assemblyCounter = &assemblyTokenCounter{counter: counter, answerModel: model}
+		}
+	}
+	if opt.traceMediation {
+		// 030 US2 grounded-trace generator (specs/030). Reuses the answerer's
+		// vLLM endpoint/model; harness-side only. Unavailable → legacy path.
+		traceCall, traceErr := newTraceSidecarCaller(traceSidecarConfig{
+			BaseURL: baseURL, APIKey: apiKey, Model: model,
+		})
+		if traceErr != nil {
+			logger.Warn("trace sidecar caller unavailable; --trace-mediation degrades to legacy path", "err", traceErr)
+		} else {
+			opt.traceSidecarCaller = traceCall
+		}
+	}
+	if opt.consolidate {
+		// 030 US3 compression generator (specs/030). Reuses the same harness-side
+		// JSON caller as the trace sidecar; unavailable → deterministic
+		// truncation on over-cap (the legacy behaviour).
+		consCall, consErr := newTraceSidecarCaller(traceSidecarConfig{
+			BaseURL: baseURL, APIKey: apiKey, Model: model,
+		})
+		if consErr != nil {
+			logger.Warn("consolidation sidecar unavailable; over-cap degrades to truncation", "err", consErr)
+		} else {
+			opt.consolidateCall = consCall
+		}
+	}
 	if opt.formalProtocol != nil {
 		// Formal call counts are provider-attempt counts. Transparent retries
 		// would make the persisted one-call contract untrue.
@@ -1032,6 +1115,22 @@ func run() error {
 			}
 			repeatOpt.navTraj = traj
 			defer func() { _ = traj.Close() }()
+		}
+		if opt.assemblyDiagnose {
+			j, err := openAssemblyJournal(filepath.Join(repeatOpt.runDir, "assembly-diagnose.jsonl"))
+			if err != nil {
+				return fmt.Errorf("open assembly-diagnose.jsonl: %w", err)
+			}
+			repeatOpt.assemblyJournal = j
+			defer func() { _ = j.Close() }()
+		}
+		if opt.traceMediation {
+			tj, err := openTraceGateJournal(filepath.Join(repeatOpt.runDir, "trace-gate.jsonl"))
+			if err != nil {
+				return fmt.Errorf("open trace-gate.jsonl: %w", err)
+			}
+			repeatOpt.traceGateJournal = tj
+			defer func() { _ = tj.Close() }()
 		}
 		parity, err := openContextParityJournal(repeatOpt.runDir)
 		if err != nil {
@@ -2403,7 +2502,81 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)
 	}
-	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold), answerCall)
+	userPrompt := buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+	if opt.evidenceAssembly {
+		// 030 US1 read-side assembly (specs/030): reorder evidence (chunk-first +
+		// category structure), render the assembled prompt, and record the exact
+		// token ledger. Off by default — legacy byte-identical path (SC-004).
+		asm, assembledUser, asmErr := assembleEvidence(ctx, qa.Question, hits, qa.Category, assemblyConfig{
+			Cap:          defaultAnswerContextCap,
+			CurrentDate:  qa.QuestionDate,
+			Scaffold:     opt.temporalDateScaffold,
+			SystemPrompt: prompt,
+			QuestionID:   qa.QuestionID,
+		}, opt.assemblyCounter)
+		if asmErr != nil {
+			logger.Warn("evidence assembly failed; using legacy context", "err", asmErr)
+		} else {
+			if opt.consolidate && asm.TotalTokens > asm.Cap {
+				// 030 US3 conditional consolidation (specs/030): compress only
+				// when the evidence provably exceeds the cap AND --consolidate is
+				// set; within budget this stays a byte-identical no-op (retain).
+				consolidated, _, _, consErr := consolidateUnits(ctx, qa.Question, asm.Units, consolidateConfig{
+					Cap: asm.Cap, Call: opt.consolidateCall,
+				})
+				if consErr != nil {
+					logger.Warn("consolidation failed; keeping assembled context", "err", consErr)
+				} else {
+					userPrompt = buildAnswerContextPrompt(qa.Question, unitsToResults(consolidated), qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+				}
+			} else {
+				userPrompt = assembledUser
+			}
+			if opt.assemblyJournal != nil {
+				if err := opt.assemblyJournal.Write(asm); err != nil {
+					logger.Warn("write assembly diagnostic failed", "err", err)
+				}
+			}
+		}
+	}
+	if opt.traceMediation && opt.traceSidecarCaller != nil && len(hits) > 0 {
+		// 030 US2 grounded-evidence mediation (specs/030): the sidecar organises
+		// the closed candidate set into a packet; the fail-closed gate keeps only
+		// boundary-cited, traceable evidence E, which becomes the answer context.
+		// Parse failure retries once; gate fallback or caller failure keeps the
+		// (possibly assembled) legacy context. Off by default (SC-004).
+		boundary := make(map[string]bool, len(hits))
+		for _, h := range hits {
+			boundary[h.Name] = true
+		}
+		raw, _, traceErr := opt.traceSidecarCaller(ctx, traceSystemPrompt, traceUserPrompt(qa.Question, hits))
+		evidence := []traceEvidence(nil)
+		status := traceGateFallback
+		retried := false
+		if traceErr != nil {
+			logger.Warn("trace sidecar call failed; using legacy context", "err", traceErr)
+		} else {
+			_, evidence, status, _ = mediateTrace(traceMediationInput{Raw: raw, CandidateIDs: boundary})
+			if status == traceGateParseFailed {
+				retried = true
+				raw2, _, retryErr := opt.traceSidecarCaller(ctx, traceSystemPrompt, traceUserPrompt(qa.Question, hits))
+				if retryErr != nil {
+					logger.Warn("trace sidecar retry failed; using legacy context", "err", retryErr)
+				} else {
+					_, evidence, status, _ = mediateTrace(traceMediationInput{Raw: raw2, CandidateIDs: boundary})
+				}
+			}
+		}
+		if len(evidence) > 0 {
+			userPrompt = buildAnswerContextPrompt(qa.Question, evidenceFromTrace(evidence), qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+		}
+		if opt.traceGateJournal != nil {
+			if err := opt.traceGateJournal.Write(traceGateRecord{QuestionID: qa.QuestionID, Status: status, EvidenceCount: len(evidence), Retried: retried}); err != nil {
+				logger.Warn("write trace gate diagnostic failed", "err", err)
+			}
+		}
+	}
+	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, userPrompt, answerCall)
 	if abstain != nil {
 		abstain.hardGated = hardGated
 	}
