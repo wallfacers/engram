@@ -280,7 +280,7 @@ func simulateRescue(ctx context.Context, retriever *memory.Retriever, qa locomoQ
 }
 
 var (
-	yearRe    = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+	navYearRe = regexp.MustCompile(`\b(19|20)\d{2}\b`)
 	monthRe   = regexp.MustCompile(`\b(january|february|march|april|may|june|july|august|september|october|november|december)\b`)
 	quotedRe  = regexp.MustCompile(`"([^"]{2,})"`)
 	titleRe   = regexp.MustCompile(`[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+`)
@@ -343,7 +343,7 @@ func questionRewriteVariants(question string) []string {
 		add(t)
 	}
 	var temporal []string
-	for _, t := range yearRe.FindAllString(question, -1) {
+	for _, t := range navYearRe.FindAllString(question, -1) {
 		temporal = append(temporal, t)
 	}
 	for _, m := range monthRe.FindAllString(question, -1) {
