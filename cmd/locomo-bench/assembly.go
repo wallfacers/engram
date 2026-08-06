@@ -42,14 +42,15 @@ type EvidenceUnit struct {
 // sum of per-unit estimates (evidencecompiler discipline: never derive a total
 // by summing parts). Units are ordered chunk-first + category structure.
 type EvidenceAssembly struct {
-	QuestionID      string         `json:"question_id"`
-	Category        int            `json:"category"`
-	Units           []EvidenceUnit `json:"units"`
-	Structure       string         `json:"structure"` // temporal | entity | generic
-	TotalTokens     int            `json:"total_tokens"`
-	Cap             int            `json:"cap"`
-	ChunkFraction   float64        `json:"chunk_fraction"`
-	TokensEstimated bool           `json:"tokens_estimated"` // exact counter unavailable; TotalTokens is an estimate
+	QuestionID      string                 `json:"question_id"`
+	Category        int                    `json:"category"`
+	Units           []EvidenceUnit         `json:"units"`
+	Structure       string                 `json:"structure"` // temporal | entity | generic
+	TotalTokens     int                    `json:"total_tokens"`
+	Cap             int                    `json:"cap"`
+	ChunkFraction   float64                `json:"chunk_fraction"`
+	TokensEstimated bool                   `json:"tokens_estimated"`               // exact counter unavailable; TotalTokens is an estimate
+	RelationBlock   *StructuralContextBlock `json:"relation_block,omitempty"`       // 031: rendered structural-context block (nil when off / empty / non-applicable)
 }
 
 // chunkTokenFraction returns the chunk-token share of the assembled units, the
@@ -105,6 +106,7 @@ func assembleEvidence(ctx context.Context, question string, hits []memory.Result
 	ordered := orderHitsForAssembly(hits, category)
 	for {
 		user := renderAssembledPrompt(question, ordered, category, cfg)
+		var relationBlock *StructuralContextBlock
 		if cfg.RelationEnabled {
 			// 031 (contracts/evidence-relations.md §2): compute the inter-evidence
 			// relations over the current ordered set and append the rendered block.
@@ -112,9 +114,11 @@ func assembleEvidence(ctx context.Context, question string, hits []memory.Result
 			// the evidence it annotates (token budget discipline, FR-005/FR-006).
 			if block, _ := computeRelationContext(ctx, ordered, category); block != nil {
 				user = appendRelationBlock(user, block)
+				relationBlock = block
 			}
 		}
 		asm := finishAssembly(ordered, category, cfg, estimateTotalTokens(ordered))
+		asm.RelationBlock = relationBlock
 		if counter == nil {
 			asm.TokensEstimated = true
 			return asm, user, nil

@@ -139,11 +139,12 @@ func runAssemblyDiagnoseCLI(ctx context.Context, opt options, convs []conversati
 				}
 				hits := finalizeQuestionHits(diagnosticCtx, qa.Question, candidates, topK, quota, armOpt)
 				asm, _, asmErr := assembleEvidence(diagnosticCtx, qa.Question, hits, qa.Category, assemblyConfig{
-					Cap:          defaultAnswerContextCap,
-					CurrentDate:  qa.QuestionDate,
-					Scaffold:     opt.temporalDateScaffold,
-					SystemPrompt: "",
-					QuestionID:   qa.QuestionID,
+					Cap:             defaultAnswerContextCap,
+					CurrentDate:     qa.QuestionDate,
+					Scaffold:        opt.temporalDateScaffold,
+					SystemPrompt:    "",
+					QuestionID:      qa.QuestionID,
+					RelationEnabled: opt.relationContext, // 031: diagnose the same block the answer path would inject
 				}, counter)
 				if asmErr != nil {
 					setErr(fmt.Errorf("assembly diagnose assemble conv=%d question=%d: %w", conv.ID, selected.Index, asmErr))

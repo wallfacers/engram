@@ -180,6 +180,28 @@ func TestRelationEdgeCap_RelatedTo(t *testing.T) {
 	}
 }
 
+func TestRelationEdgeCap_Global(t *testing.T) {
+	// Many facts sharing one entity must not blow past the global block cap
+	// (R-4 token discipline) even when per-evidence caps would allow more.
+	hits := make([]memory.Result, 0, 30)
+	for i := 0; i < 30; i++ {
+		hits = append(hits, memory.Result{
+			Name:    "fact-" + string(rune('a'+i)),
+			Content: `Shared Entity "Core" mention.`,
+		})
+	}
+	block, err := computeRelationContext(context.Background(), hits, assemblyCategoryMultiHop)
+	if err != nil {
+		t.Fatalf("compute: %v", err)
+	}
+	if block == nil {
+		t.Fatal("expected a block over 30 shared-entity facts")
+	}
+	if len(block.Edges) > relationMaxEdges {
+		t.Errorf("block has %d edges, global cap %d", len(block.Edges), relationMaxEdges)
+	}
+}
+
 func TestRelationRender_Shape(t *testing.T) {
 	hits := relTestHits()
 	block, err := computeRelationContext(context.Background(), hits, assemblyCategoryMultiHop)
@@ -201,6 +223,30 @@ func TestRelationRender_Shape(t *testing.T) {
 	user := appendRelationBlock("question + evidence", block)
 	if !strings.HasPrefix(user, "question + evidence\n") || !strings.HasSuffix(user, "\n"+block.Text) {
 		t.Errorf("appendRelationBlock shape wrong: %q", user)
+	}
+}
+
+func TestExtractEntities_Dialogue(t *testing.T) {
+	// LoCoMo chunks are dialogue turns with "Name:" prefixes. Speakers and
+	// sentence-initial filler must be excluded; content entities kept — else
+	// related_to floods on the shared speakers.
+	text := "Caroline: Hey Mel, the Pottery class starts Tuesday.\nMelanie: Sounds fun, Door Dash is great too."
+	got := extractEntities(text)
+	for _, e := range got {
+		for _, bad := range []string{"Caroline", "Melanie", "Sounds", "Hey", "Mel"} {
+			if e == bad {
+				t.Errorf("extractEntities(%q) should exclude %q, got %v", text, bad, got)
+			}
+		}
+	}
+	found := false
+	for _, e := range got {
+		if e == "Pottery" || e == "Door Dash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("extractEntities(%q) should keep content entities (Pottery/Door Dash), got %v", text, got)
 	}
 }
 

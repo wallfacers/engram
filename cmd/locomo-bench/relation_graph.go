@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -32,6 +33,11 @@ const (
 	relationCapTemporalNext = 1
 	relationCapCausedBy     = 2
 	relationEntityCap       = 5 // per-evidence entity cap (research R-2)
+	// relationMaxEdges caps the total edges in a block. A dense
+	// single-conversation candidate set (many facts sharing the participants)
+	// can otherwise emit dozens of low-value edges that crowd out the evidence
+	// itself — token budget discipline (FR-005 / R-4).
+	relationMaxEdges = 24
 )
 
 // RelationEdge is one explicit relation between two evidence units
@@ -61,18 +67,76 @@ type StructuralContextBlock struct {
 // core entity between the two evidence texts (R-3 double condition).
 var causalIndicatorWords = []string{
 	"because", "due to", "led to", "caused by", "resulted in", "therefore",
-	"as a result", "consequently", "since", "thus", "triggered", "in response to",
+	"as a result", "consequently", "thus", "triggered", "in response to",
+	// NOTE: "since" is deliberately absent — in LoCoMo/English it is primarily a
+	// temporal preposition ("since 2023"), which fires spurious caused_by edges
+	// at every dated fact (observed: a single run produced 17 since-caused_by
+	// edges all pointing at one shared evidence).
 }
 
-// extractEntities lifts quoted phrases and title-case multi-word spans from a
-// single evidence text (029 extractEntitiesFromHits pattern), deduped and
-// capped per evidence (R-2). Returns the entities in first-occurrence order.
+// speakerRe matches a dialogue turn's "Name:" prefix (LoCoMo chunks carry
+// speaker labels at line starts). upperTokenRe catches capitalized single
+// tokens (proper nouns in dialogue). Both are deterministic (research R-2).
+var (
+	speakerRe    = regexp.MustCompile(`(?:^|\n)[ \t]*([A-Z][A-Za-z]+):[ \t]`)
+	upperTokenRe = regexp.MustCompile(`\b[A-Z][a-z]{4,}\b`)
+)
+
+// relationStopWords filters sentence-initial filler / dialogue-register words
+// that are capitalized in turn text but are not content entities. The list is
+// deliberately conservative: leftover noise stays bounded by the per-evidence
+// entity cap and only *shared* entities ever build edges.
+var relationStopWords = map[string]bool{
+	"I": true, "A": true, "An": true, "The": true, "We": true, "You": true,
+	"He": true, "She": true, "It": true, "They": true, "So": true, "And": true,
+	"But": true, "Or": true, "Oh": true, "Hey": true, "Hi": true, "Yeah": true,
+	"No": true, "Yes": true, "Ok": true, "Okay": true, "Well": true, "Look": true,
+	"Good": true, "Great": true, "Thanks": true, "Bye": true, "Wait": true,
+	"Wow": true, "Ugh": true, "Just": true, "Then": true, "Now": true,
+	"Still": true, "Maybe": true, "Probably": true, "Also": true, "Even": true,
+	"Please": true, "Sure": true, "Right": true, "Long": true, "Been": true,
+	"Lots": true, "Little": true, "Last": true, "Next": true, "This": true,
+	"That": true, "These": true, "Those": true, "My": true, "Your": true,
+	"His": true, "Her": true, "Our": true, "Their": true, "Its": true,
+	"What": true, "When": true, "Where": true, "Who": true, "How": true,
+	"Why": true, "There": true, "Here": true, "Not": true, "Really": true,
+	"Anyways": true, "Actually": true, "Apparently": true, "Congrats": true,
+	"Congratulation": true, "Sounds": true, "Sound": true, "Glad": true,
+	"Anything": true, "Something": true, "Everything": true, "Nothing": true,
+	"Take": true, "Takes": true, "Taken": true, "Took": true, "Going": true,
+	"Went": true, "Come": true, "Comes": true, "Coming": true, "Came": true,
+	"Make": true, "Makes": true, "Made": true, "Making": true, "Need": true,
+	"Needs": true, "Needed": true, "Think": true, "Thinks": true,
+	"Thought": true, "Thinking": true, "Want": true, "Wants": true,
+	"Wanted": true, "Get": true, "Gets": true, "Got": true, "Getting": true,
+	"Start": true, "Starts": true, "Started": true, "Starting": true,
+	"Hope": true, "Hopes": true, "Hoped": true, "Hoping": true,
+	"Sorry": true, "Missed": true, "Miss": true, "Missing": true,
+}
+
+// extractEntities lifts content entities from a single evidence text (029
+// extractEntitiesFromHits pattern): quoted phrases, title-case multi-word
+// spans, and capitalized single tokens — minus the dialogue "Name:" speakers
+// and sentence-initial stop words. Deduped, capped per evidence (R-2). In a
+// single-conversation candidate set every chunk shares the speakers, so they
+// are excluded: they would otherwise flood related_to with meaningless
+// co-occurrence. Returns entities in first-occurrence order.
 func extractEntities(text string) []string {
+	speakers := make(map[string]bool)
+	for _, m := range speakerRe.FindAllStringSubmatch(text, -1) {
+		speakers[m[1]] = true
+	}
 	var entities []string
 	seen := make(map[string]bool)
 	add := func(e string) {
 		e = strings.TrimSpace(e)
 		if e == "" || seen[e] || len(strings.Fields(e)) > 6 {
+			return
+		}
+		if speakers[e] {
+			return
+		}
+		if relationStopWords[strings.Fields(e)[0]] {
 			return
 		}
 		seen[e] = true
@@ -83,6 +147,9 @@ func extractEntities(text string) []string {
 	}
 	for _, t := range titleRe.FindAllString(text, -1) {
 		add(t)
+	}
+	for _, m := range upperTokenRe.FindAllString(text, -1) {
+		add(m)
 	}
 	if len(entities) > relationEntityCap {
 		entities = entities[:relationEntityCap]
@@ -146,6 +213,9 @@ func computeRelationContext(ctx context.Context, hits []memory.Result, category 
 	}
 	if len(edges) == 0 {
 		return nil, nil
+	}
+	if len(edges) > relationMaxEdges {
+		edges = edges[:relationMaxEdges] // global block cap (R-4 + token discipline)
 	}
 	for i := range edges {
 		edges[i].Rank = i
