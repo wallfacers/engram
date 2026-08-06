@@ -61,6 +61,8 @@ def main():
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--quant", action="store_true",
+                    help="4bit QLoRA (default off: 3B bf16 fits in >24G; avoids bnb-on-Blackwell risk)")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -71,11 +73,15 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16,
-                             bnb_4bit_use_double_quant=True, bnb_4bit_quant_type="nf4")
-    model = AutoModelForCausalLM.from_pretrained(args.base, quantization_config=bnb,
-                                                 device_map="auto", trust_remote_code=True)
-    model = prepare_model_for_kbit_training(model)
+    if args.quant:
+        bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16,
+                                 bnb_4bit_use_double_quant=True, bnb_4bit_quant_type="nf4")
+        model = AutoModelForCausalLM.from_pretrained(args.base, quantization_config=bnb,
+                                                     device_map="auto", trust_remote_code=True)
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16,
+                                                     device_map="auto", trust_remote_code=True)
     lora = LoraConfig(r=args.lora_r, lora_alpha=2 * args.lora_r, target_modules=["q_proj", "k_proj",
                                                                                   "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
                       lora_dropout=0.05, bias="none", task_type="CAUSAL_LM")
