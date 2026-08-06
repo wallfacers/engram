@@ -142,6 +142,14 @@ S-2 的「agent loop post-retrieval mediation / agentic 检索」方向（MemCog
 - **对 S-2 的约束**：MemCog/NapMem 的「推理介入检索」涨点主张**不可移植到本地弱模型（35B 自主导航）+ 无 quota 的检索路径**。S-2 若推进（托管大模型 justifier / agent loop），必须：(1) 与基线同 answer-context 预算（chunk-quota 对齐，避免 fact 主导劣化）；(2) 端到端配对为唯一 GO 门（008），零成本诊断 GO 不能作依据。
 - **附带工程发现**：Qwen3.6 推理模型默认输出思考+JSON 混合（无 `reasoning_content` 分离），agent 每步工具调用需 `enable_thinking=false`（0.6s vs 13s/步）；导航 decide 需独立 vLLM HTTP caller（harness 内，引擎零改动）。
 
+## 实测增量：030 读侧证据装配（2026-08-06）
+
+L1-2（MemChain 引用链）与 L1-1（Retain or Consolidate 精确装填）在 [spec 030](../../specs/030-evidence-mediation/spec.md) 落地为读侧装配结构，US1 机制已实测，US2/US3 配对待评测环境：
+
+- **US1 装配器机制 GO（单测全绿 + 真实 store 诊断）**：chunk-first 排序（chunk_fraction 单测 ≥0.5，029 是 ~0.01）、类别条件结构（temporal→时间序 / multi-hop→实体分组 / generic→分数序）、超 cap 精确截断（复用既有 `vllmTokenCounter` 的 `/tokenize`，TotalTokens 精确）、estimateTokens 显式降级（tokens_estimated=true，宪法 V）。
+- **真实发现（029 根因 A 的独立确认）**：keyword-only 检索下 chunks 不进 top 候选（BM25 对长 chunk 分数低，`applyChunkQuota` 无 chunk 可保，chunk_fraction=0）——**装配器无法补偿检索侧 chunk 缺失**；基线的 3654 tokens 来自 hybrid（semantic 召回 chunks）+ `--chunk-quota 12`，不是 keyword。⇒ 读侧装配必须配检索侧 chunk 保底，US2 配对必须用基线同款检索口径（hybrid + chunk-quota）。
+- **对 L1-1/L1-2 的约束**：精确装填（L1-1）的核心是"整体精确 count + 逐条估算排序"（evidencecompiler 纪律：整体≠逐条之和）；引用链（L1-2）的 fail-closed 门（闭包校验/回溯校验/解析失败重试→回退）是纯 Go 确定性，trace 生成需 sidecar opt-in。**US2/US3 的涨点主张必须落 008 端到端配对**，机制/单测 GO 不作依据（延续 028 的蒸馏教训）。
+
 ## 与现有文档的关系
 
 - 证据来源：[长期记忆系统成绩与机制证据登记](high-scoring-memory-systems.md)（11 篇 + Mem0 的成绩/分母/judge 全表）。
