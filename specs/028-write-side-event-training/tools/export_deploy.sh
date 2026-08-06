@@ -7,16 +7,17 @@ V=/root/autodl-tmp/023-venv/bin
 export HF_HOME=/root/autodl-tmp/hf-cache
 export PATH=$V:$PATH
 
-LORA=${1:?usage: export_deploy.sh <lora_dir> <merged_out> [port]}
-MERGED=${2:?usage: export_deploy.sh <lora_dir> <merged_out> [port]}
+LORA=${1:?usage: export_deploy.sh <lora_dir> <merged_out> [port] [base_model]}
+MERGED=${2:?usage: export_deploy.sh <lora_dir> <merged_out> [port] [base_model]}
 PORT=${3:-8002}
+BASE=${4:-Qwen/Qwen2.5-3B-Instruct}
 
 # merge LoRA into base (train_sft.py saved adapter only)
 $V/python - <<EOF
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
-base = "${LORA%/lora}"
+base = "${BASE}"
 tok = AutoTokenizer.from_pretrained(base, trust_remote_code=True)
 m = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.bfloat16, trust_remote_code=True)
 m = PeftModel.from_pretrained(m, "$LORA").merge_and_unload()
