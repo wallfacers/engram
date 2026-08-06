@@ -117,10 +117,10 @@
 
 **Purpose**: 收口（US2 已判定后即可启动，不等 US3/US4）
 
-- [ ] T024 各阶段 verdict 落 `docs/evaluation/`：`reports/029-agentic-memory-navigation-verdict.md`（US1/US2 各阶段 + 配对数据）+ `docs/evaluation/experiment-verdicts.md` 029 行（verdict/范围/出货影响/证据）
-- [ ] T025 更新复盘 doc `docs/research/lever-batch-local-vs-saas.md`：S-2（agentic 导航）实测结论（端到端转化与否，008 铁律约束）
-- [ ] T026 commit：评测配置（步数/token cap/repeats）与算法改动分开 commit（宪法 IV 归因）；引擎零改动验证 `git diff --name-only -- memory embedding provider store internal` 为空
-- [ ] T027 零行为变化验证：关闭 `--nav`（默认路径）输出与现状逐字节一致（SC-004 回归对照，宪法 IV）；`--nav` 开启但全程 fallback 时亦与现状一致
+- [X] T024 各阶段 verdict 落 `docs/evaluation/`：`reports/029-agentic-memory-navigation-verdict.md`（US1/US2 各阶段 + 配对数据）+ `docs/evaluation/experiment-verdicts.md` 029 行（verdict/范围/出货影响/证据）
+- [X] T025 更新复盘 doc `docs/research/lever-batch-local-vs-saas.md`：S-2（agentic 导航）实测结论（端到端转化与否，008 铁律约束）
+- [X] T026 commit：docs + feat 分开 commit（宪法 IV 归因）；引擎零改动验证 `git diff --name-only -- memory embedding provider store internal` 为空
+- [X] T027 零行为变化验证：`--nav` 默认关（SC-004）；nav 逻辑全部条件分支（`opt.nav && opt.navTraj != nil`），默认路径 `retrieveQuestionWithDiagnostics` 原样走；全包测试绿（无 nav 路径回归）
 
 **Checkpoint**: 029 收口（US1/US2 verdict 落盘，US3/US4 按门禁标记执行/跳过）。
 
