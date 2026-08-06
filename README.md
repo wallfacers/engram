@@ -312,6 +312,19 @@ budget to MemOS's ~1059 tokens (from 3614) reverses the gap to −5.62pp
 (p=0.000006)—the lead reflects engram's ~3.4× larger context budget, not a
 memory-mechanism advantage.
 
+### Read-side evidence mediation — budget-efficient (trace)
+
+An opt-in read-side stage (`--trace-mediation`, [spec 030](specs/030-evidence-mediation/spec.md))
+runs the retrieved candidate set through a small mediator that distils a single
+grounded evidence statement before answering; a deterministic fail-closed gate
+keeps every citation inside the retrieved boundary. On the full 1,540-question
+LoCoMo set this drops the answer context from ~3,614 to ~441 tokens (≈8×) while
+accuracy stays non-negative (85.6% vs 84.9%, single run; repeats in progress)
+and no category regresses. Because the token saving holds at any accuracy
+delta, this is the budget-efficient counterpart to the budget-driven +3.20pp
+above — the first "more signal, fewer tokens" result under the budget-aligned
+lens. The stage stays opt-in and default-off.
+
 Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
 that are not present in the open-source SDK, and a `top_200` retrieval budget.
 They cannot be reproduced under the same stack, so the true controlled gap to
