@@ -132,6 +132,16 @@ S-1 的「训练小抽取器」方向在 [spec 028](../../specs/028-write-side-e
 - **蒸馏上限 = 教师**：训练数据全部来自教师，模型不可能超过教师的事件语义质量（教师自身 −6.0pp 未转化）。若想突破，需要非教师来源的监督（人工精修超大量 / 奖励信号）。
 - **对 S-1 的约束**：LazyMem 的涨点证据（SFT/RL 提高 token 压缩率）是**中间指标**；028 证明"训练抽取能力提升"≠"端到端 QA 转化"。S-1 若推进，涨点主张**必须落端到端配对**（008 纪律），不能以抽取质量/压缩率作出货依据。写侧 event 结构本身的价值已被 027/028 三次证伪，S-1 若做应优先 agentic 检索 / 答题侧，而非写侧 event 表示。
 
+## 实测增量：029 Agentic 多步导航（2026-08-06）
+
+S-2 的「agent loop post-retrieval mediation / agentic 检索」方向（MemCog / NapMem / ByteRover 消融所指）在 [spec 029](../../specs/029-agentic-memory-navigation/spec.md) 做过一次端到端实测，结论对 S-2 / A 类「推理介入检索」主张有直接约束：
+
+- **US1 零成本诊断 GO 但 US2 配对 NO-GO**：确定性模拟显示 `rescueable_share=0.655`（换查询 76% / 换粒度 22% / 跟线索 2%），但真实 35B 导航 agent 配对 **29.8% vs 单次基线 47.6%（−17.9pp，p=0.0059 显著负）**。
+- **根因 A（结构性）**：该 store 的裸混合检索以短 fact 为主，chunk 需 `chunk-quota` 机制强制保底——导航组装无 quota，answerer 上下文永远劣化（~500 vs 基线 3654 tokens）。
+- **根因 B（机制性）**：模型自主导航不转化 US1 理论空间（73% 不 stop、改写查询命中 gold 差于确定性模拟）。**「换查询可救」需要 oracle 式改写，本地 35B 自主达不到**；US1 模拟高估真实导航救回能力。
+- **对 S-2 的约束**：MemCog/NapMem 的「推理介入检索」涨点主张**不可移植到本地弱模型（35B 自主导航）+ 无 quota 的检索路径**。S-2 若推进（托管大模型 justifier / agent loop），必须：(1) 与基线同 answer-context 预算（chunk-quota 对齐，避免 fact 主导劣化）；(2) 端到端配对为唯一 GO 门（008），零成本诊断 GO 不能作依据。
+- **附带工程发现**：Qwen3.6 推理模型默认输出思考+JSON 混合（无 `reasoning_content` 分离），agent 每步工具调用需 `enable_thinking=false`（0.6s vs 13s/步）；导航 decide 需独立 vLLM HTTP caller（harness 内，引擎零改动）。
+
 ## 与现有文档的关系
 
 - 证据来源：[长期记忆系统成绩与机制证据登记](high-scoring-memory-systems.md)（11 篇 + Mem0 的成绩/分母/judge 全表）。

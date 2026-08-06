@@ -1,0 +1,343 @@
+{
+  "input": {
+    "hits_jsonl": "diagnosis/nav-diagnose.jsonl",
+    "questions": 84,
+    "whitelist": false
+  },
+  "class_counts": {
+    "in_pool": 0,
+    "topk_hit": 29,
+    "rescueable": 55,
+    "not_in_pool": 0,
+    "gold_unresolved": 0
+  },
+  "rescueable_share": 0.6548,
+  "rescue_mechanisms": {
+    "rewrite": 42,
+    "deep": 12,
+    "follow_entity": 1,
+    "unattributed": 0
+  },
+  "rescue_mechanism_share": {
+    "rewrite": 0.7636363636363637,
+    "follow_entity": 0.01818181818181818,
+    "deep": 0.21818181818181817
+  },
+  "verdict_gate": {
+    "threshold": 0.2,
+    "rescueable_share": 0.6548,
+    "pass": true
+  },
+  "per_question": {
+    "conv-0-q-6": "rescueable",
+    "conv-0-q-9": "topk_hit",
+    "conv-0-q-21": "topk_hit",
+    "conv-0-q-26": "rescueable",
+    "conv-0-q-31": "rescueable",
+    "conv-0-q-33": "rescueable",
+    "conv-0-q-43": "rescueable",
+    "conv-0-q-71": "topk_hit",
+    "conv-0-q-73": "rescueable",
+    "conv-0-q-76": "rescueable",
+    "conv-2-q-5": "rescueable",
+    "conv-2-q-18": "topk_hit",
+    "conv-2-q-24": "rescueable",
+    "conv-2-q-42": "topk_hit",
+    "conv-2-q-48": "rescueable",
+    "conv-3-q-9": "rescueable",
+    "conv-3-q-17": "rescueable",
+    "conv-3-q-19": "rescueable",
+    "conv-3-q-22": "rescueable",
+    "conv-3-q-23": "topk_hit",
+    "conv-3-q-32": "rescueable",
+    "conv-3-q-33": "topk_hit",
+    "conv-3-q-34": "rescueable",
+    "conv-3-q-41": "rescueable",
+    "conv-3-q-44": "rescueable",
+    "conv-3-q-45": "rescueable",
+    "conv-3-q-49": "topk_hit",
+    "conv-3-q-52": "topk_hit",
+    "conv-3-q-53": "rescueable",
+    "conv-3-q-54": "rescueable",
+    "conv-3-q-58": "rescueable",
+    "conv-3-q-78": "topk_hit",
+    "conv-3-q-79": "topk_hit",
+    "conv-3-q-80": "topk_hit",
+    "conv-4-q-6": "rescueable",
+    "conv-4-q-10": "rescueable",
+    "conv-4-q-16": "topk_hit",
+    "conv-4-q-17": "topk_hit",
+    "conv-4-q-20": "rescueable",
+    "conv-4-q-33": "topk_hit",
+    "conv-4-q-47": "rescueable",
+    "conv-4-q-48": "rescueable",
+    "conv-4-q-49": "rescueable",
+    "conv-4-q-55": "topk_hit",
+    "conv-4-q-56": "topk_hit",
+    "conv-4-q-68": "rescueable",
+    "conv-5-q-4": "topk_hit",
+    "conv-5-q-10": "topk_hit",
+    "conv-5-q-16": "rescueable",
+    "conv-5-q-22": "rescueable",
+    "conv-5-q-24": "topk_hit",
+    "conv-5-q-45": "rescueable",
+    "conv-5-q-46": "rescueable",
+    "conv-5-q-55": "rescueable",
+    "conv-5-q-57": "rescueable",
+    "conv-6-q-11": "rescueable",
+    "conv-6-q-15": "rescueable",
+    "conv-6-q-20": "topk_hit",
+    "conv-6-q-37": "rescueable",
+    "conv-6-q-43": "rescueable",
+    "conv-6-q-53": "topk_hit",
+    "conv-6-q-59": "topk_hit",
+    "conv-6-q-64": "topk_hit",
+    "conv-7-q-12": "rescueable",
+    "conv-7-q-26": "rescueable",
+    "conv-7-q-43": "rescueable",
+    "conv-7-q-46": "rescueable",
+    "conv-7-q-77": "topk_hit",
+    "conv-8-q-6": "topk_hit",
+    "conv-8-q-24": "rescueable",
+    "conv-8-q-60": "rescueable",
+    "conv-8-q-70": "rescueable",
+    "conv-8-q-79": "rescueable",
+    "conv-8-q-80": "rescueable",
+    "conv-9-q-0": "rescueable",
+    "conv-9-q-27": "rescueable",
+    "conv-9-q-31": "rescueable",
+    "conv-9-q-45": "rescueable",
+    "conv-9-q-47": "topk_hit",
+    "conv-9-q-48": "rescueable",
+    "conv-9-q-59": "rescueable",
+    "conv-9-q-61": "topk_hit",
+    "conv-9-q-62": "topk_hit",
+    "conv-9-q-67": "rescueable"
+  },
+  "sample_rescueable": [
+    {
+      "question_id": "conv-0-q-6",
+      "question": "When is Melanie planning on going camping?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 105,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-26",
+      "question": "When did Melanie read the book \"nothing is impossible\"?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 52,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "follow_entity"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-31",
+      "question": "When did Melanie go camping in June?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 73,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-33",
+      "question": "When did Caroline go to a pride parade during the summer?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 80,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-43",
+      "question": "What kind of art does Caroline make?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 101,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-73",
+      "question": "When did Melanie get hurt?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 85,
+      "simulated": [
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-0-q-76",
+      "question": "When did Melanie go on a hike after the roadtrip?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 69,
+      "simulated": [
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-2-q-5",
+      "question": "When did Maria go to the beach?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 138,
+      "simulated": [
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-2-q-24",
+      "question": "When did John start boot camp with his family?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 58,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-2-q-48",
+      "question": "When did John have his first firefighter call-out?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 62,
+      "simulated": [
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-9",
+      "question": "What major achievement did Joanna accomplish in January 2022?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 32,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-17",
+      "question": "What movie did Joanna watch on 1 May, 2022?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 215,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-19",
+      "question": "How many times has Joanna found new hiking trails?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 90,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-22",
+      "question": "When did Joanna start writing her third screenplay?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 208,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-32",
+      "question": "Where did Joanna travel to in July 2022?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 210,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-34",
+      "question": "What book recommendations has Joanna given to Nate?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 41,
+      "simulated": [
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-41",
+      "question": "When did Joanna make a chocolate tart with raspberries?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 136,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-44",
+      "question": "When did Nate win a lot of money in a video game tournament?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 182,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-45",
+      "question": "When did Joanna finish up the writing for her book?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 226,
+      "simulated": [
+        "rewrite",
+        "rewrite",
+        "rewrite",
+        "rewrite"
+      ]
+    },
+    {
+      "question_id": "conv-3-q-53",
+      "question": "How many times has Nate taken his turtles on a walk?",
+      "single_gold_rank": -1,
+      "wide_gold_rank": 82,
+      "simulated": [
+        "rewrite",
+        "rewrite"
+      ]
+    }
+  ]
+}
