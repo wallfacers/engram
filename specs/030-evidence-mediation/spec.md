@@ -6,6 +6,8 @@
 
 **Status**: Draft
 
+> **修订注记 (2026-08-06)**: 下述 FR-005 与 SC-004 中「trace 生成默认关闭 / opt-in」的约束，经全量 1540 题 × 3 次 majority 验证（**85.91%** @ ~468 tok，类别全正向、token 省 7.7 倍）后更新：`--trace-mediation` **现为 eval harness 默认开启**。未配置 answerer sidecar 时仍优雅降级 legacy 路径（字节一致，SC-004 保持）；`--trace-mediation=false` 显式回 legacy。`--evidence-assembly` / `--consolidate` 维持默认关不变。改动仅在 `cmd/locomo-bench/`（引擎零改动，FR-001 保持）。
+
 **Input**: User description: "推进吧" —— 落地 C1 引用链证据门（MemChain）+ D1 token 精确装填（Retain or Consolidate）+ 证据装配地基（chunk-quota 固化），即「检索之后、作答之前」的读侧证据装配结构。
 
 ## User Scenarios & Testing *(mandatory)*

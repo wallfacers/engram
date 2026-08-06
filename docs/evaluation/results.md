@@ -24,6 +24,7 @@ tags: [evaluation, locomo, longmemeval, results]
 | 数据集 | 样本 | 答题模型 | 判题模型 | 配方与聚合 | 结果 | 解释边界 |
 |---|---:|---|---|---|---:|---|
 | LoCoMo（cat 1–4） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local hybrid、3 次答题多数 | 85.71% | 与同栈 MemOS 的可比基线 |
+| LoCoMo（cat 1–4）· trace（默认） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | 030 read-side trace、3 次答题多数 | 85.91% | 当前默认路径：answer context 468 vs 3620 tok（省 7.7×）；配对细节见 [030 verdict](reports/030-evidence-mediation-verdict.md) |
 | LoCoMo（cat 1–4） | 1540 | deepseek-v4-pro | deepseek-v4-flash | canonical recipe、3 次答题多数 | 89.03% | 强 answerer 探针，不能与本地基线混作默认分 |
 | LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local-first、3 次答题多数 | 80.80% | 历史 full 500 本地栈测量；见下方口径更正 |
 | LongMemEval-S（cleaned） | 500 | deepseek-v4-pro | deepseek-v4-flash | 与本地臂相同检索、3 次答题多数 | 86.00% | 历史强 answerer 探针；同受下方口径更正约束 |

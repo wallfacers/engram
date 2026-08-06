@@ -40,9 +40,10 @@ python specs/030-evidence-mediation/tools/assembly_diagnose.py ./.locomo-030-us1
 CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench -run 'TestTraceGate|TestTraceFailClosed|TestTraceParity'
 
 # 2. 配对：基线 vs 中介 arm，84 题 × 3 reps（复用 029 whitelist）
-#    基线
+#    基线（--trace-mediation 现默认开启，base 对照需显式关闭）
 go run ./cmd/locomo-bench --store-dir <store> --run-dir ./.locomo-030-us2/base \
-  --only-questions specs/029-agentic-memory-navigation/diagnosis/phase0-ids.txt --repeats 3
+  --only-questions specs/029-agentic-memory-navigation/diagnosis/phase0-ids.txt --repeats 3 \
+  --trace-mediation=false
 #    中介 arm（sidecar env: ENGRAM_TRACE_MODEL 等，走 029 式 harness HTTP caller）
 go run ./cmd/locomo-bench --store-dir <store> --run-dir ./.locomo-030-us2/trace \
   --only-questions specs/029-agentic-memory-navigation/diagnosis/phase0-ids.txt --repeats 3 \

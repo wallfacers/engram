@@ -257,6 +257,7 @@ code without modifications.
 | Dataset (n) | Framework | Answerer | Judge | Score |
 |---|---|---|---|---:|
 | **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.71%** |
+| LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · default |
 | LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-pro | 83.77% |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
 | LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | 82.40% |
@@ -314,17 +315,22 @@ memory-mechanism advantage.
 
 ### Read-side evidence mediation — budget-efficient (trace)
 
-An opt-in read-side stage (`--trace-mediation`, [spec 030](specs/030-evidence-mediation/spec.md))
-runs the retrieved candidate set through a small mediator that distils a single
-grounded evidence statement before answering; a deterministic fail-closed gate
-keeps every citation inside the retrieved boundary. On the full 1,540-question
-LoCoMo set this drops the answer context from ~3,614 to ~468 tokens (≈7.7×)
-at a stable 3-run majority of **85.91%** (vs base 84.9% single-run / 85.19%
-historical majority) — higher accuracy at roughly one-eighth the tokens, with
-no category regressing. Because the token saving holds at any accuracy delta,
-this is the budget-efficient counterpart to the budget-driven +3.20pp above —
-the first "more signal, fewer tokens" result under the budget-aligned lens.
-The stage stays opt-in and default-off.
+A read-side stage (`--trace-mediation`, [spec 030](specs/030-evidence-mediation/spec.md)),
+**on by default in the eval harness**, runs the retrieved candidate set through
+a small mediator that distils a single grounded evidence statement before
+answering; a deterministic fail-closed gate keeps every citation inside the
+retrieved boundary. On the full 1,540-question LoCoMo set this drops the answer
+context from ~3,614 to ~468 tokens (≈7.7×) at a stable 3-run majority of
+**85.91%** (vs base 84.9% single-run / 85.19% historical majority) — higher
+accuracy at roughly one-eighth the tokens, with no category regressing.
+Category-by-category (trace, 3-run majority): single-hop 88.23% · multi-hop
+87.23% · temporal 84.42% · open-domain 66.67%. Because
+the token saving holds at any accuracy delta, this is the budget-efficient
+counterpart to the budget-driven +3.20pp above — the first "more signal, fewer
+tokens" result under the budget-aligned lens. The stage is default-on: it needs
+a configured answerer LLM as its sidecar and degrades to the legacy
+byte-identical path when the sidecar is unavailable; pass
+`--trace-mediation=false` to restore the legacy path explicitly.
 
 Mem0's 92.5% / 94.4% come from its managed platform, including optimizations
 that are not present in the open-source SDK, and a `top_200` retrieval budget.

@@ -58,4 +58,4 @@
 
 ## 出货影响
 
-trace（`--trace-mediation`）/ consolidate（`--consolidate`）**default-off 保留为 opt-in 评测能力**（SC-004 零行为变化）。装配器排序方向（chunk-first 读侧）为后续 MCP/CLI 读侧装配接线提供依据（023 planner 生产接线类似）。引擎零改动（FR-001）。
+`--trace-mediation` **默认开启**（2026-08-06 全量 85.91%@468tok 验证后转正）：需要已配置的 answerer LLM 作为 sidecar，sidecar 不可用时优雅降级 legacy 路径（字节一致，SC-004），`--trace-mediation=false` 显式回 legacy。`--consolidate` / `--evidence-assembly` 保持 **default-off**（SC-004 零行为变化）。装配器排序方向（chunk-first 读侧）为后续 MCP/CLI 读侧装配接线提供依据（023 planner 生产接线类似）。引擎零改动（FR-001）。

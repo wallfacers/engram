@@ -63,15 +63,16 @@ curl -s -H 'Authorization: Bearer local-eval' http://127.0.0.1:8010/v1/models  #
 #   基线 flag: --chunks --retrieval hybrid --top-k 30 --chunk-quota 12 --force-answer --judge-mem0-aligned
 
 # 子集配对（029 实际 84 题 = specs/030/diagnosis/phase0-ids-029-84.txt）
-bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3                     # base
-bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3 --trace-mediation    # trace
+#   注意：--trace-mediation 现默认开启；base 对照必须显式 --trace-mediation=false
+bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3 --trace-mediation=false   # base
+bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3 --trace-mediation        # trace
 bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3 --evidence-assembly  # keep (US3)
 bash run030.sh RUN_DIR --only-questions phase0-ids-029-84.txt --repeats 3 --evidence-assembly \
   --consolidate --token-counter-base-url http://127.0.0.1:8000/v1                             # cons (US3)
 
-# 全量（canonical recipe）
-bash run030.sh RUN_DIR --repeats 1                     # base 全量（84.9%）
-bash run030.sh RUN_DIR --trace-mediation --repeats 3   # trace 全量（3 次多数）
+# 全量（canonical recipe）；base 需显式关 trace（默认已开）
+bash run030.sh RUN_DIR --trace-mediation=false --repeats 1   # base 全量（84.9%）
+bash run030.sh RUN_DIR --trace-mediation --repeats 3         # trace 全量（3 次多数）
 
 # 配对统计
 ./locomo-bench --compare DIR_A DIR_B    # 输出 flips A→B / B→A + McNemar p + verdict
