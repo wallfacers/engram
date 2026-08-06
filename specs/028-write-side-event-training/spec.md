@@ -4,9 +4,19 @@
 
 **Created**: 2026-08-05
 
-**Status**: Draft
+**Status**: **Closed（NO-GO 收口，2026-08-06）**——US1 教师零训练验证 GO，US2 训练复测 NO-GO（008 铁律未转化），US3 不再执行。实际结果见下方「实际收口」。
 
 **Input**: 走 spec 规范开 SaaS 线——训练抽取器做写侧结构（SaaS 线第一步）
+
+## 实际收口（2026-08-06，NO-GO）
+
+本 feature 已按门禁执行完并收口为 **NO-GO**。阶段判定与证据如下：
+
+- **US1（教师零训练验证，GO）**：DeepSeek-flash 教师抽取时间锚定 **86.4%**（vs 7B 5%），84 题配对 event 44.0% vs chunk 50.0%（−6.0pp，p=0.44）——假设「抽取能力是瓶颈」成立，且训练可解被零成本坐实。见 [diagnosis/us1-verdict.md](diagnosis/us1-verdict.md)。
+- **US2（训练抽取器 + 复测，NO-GO）**：Qwen2.5-3B-LoRA 训练（5313 条教师数据，3 epochs，loss 1.32→0.44，全本地栈 $0），T013 审计全过——时间锚定 **96.9%**（≥70 门）、schema 合法 **100%**（≥95 门）、非法时间戳 0（≤5% 门）；但端到端配对 **chunk 50.0% vs event 48.8%（−1.2pp，McNemar p=1.00）未转化**——008 铁律唯一 GO 门（event ≥ chunk）未达成。temporal +3.3pp（52.5 vs 49.2，p=0.81）首次转正但噪声内；multi-hop −12pp（40.0 vs 52.0，p=0.51）倒退。三臂差距收窄链 **−26.2(7B) → −6.0(teacher) → −1.2(trained) pp**。完整见 [docs/evaluation/reports/028-write-side-training-verdict.md](../../docs/evaluation/reports/028-write-side-training-verdict.md)。
+- **US2 失败机制**：训练抽取器在中间指标彻底解决 027 瓶颈（锚定 96.9%），但端到端仍不转化——写侧 event 表示替代原文 chunk 的固有损耗（原文保真丢失）未被关系/时间结构补偿。**训练无法超越蒸馏上限 = 教师**（教师自身 −6.0pp 未转化）。写侧 event 表示**第三次端到端不转化**（027 / 028-US1 / 028-US2）。
+- **US3（部署接入）不再执行**：US2 未转化即 STOP（008 铁律），default-off 维持现状，无需额外接入。
+- **出货影响（FR-010 延续）**：event 投影 / `--representation event` 保持 **default-off**；训练抽取器（`train_sft.py`/`train.sh`/`export_deploy.sh`，含 transformers 5.x 兼容修复）作为 **SaaS 线能力资产**记录保留。tasks.md 已如实收口。
 
 ## 阶段化（门禁驱动，不盲烧）
 

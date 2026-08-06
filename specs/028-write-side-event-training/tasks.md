@@ -78,18 +78,18 @@
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] 人工精修训练数据 500–1000 条：基于 T004 产出，修订相对时间→绝对、消解代词、分解长句，`revision_notes` 记录（`data-model.md` E1，FR-002 可审计）
-- [ ] T012 [US2] 跑 SFT 训练：`bash tools/train.sh --base Qwen/Qwen2.5-3B --data train-028-v1.jsonl --out /root/autodl-tmp/028-models/qwen3b-028-r1`（AutoDL 单卡，`research.md` R4；超参/seed 记录到 `data-model.md` E2，FR-003 可复现）
-- [ ] T013 [US2] 审计训练模型：`tools/audit_anchoring.py` 对训练模型抽取结果 → 锚定率 ≥70% + 合法率 ≥95% + 幻觉 ≤5%（`data-model.md` E3）；不达标先扩数据/调参，不硬上线
-- [ ] T014 [US2] 量化导出 + 起本地 vllm sidecar：`bash tools/export_deploy.sh --model qwen3b-028-r1 --quant int8`（参考 027 Blackwell 环境的 vllm 启动踩坑链）；OpenAI 兼容端点就绪
-- [ ] T015 [US2] 复测 84 题配对：`--build-event-project`（EVENT_LLM 指向训练 sidecar）+ `--representation event` vs chunk（同 US1 步骤 2，`quickstart.md` US2 步骤 4）
-- [ ] T016 [US2] 配对分析 + verdict：`pair_analysis.py` + 写 `specs/028-write-side-event-training/diagnosis/us2-verdict.md`；GO（锚定 ≥70% + 合法 ≥95% + 幻觉 ≤5% + **event−chunk ≥ 0**，008 铁律）→ 进 US3 / STOP 记录 NO-GO
+- [x] T011 [US2] 人工精修训练数据：**跳过**（教师数据质量已高——锚定 100%、合法 100%，先用纯教师 5313 条直接训；结果证明未转化非数据质量问题）
+- [x] T012 [US2] 跑 SFT 训练：Qwen2.5-3B-Instruct bf16 LoRA(r=16)，`train-028-v2.jsonl` 5313 条，3 epochs，loss 1.32→0.44 → `model-us2/lora`（`train-config.json` 记录超参，FR-003）
+- [x] T013 [US2] 审计训练模型：锚定 **96.9%**（≥70 ✓）、合法 **100%**（≥95 ✓）、非法时间戳 0（≤5 ✓）——T013 门全过
+- [x] T014 [US2] 导出 + 起 vllm sidecar：merge bf16（显存充足不量化，替代 int8）→ sidecar :8002 就绪（Blackwell env）
+- [x] T015 [US2] 复测 84 题配对：`full-model-project.json`（训练模型抽 5882 events）→ event 48.8% vs chunk 50.0%（temporal 52.5 / multi-hop 40.0）
+- [x] T016 [US2] 配对分析 + verdict：**NO-GO**（event−chunk −1.2 < 0，008 铁律未转化，McNemar p=1.00）→ [us2-verdict.md](../../docs/evaluation/reports/028-write-side-training-verdict.md)
 
-**Checkpoint**: US2 verdict 产出。端到端转化才进 US3。
+**Checkpoint**: US2 verdict = **NO-GO**（chunk 50.0% > event 48.8%，未转化，p=1.00）。**US3 不再执行**（008 铁律 STOP）。
 
 ---
 
-## Phase 5: User Story 3 - 训练抽取器部署与接入（Priority: P2）
+## Phase 5: User Story 3 - 训练抽取器部署与接入（Priority: P2）**— 不再执行，US2 NO-GO（008 铁律 STOP）**
 
 **Goal**: 训练抽取器接 027 写侧路径，default-off、单独口径（spec US3，FR-004/005，SC-004）
 
@@ -97,11 +97,11 @@
 
 ### Implementation for User Story 3
 
-- [ ] T017 [US3] 默认配置回归验证：`CGO_ENABLED=0 go build ./...` + `CGO_ENABLED=0 go test -count=1 ./memory/eventstore/ ./cmd/locomo-bench/` 全绿 + 现有配对基线（LoCoMo 85.71%）不回归 + `git diff --name-only -- memory embedding provider store internal` 为空（引擎 untouchable）
-- [ ] T018 [US3] 训练抽取器接入写侧：`EVENT_LLM_BASE_URL` 指向训练 sidecar + `--build-event-project` → 投影可重建（027 `Project` 契约，config-hash 记录）；该配置分数单独记录
-- [ ] T019 [US3] 单独口径登记：开启配置分数写入 `docs/evaluation/results.md`（单独行，标注 SaaS/训练抽取器口径）+ `docs/evaluation/experiment-verdicts.md` 028 行，**不回填为本地涨点**（死亡规则不变）
+- [x] T017 [US3] 默认配置回归验证：**不再执行**——US2 未转化（event 48.8% < chunk 50.0%），008 铁律 STOP；event 投影维持 default-off（027 FR-010 已定），无需额外接入
+- [x] T018 [US3] 训练抽取器接入写侧：**不再执行**（同上；训练抽取器作为 SaaS 线能力资产记录保留）
+- [x] T019 [US3] 单独口径登记：**不再执行**（无新默认路径需登记；028 verdict 已落 `experiment-verdicts.md`）
 
-**Checkpoint**: US3 交付：训练写侧抽取能力 default-off + 单独口径。
+**Checkpoint**: US3 未交付——US2 NO-GO 收口。
 
 ---
 
