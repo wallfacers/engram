@@ -258,13 +258,16 @@ type options struct {
 	// HTTP with thinking disabled — fast pure-JSON tool calls). Nil falls back
 	// to answerCall. Never serialized.
 	navDecideCall usageModelCaller
-	// 030 read-side evidence assembly (specs/030). All flags default OFF;
-	// when off the answer-context path is byte-identical to the legacy path
-	// (SC-004 parity). Engine untouched (FR-001).
-	evidenceAssembly bool   // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure)
-	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir
-	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar opt-in; fail-closed gate)
-	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled)
+	// 030 read-side evidence assembly (specs/030). Only --trace-mediation is
+	// default-on (030 full-set verification: 85.91% @ 468 tok — budget-efficient
+	// read-side mediation); it needs a configured answerer LLM as sidecar and
+	// degrades to the legacy byte-identical path (SC-004) when the sidecar is
+	// unavailable. The rest default OFF — when off the answer-context path is
+	// byte-identical to the legacy path (SC-004 parity). Engine untouched (FR-001).
+	evidenceAssembly bool   // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure); default off
+	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
+	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
+	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
 	// assemblyCounter is the runtime-only exact tokenizer for 030 evidence
 	// assembly (chat-aware /tokenize, reuses the formal 022 counter config).
 	// Never serialized; nil → estimate-ledger fallback (tokens_estimated=true).
@@ -413,10 +416,11 @@ func run() error {
 	flag.IntVar(&opt.outrankCap, "outrank-cap", 5, "maximum non-gold hits to record before the first gold hit")
 	flag.IntVar(&opt.widePool, "wide-pool", 0, "candidate pool size for gold_in_pool (0 = max(300, top-k*6))")
 	flag.Float64Var(&opt.factCoverageTau, "fact-coverage-tau", defaultFactCoverageTau, "attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it")
-	// 030 read-side evidence assembly flags (specs/030). All default OFF.
+	// 030 read-side evidence assembly flags (specs/030). --trace-mediation
+	// defaults ON (budget-efficient verified path); the rest default OFF.
 	flag.BoolVar(&opt.evidenceAssembly, "evidence-assembly", false, "030 US1: assemble retrieved evidence (exact token accounting + chunk-first + category structure) before answering; off = legacy byte-identical path")
 	flag.BoolVar(&opt.assemblyDiagnose, "assembly-diagnose", false, "030 US1 retrieval-only: emit per-question evidence-assembly audit (chunk_fraction / total_tokens / structure / tokens_estimated) to run-dir/assembly-diagnose.jsonl (needs --store-dir + --run-dir + --chunks + --evidence-assembly)")
-	flag.BoolVar(&opt.traceMediation, "trace-mediation", false, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via opt-in sidecar; fail-closed gate in pure Go); off = legacy path")
+	flag.BoolVar(&opt.traceMediation, "trace-mediation", true, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via sidecar; fail-closed gate in pure Go); on = default (needs answerer LLM as sidecar; no sidecar degrades to legacy path); set false for the legacy byte-identical path")
 	flag.BoolVar(&opt.consolidate, "consolidate", false, "030 US3: conditional consolidation — compress only when evidence exceeds the answer-context cap AND this flag is set; off = retain raw (default)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
@@ -930,7 +934,7 @@ func run() error {
 			BaseURL: baseURL, APIKey: apiKey, Model: model,
 		})
 		if traceErr != nil {
-			logger.Warn("trace sidecar caller unavailable; --trace-mediation degrades to legacy path", "err", traceErr)
+			logger.Warn("trace sidecar caller unavailable; --trace-mediation (default on) degrades to the legacy byte-identical path", "err", traceErr)
 		} else {
 			opt.traceSidecarCaller = traceCall
 		}
@@ -2544,7 +2548,8 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		// the closed candidate set into a packet; the fail-closed gate keeps only
 		// boundary-cited, traceable evidence E, which becomes the answer context.
 		// Parse failure retries once; gate fallback or caller failure keeps the
-		// (possibly assembled) legacy context. Off by default (SC-004).
+		// (possibly assembled) legacy context. On by default (030 full-set
+		// verification); off restores the legacy byte-identical path.
 		boundary := make(map[string]bool, len(hits))
 		for _, h := range hits {
 			boundary[h.Name] = true
