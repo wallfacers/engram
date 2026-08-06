@@ -183,6 +183,14 @@ func compileTemporalResolutionArm(query string, expanded []formalExpandedAnchor,
 	default: // current_value / evolution_chain
 		kept = resolveVersionOrdering(candidates, latestByCandidate, query, mode, &audit)
 	}
+	// 027 fail-open: 时间组织把候选过滤/选择为空时, 回退到 relevance 选择 (与
+	// exact-token 基线一致), 绝不产出空 bundle — 空 bundle 会触发
+	// no_evidence_fits_token_cap 使整题 invalid (paired run: 209/1540)。
+	// 时间解析是排序/过滤/选值, 不做 need 剪枝 (026 负结果教训)。
+	if len(kept) == 0 {
+		selections := selectExactTokenCandidates(query, candidates, limit)
+		kept = keepBySelections(candidates, selections)
+	}
 
 	// 2. 构建 engine 形状一致的 Bundle (复用 exact-token 的 item 构建模式)。
 	items := make([]evidencecompiler.BundleItem, 0, len(kept))
