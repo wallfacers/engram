@@ -5,6 +5,8 @@
 set -e
 V=/root/autodl-tmp/023-venv/bin
 export HF_HOME=/root/autodl-tmp/hf-cache
+export HF_HUB_OFFLINE=1   # base model already cached; huggingface.co is blocked on AutoDL
+export PYTHONUNBUFFERED=1
 export PATH=$V:$PATH
 
 LORA=${1:?usage: export_deploy.sh <lora_dir> <merged_out> [port] [base_model]}
