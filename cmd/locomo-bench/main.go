@@ -268,6 +268,7 @@ type options struct {
 	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
 	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
 	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
+	relationContext bool   // 031: append the structural-context relation block to the assembled/traced answer context; default off (parity)
 	// assemblyCounter is the runtime-only exact tokenizer for 030 evidence
 	// assembly (chat-aware /tokenize, reuses the formal 022 counter config).
 	// Never serialized; nil → estimate-ledger fallback (tokens_estimated=true).
@@ -422,6 +423,7 @@ func run() error {
 	flag.BoolVar(&opt.assemblyDiagnose, "assembly-diagnose", false, "030 US1 retrieval-only: emit per-question evidence-assembly audit (chunk_fraction / total_tokens / structure / tokens_estimated) to run-dir/assembly-diagnose.jsonl (needs --store-dir + --run-dir + --chunks + --evidence-assembly)")
 	flag.BoolVar(&opt.traceMediation, "trace-mediation", true, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via sidecar; fail-closed gate in pure Go); on = default (needs answerer LLM as sidecar; no sidecar degrades to legacy path); set false for the legacy byte-identical path")
 	flag.BoolVar(&opt.consolidate, "consolidate", false, "030 US3: conditional consolidation — compress only when evidence exceeds the answer-context cap AND this flag is set; off = retain raw (default)")
+	flag.BoolVar(&opt.relationContext, "relation-context", false, "031: append the structural-context relation block (related_to/temporal_next/caused_by) to the assembled or trace-mediated answer context; off = legacy byte-identical path")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -2529,11 +2531,12 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		// category structure), render the assembled prompt, and record the exact
 		// token ledger. Off by default — legacy byte-identical path (SC-004).
 		asm, assembledUser, asmErr := assembleEvidence(ctx, qa.Question, hits, qa.Category, assemblyConfig{
-			Cap:          defaultAnswerContextCap,
-			CurrentDate:  qa.QuestionDate,
-			Scaffold:     opt.temporalDateScaffold,
-			SystemPrompt: prompt,
-			QuestionID:   qa.QuestionID,
+			Cap:             defaultAnswerContextCap,
+			CurrentDate:     qa.QuestionDate,
+			Scaffold:        opt.temporalDateScaffold,
+			SystemPrompt:    prompt,
+			QuestionID:      qa.QuestionID,
+			RelationEnabled: opt.relationContext,
 		}, opt.assemblyCounter)
 		if asmErr != nil {
 			logger.Warn("evidence assembly failed; using legacy context", "err", asmErr)
@@ -2591,6 +2594,20 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		}
 		if len(evidence) > 0 {
 			userPrompt = buildAnswerContextPrompt(qa.Question, evidenceFromTrace(evidence), qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+		}
+		if opt.relationContext && len(evidence) > 0 {
+			// 031 T011 (contracts/evidence-relations.md §3): overlay the
+			// structural-context block on the trace-mediated context, keeping only
+			// edges whose endpoints lie inside the closed candidate boundary
+			// (fail-closed reuse of the trace gate). Trace evidence carries no
+			// EventDate → temporal chains fail-soft; multi-hop relations still apply.
+			if block, _ := computeRelationContext(ctx, evidenceFromTrace(evidence), qa.Category); block != nil {
+				if kept := relationBlockWithinBoundary(block, boundary); kept != nil {
+					kept.Text = renderRelationBlock(kept)
+					kept.TokenCount = estimateTokens(kept.Text)
+					userPrompt = appendRelationBlock(userPrompt, kept)
+				}
+			}
 		}
 		if opt.traceGateJournal != nil {
 			if err := opt.traceGateJournal.Write(traceGateRecord{QuestionID: qa.QuestionID, Status: status, EvidenceCount: len(evidence), Retried: retried}); err != nil {

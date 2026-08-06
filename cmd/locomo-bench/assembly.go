@@ -82,11 +82,12 @@ const (
 
 // assemblyConfig carries the fixed per-question context the assembler needs.
 type assemblyConfig struct {
-	Cap          int    // answer-context token cap (default 3600)
-	CurrentDate  string // rendered "CURRENT DATE" header
-	Scaffold     bool   // --temporal-date-scaffold (gates the TIMELINE block)
-	SystemPrompt string // answerer system prompt (exact full-prompt count)
-	QuestionID   string // conv-N-q-M for diagnostics
+	Cap              int    // answer-context token cap (default 3600)
+	CurrentDate      string // rendered "CURRENT DATE" header
+	Scaffold         bool   // --temporal-date-scaffold (gates the TIMELINE block)
+	SystemPrompt     string // answerer system prompt (exact full-prompt count)
+	QuestionID       string // conv-N-q-M for diagnostics
+	RelationEnabled  bool   // 031: append the structural-context relation block (default off; parity)
 }
 
 // assembleEvidence builds the answer context from retrieved hits (contracts/
@@ -104,6 +105,15 @@ func assembleEvidence(ctx context.Context, question string, hits []memory.Result
 	ordered := orderHitsForAssembly(hits, category)
 	for {
 		user := renderAssembledPrompt(question, ordered, category, cfg)
+		if cfg.RelationEnabled {
+			// 031 (contracts/evidence-relations.md §2): compute the inter-evidence
+			// relations over the current ordered set and append the rendered block.
+			// Recomputed per truncation round so the block shrinks/disappears with
+			// the evidence it annotates (token budget discipline, FR-005/FR-006).
+			if block, _ := computeRelationContext(ctx, ordered, category); block != nil {
+				user = appendRelationBlock(user, block)
+			}
+		}
 		asm := finishAssembly(ordered, category, cfg, estimateTotalTokens(ordered))
 		if counter == nil {
 			asm.TokensEstimated = true
