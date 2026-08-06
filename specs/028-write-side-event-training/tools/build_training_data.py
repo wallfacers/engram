@@ -40,6 +40,24 @@ def validate_sample(s, samples):
     return True, "ok"
 
 
+_SDATE_RE = re.compile(r"on\s+(\d{1,2})\s+(\w+)\s*,\s*(\d{4})", re.I)
+_MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june",
+                                       "july", "august", "september", "october", "november", "december"], 1)}
+
+
+def _parse_sdate(raw):
+    """'8:56 pm on 20 July, 2023' -> '2023-07-20' (ISO; empty if unresolvable)."""
+    if not raw:
+        return ""
+    m = _SDATE_RE.search(raw)
+    if not m:
+        return ""
+    mon = _MONTHS.get(m.group(2).lower())
+    if not mon:
+        return ""
+    return f"{m.group(3)}-{mon:02d}-{int(m.group(1)):02d}"
+
+
 def load_message_index(data_path):
     """'<conv_id>:<dia_id>' -> (speaker, session_date, text, context_prev3).
 
@@ -55,7 +73,7 @@ def load_message_index(data_path):
                           key=lambda k: int(k.split("_")[1]))
         for sk in sessions:
             n = int(sk.split("_")[1])
-            sdate = conv_data.get(f"session_{n}_date_time") or ""
+            sdate = _parse_sdate(conv_data.get(f"session_{n}_date_time") or "")
             turns = conv_data[sk]
             for i, t in enumerate(turns):
                 text = (t.get("text") or "").strip()
@@ -86,6 +104,7 @@ def build(project_path, data_path, out_jsonl, out_audit, human_refined_path=None
             "id": f"train-{i:05d}",
             "conv_id": m["conv_id"],
             "source_msg_id": sid,
+            "session_date": m["session_date"],
             "input_text": f"{m['speaker']}: {m['text']}",
             "context_turns": m["context"],
             "event_json": ev,
