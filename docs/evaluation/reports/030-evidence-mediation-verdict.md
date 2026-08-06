@@ -31,6 +31,20 @@
 2. **trace 引用链无独立增量**：sidecar 精选 1 条 evidence 的效果 ≈ 装配器 top chunk（keep→trace p=0.152）。evidence_count 几乎全 1（valid+1=215/248）说明 sidecar 倾向单条输出，机制收益与简单装配重叠。
 3. **token 削减排除**：base-slim（688 tok）与 base 满（3600 tok）同为 27.4% → 正确率不随 token 削减变化；trace 的赢来自证据选择非预算差。
 
+## 全量验证（2026-08-06 补充，budget-efficient win 候选）
+
+子集配对后重开机器补跑**全量 1540 题**（1 rep，canonical recipe）确认环境与全量表现：
+
+| 全量 1540 题 | OVERALL | 上下文 token | 备注 |
+|---|---|---|---|
+| base（chunk-quota 12） | **84.9%**（1308/1540） | 3620 | 与历史基线吻合（85.71%/85.19%/84.94%）→ 环境正常 |
+| **trace（--trace-mediation）** | **85.6%**（1319/1540） | **441** | **+0.7pp（净 +11 题）+ token 省 8 倍** |
+
+- 全量 trace 类别全正向：multi-hop 86.9→87.6 / temporal 81.3→82.9 / open-domain 61.5→64.6 / single-hop 88.3→88.5，**无类别回落**。
+- paired（1 rep）：flips A→B=76 / B→A=65，McNemar **p=0.40 单次不显著**；但 **answer context 441 vs 3620 tok（省 8 倍）是确定性结构优势**。
+- **解读**：84 题子集 trace +22pp（base 27.4→trace 50.0）在全量上收窄为 +0.7pp（简单题 base 也能答对，trace 优势集中在难题）；但 **token 8 倍节省在任意口径下成立**——这是"预算下提质"（signal not volume）的首个落地候选：省 8 倍 token 且正确率不降反升，类别全正向。
+- 诚实边界：单次观测 +0.7pp 不显著（p=0.40），需 repeats=3 才能判定正确率是否显著涨点；token 节省与类别方向不依赖显著性。
+
 ## 诚实缺口
 
 - US3 精确 tokenizer 未启用：缺 `--counter-fingerprint`（022 formal calibration 产物，机器未留存）→ keep/cons 装配用 estimate ledger；over-cap 判定为近似。
