@@ -178,7 +178,9 @@ func runNavDiagnoseCLI(ctx context.Context, opt options, convs []conversation, a
 	})
 
 	path := filepath.Join(opt.runDir, "nav-diagnose.jsonl")
-	f, err := os.Create(path)
+	// Owner-only (0o600): the diagnostic carries raw question text and retrieved
+	// memory content — sensitive data.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create nav-diagnose.jsonl: %w", err)
 	}

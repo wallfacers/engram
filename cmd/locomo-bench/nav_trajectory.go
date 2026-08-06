@@ -40,7 +40,9 @@ type navTrajectoryJournal struct {
 }
 
 func openNavTrajectoryJournal(path string) (*navTrajectoryJournal, error) {
-	f, err := os.Create(path)
+	// Owner-only (0o600): the journal carries raw question text and retrieved
+	// memory content — sensitive data — so it must not be world/group readable.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, err
 	}
