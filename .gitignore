@@ -47,3 +47,6 @@ Thumbs.db
 pcic_meta*.json
 cov-pcic*
 ans-pcic*
+
+# eval notebook (per-run mistake attribution; contains raw conversation text)
+/eval-notebook/

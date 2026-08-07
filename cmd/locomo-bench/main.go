@@ -308,6 +308,18 @@ type options struct {
 	adjudicationAuditSeed        string
 	adjudicationAuditAllowPaid   bool
 	adjudicationAuditMaxTokens   int
+	// --trace-multi-evidence (032): relax the trace sidecar to several evidence
+	// statements by intent (multi_hop/temporal → 3-6) instead of the legacy
+	// single-evidence prompt. Off by default (SC-004).
+	traceMultiEvidence bool // --trace-multi-evidence: intent-breadth evidence prompt for the trace sidecar
+	traceEvidenceCap   int  // --trace-evidence-cap: hard cap on evidence statements kept under --trace-multi-evidence (0 = no cap)
+	traceFallbackTopk  int  // --trace-fallback-topk: if the trace sidecar cites NONE of the retrieval top-k candidates, fall back to the top-k raw candidates as the answer context (0 = off)
+	// notebook (--notebook): inline gold attribution + cross-run mistake book.
+	// Off by default — results stay byte-identical (SC-004).
+	notebook        bool    // --notebook: accumulate per-question gold attribution + mistakes into the notebook
+	notebookAdvise  bool    // --notebook-advise: draft "how to solve this class" advice via the answerer LLM
+	notebookDir     string  // --notebook-dir: output dir for notebook.jsonl / mistakes-*.md / index.md (default ./eval-notebook)
+	notebookFactTau float64 // --notebook-fact-tau: notebook attribution fact-coverage threshold (lower than factCoverageTau: the notebook must flag "gold plausibly in context" rather than require strict lexical proof). Does NOT affect retrieval or the formal protocol.
 }
 
 func main() {
@@ -464,6 +476,13 @@ func run() error {
 	flag.BoolVar(&opt.traceMediation, "trace-mediation", true, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via sidecar; fail-closed gate in pure Go); on = default (needs answerer LLM as sidecar; no sidecar degrades to legacy path); set false for the legacy byte-identical path")
 	flag.BoolVar(&opt.consolidate, "consolidate", false, "030 US3: conditional consolidation — compress only when evidence exceeds the answer-context cap AND this flag is set; off = retain raw (default)")
 	flag.BoolVar(&opt.relationContext, "relation-context", false, "031: append the structural-context relation block (related_to/temporal_next/caused_by) to the assembled or trace-mediated answer context; off = legacy byte-identical path")
+	flag.BoolVar(&opt.notebook, "notebook", false, "after the run, capture per-question gold attribution (gold_resolved/candidate_covered/bundle_covered) + accumulate mistakes into the notebook dir (default ./eval-notebook); off = results byte-identical (SC-004)")
+	flag.BoolVar(&opt.notebookAdvise, "notebook-advise", false, "with --notebook, ask the answerer LLM to draft 'how to solve this class next time' advice for this run's mistakes (writes advice-<run_id>.md)")
+	flag.StringVar(&opt.notebookDir, "notebook-dir", "", "notebook output dir (default ./eval-notebook)")
+	flag.Float64Var(&opt.notebookFactTau, "notebook-fact-tau", defaultNotebookFactTau, "notebook attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it. Lower than --fact-coverage-tau so the notebook flags 'gold plausibly in context' instead of requiring strict lexical proof; does NOT touch retrieval or the formal protocol")
+	flag.BoolVar(&opt.traceMultiEvidence, "trace-multi-evidence", false, "032: relax the trace sidecar to intent-breadth evidence (fact_lookup/preference_recall → 1-2, multi_hop/temporal_state_tracking → 3-6 statements) instead of the legacy single-evidence prompt; off = legacy prompt (SC-004)")
+	flag.IntVar(&opt.traceEvidenceCap, "trace-evidence-cap", 0, "with --trace-multi-evidence, hard cap on the number of evidence statements kept (0 = no cap)")
+	flag.IntVar(&opt.traceFallbackTopk, "trace-fallback-topk", 0, "compiler-miss guard: if the trace sidecar cites NONE of the retrieval top-k candidates, use the top-k raw candidates as the answer context instead (0 = off)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -1410,6 +1429,42 @@ func run() error {
 		}
 	}
 	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
+	if opt.notebook {
+		if err := mountNotebook(ctx, opt, prov, model, logger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mountNotebook accumulates the run's per-question attribution + mistakes into
+// the notebook dir (default ./eval-notebook), writes the markdown mistake book,
+// and optionally drafts "how to solve this class" advice via the answerer LLM.
+func mountNotebook(ctx context.Context, opt options, prov provider.Provider, model string, logger *slog.Logger) error {
+	notebookDir := opt.notebookDir
+	if notebookDir == "" {
+		notebookDir = "eval-notebook"
+	}
+	runID := notebookRunID(opt.runDir)
+	importedAt := time.Now()
+	var advisor func(context.Context, string) (string, error)
+	if opt.notebookAdvise {
+		call := newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "notebook-advise", nil)
+		gated := gateUsage(make(chan struct{}, 4), call)
+		advisor = func(ctx context.Context, prompt string) (string, error) {
+			text, _, err := gated(ctx, notebookAdviseSystemPrompt, prompt)
+			return text, err
+		}
+	}
+	summary, err := writeNotebook(ctx, opt, runID, importedAt, notebookDir, advisor)
+	if err != nil {
+		return fmt.Errorf("write notebook: %w", err)
+	}
+	acc := 0.0
+	if summary.Total > 0 {
+		acc = 100 * float64(summary.Correct) / float64(summary.Total)
+	}
+	fmt.Printf("notebook: run %s → %d/%d (%.2f%%) at %s\n", runID, summary.Correct, summary.Total, acc, notebookDir)
 	return nil
 }
 
@@ -2231,9 +2286,9 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					countedAnswer := recorder.wrapAnswer(answerCall)
 					countedRewrite := recorder.wrapRewrite(rewriteCall)
 					countedJudge := recorder.wrapJudge(judgeCall)
-					correct, predicted, usage, sweepUsed, evidence, retrievalMeta := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
+					correct, predicted, usage, sweepUsed, evidence, retrievalMeta, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
 						ctx, runtime.retrievers[s.name], countedAnswer, filterCall, countedRewrite,
-						countedJudge, armOpt, qa, runtime.chunkTurns, nil, logger,
+						countedJudge, armOpt, qa, runtime.chunkTurns, nil, nil, logger,
 					)
 					receipt := recorder.snapshot()
 					item := result{
@@ -2327,7 +2382,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 				if armOpt.abstainHard || armOpt.abstainSoft {
 					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
 				}
-				correct, predicted, usage, sweepUsed, evidence, retrievalMeta := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, abstainRuntime, logger)
+				correct, predicted, usage, sweepUsed, evidence, retrievalMeta, notebookAttribution := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, turnTextIndex(conv), abstainRuntime, logger)
 				if writeParity && armOpt.contextParity != nil {
 					record := contextParityRecord{
 						Conv:                key.Conv,
@@ -2375,6 +2430,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					SweepUsed:           sweepUsed,
 					SweepOverBudget:     sweepOverBudget(armOpt, sweepUsed, usage),
 					EvidenceDiagnostics: evidence,
+					Notebook:            notebookAttribution,
 				})
 			}(s, qa, key, armOpt, s == parityState)
 		}
@@ -2481,7 +2537,7 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 }
 
 func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
-	return answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, nil, logger)
+	return answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, nil, nil, logger)
 }
 
 type abstainRuntimeContext struct {
@@ -2521,12 +2577,12 @@ func abstainDecisionForHits(ctx context.Context, abstain *abstainRuntimeContext,
 	return decideAbstention(signal, defaultFrontierAbstainThresholds()), nil
 }
 
-func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
-	correct, predicted, usage, sweepUsed, evidence, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, abstain, logger)
+func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
+	correct, predicted, usage, sweepUsed, evidence, _, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, turnText, abstain, logger)
 	return correct, predicted, usage, sweepUsed, evidence
 }
 
-func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta) {
+func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta, *evalNotebookAttribution) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	var hits []memory.Result
 	var searchDiagnostics memory.SearchDiagnostics
@@ -2552,14 +2608,14 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		traj, navErr := runNavigation(ctx, qa.QuestionID, qa.Question, retriever, navCfg)
 		if navErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return false, "", provider.Usage{}, false, nil, retrievalMeta
+				return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
 			}
 			logger.Warn("navigation failed; falling back to single-shot retrieval", "err", navErr)
 			var err error
 			hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
 			if err != nil {
 				logger.Warn("retrieve failed; question scored wrong", "err", err)
-				return false, "", provider.Usage{}, false, nil, retrievalMeta
+				return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
 			}
 		} else {
 			if err := opt.navTraj.Write(*traj); err != nil {
@@ -2576,7 +2632,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		irisHits, irisErr := irisRetrieve(ctx, retriever, filterCall, rewriteCall, answerCall, qa.Question, topK, quota, opt, qa.Category)
 		if irisErr != nil {
 			logger.Warn("iris retrieve failed; question scored wrong", "err", irisErr)
-			return false, "", provider.Usage{}, false, nil, retrievalMeta
+			return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
 		}
 		hits = irisHits
 	} else {
@@ -2584,7 +2640,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
 		if err != nil {
 			logger.Warn("retrieve failed; question scored wrong", "err", err)
-			return false, "", provider.Usage{}, false, nil, retrievalMeta
+			return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
 		}
 	}
 	// 027 event representation (research-subset): replace the retrieved hits
@@ -2596,6 +2652,11 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	}
 	sweepUsed := searchDiagnostics.SweepUsed || hasClusterSweepHit(hits)
 	answerHits, answerDiagnostics := hits, searchDiagnostics
+	// contextEvidence tracks the units actually placed in the answer context, so
+	// a --notebook run can separate compiler_miss (in pool, dropped by assembly/
+	// trace) from answerer_miss (in context, still wrong). Defaults to the final
+	// hit set; assembly/trace override it below.
+	contextEvidence := hits
 	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
 	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
 	if err != nil {
@@ -2629,9 +2690,11 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 					logger.Warn("consolidation failed; keeping assembled context", "err", consErr)
 				} else {
 					userPrompt = buildAnswerContextPrompt(qa.Question, unitsToResults(consolidated), qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+					contextEvidence = unitsToResults(consolidated)
 				}
 			} else {
 				userPrompt = assembledUser
+				contextEvidence = unitsToResults(asm.Units)
 			}
 			if opt.assemblyJournal != nil {
 				if err := opt.assemblyJournal.Write(asm); err != nil {
@@ -2647,11 +2710,15 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 		// Parse failure retries once; gate fallback or caller failure keeps the
 		// (possibly assembled) legacy context. On by default (030 full-set
 		// verification); off restores the legacy byte-identical path.
+		tracePrompt := traceSystemPrompt
+		if opt.traceMultiEvidence {
+			tracePrompt = traceMultiEvidencePrompt
+		}
 		boundary := make(map[string]bool, len(hits))
 		for _, h := range hits {
 			boundary[h.Name] = true
 		}
-		raw, _, traceErr := opt.traceSidecarCaller(ctx, traceSystemPrompt, traceUserPrompt(qa.Question, hits))
+		raw, _, traceErr := opt.traceSidecarCaller(ctx, tracePrompt, traceUserPrompt(qa.Question, hits))
 		evidence := []traceEvidence(nil)
 		status := traceGateFallback
 		retried := false
@@ -2661,7 +2728,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 			_, evidence, status, _ = mediateTrace(traceMediationInput{Raw: raw, CandidateIDs: boundary})
 			if status == traceGateParseFailed {
 				retried = true
-				raw2, _, retryErr := opt.traceSidecarCaller(ctx, traceSystemPrompt, traceUserPrompt(qa.Question, hits))
+				raw2, _, retryErr := opt.traceSidecarCaller(ctx, tracePrompt, traceUserPrompt(qa.Question, hits))
 				if retryErr != nil {
 					logger.Warn("trace sidecar retry failed; using legacy context", "err", retryErr)
 				} else {
@@ -2669,16 +2736,33 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 				}
 			}
 		}
-		if len(evidence) > 0 {
-			userPrompt = buildAnswerContextPrompt(qa.Question, evidenceFromTrace(evidence), qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+		if opt.traceMultiEvidence {
+			evidence = capEvidence(evidence, opt.traceEvidenceCap)
 		}
-		if opt.relationContext && len(evidence) > 0 {
+		answerEvidence := evidenceFromTrace(evidence)
+		if opt.traceFallbackTopk > 0 && len(answerEvidence) > 0 && len(hits) > 0 {
+			k := opt.traceFallbackTopk
+			if k > len(hits) {
+				k = len(hits)
+			}
+			if !evidenceTouchesTopK(evidence, hits[:k]) {
+				// trace 侧边车完全没引用检索 top-k 候选 —— compiler_miss 主因
+				// (p0-diag3: gold 常 rank top-1/top-5 却被 trace 丢掉)。规则化兜底:
+				// 用 top-k 原文作为 answer context,零额外 LLM。
+				answerEvidence = hits[:k]
+			}
+		}
+		if len(answerEvidence) > 0 {
+			userPrompt = buildAnswerContextPrompt(qa.Question, answerEvidence, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
+			contextEvidence = answerEvidence
+		}
+		if opt.relationContext && len(answerEvidence) > 0 {
 			// 031 T011 (contracts/evidence-relations.md §3): overlay the
 			// structural-context block on the trace-mediated context, keeping only
 			// edges whose endpoints lie inside the closed candidate boundary
 			// (fail-closed reuse of the trace gate). Trace evidence carries no
 			// EventDate → temporal chains fail-soft; multi-hop relations still apply.
-			if block, _ := computeRelationContext(ctx, evidenceFromTrace(evidence), qa.Category); block != nil {
+			if block, _ := computeRelationContext(ctx, answerEvidence, qa.Category); block != nil {
 				if kept := relationBlockWithinBoundary(block, boundary); kept != nil {
 					kept.Text = renderRelationBlock(kept)
 					kept.TokenCount = estimateTokens(kept.Text)
@@ -2698,7 +2782,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	}
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
-		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns), retrievalMeta
+		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns), retrievalMeta, nil
 	}
 
 	if !hardGated && isIDK(predicted) && !opt.noIDKRetry {
@@ -2730,9 +2814,21 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	verdict, _, err := judgeCall(ctx, judgeSystemPromptFor(opt.judgeAlignmentMode()), buildJudgePrompt(qa.Question, goldFor(qa), predicted))
 	if err != nil {
 		logger.Warn("judge call failed; question scored wrong", "err", err)
-		return false, predicted, usage, sweepUsed, evidence, retrievalMeta
+		return false, predicted, usage, sweepUsed, evidence, retrievalMeta, nil
 	}
-	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed, evidence, retrievalMeta
+	// --notebook: capture the gold attribution against the ACTUAL candidate set
+	// and the ACTUAL answer context. Off by default → nil, results unchanged.
+	var attribution *evalNotebookAttribution
+	if opt.notebook && turnText != nil {
+		goldTurns := parsedGoldTurns(qa.Evidence)
+		att := computeNotebookAttribution(hits, contextEvidence, chunkTurns, turnText, goldTurns, opt.notebookFactTau)
+		if opt.traceMediation && opt.traceSidecarCaller != nil && len(hits) > 0 {
+			att.BundleApprox = true
+		}
+		att.ContextPreview = truncateRunes(userPrompt, notebookContextPreviewLen)
+		attribution = &att
+	}
+	return parseJudgeVerdict(verdict), predicted, usage, sweepUsed, evidence, retrievalMeta, attribution
 }
 
 // adversarialGold is the judge-facing gold for category-5 questions. They have

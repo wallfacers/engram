@@ -34,6 +34,10 @@ type result struct {
 	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
 	B0Continuity        *evalB0ContinuityRun      `json:"b0_continuity,omitempty"`
 	Formal022           *evalFormalQuestionRun    `json:"formal_022,omitempty"`
+	// Notebook is populated only under --notebook (SC-004: off → field absent,
+	// results byte-identical). Inline gold attribution against the actual
+	// candidate set and answer context; consumed by notebook.go.
+	Notebook *evalNotebookAttribution `json:"notebook,omitempty"`
 }
 
 // loadFormalQuestionRuns reads the per-repetition journal records used to

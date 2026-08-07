@@ -96,6 +96,29 @@ Rules:
 - Never introduce facts absent from the provided candidates.
 - "evidence" MUST be compact and sufficient to answer the question.`
 
+// traceMultiEvidencePrompt is the --trace-multi-evidence variant: the sidecar
+// chooses evidence breadth from the question's intent instead of being pinned to
+// a single statement. p0-diag2 showed the single-evidence prompt under-feeds the
+// answerer on multi-hop / detail questions (compiler_miss: gold evidence in the
+// candidate set but dropped before the answer context), so this lets multi_hop /
+// temporal_state_tracking emit one statement per hop/state while fact_lookup and
+// preference_recall stay lean. Paired runs (single vs multi) drive the verdict.
+const traceMultiEvidencePrompt = `You organise retrieved memories into grounded evidence for answering one question.
+Emit STRICT JSON only, one object, no prose or code fences:
+{
+  "plan": {"intent": "temporal_state_tracking|fact_lookup|multi_hop|preference_recall", "memory_types": [...], "temporal_scope": "current|recent|historical|any", "evidence_requirement": "...", "target_count": <see Rules>},
+  "trace": [{"role": "old_state|update|support|contrast|resolution", "cited_ids": [...], "statement": "...", "next_relation": "..."}],
+  "actions": [{"action": "KEEP|DROP|MERGE|REFINE|ADD", "cited_ids": [...], "rationale": "..."}],
+  "evidence": [{"text": "...", "cited_ids": [...]}]
+}
+Rules:
+- Every "cited_ids" entry MUST be one of the candidate IDs provided after CANDIDATES:. Never invent IDs.
+- "trace" is an ordered grounded chain; each step cites at least one candidate.
+- "evidence" is the final answer-facing text; each statement MUST cite at least one candidate AND be traceable to a trace step.
+- Never introduce facts absent from the provided candidates.
+- Choose target_count from the question's intent: fact_lookup and preference_recall → 1-2 evidence statements; multi_hop and temporal_state_tracking → 3-6 (one statement per hop / state transition).
+- "evidence" MUST be sufficient to answer the question: when the answer needs several facts, include ALL of them as separate evidence statements. Do NOT collapse a multi-hop answer into one statement and do NOT trim to a single "best" memory — completeness over minimalism.`
+
 // traceUserPrompt renders the question plus the closed candidate set for the
 // sidecar. Candidates are rendered in the same [event:]/[recorded:] line shape
 // the answering model consumes.
@@ -122,6 +145,37 @@ func evidenceFromTrace(evidence []traceEvidence) []memory.Result {
 		out = append(out, memory.Result{Name: id, Content: ev.Text})
 	}
 	return out
+}
+
+// evidenceTouchesTopK reports whether any evidence statement cites a candidate
+// inside the retrieval top-k set. Used by --trace-fallback-topk: when the trace
+// sidecar's final evidence shares NO cited id with the top-k candidates, the
+// sidecar almost certainly dropped the gold (p0-diag3: gold often ranks top-1/5
+// yet the sidecar omits it) — the harness then falls back to the raw top-k.
+func evidenceTouchesTopK(evidence []traceEvidence, topK []memory.Result) bool {
+	topSet := make(map[string]struct{}, len(topK))
+	for _, h := range topK {
+		topSet[h.Name] = struct{}{}
+	}
+	for _, ev := range evidence {
+		for _, cid := range ev.CitedIDs {
+			if _, ok := topSet[cid]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// capEvidence hard-caps the evidence statements kept from the trace sidecar
+// (0 = no cap). Applied only under --trace-multi-evidence: the intent-breadth
+// prompt may over-produce, and the cap keeps answer-context cost bounded while
+// still letting multi-hop questions carry more than the legacy single statement.
+func capEvidence(evidence []traceEvidence, cap int) []traceEvidence {
+	if cap > 0 && len(evidence) > cap {
+		return evidence[:cap]
+	}
+	return evidence
 }
 
 // traceGateRecord is one question's fail-closed gate outcome (audit).
