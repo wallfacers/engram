@@ -258,6 +258,7 @@ code without modifications.
 |---|---|---|---|---:|
 | **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.71%** |
 | LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · default |
+| LoCoMo (1540) · thinking | engram 🔬 | Qwen3.6-35B · local vLLM (thinking) | deepseek-v4-flash | **88.23%** · 3-rep mean · ci95 [86.85, 89.60] |
 | LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-pro | 83.77% |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
 | LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | 82.40% |
