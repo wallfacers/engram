@@ -234,6 +234,10 @@ func encodeRequest(r provider.Request, includeUsage bool) ([]byte, error) {
 	}
 	if r.ThinkingDisabled {
 		out.Thinking = &thinkingReq{Type: "disabled"}
+		// Qwen3 on vLLM ignores the DeepSeek-style thinking toggle and keeps
+		// emitting a thinking process (measured ~15x slower on reasoning-heavy
+		// prompts). The chat-template knob is what actually suppresses it.
+		out.ChatTemplateKwargs = &chatTemplateKwargs{EnableThinking: false}
 	}
 	if r.System != "" {
 		out.Messages = append(out.Messages, openaiMsg{Role: "system", Content: r.System})

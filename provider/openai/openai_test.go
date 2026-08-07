@@ -168,6 +168,15 @@ func TestOpenAI_ThinkingDisabledEncoding(t *testing.T) {
 	if tv["type"] != "disabled" {
 		t.Errorf("thinking.type = %v, want disabled", tv["type"])
 	}
+	// Qwen3-on-vLLM knob: disable thinking via chat_template_kwargs too
+	// (the DeepSeek-style toggle is ignored by vLLM and Qwen keeps thinking).
+	ck, ok := body2["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("chat_template_kwargs field missing when disabled: %s", captured)
+	}
+	if ck["enable_thinking"] != false {
+		t.Errorf("chat_template_kwargs.enable_thinking = %v, want false", ck["enable_thinking"])
+	}
 }
 
 // Scenario from spec: 并发 tool_calls 累积（index 字段）.

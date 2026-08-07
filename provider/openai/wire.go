@@ -5,14 +5,15 @@ import "encoding/json"
 // Request shape ----
 
 type openaiReq struct {
-	Model       string       `json:"model"`
-	Messages    []openaiMsg  `json:"messages"`
-	Tools       []openaiTool `json:"tools,omitempty"`
-	Stream      bool         `json:"stream"`
-	StreamOpts  *streamOpts  `json:"stream_options,omitempty"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
-	Temperature float64      `json:"temperature,omitempty"`
-	Thinking    *thinkingReq `json:"thinking,omitempty"`
+	Model              string              `json:"model"`
+	Messages           []openaiMsg         `json:"messages"`
+	Tools              []openaiTool        `json:"tools,omitempty"`
+	Stream             bool                `json:"stream"`
+	StreamOpts         *streamOpts         `json:"stream_options,omitempty"`
+	MaxTokens          int                 `json:"max_tokens,omitempty"`
+	Temperature        float64             `json:"temperature,omitempty"`
+	Thinking           *thinkingReq        `json:"thinking,omitempty"`
+	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 }
 
 // thinkingReq carries DeepSeek's reasoning toggle in the OpenAI-compatible
@@ -20,6 +21,14 @@ type openaiReq struct {
 // fields, so a disabled toggle is harmless there.
 type thinkingReq struct {
 	Type string `json:"type"`
+}
+
+// chatTemplateKwargs disables reasoning for chat-template models (Qwen3 on
+// vLLM) that ignore the DeepSeek-style thinking toggle. Verified against
+// vllm 0.26.0 serving Qwen3.6-35B: {"chat_template_kwargs":
+// {"enable_thinking": false}} suppresses the thinking process entirely.
+type chatTemplateKwargs struct {
+	EnableThinking bool `json:"enable_thinking"`
 }
 
 type streamOpts struct {
