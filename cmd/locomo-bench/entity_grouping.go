@@ -45,13 +45,95 @@ func partitionByEntity(hits []memory.Result) (groups []*entityGroup, ungrouped [
 	return groups, ungrouped
 }
 
-// groupHitsByEntity reorders hits for multi-hop questions: entities with more
-// evidence first (coverage desc), then name asc; within a group score desc;
-// ungrouped units last, score desc.
+// indexedEntityHit keeps the input ordinal as the final deterministic
+// tie-break without changing memory.Result or the engine contract.
+type indexedEntityHit struct {
+	hit     memory.Result
+	ordinal int
+}
+
+// sortIndexedEntityHits applies the canonical member order: score desc,
+// stable source ID asc, then original ordinal for malformed duplicate IDs.
+func sortIndexedEntityHits(hits []indexedEntityHit) {
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].hit.Score != hits[j].hit.Score {
+			return hits[i].hit.Score > hits[j].hit.Score
+		}
+		if hits[i].hit.Name != hits[j].hit.Name {
+			return hits[i].hit.Name < hits[j].hit.Name
+		}
+		return hits[i].ordinal < hits[j].ordinal
+	})
+}
+
+// groupHitsByEntity constructs the canonical multi-hop flat sequence. Entity
+// coverage is computed over the complete input closure (the pre-033 grouping
+// semantic), but output is globally kind-layered: every chunk precedes every
+// fact. Within each kind layer, groups are coverage desc then entity asc;
+// members are score desc, SourceID asc, ordinal asc; ungrouped hits are last.
 func groupHitsByEntity(hits []memory.Result) []memory.Result {
+	type indexedGroup struct {
+		entity  string
+		members []indexedEntityHit
+	}
+
+	byEntity := make(map[string]*indexedGroup)
+	groups := make([]*indexedGroup, 0)
+	ungrouped := make([]indexedEntityHit, 0)
+	for ordinal, hit := range hits {
+		indexed := indexedEntityHit{hit: hit, ordinal: ordinal}
+		entity := topEntity(hit.Content)
+		if entity == "" {
+			ungrouped = append(ungrouped, indexed)
+			continue
+		}
+		group := byEntity[entity]
+		if group == nil {
+			group = &indexedGroup{entity: entity}
+			byEntity[entity] = group
+			groups = append(groups, group)
+		}
+		group.members = append(group.members, indexed)
+	}
+
+	sort.SliceStable(groups, func(i, j int) bool {
+		if len(groups[i].members) != len(groups[j].members) {
+			return len(groups[i].members) > len(groups[j].members)
+		}
+		return groups[i].entity < groups[j].entity
+	})
+	for _, group := range groups {
+		sortIndexedEntityHits(group.members)
+	}
+	sortIndexedEntityHits(ungrouped)
+
+	out := make([]memory.Result, 0, len(hits))
+	for _, kind := range []string{"chunk", "fact"} {
+		for _, group := range groups {
+			for _, member := range group.members {
+				if kindOfEvidence(member.hit.Name) == kind {
+					out = append(out, member.hit)
+				}
+			}
+		}
+		for _, member := range ungrouped {
+			if kindOfEvidence(member.hit.Name) == kind {
+				out = append(out, member.hit)
+			}
+		}
+	}
+	return out
+}
+
+// legacyGroupHitsByEntity is the exact pre-033 sorter retained only for the
+// explicit benchmark control: group-major coverage order, score-only stable
+// member order, and score-only stable ungrouped tail.
+func legacyGroupHitsByEntity(hits []memory.Result) []memory.Result {
 	groups, ungrouped := partitionByEntity(hits)
-	for _, grp := range groups {
-		sort.SliceStable(grp.hits, func(i, j int) bool { return grp.hits[i].Score > grp.hits[j].Score })
+	for _, group := range groups {
+		sort.SliceStable(group.hits, func(i, j int) bool {
+			return group.hits[i].Score > group.hits[j].Score
+		})
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
 		if len(groups[i].hits) != len(groups[j].hits) {
@@ -59,11 +141,13 @@ func groupHitsByEntity(hits []memory.Result) []memory.Result {
 		}
 		return groups[i].entity < groups[j].entity
 	})
-	sort.SliceStable(ungrouped, func(i, j int) bool { return ungrouped[i].Score > ungrouped[j].Score })
+	sort.SliceStable(ungrouped, func(i, j int) bool {
+		return ungrouped[i].Score > ungrouped[j].Score
+	})
 
 	out := make([]memory.Result, 0, len(hits))
-	for _, grp := range groups {
-		out = append(out, grp.hits...)
+	for _, group := range groups {
+		out = append(out, group.hits...)
 	}
 	out = append(out, ungrouped...)
 	return out
@@ -80,11 +164,39 @@ func topEntity(content string) string {
 	return ""
 }
 
-// buildEntityAnswerPrompt renders entity-grouped hits with group headers so the
-// answering model sees which evidence belongs to which entity. Format mirrors
-// buildSweepAnswerPrompt's group-render pattern (headers + numbered lines) and
-// keeps the legacy [event:]/[recorded:] line shape via toMemories.
+// buildEntityAnswerPrompt streams the canonical flat sequence without
+// partitioning or sorting it again. It may repeat an entity header when a kind
+// layer changes; evidence lines always remain byte-for-byte in input order.
 func buildEntityAnswerPrompt(question string, hits []memory.Result, currentDate string) string {
+	var b strings.Builder
+	writeCurrentDateHeader(&b, currentDate)
+	b.WriteString("RETRIEVED MEMORIES (grouped by entity):\n")
+	if len(hits) == 0 {
+		b.WriteString("(none)\n")
+	}
+	lastKind, lastEntity := "", ""
+	for position, hit := range hits {
+		kind := kindOfEvidence(hit.Name)
+		entity := topEntity(hit.Content)
+		if kind != lastKind || entity != lastEntity {
+			label := "ungrouped"
+			if entity != "" {
+				label = "entity: " + entity
+			}
+			fmt.Fprintf(&b, "[%s]\n", label)
+			lastKind, lastEntity = kind, entity
+		}
+		mem := toMemories([]memory.Result{hit})[0]
+		fmt.Fprintf(&b, "%d. %s\n", position+1, mem.Line())
+	}
+	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)
+	return b.String()
+}
+
+// buildLegacyEntityAnswerPrompt preserves the pre-033 group-major renderer
+// for the benchmark-only legacy control. Production assembly never calls it
+// unless that explicit control mode is selected.
+func buildLegacyEntityAnswerPrompt(question string, hits []memory.Result, currentDate string) string {
 	groups, ungrouped := partitionByEntity(hits)
 
 	var b strings.Builder
@@ -99,14 +211,14 @@ func buildEntityAnswerPrompt(question string, hits []memory.Result, currentDate 
 			return
 		}
 		fmt.Fprintf(&b, "[%s]\n", label)
-		for _, h := range members {
-			mem := toMemories([]memory.Result{h})[0]
+		for _, hit := range members {
+			mem := toMemories([]memory.Result{hit})[0]
 			fmt.Fprintf(&b, "%d. %s\n", position, mem.Line())
 			position++
 		}
 	}
-	for _, grp := range groups {
-		writeGroup("entity: "+grp.entity, grp.hits)
+	for _, group := range groups {
+		writeGroup("entity: "+group.entity, group.hits)
 	}
 	writeGroup("ungrouped", ungrouped)
 	fmt.Fprintf(&b, "\nQUESTION: %s\n\nAnswer:", question)

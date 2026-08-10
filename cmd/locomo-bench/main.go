@@ -264,18 +264,20 @@ type options struct {
 	// degrades to the legacy byte-identical path (SC-004) when the sidecar is
 	// unavailable. The rest default OFF — when off the answer-context path is
 	// byte-identical to the legacy path (SC-004 parity). Engine untouched (FR-001).
-	evidenceAssembly bool   // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure); default off
-	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
-	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
-	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
-	relationContext bool   // 031: append the structural-context relation block to the assembled/traced answer context; default off (parity)
+	evidenceAssembly          bool // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure); default off
+	assemblyDiagnose          bool // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
+	assemblyAudit             bool // --assembly-audit: write the same assembly audit from the real answer path; default off
+	assemblyLegacyEntityOrder bool // --assembly-legacy-entity-order: benchmark-only pre-033 multi-hop group-major control; default off
+	traceMediation            bool // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
+	consolidate               bool // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
+	relationContext           bool // 031: append the structural-context relation block to the assembled/traced answer context; default off (parity)
 	// assemblyCounter is the runtime-only exact tokenizer for 030 evidence
 	// assembly (chat-aware /tokenize, reuses the formal 022 counter config).
 	// Never serialized; nil → estimate-ledger fallback (tokens_estimated=true).
 	assemblyCounter *assemblyTokenCounter
-	// assemblyJournal is the runtime-only, concurrency-safe writer for the 030
-	// US1 assembly audit (--assembly-diagnose → run-dir/assembly-diagnose.jsonl).
-	// Never serialized.
+	// assemblyJournal is the runtime-only, concurrency-safe writer for assembly
+	// receipts. Retrieval-only --assembly-diagnose writes assembly-diagnose.jsonl;
+	// answer-path --assembly-audit writes assembly-audit.jsonl. Never serialized.
 	assemblyJournal *assemblyJournal
 	// traceSidecarCaller is the runtime-only 030 US2 grounded-trace generator
 	// (DeepSeek-flash via harness-side vLLM HTTP). Nil → legacy path (byte-
@@ -421,6 +423,8 @@ func run() error {
 	// defaults ON (budget-efficient verified path); the rest default OFF.
 	flag.BoolVar(&opt.evidenceAssembly, "evidence-assembly", false, "030 US1: assemble retrieved evidence (exact token accounting + chunk-first + category structure) before answering; off = legacy byte-identical path")
 	flag.BoolVar(&opt.assemblyDiagnose, "assembly-diagnose", false, "030 US1 retrieval-only: emit per-question evidence-assembly audit (chunk_fraction / total_tokens / structure / tokens_estimated) to run-dir/assembly-diagnose.jsonl (needs --store-dir + --run-dir + --chunks + --evidence-assembly)")
+	flag.BoolVar(&opt.assemblyAudit, "assembly-audit", false, "033 benchmark audit: emit the evidence-assembly receipt from each real answer pass to run-dir/assembly-audit.jsonl (requires --evidence-assembly; write-only)")
+	flag.BoolVar(&opt.assemblyLegacyEntityOrder, "assembly-legacy-entity-order", false, "033 benchmark-only: use the pre-repair multi-hop group-major evidence order (requires --evidence-assembly; default false)")
 	flag.BoolVar(&opt.traceMediation, "trace-mediation", true, "030 US2: grounded-evidence mediator (plan/trace/actions/evidence via sidecar; fail-closed gate in pure Go); on = default (needs answerer LLM as sidecar; no sidecar degrades to legacy path); set false for the legacy byte-identical path")
 	flag.BoolVar(&opt.consolidate, "consolidate", false, "030 US3: conditional consolidation — compress only when evidence exceeds the answer-context cap AND this flag is set; off = retain raw (default)")
 	flag.BoolVar(&opt.relationContext, "relation-context", false, "031: append the structural-context relation block (related_to/temporal_next/caused_by) to the assembled or trace-mediated answer context; off = legacy byte-identical path")
@@ -434,6 +438,9 @@ func run() error {
 		return err
 	}
 	if err := validatePromptModes(opt); err != nil {
+		return err
+	}
+	if err := validateAssemblyOptions(opt); err != nil {
 		return err
 	}
 	if err := validateAssocDepth(opt.assocDepth); err != nil {
@@ -1139,10 +1146,10 @@ func run() error {
 			repeatOpt.navTraj = traj
 			defer func() { _ = traj.Close() }()
 		}
-		if opt.assemblyDiagnose {
-			j, err := openAssemblyJournal(filepath.Join(repeatOpt.runDir, "assembly-diagnose.jsonl"))
+		if opt.assemblyAudit {
+			j, err := openAssemblyJournal(filepath.Join(repeatOpt.runDir, "assembly-audit.jsonl"))
 			if err != nil {
-				return fmt.Errorf("open assembly-diagnose.jsonl: %w", err)
+				return fmt.Errorf("open assembly-audit.jsonl: %w", err)
 			}
 			repeatOpt.assemblyJournal = j
 			defer func() { _ = j.Close() }()
@@ -1999,6 +2006,13 @@ func checkRunDirRegime(opt options) error {
 
 func answerRegimeFingerprint(opt options) string {
 	fingerprint := fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
+	if opt.evidenceAssembly {
+		entityOrder := "kind_layered"
+		if opt.assemblyLegacyEntityOrder {
+			entityOrder = "legacy_grouped"
+		}
+		fingerprint += ";evidence_assembly=true;assembly_entity_order=" + entityOrder
+	}
 	if opt.temporalAnswerPrompt {
 		fingerprint += ";temporal_answer_prompt=true"
 	}
@@ -2012,6 +2026,26 @@ func answerRegimeFingerprint(opt options) string {
 		fingerprint += ";judge_model=" + opt.judgeModel
 	}
 	return fingerprint
+}
+
+func validateAssemblyOptions(opt options) error {
+	if opt.assemblyLegacyEntityOrder && !opt.evidenceAssembly {
+		return fmt.Errorf("--assembly-legacy-entity-order requires --evidence-assembly")
+	}
+	if opt.assemblyAudit && !opt.evidenceAssembly {
+		return fmt.Errorf("--assembly-audit requires --evidence-assembly")
+	}
+	if opt.assemblyAudit && opt.assemblyDiagnose {
+		return fmt.Errorf("--assembly-audit cannot be combined with retrieval-only --assembly-diagnose")
+	}
+	return nil
+}
+
+func configuredAssemblyEntityOrder(opt options) string {
+	if opt.assemblyLegacyEntityOrder {
+		return assemblyEntityOrderLegacyGrouped
+	}
+	return assemblyEntityOrderKindLayered
 }
 
 func (o options) judgeAlignmentMode() string {
@@ -2537,6 +2571,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 			SystemPrompt:    prompt,
 			QuestionID:      qa.QuestionID,
 			RelationEnabled: opt.relationContext,
+			EntityOrder:     configuredAssemblyEntityOrder(opt),
 		}, opt.assemblyCounter)
 		if asmErr != nil {
 			logger.Warn("evidence assembly failed; using legacy context", "err", asmErr)

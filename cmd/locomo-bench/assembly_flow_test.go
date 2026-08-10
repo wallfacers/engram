@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,8 @@ import (
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
+
+var numberedEvidenceLineRE = regexp.MustCompile(`(?m)^\d+\. (.*)$`)
 
 func hit(name, content string, score float64) memory.Result {
 	return memory.Result{Name: name, Content: content, Score: score}
@@ -195,6 +199,193 @@ func TestAssembleEmptyHits(t *testing.T) {
 	}
 	if !strings.Contains(user, "(none)") {
 		t.Fatalf("empty render missing (none): %q", user)
+	}
+}
+
+func TestMultiHopPromptMatchesAssemblyUnits(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-alice", "Alice Smith derived fact", 99),
+		hit("chunk-bob", "Bob Jones raw chunk", 3),
+		hit("chunk-alice", "Alice Smith raw chunk", 4),
+		hit("fact-bob", "Bob Jones derived fact", 98),
+	}
+	hits[0].CreatedAt = time.Date(2025, 2, 3, 0, 0, 0, 0, time.UTC)
+	asm, prompt, err := assembleEvidence(
+		t.Context(), "q", hits, assemblyCategoryMultiHop, testAssemblyConfig(), nil,
+	)
+	if err != nil {
+		t.Fatalf("assembleEvidence: %v", err)
+	}
+	lines := numberedEvidenceLineRE.FindAllStringSubmatch(prompt, -1)
+	if len(lines) != len(asm.Units) {
+		t.Fatalf("prompt evidence lines = %d, units = %d\n%s", len(lines), len(asm.Units), prompt)
+	}
+	if !asm.PromptOrderMatchesUnits {
+		t.Fatal("assembly audit did not certify prompt/unit evidence-line order")
+	}
+	for i, unit := range asm.Units {
+		if !strings.Contains(lines[i][1], unit.Text) {
+			t.Fatalf("prompt line %d = %q, want unit %q", i, lines[i][1], unit.Text)
+		}
+	}
+	for i := 1; i < len(asm.Units); i++ {
+		if kindRank(asm.Units[i-1].Kind) > kindRank(asm.Units[i].Kind) {
+			t.Fatalf("fact crossed chunk in units: %#v", asm.Units)
+		}
+	}
+}
+
+type evidenceLineCountStub struct{}
+
+func (evidenceLineCountStub) CountInput(_ context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	return evidencecompiler.TokenCount{
+		InputTokens: len(numberedEvidenceLineRE.FindAllStringSubmatch(input.User, -1)),
+		Fingerprint: "evidence-lines",
+	}, nil
+}
+
+func TestMultiHopCapKeepsCanonicalPrefix(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-a", "Alice Smith derived fact", 99),
+		hit("chunk-b", "Bob Jones raw chunk", 3),
+		hit("chunk-a", "Alice Smith raw chunk", 4),
+		hit("fact-b", "Bob Jones derived fact", 98),
+		hit("chunk-z", "plain raw chunk", 2),
+	}
+	canonical := groupHitsByEntity(hits)
+	counter := &assemblyTokenCounter{counter: evidenceLineCountStub{}, answerModel: "stub"}
+	cfg := testAssemblyConfig()
+	cfg.Cap = 3
+	asm, prompt, err := assembleEvidence(t.Context(), "q", hits, assemblyCategoryMultiHop, cfg, counter)
+	if err != nil {
+		t.Fatalf("assembleEvidence: %v", err)
+	}
+	want := multiHopIDs(canonical[:3])
+	got := make([]string, 0, len(asm.Units))
+	for _, unit := range asm.Units {
+		got = append(got, unit.SourceID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("capped IDs = %v, want canonical prefix %v", got, want)
+	}
+	if len(numberedEvidenceLineRE.FindAllStringSubmatch(prompt, -1)) != len(asm.Units) {
+		t.Fatalf("prompt and units diverged after cap:\n%s", prompt)
+	}
+}
+
+func TestMultiHopEntityHeaderCanRepeatAcrossKinds(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-a", "Alice Smith derived fact", 9),
+		hit("chunk-a", "Alice Smith raw chunk", 1),
+		hit("chunk-b", "Bob Jones raw chunk", 2),
+	}
+	_, prompt, err := assembleEvidence(
+		t.Context(), "q", hits, assemblyCategoryMultiHop, testAssemblyConfig(), nil,
+	)
+	if err != nil {
+		t.Fatalf("assembleEvidence: %v", err)
+	}
+	if got := strings.Count(prompt, "[entity: Alice Smith]"); got != 2 {
+		t.Fatalf("Alice headers = %d, want 2 across chunk/fact layers\n%s", got, prompt)
+	}
+	if strings.Index(prompt, "Alice Smith derived fact") < strings.Index(prompt, "Bob Jones raw chunk") {
+		t.Fatalf("fact rendered before all chunks:\n%s", prompt)
+	}
+}
+
+func TestMultiHopLegacyOrderParityAndAudit(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-alice", "Alice Smith derived fact", 99),
+		hit("chunk-bob", "Bob Jones raw chunk", 3),
+		hit("fact-bob", "Bob Jones derived fact", 98),
+		hit("chunk-alice", "Alice Smith raw chunk", 4),
+		hit("fact-z", "plain derived fact", 97),
+		hit("chunk-z", "plain raw chunk", 2),
+	}
+	cfg := testAssemblyConfig()
+	cfg.EntityOrder = assemblyEntityOrderLegacyGrouped
+	asm, prompt, err := assembleEvidence(t.Context(), "q", hits, assemblyCategoryMultiHop, cfg, nil)
+	if err != nil {
+		t.Fatalf("assembleEvidence: %v", err)
+	}
+	want := []string{
+		"fact-alice", "chunk-alice", "fact-bob", "chunk-bob", "fact-z", "chunk-z",
+	}
+	got := make([]string, 0, len(asm.Units))
+	for _, unit := range asm.Units {
+		got = append(got, unit.SourceID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy IDs = %v, want pre-033 order %v", got, want)
+	}
+	if asm.EntityOrder != assemblyEntityOrderLegacyGrouped {
+		t.Fatalf("entity_order = %q, want legacy_grouped", asm.EntityOrder)
+	}
+	if prompt != buildLegacyEntityAnswerPrompt("q", unitsToResults(asm.Units), cfg.CurrentDate) {
+		t.Fatalf("legacy renderer parity failed:\n%s", prompt)
+	}
+}
+
+func TestMultiHopEntityOrderAuditAndInputClosure(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-a", "Alice Smith fact", 9), hit("chunk-a", "Alice Smith chunk", 1),
+	}
+	normal, _, err := assembleEvidence(
+		t.Context(), "q", hits, assemblyCategoryMultiHop, testAssemblyConfig(), nil,
+	)
+	if err != nil {
+		t.Fatalf("normal assemble: %v", err)
+	}
+	legacyCfg := testAssemblyConfig()
+	legacyCfg.EntityOrder = assemblyEntityOrderLegacyGrouped
+	legacy, _, err := assembleEvidence(
+		t.Context(), "q", hits, assemblyCategoryMultiHop, legacyCfg, nil,
+	)
+	if err != nil {
+		t.Fatalf("legacy assemble: %v", err)
+	}
+	if normal.EntityOrder != assemblyEntityOrderKindLayered {
+		t.Fatalf("normal entity_order = %q", normal.EntityOrder)
+	}
+	if normal.InputCandidateCount != len(hits) || legacy.InputCandidateCount != len(hits) {
+		t.Fatalf("input counts = %d/%d, want %d", normal.InputCandidateCount, legacy.InputCandidateCount, len(hits))
+	}
+	if normal.InputClosureSHA256 == "" || normal.InputClosureSHA256 != legacy.InputClosureSHA256 {
+		t.Fatalf("input closure digests = %q/%q", normal.InputClosureSHA256, legacy.InputClosureSHA256)
+	}
+}
+
+func TestNonMultiAssemblyModesAreByteIdentical(t *testing.T) {
+	hits := []memory.Result{
+		hit("fact-a", "derived fact", 9), hit("chunk-a", "raw chunk", 1),
+	}
+	categoryNames := map[int]string{
+		temporalCategory: "temporal", assemblyCategoryOpenDomain: "open-domain",
+		assemblyCategorySingleHop: "single-hop",
+	}
+	for _, category := range []int{temporalCategory, assemblyCategoryOpenDomain, assemblyCategorySingleHop} {
+		t.Run(categoryNames[category], func(t *testing.T) {
+			normal, normalPrompt, err := assembleEvidence(
+				t.Context(), "q", hits, category, testAssemblyConfig(), nil,
+			)
+			if err != nil {
+				t.Fatalf("normal assemble: %v", err)
+			}
+			legacyCfg := testAssemblyConfig()
+			legacyCfg.EntityOrder = assemblyEntityOrderLegacyGrouped
+			legacy, legacyPrompt, err := assembleEvidence(
+				t.Context(), "q", hits, category, legacyCfg, nil,
+			)
+			if err != nil {
+				t.Fatalf("legacy assemble: %v", err)
+			}
+			if !reflect.DeepEqual(normal, legacy) || normalPrompt != legacyPrompt {
+				t.Fatalf("category %d changed under ignored legacy mode", category)
+			}
+			if normal.EntityOrder != assemblyEntityOrderNotApplicable {
+				t.Fatalf("category %d entity_order = %q", category, normal.EntityOrder)
+			}
+		})
 	}
 }
 

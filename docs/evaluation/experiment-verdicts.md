@@ -4,7 +4,7 @@ summary: 本文汇总已收口实验的可执行 verdict 与证据入口；不�
 status: stable
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-31
+last_reviewed: 2026-08-10
 canonical_for: [experiment-verdicts]
 tags: [evaluation, verdicts, evidence]
 ---
@@ -13,7 +13,7 @@ tags: [evaluation, verdicts, evidence]
 
 本文是已收口实验的唯一裁决入口；完整当前分数见[当前评测结果](results.md)，逐次过程、旧基线和原始数字见[LoCoMo 历史实验台账](../archive/evaluation/locomo-experiment-ledger-2026-07.md)。本页不把覆盖率、代理指标或单次差值写成默认能力。
 
-## Feature 003–022 的交付与实验裁决
+## Feature 003–033 的交付与实验裁决
 
 | Feature | Verdict | 范围及最终结论 | 出货影响 | 证据 |
 |---|---|---|---|---|
@@ -44,6 +44,7 @@ tags: [evaluation, verdicts, evidence]
 | 030 | mechanism-go · trace default-on | **读侧证据装配**（post-retrieval evidence mediation）：**子集配对**（84 题 = 029 实际子集 × 3 reps majority，Qwen3.6 + bge-large + DeepSeek mem0-aligned judge）——装配器 chunk-first **keep 47.6% vs base 27.4%（p=0.0455 显著）**；trace 引用链 **50.0% vs base 27.4%（p=0.0017 显著）但 vs keep 不显著（p=0.152）**；base-slim 控制（~688 tok 仍 27.4%）排除 token-削减伪赢。**全量复跑验证**（1540 题）：base 单次 **84.9%**（与历史 85.71%/85.19% 吻合 → 环境正常，子集 27.4% 系 029 难题 84 题 topk_hit 34.5% 的真实水平）；**trace 全量 3 次多数 85.91%（1323/1540，3 次 rep 稳定 85.6→85.9），vs base 单次 84.9% / 历史多数 85.19% 高 +0.72~1.01pp，净 +15 题，answer context 468 vs 3620 tok 省 7.7 倍，类别全正向无回落**——「预算下提质」落地（省 7.7 倍 token 且正确率稳定更高）。US3 条件压缩保守 PASS（cons 41.7% vs keep 47.6%，p=1.0）。**有效杠杆 = 读侧证据精炼（chunk-first + 聚焦）**，trace 是其省 token 的实现在全量站住。缺口：US3 精确 tokenizer 未启用（缺 `--counter-fingerprint`）；全量 trace 正确率单次不显著待 repeats 确认。 | `--trace-mediation` 默认开启（全量 85.91%@468tok 验证后转正，2026-08-06）；无 sidecar 时优雅降级 legacy 字节一致；`--trace-mediation=false` 显式回 legacy。`--consolidate` 仍 default-off（SC-004）。 | [spec 030](../../specs/030-evidence-mediation/spec.md) · [整体 verdict](reports/030-evidence-mediation-verdict.md) · [US2 配对](../../specs/030-evidence-mediation/diagnosis/us2-verdict.md) · [US3 配对](../../specs/030-evidence-mediation/diagnosis/us3-verdict.md) |
 
 | 031 | mechanism-go · default-off | **读侧证据关联装配**（post-retrieval structural context）：子集配对（84 题 × 3 reps majority）+ 全量 1540（flash fts 弱检索，arm-to-arm）——relation（+结构上下文块）相对 keep 装配器：子集 **+2.4pp（29.8% vs 27.4%，p=0.75）**、全量 **+1.04pp（48.70% vs 47.66%，+16 题，p=0.253）**，均 within-noise；**生效类别（temporal / multi-hop）全量一致 +3.2pp**（44.2→47.4 / 55.3→58.5），不生效类别 single-hop +0.2、open-domain −5.2（噪声）。数据驱动修复：说话人排除实体提取、`since` 从因果词典移除、全局边 cap 24。**结构性发现**：LoCoMo 单对话内 related_to 被说话人主导、信息量受限（MemCog Graph Overlay 是跨维度页面建链）；temporal_next（EventDate）才是可靠主增量。叠加臂（relation+trace）未实测。 | `--relation-context` 默认关闭（SC-004 parity）；opt-in 评测能力，不改变默认 MCP/CLI/检索路径。 | [spec 031](../../specs/031-evidence-relation-assembly/spec.md) · [整体 verdict](reports/031-evidence-relation-verdict.md) · [探针](../../specs/031-evidence-relation-assembly/diagnosis/flash-keyword-probe.md) |
+| 033 | closed-no-go | **multi-hop chunk-first 合同修复**：deepseek-v4-pro 64 题三跑探针 target C−A 仅 **+1**（门槛 +8），guard 0；B legacy/C repaired 在 18 道 multi-hop 上均 9/18、零翻转；57/57 chunk-gold 记录全保留 30/30 候选、零 cap 截断。后验纠正归因：`gold_in_pool` 仅表示任意 gold turn 命中，target 实际全链覆盖 26/32、multi-hop 4/9；16 道 single-hop 残差中 10 道关键内容依赖未入库 caption。证据齐全的计数题仍需要事件去重/集合运算，纯顺序变化不转化。 | 不合并、不转正、不跑全量；付费云 reranker/recall 仍禁止。后续若冲 >90，优先单独验证 gold-blind normalized 文本不一致集上的 evidence-grounded answer adjudication，不回填为本地默认分。 | [failure analysis](reports/033-chunk-first-failure-analysis.md) · [feature verdict](../../specs/033-chunk-first-contract-repair/diagnosis/verdict.md) |
 
 ## 规划中的评估（未裁决，不进裁决表）
 
