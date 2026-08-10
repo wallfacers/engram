@@ -60,6 +60,15 @@ import (
 )
 
 type options struct {
+	adjudicationBuildDir      string
+	adjudicationValidateDir   string
+	adjudicationRunDir        string
+	adjudicationScoreDir      string
+	adjudicationCandidates    []string
+	adjudicationTracePath     string
+	adjudicationSeed          string
+	adjudicationAllowPaid     bool
+	adjudicationMaxTokens     int
 	dataPath                  string
 	runDir                    string
 	storeDir                  string
@@ -264,11 +273,11 @@ type options struct {
 	// degrades to the legacy byte-identical path (SC-004) when the sidecar is
 	// unavailable. The rest default OFF — when off the answer-context path is
 	// byte-identical to the legacy path (SC-004 parity). Engine untouched (FR-001).
-	evidenceAssembly bool   // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure); default off
-	assemblyDiagnose bool  // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
-	traceMediation  bool   // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
-	consolidate     bool   // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
-	relationContext bool   // 031: append the structural-context relation block to the assembled/traced answer context; default off (parity)
+	evidenceAssembly bool // --evidence-assembly: assemble evidence (exact token accounting + chunk-first + category structure); default off
+	assemblyDiagnose bool // --assembly-diagnose: retrieval-only assembly audit (chunk_fraction / token ledger) to run-dir; default off
+	traceMediation   bool // --trace-mediation: US2 grounded-evidence mediator (sidecar; fail-closed gate); default on
+	consolidate      bool // --consolidate: US3 conditional compression (only when over cap AND explicitly enabled); default off
+	relationContext  bool // 031: append the structural-context relation block to the assembled/traced answer context; default off (parity)
 	// assemblyCounter is the runtime-only exact tokenizer for 030 evidence
 	// assembly (chat-aware /tokenize, reuses the formal 022 counter config).
 	// Never serialized; nil → estimate-ledger fallback (tokens_estimated=true).
@@ -299,6 +308,16 @@ func main() {
 
 func run() error {
 	var opt options
+	var adjudicationCandidates adjudicationCandidatePaths
+	flag.StringVar(&opt.adjudicationBuildDir, "adjudication-build", "", "034 offline: build label-blind answer-adjudication packets in this directory")
+	flag.StringVar(&opt.adjudicationValidateDir, "adjudication-validate", "", "034 offline: validate public answer-adjudication packets in this directory")
+	flag.StringVar(&opt.adjudicationRunDir, "adjudication-run", "", "034 opt-in: run the answer-side verifier and seal decisions in this directory")
+	flag.StringVar(&opt.adjudicationScoreDir, "adjudication-score", "", "034 offline: score a sealed decision set against historical verdicts")
+	flag.Var(&adjudicationCandidates, "adjudication-candidate", "candidate results JSONL (repeat exactly three times for --adjudication-build/score)")
+	flag.StringVar(&opt.adjudicationTracePath, "adjudication-trace", "", "sanitized-at-read attribution trace source (required for --adjudication-build)")
+	flag.StringVar(&opt.adjudicationSeed, "adjudication-seed", "", "label-independent permutation seed (required for --adjudication-build)")
+	flag.BoolVar(&opt.adjudicationAllowPaid, "adjudication-allow-paid", false, "explicitly allow the 034 hosted verifier run to incur cost")
+	flag.IntVar(&opt.adjudicationMaxTokens, "adjudication-max-tokens", 512, "maximum verifier output tokens")
 	flag.StringVar(&opt.dataPath, "data", "", "path to LoCoMo JSON dataset (required)")
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")
@@ -426,6 +445,12 @@ func run() error {
 	flag.BoolVar(&opt.relationContext, "relation-context", false, "031: append the structural-context relation block (related_to/temporal_next/caused_by) to the assembled or trace-mediated answer context; off = legacy byte-identical path")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
+	}
+	opt.adjudicationCandidates = append([]string(nil), adjudicationCandidates...)
+	if adjudicationMode, err := adjudicationModeFor(opt); err != nil {
+		return err
+	} else if adjudicationMode != "" {
+		return runAdjudicationCLI(context.Background(), opt)
 	}
 	if err := validateFixedGoldOracleMode(opt); err != nil {
 		return err
