@@ -308,6 +308,8 @@ type options struct {
 	adjudicationAuditSeed        string
 	adjudicationAuditAllowPaid   bool
 	adjudicationAuditMaxTokens   int
+	adjudicationAttributionDir   string
+	adjudicationAuditDir         string
 	// --trace-multi-evidence (032): relax the trace sidecar to several evidence
 	// statements by intent (multi_hop/temporal → 3-6) instead of the legacy
 	// single-evidence prompt. Off by default (SC-004).
@@ -342,6 +344,8 @@ func run() error {
 	flag.StringVar(&opt.adjudicationAuditScoreDir, "adjudication-audit-score", "", "035 offline: score a sealed second-pass decision set")
 	flag.StringVar(&opt.adjudicationSourceDir, "adjudication-source", "", "frozen 034 parent artifact directory (035 build/score only)")
 	flag.StringVar(&opt.adjudicationAuditSeed, "adjudication-audit-seed", "", "label-independent 035 view permutation seed (build only)")
+	flag.StringVar(&opt.adjudicationAttributionDir, "adjudication-attribution", "", "036 offline: attribute the 034/035 decision gap (zero model calls) in this 034 directory")
+	flag.StringVar(&opt.adjudicationAuditDir, "adjudication-audit-source", "", "036 optional: 035 audit seal directory for gap cross-validation; missing degrades to audit_unavailable")
 	flag.BoolVar(&opt.adjudicationAuditAllowPaid, "adjudication-audit-allow-paid", false, "explicitly allow the 035 hosted dual-view audit to incur cost")
 	flag.IntVar(&opt.adjudicationAuditMaxTokens, "adjudication-audit-max-tokens", 768, "maximum 035 audit output tokens")
 	flag.Var(&adjudicationCandidates, "adjudication-candidate", "candidate results JSONL (repeat exactly three times for 034 build/score or 035 audit score)")

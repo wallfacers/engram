@@ -31,6 +31,7 @@ const (
 	adjudicationAuditModeValidate adjudicationMode = "audit-validate"
 	adjudicationAuditModeRun      adjudicationMode = "audit-run"
 	adjudicationAuditModeScore    adjudicationMode = "audit-score"
+	adjudicationModeAttribution   adjudicationMode = "attribution"
 )
 
 type adjudicationCandidatePaths []string
@@ -61,6 +62,7 @@ func adjudicationModeFor(opt options) (adjudicationMode, error) {
 		{adjudicationAuditModeValidate, opt.adjudicationAuditValidateDir},
 		{adjudicationAuditModeRun, opt.adjudicationAuditRunDir},
 		{adjudicationAuditModeScore, opt.adjudicationAuditScoreDir},
+		{adjudicationModeAttribution, opt.adjudicationAttributionDir},
 	}
 	var selected adjudicationMode
 	for _, item := range configured {
@@ -77,6 +79,12 @@ func adjudicationModeFor(opt options) (adjudicationMode, error) {
 	if auditAuxiliary && (selected == "" || selected == adjudicationModeBuild || selected == adjudicationModeValidate ||
 		selected == adjudicationModeRun || selected == adjudicationModeScore) {
 		return "", fmt.Errorf("035 adjudication audit options require a matching audit mode")
+	}
+	// 036 attribution has its own optional audit-dir flag and must not be
+	// confused with 035's audit options (which stay 035-mode-only).
+	if selected == adjudicationModeAttribution && strings.TrimSpace(opt.adjudicationAuditDir) != "" &&
+		strings.TrimSpace(opt.adjudicationAuditSeed) != "" {
+		return "", fmt.Errorf("036 attribution audit uses --adjudication-audit-source only")
 	}
 	return selected, nil
 }
@@ -103,6 +111,8 @@ func runAdjudicationCLI(ctx context.Context, opt options) error {
 		return runAdjudicationAuditProviderCLI(ctx, opt)
 	case adjudicationAuditModeScore:
 		return runAdjudicationAuditScoreCLI(opt)
+	case adjudicationModeAttribution:
+		return runDecisionGapAttributionCLI(ctx, opt)
 	default:
 		return fmt.Errorf("adjudication mode is required")
 	}
