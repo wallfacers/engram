@@ -26,6 +26,11 @@ const (
 	adjudicationModeValidate adjudicationMode = "validate"
 	adjudicationModeRun      adjudicationMode = "run"
 	adjudicationModeScore    adjudicationMode = "score"
+
+	adjudicationAuditModeBuild    adjudicationMode = "audit-build"
+	adjudicationAuditModeValidate adjudicationMode = "audit-validate"
+	adjudicationAuditModeRun      adjudicationMode = "audit-run"
+	adjudicationAuditModeScore    adjudicationMode = "audit-score"
 )
 
 type adjudicationCandidatePaths []string
@@ -52,6 +57,10 @@ func adjudicationModeFor(opt options) (adjudicationMode, error) {
 		{adjudicationModeValidate, opt.adjudicationValidateDir},
 		{adjudicationModeRun, opt.adjudicationRunDir},
 		{adjudicationModeScore, opt.adjudicationScoreDir},
+		{adjudicationAuditModeBuild, opt.adjudicationAuditBuildDir},
+		{adjudicationAuditModeValidate, opt.adjudicationAuditValidateDir},
+		{adjudicationAuditModeRun, opt.adjudicationAuditRunDir},
+		{adjudicationAuditModeScore, opt.adjudicationAuditScoreDir},
 	}
 	var selected adjudicationMode
 	for _, item := range configured {
@@ -62,6 +71,12 @@ func adjudicationModeFor(opt options) (adjudicationMode, error) {
 			return "", fmt.Errorf("adjudication modes are mutually exclusive")
 		}
 		selected = item.mode
+	}
+	auditAuxiliary := strings.TrimSpace(opt.adjudicationSourceDir) != "" || strings.TrimSpace(opt.adjudicationAuditSeed) != "" ||
+		opt.adjudicationAuditAllowPaid || (opt.adjudicationAuditMaxTokens != 0 && opt.adjudicationAuditMaxTokens != 768)
+	if auditAuxiliary && (selected == "" || selected == adjudicationModeBuild || selected == adjudicationModeValidate ||
+		selected == adjudicationModeRun || selected == adjudicationModeScore) {
+		return "", fmt.Errorf("035 adjudication audit options require a matching audit mode")
 	}
 	return selected, nil
 }
@@ -80,6 +95,14 @@ func runAdjudicationCLI(ctx context.Context, opt options) error {
 		return runAdjudicationProviderCLI(ctx, opt)
 	case adjudicationModeScore:
 		return runAdjudicationScoreCLI(opt)
+	case adjudicationAuditModeBuild:
+		return runAdjudicationAuditBuildCLI(ctx, opt)
+	case adjudicationAuditModeValidate:
+		return runAdjudicationAuditValidateCLI(opt)
+	case adjudicationAuditModeRun:
+		return runAdjudicationAuditProviderCLI(ctx, opt)
+	case adjudicationAuditModeScore:
+		return runAdjudicationAuditScoreCLI(opt)
 	default:
 		return fmt.Errorf("adjudication mode is required")
 	}
