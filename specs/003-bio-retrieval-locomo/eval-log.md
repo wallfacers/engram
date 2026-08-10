@@ -8,7 +8,7 @@ and the keep/revert decision together.
 
 - Date: 2026-07-19 (10:01–12:42 +08:00, 单次连续运行)
 - Dataset / repeats: locomo.json 全量 10 段 × 1540 题(可判分四类) × repeats=5, single-pass (--no-idk-retry), hybrid, top_k=30
-- Answer model: gpt-5.6-sol (答题+判分, 中转站 tokensfree)
+- Answer model: gpt-5.6-sol (答题+判分, 经中转站)
 - Extract model candidates: A=gpt-5.6-luna, B=gpt-5.6-sol
 - Frozen extract model: **gpt-5.6-luna**（见 Decision）
 - Estimate output: A ¥76.36 / B ¥77.89（合计 ¥154.25）
@@ -260,8 +260,7 @@ multi-hop 做配对付费答题评测，检验 +8.3pp 覆盖能否转化为答�
   adapter-only，引擎零改；`TestRerankArmMechanismGatesReranker`）。付费前先做**免费
   配对覆盖预检**，同一进程复现分进程离线数（hybrid 0.559 / +rerank 0.642，0 降级），
   证明两臂只差重排一个变量、口径无误后才发。
-- 复用已建库（`reusing persisted extraction`，无二次抽取）；答题+判分走 tokensfree
-  relay（gpt-5.6-luna，003 冻结模型），重排走 DashScope `gte-rerank-v2`。
+- 复用已建库（`reusing persisted extraction`，无二次抽取）；答题+判分走 relay（gpt-5.6-luna，003 冻结模型），重排走 DashScope `gte-rerank-v2`。
 - **结果（multi-hop，N=282，repeats=1）**：
 
   | 臂 | 答题正确率 | 翻转 |

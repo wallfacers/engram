@@ -22,7 +22,7 @@ tags: [evaluation, strategy, cost, retrospective, verdicts]
 |---|---|---|
 | 008 云端 reranker（gte-rerank-v2） | ~¥150/天、数天（有记录） | coverage +15.5pp → **e2e −0.06pp NO-GO**；催生 DEATH RULE |
 | deepseek-v4-pro 探针（LME 500 + LoCoMo） | LME ¥4.7（缓存 96%，有记录） | 89.03% / 86.00%——**唯一「花钱买到真信息」**：answerer 是天花板 |
-| tokensfree relay | 白烧（有记录） | 封禁，已禁 |
+| 中转站 relay | 白烧（有记录） | 封禁，已禁 |
 
 ### 1.2 云 GPU（AutoDL 机器时间）
 
