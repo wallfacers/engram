@@ -297,6 +297,15 @@ type options struct {
 	// the trace-sidecar JSON caller). Nil → deterministic truncation on over-cap.
 	// Never serialized.
 	consolidateCall usageModelCaller
+
+	adjudicationAuditBuildDir    string
+	adjudicationAuditValidateDir string
+	adjudicationAuditRunDir      string
+	adjudicationAuditScoreDir    string
+	adjudicationSourceDir        string
+	adjudicationAuditSeed        string
+	adjudicationAuditAllowPaid   bool
+	adjudicationAuditMaxTokens   int
 }
 
 func main() {
@@ -313,7 +322,15 @@ func run() error {
 	flag.StringVar(&opt.adjudicationValidateDir, "adjudication-validate", "", "034 offline: validate public answer-adjudication packets in this directory")
 	flag.StringVar(&opt.adjudicationRunDir, "adjudication-run", "", "034 opt-in: run the answer-side verifier and seal decisions in this directory")
 	flag.StringVar(&opt.adjudicationScoreDir, "adjudication-score", "", "034 offline: score a sealed decision set against historical verdicts")
-	flag.Var(&adjudicationCandidates, "adjudication-candidate", "candidate results JSONL (repeat exactly three times for --adjudication-build/score)")
+	flag.StringVar(&opt.adjudicationAuditBuildDir, "adjudication-audit-build", "", "035 offline: build the frozen risk-controlled audit queue in this directory")
+	flag.StringVar(&opt.adjudicationAuditValidateDir, "adjudication-audit-validate", "", "035 offline: validate risk-controlled audit build artifacts in this directory")
+	flag.StringVar(&opt.adjudicationAuditRunDir, "adjudication-audit-run", "", "035 opt-in: run the dual-view evidence audit and seal decisions in this directory")
+	flag.StringVar(&opt.adjudicationAuditScoreDir, "adjudication-audit-score", "", "035 offline: score a sealed second-pass decision set")
+	flag.StringVar(&opt.adjudicationSourceDir, "adjudication-source", "", "frozen 034 parent artifact directory (035 build/score only)")
+	flag.StringVar(&opt.adjudicationAuditSeed, "adjudication-audit-seed", "", "label-independent 035 view permutation seed (build only)")
+	flag.BoolVar(&opt.adjudicationAuditAllowPaid, "adjudication-audit-allow-paid", false, "explicitly allow the 035 hosted dual-view audit to incur cost")
+	flag.IntVar(&opt.adjudicationAuditMaxTokens, "adjudication-audit-max-tokens", 768, "maximum 035 audit output tokens")
+	flag.Var(&adjudicationCandidates, "adjudication-candidate", "candidate results JSONL (repeat exactly three times for 034 build/score or 035 audit score)")
 	flag.StringVar(&opt.adjudicationTracePath, "adjudication-trace", "", "sanitized-at-read attribution trace source (required for --adjudication-build)")
 	flag.StringVar(&opt.adjudicationSeed, "adjudication-seed", "", "label-independent permutation seed (required for --adjudication-build)")
 	flag.BoolVar(&opt.adjudicationAllowPaid, "adjudication-allow-paid", false, "explicitly allow the 034 hosted verifier run to incur cost")
