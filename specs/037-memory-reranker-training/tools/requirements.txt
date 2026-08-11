@@ -1,0 +1,35 @@
+# ============================================================================
+# Memory-Specific Reranker Training — 训练链 Python 依赖
+# spec: specs/037-memory-reranker-training
+# ============================================================================
+#
+# 两套环境：
+#   1) 本地 WSL2（CPU，零 GPU）—— 数据构建 / schema 校验 / R7 审计（T003 冒烟）
+#      pip install torch --index-url https://download.pytorch.org/whl/cpu
+#      pip install "transformers>=4.51" peft datasets
+#   2) AutoDL GPU（Python 3.11 conda env 更稳）—— 训练 / 推理（T017）
+#      pip install "vllm>=0.8.5" "torch>=2.6" "transformers>=4.51" peft datasets
+#
+# 版本记录（T003 本地冒烟实测，2026-08-11）：
+#   torch         2.13.0+cpu
+#   transformers  5.15.0
+#   peft          0.20.0
+#   datasets      5.0.1
+#   vllm          <TBD: T004 AutoDL 实测冻结，见 contracts/rerank-serving.md>
+# 注意: transformers 5.x 可能有 API breaking change，train_reranker.py 实现时
+#       以 5.x API 为准（T015）；vllm serving 侧版本在 T004 单独冻结。
+
+# --- 核心训练链依赖（数据构建 + 训练 + 推理） ---
+torch>=2.6
+transformers>=4.51
+peft>=0.14
+datasets>=3.0
+
+# --- vllm 推理服务（Qwen3-Reranker serving；AutoDL GPU 环境） ---
+# vllm 对 Python 版本敏感：本地 WSL2 Python 3.13 不保证可装，不阻塞数据链；
+# 训练/推理端在 AutoDL 上装（建议 Python 3.11 env）。版本实测冻结见 T004。
+vllm>=0.8.5
+
+# --- 推理端可选（低层加速 / 实验） ---
+# accelerate>=1.0
+# bitsandbytes
