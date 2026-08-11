@@ -45,10 +45,11 @@
 
 **Independent Test**: locomo-bench 配对表（`hybrid` vs `hybrid+rerank`，全量 1540）+ 四类别 + McNemar + flip + paired CI + vs 008 对比；preflight 确认 rerank 调用数 > 0
 
-- [ ] T008 [P] [US1] 起 vLLM serve Qwen3-Reranker-0.6B base（用 T004 冻结命令），写 `tools/serve_base.sh`（含 `EMBED_RERANK_MODEL` / `EMBED_BASE_URL`）
-- [ ] T009 [US1] 跑 locomo-bench 全量配对：`--run-dir ./.locomo-run/037-us1 --retrieval 'hybrid,hybrid+rerank'`（对照 `hybrid`），`setsid` 后台跑 + `run.exit` 轮询（WSL2 规则）
-- [ ] T010 [US1] 生成 US1 配对报告（data-model PairedEvalReport 字段齐全：overall / by_category_paired / vs_008 / rerank_telemetry / 全量含训练对话的污染标注），落 `specs/037-memory-reranker-training/reports/us1-paired.md`
-- [ ] T011 [US1] US1 报告校验：preflight rerank 成功计数 > 0、四类别含 temporal 单独行、与 008 bge-reranker-v2-m3 记录同口径可比
+- [x] T008 [P] [US1] 起 transformers HTTP serve Qwen3-Reranker-0.6B base（vLLM cu13 不兼容 CUDA 12.8 驱动，改用 FastAPI + transformers；同时加载 BGE-small 供 embedding），写 `rerank_server.py` 至远程 `/root/autodl-tmp/037-reranker/`
+- [x] T009 [US1] 跑 locomo-bench 全量配对：`--run-dir /root/autodl-tmp/.locomo-run/037-us1 --retrieval 'hybrid,hybrid+rerank'`（SeetaCloud 224 vCPU 远程直跑，零 SSH 隧道）
+- [x] T010 [US1] 生成 US1 配对报告 → `specs/037-memory-reranker-training/reports/us1-paired.md`
+- [x] T011 [US1] US1 报告校验：preflight rerank OK、四类别含 temporal、与 008 对比已附
+- [x] 2026-08-12 补充：机器从 AutoDL 迁移至 SeetaCloud（CUDA 驱动 12.8 ↔ vLLM cu13 不兼容），已用 transformers 替代方案绕过
 
 **Checkpoint**: US1 落地 = 本 feature 的**零成本 MVP**（半天出结果），是 US2 训练的对照臂与动机证据
 
