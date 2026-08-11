@@ -244,6 +244,7 @@ mem0-aligned prompt。
 | **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.71%** |
 | LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · 默认 |
 | LoCoMo (1540) · thinking | engram 🔬 | Qwen3.6-35B · 本地 vLLM（思考） | deepseek-v4-flash | **88.23%** · 3 次平均 · ci95 [86.85, 89.60] |
+| LoCoMo (1540) · thinking · top-k 150 | engram 🔬 | Qwen3.6-35B · 本地 vLLM（思考，32k 上下文） | deepseek-v4-flash | **90.13%** · 3 次多数（均值 89.8%）· ci95 [89.4, 90.3] |
 | LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 83.77% |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
 | LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
@@ -257,7 +258,7 @@ mem0-aligned prompt。
 
 | 数据集 | engram 🔬 | MemOS 📣 | Mem0 📣 |
 |---|---:|---:|---:|
-| LoCoMo | **89.03%**（v4-pro，n=1540） | 88.83% | 92.5% |
+| LoCoMo | **90.13%**（思考 · top-k 150，n=1540） | 88.83% | 92.5% |
 | LongMemEval | **86.00%**（v4-pro，S-cleaned 500） | 89.20% | 94.4% |
 
 ### LoCoMo 分类别得分
@@ -265,13 +266,13 @@ mem0-aligned prompt。
 以下结果覆盖类别 1–4 的全部 1,540 道题，使用
 `judge=deepseek-v4-flash`，并对三次答题结果进行多数投票。
 
-| 类别 | n | engram (Qwen) | engram (v4-pro) | MemOS，同栈 | Δ engram−MemOS |
-|---|---:|---:|---:|---:|---:|
-| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18pp** |
-| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77pp |
-| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62pp |
-| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24pp** |
-| **总计** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31pp** |
+| 类别 | n | engram (Qwen) | engram (Qwen · tk150) | engram (v4-pro) | MemOS，同栈 | Δ engram−MemOS |
+|---|---:|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | 91.9% | 90.96% | 82.64% | **+6.18pp** |
+| multi-hop | 282 | 87.59% | 95.0% | 88.65% | 89.36% | −1.77pp |
+| temporal | 321 | 81.93% | 87.9% | 89.41% | 82.55% | −0.62pp |
+| open-domain | 96 | 65.62% | 67.7% | 71.88% | 59.38% | **+6.24pp** |
+| **总计** | **1540** | **85.71%** | **90.13%** | **89.03%** | **82.40%** | **+3.31pp** |
 
 分类结果比单一总分更有解释力。MemOS 的 tree/graph 组织在 multi-hop 上领先
 1.77 个百分点；engram 则在 single-hop 和 open-domain 上领先超过 6 个百分点。

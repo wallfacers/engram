@@ -259,6 +259,7 @@ code without modifications.
 | **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.71%** |
 | LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · default |
 | LoCoMo (1540) · thinking | engram 🔬 | Qwen3.6-35B · local vLLM (thinking) | deepseek-v4-flash | **88.23%** · 3-rep mean · ci95 [86.85, 89.60] |
+| LoCoMo (1540) · thinking · top-k 150 | engram 🔬 | Qwen3.6-35B · local vLLM (thinking, 32k ctx) | deepseek-v4-flash | **90.13%** · 3-rep majority (89.8% mean) · ci95 [89.4, 90.3] |
 | LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-pro | 83.77% |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
 | LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · local vLLM | deepseek-v4-flash | 82.40% |
@@ -272,7 +273,7 @@ These numbers are useful context, but they are **not directly comparable**:
 
 | Dataset | engram 🔬 | MemOS 📣 | Mem0 📣 |
 |---|---:|---:|---:|
-| LoCoMo | **89.03%** (v4-pro, n=1540) | 88.83% | 92.5% |
+| LoCoMo | **90.13%** (thinking · top-k 150, n=1540) | 88.83% | 92.5% |
 | LongMemEval | **86.00%** (v4-pro, S-cleaned 500) | 89.20% | 94.4% |
 
 ### LoCoMo by category
@@ -280,13 +281,13 @@ These numbers are useful context, but they are **not directly comparable**:
 Results below use all 1,540 category 1–4 questions,
 `judge=deepseek-v4-flash`, and majority voting across three answer runs.
 
-| Category | n | engram (Qwen) | engram (v4-pro) | MemOS, same stack | Δ engram−MemOS |
-|---|---:|---:|---:|---:|---:|
-| single-hop | 841 | 88.82% | 90.96% | 82.64% | **+6.18pp** |
-| multi-hop | 282 | 87.59% | 88.65% | 89.36% | −1.77pp |
-| temporal | 321 | 81.93% | 89.41% | 82.55% | −0.62pp |
-| open-domain | 96 | 65.62% | 71.88% | 59.38% | **+6.24pp** |
-| **Overall** | **1540** | **85.71%** | **89.03%** | **82.40%** | **+3.31pp** |
+| Category | n | engram (Qwen) | engram (Qwen · tk150) | engram (v4-pro) | MemOS, same stack | Δ engram−MemOS |
+|---|---:|---:|---:|---:|---:|---:|
+| single-hop | 841 | 88.82% | 91.9% | 90.96% | 82.64% | **+6.18pp** |
+| multi-hop | 282 | 87.59% | 95.0% | 88.65% | 89.36% | −1.77pp |
+| temporal | 321 | 81.93% | 87.9% | 89.41% | 82.55% | −0.62pp |
+| open-domain | 96 | 65.62% | 67.7% | 71.88% | 59.38% | **+6.24pp** |
+| **Overall** | **1540** | **85.71%** | **90.13%** | **89.03%** | **82.40%** | **+3.31pp** |
 
 The category breakdown matters more than one aggregate number. MemOS's
 tree/graph organization leads on multi-hop by 1.77 points, while engram leads
