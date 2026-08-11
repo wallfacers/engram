@@ -4,9 +4,31 @@
 
 **Created**: 2026-08-10
 
-**Status**: Draft
+**Status**: **Closed（NO-GO 收口，2026-08-11）**——954-call Stage-0 已完整封存；历史映射仍为 1378/1540（89.48%），唯一改选为正确性中性，不进入 formal rejudge。后续决策缺口归因由 [036](../036-decision-gap-attribution/spec.md) 承接。
 
 **Input**: User description: "继续冲击 LoCoMo 严格超过 90%；承接 034 的 89.48% NO-GO，针对错误的高置信候选改选做风险控制二次裁决，不使用付费云 reranker/recall，不接触引擎，并先通过冻结 Stage-0 止损门。"
+
+## 实际收口（2026-08-11，NO-GO）
+
+本 feature 已按冻结协议执行完成并正式收口：
+
+- **执行完整**：单次批准的 V4-Pro Stage-0 完成 954/954 次调用，940 个严格有效响应、14 个
+  `invalid_response`、零重试；seal、冻结诊断和 1540 条决策均有效。最终 1539 题保留父答案，仅 1 题满足
+  双视图严格收敛并改选。
+- **分数未转化**：父映射与新映射同为 **1378/1540（89.48%）**，judge-instability lower 为 1375；
+  triggered mixed 为 61/88、lower 为 60；new-only/parent-only 为 0/0，McNemar p=1.0。唯一改选没有改变
+  正确性，因此结论为 **NO-GO**，不启动 formal paired-rejudge。
+- **失败机制已定位**：当前答案在完成调用中仅被严格反驳 10/473（entailment）和 16/467
+  （falsification）；同时满足“反驳当前答案 + 唯一替代受支持”的视图分别只有 4 和 5 个，最终仅 1 个
+  packet 在两个视图上收敛。问题不再是裁决阈值，而是裁决输入的证据形态与候选生成质量；不得依据本次
+  hidden outcome 事后放宽门槛。
+- **出货影响为零**：该路径保持 benchmark-only、显式付费、default-off；没有加入 hosted reranker/recall，
+  没有修改 memory engine 或默认 benchmark 行为。实现与可审计产物保留为历史诊断能力，不作为产品涨点
+  方案推荐。
+- **后续承接**：不再沿 035 的“更保守二次裁决”轴继续付费试探。候选 oracle 1411 与 selected 1378
+  之间的 33 题缺口，已由 [036 决策缺口归因](../036-decision-gap-attribution/spec.md) 以零模型调用方式承接。
+  完整调用收据、门禁与失败分析见 [quickstart.md](quickstart.md#7-measured-stage-0-result-2026-08-10)，任务与
+  验证收据见 [tasks.md](tasks.md#completion-record-2026-08-10)。
 
 ## Decision and Scope
 

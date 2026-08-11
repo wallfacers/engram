@@ -225,3 +225,6 @@ Task T024 owner:      cmd/locomo-bench/answer_adjudication_audit_artifact.go
   `go vet ./cmd/locomo-bench` exit 0, `git diff --check` is clean, engine-directory changes are zero, and tracked/public
   artifact credential plus forbidden-field scans report zero hits. Detached test logs are retained under the session
   scratchpad run `035-merge-gate.OkuQeN`.
+- Documentation lifecycle closed as **NO-GO** on 2026-08-11. All 44 tasks remain complete; no deferred implementation
+  is carried inside 035. The next diagnostic scope is independently specified by
+  [036 decision-gap attribution](../036-decision-gap-attribution/spec.md).

@@ -2,6 +2,10 @@
 
 **Branch**: `worktree-035-risk-controlled-adjudication` | **Date**: 2026-08-10 | **Spec**: [spec.md](spec.md)
 
+**Lifecycle**: Closed / NO-GO on 2026-08-11. Implementation and the single frozen Stage-0 completed, but the only
+dual-convergence switch was correctness-neutral; no formal rejudge or product promotion follows. See
+[实际收口](spec.md#实际收口2026-08-11no-go).
+
 **Input**: Feature specification from `specs/035-risk-controlled-adjudication/spec.md`
 
 ## Summary
