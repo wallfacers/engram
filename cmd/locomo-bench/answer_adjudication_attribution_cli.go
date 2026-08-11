@@ -78,8 +78,12 @@ func validateAdjudicationAttributionOptions(opt options) error {
 	if strings.TrimSpace(opt.adjudicationAttributionDir) == "" || len(opt.adjudicationCandidates) != 3 {
 		return fmt.Errorf("attribution requires DIR and exactly three candidates")
 	}
+	// Reject only mode-foreign *explicit* options. adjudicationMaxTokens is a
+	// 034 run-mode flag whose flag default is 512, so it must not gate the
+	// attribution mode (same convention as 034/035 score/validate modes, which
+	// ignore it entirely).
 	if strings.TrimSpace(opt.adjudicationTracePath) != "" || strings.TrimSpace(opt.adjudicationSeed) != "" ||
-		opt.adjudicationAllowPaid || opt.adjudicationMaxTokens != 0 {
+		opt.adjudicationAllowPaid {
 		return fmt.Errorf("attribution accepts only DIR, three candidates, and optional audit dir")
 	}
 	if strings.TrimSpace(opt.adjudicationAuditDir) != "" {

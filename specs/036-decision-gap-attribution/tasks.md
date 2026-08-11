@@ -210,3 +210,35 @@
 - The fixture recomputes gap=43 (oracle 1411 − selected 1368) because the scoring fixture's decisions are all
   fallback (selected == control); the real run's 33 comes from the same code with the actual 034 decisions.
 
+## Real-Data Verification (2026-08-11)
+
+The 034/035 artifacts turned out to live on this machine (session-scratch), so the §2 handoff ran locally:
+
+```bash
+go run ./cmd/locomo-bench --adjudication-attribution ~/.claude/session-scratch/034-stage0.DR07JV \
+  --adjudication-candidate ~/.claude/session-scratch/locomo90.M5r3Os/matrix-2026-07-26/locomo-pro/r1/results-hybrid.jsonl \
+  --adjudication-candidate .../r2/results-hybrid.jsonl \
+  --adjudication-candidate .../r3/results-hybrid.jsonl \
+  --adjudication-audit-source ~/.claude/session-scratch/035-materialize-a.RVp4zU
+```
+
+Receipt: `attribution: gaps=33 control_only_loss=13 both_wrong=9 categories=4 audit=035-audit dominant=factually_wrong`.
+Report: `~/.claude/session-scratch/034-stage0.DR07JV/decision-gap-attribution.json`. Verdict:
+`docs/evaluation/reports/036-decision-gap-attribution-verdict.md`.
+
+Two bugs were found and fixed during the real-data run (both missed by the fixture because it is all-fallback):
+
+1. **CLI flag bug**: `validateAdjudicationAttributionOptions` rejected attribution mode because it required
+   `adjudicationMaxTokens == 0`, but max-tokens is a 034 run-mode flag whose default is 512. The task table claimed a
+   `_cli_test.go` that did not exist, so the flag path was never tested. Fixed + added
+   `answer_adjudication_attribution_cli_test.go` (6 tests) covering flag defaults, audit-dir, mode-foreign options, and
+   the exactly-three-candidates contract.
+2. **Aggregation bug**: `aggregateAttribution` counted every `!control && !selected` gap as `both_wrong`, absorbing the
+   11 fallback gaps (6 not-triggered + 5 triggered) and yielding both_wrong=20 instead of the verdict's 9. Per data-model
+   (`fallback_gaps = non-trigger + triggered`) and SC-002 (13/9), fallback is now `FallbackReason != ""` and never mixes
+   into the override split: `33 = 13 control-only + 9 both-wrong + 11 fallback_gaps`.
+
+Failure-mode conclusion: factually_wrong 22 (all 22 accepted overrides), semantic_equivalence 7 (all fallback),
+evidence_insufficient 4 (triggered low-confidence fallbacks), unclear 0. Temporal is the largest category (12 gaps, 6
+control-only + factually_wrong). See the verdict doc for the mechanism-spec direction.
+

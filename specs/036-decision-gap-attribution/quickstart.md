@@ -28,7 +28,11 @@ go run ./cmd/locomo-bench \
 
 Expected (real frozen run): report written to `/path/to/034-stage0/decision-gap-attribution.json`; summary prints
 `gaps=33 control_only_loss=13 both_wrong=9 categories=4 audit=035-audit dominant=...`. The four category rows sum to
-33; `gap_count == oracle_correct - selected_correct` (1411 − 1378).
+33; `gap_count == oracle_correct - selected_correct` (1411 − 1378). `fallback_gaps` is 11 (6 not-triggered + 5
+triggered); fallback gaps are counted separately from the 13/9 accepted-override split (never mixed).
+
+Verified on the real 034/035 artifacts on 2026-08-11 (session-scratch, see tasks.md §Real-Data Verification and
+`docs/evaluation/reports/036-decision-gap-attribution-verdict.md`).
 
 The `--adjudication-audit-source` flag is optional. When omitted or when the 035 seal is missing/invalid, every gap
 row is marked `audit_unavailable` and the report still succeeds.

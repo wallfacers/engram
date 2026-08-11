@@ -317,10 +317,17 @@ func aggregateAttribution(rows *attributionRows) ([]attributionCategoryAggregate
 	byMode := make(map[attributionFailureMode]int)
 	for _, gap := range rows.Gaps {
 		summary.GapCount++
-		if gap.Triggered && gap.FallbackReason != "" {
+		// Fallback vs accepted override: in 034, confidence="fallback" is the
+		// default label for not-triggered decisions (769 of 822 fallback rows are
+		// not_triggered), so the discriminator is fallback_reason != "" (accepted
+		// overrides carry an empty reason). Fallback gaps are counted separately
+		// (fallback_gaps = non-trigger + triggered per data-model) and never
+		// absorbed into the control-only / both-wrong override split (spec SC-002
+		// requires those to match the verdict's 13/9 accepted-override breakdown).
+		isFallback := gap.FallbackReason != ""
+		if isFallback {
 			summary.FallbackGaps++
-		}
-		if gap.ControlCorrect && !gap.SelectedCorrect {
+		} else if gap.ControlCorrect && !gap.SelectedCorrect {
 			summary.ControlOnlyLoss++
 		} else if !gap.ControlCorrect && !gap.SelectedCorrect {
 			summary.BothWrong++
@@ -331,7 +338,9 @@ func aggregateAttribution(rows *attributionRows) ([]attributionCategoryAggregate
 			perCategory[gap.Category] = agg
 		}
 		agg.Gaps++
-		if gap.ControlCorrect && !gap.SelectedCorrect {
+		if isFallback {
+			// fallback gaps are counted in Gaps but not in the override split.
+		} else if gap.ControlCorrect && !gap.SelectedCorrect {
 			agg.ControlOnlyLoss++
 		} else if !gap.ControlCorrect && !gap.SelectedCorrect {
 			agg.BothWrong++

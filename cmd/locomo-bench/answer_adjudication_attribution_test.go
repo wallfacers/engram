@@ -203,9 +203,53 @@ func TestAttributionFrozenFixtureRecomputesGapAndControlSplit(t *testing.T) {
 	if summary.GapCount != 43 {
 		t.Fatalf("gap = %d, want 43 (oracle 1411 - selected 1368 on the fallback fixture)", summary.GapCount)
 	}
-	// Every gap must be split into control-only loss or both-wrong.
-	if summary.ControlOnlyLoss+summary.BothWrong != summary.GapCount {
-		t.Fatalf("gap split control_only=%d both_wrong=%d != total %d", summary.ControlOnlyLoss, summary.BothWrong, summary.GapCount)
+	// Every fixture gap is a fallback (all decisions are fallback), so the
+	// override split (control-only loss / both-wrong) must be zero and every gap
+	// must land in fallback_gaps. The real 034 run exercises the override split.
+	if summary.ControlOnlyLoss != 0 || summary.BothWrong != 0 {
+		t.Fatalf("override split must be zero on the all-fallback fixture, got control_only=%d both_wrong=%d", summary.ControlOnlyLoss, summary.BothWrong)
+	}
+	if summary.FallbackGaps != summary.GapCount {
+		t.Fatalf("fallback_gaps = %d, want every gap %d (all decisions are fallback)", summary.FallbackGaps, summary.GapCount)
+	}
+}
+
+// TestAttributionFallbackGapsExcludedFromOverrideSplit proves the aggregation
+// semantic that spec SC-002 fixes: a fallback gap (confidence=fallback, either
+// triggered with a fallback reason or not_triggered) is counted in fallback_gaps
+// and must NOT be absorbed into the both-wrong override bucket. In the 034 data,
+// confidence="fallback" is the default label for not-triggered decisions (769 of
+// 822), so only triggered-accepted overrides belong in control_only/both_wrong.
+func TestAttributionFallbackGapsExcludedFromOverrideSplit(t *testing.T) {
+	rows := &attributionRows{
+		Schema: attributionReportSchema, Count: 4,
+		Rows: make([]attributionRow, 4),
+		Gaps: []attributionGapRow{
+			// accepted override: control correct, selected wrong → control-only loss.
+			{PacketID: "p1", Category: 1, ControlCorrect: true, SelectedCorrect: false, Oracle: true, Triggered: true},
+			// accepted override: control wrong, selected wrong, third candidate correct → both-wrong.
+			{PacketID: "p2", Category: 1, ControlCorrect: false, SelectedCorrect: false, Oracle: true, Triggered: true},
+			// triggered fallback (low_confidence): control wrong, selected wrong → fallback_gaps, not both-wrong.
+			{PacketID: "p3", Category: 1, ControlCorrect: false, SelectedCorrect: false, Oracle: true, Triggered: true, FallbackReason: "low_confidence", SelectedConfidence: "fallback"},
+			// not-triggered fallback (not_triggered): control wrong, selected wrong → fallback_gaps, not both-wrong.
+			{PacketID: "p4", Category: 1, ControlCorrect: false, SelectedCorrect: false, Oracle: true, Triggered: false, FallbackReason: "not_triggered", SelectedConfidence: "fallback"},
+		},
+	}
+	_, summary := aggregateAttribution(rows)
+	if summary.GapCount != 4 {
+		t.Fatalf("gap = %d, want 4", summary.GapCount)
+	}
+	if summary.ControlOnlyLoss != 1 {
+		t.Fatalf("control_only_loss = %d, want 1 (accepted override only)", summary.ControlOnlyLoss)
+	}
+	if summary.BothWrong != 1 {
+		t.Fatalf("both_wrong = %d, want 1 (accepted override only; fallback gaps must not be absorbed)", summary.BothWrong)
+	}
+	if summary.FallbackGaps != 2 {
+		t.Fatalf("fallback_gaps = %d, want 2 (triggered low_confidence + not_triggered)", summary.FallbackGaps)
+	}
+	if summary.ControlOnlyLoss+summary.BothWrong+summary.FallbackGaps != summary.GapCount {
+		t.Fatalf("override split + fallback_gaps = %d, want gap %d (disjoint, exhaustive buckets)", summary.ControlOnlyLoss+summary.BothWrong+summary.FallbackGaps, summary.GapCount)
 	}
 }
 
