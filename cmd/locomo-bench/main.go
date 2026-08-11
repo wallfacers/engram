@@ -69,6 +69,7 @@ type options struct {
 	adjudicationSeed          string
 	adjudicationAllowPaid     bool
 	adjudicationMaxTokens     int
+	adjudicationTemporalPrompt bool
 	dataPath                  string
 	runDir                    string
 	storeDir                  string
@@ -353,6 +354,7 @@ func run() error {
 	flag.StringVar(&opt.adjudicationSeed, "adjudication-seed", "", "label-independent permutation seed (required for --adjudication-build)")
 	flag.BoolVar(&opt.adjudicationAllowPaid, "adjudication-allow-paid", false, "explicitly allow the 034 hosted verifier run to incur cost")
 	flag.IntVar(&opt.adjudicationMaxTokens, "adjudication-max-tokens", 512, "maximum verifier output tokens")
+	flag.BoolVar(&opt.adjudicationTemporalPrompt, "adjudication-temporal-prompt", false, "036/90pp opt-in: use the temporal reasoning contract for category-2 adjudication (default off, byte-identical generic prompt)")
 	flag.StringVar(&opt.dataPath, "data", "", "path to LoCoMo JSON dataset (required)")
 	flag.StringVar(&opt.runDir, "run-dir", "", "directory for resumable JSONL run artifacts (required)")
 	flag.StringVar(&opt.datasetFormat, "dataset-format", "locomo", "dataset format: locomo | longmemeval")

@@ -111,6 +111,66 @@ func TestAdjudicationVerifierPromptIsPacketOnly(t *testing.T) {
 	}
 }
 
+// TestAdjudicationTemporalPromptIsOptInAndCategoryScoped proves the 90pp
+// lever stays byte-identical by default: adjudicationSystemPromptFor returns
+// the frozen generic prompt unless the temporal contract is explicitly enabled
+// AND the packet is a category-2 (temporal) question. Enabling the flag must
+// change the prompt digest so a tplan-arm seal cannot be confused with a
+// generic-arm seal.
+func TestAdjudicationTemporalPromptIsOptInAndCategoryScoped(t *testing.T) {
+	prior := adjudicationTemporalPromptEnabled
+	defer func() { adjudicationTemporalPromptEnabled = prior }()
+
+	temporal := testAdjudicationPacket()
+	temporal.Category = 2
+
+	// Default off: byte-identical generic prompt for every category.
+	adjudicationTemporalPromptEnabled = false
+	if got := adjudicationSystemPromptFor(temporal); got != adjudicationVerifierSystemPrompt {
+		t.Fatalf("flag-off system prompt diverged from frozen generic")
+	}
+	nonTemporal := testAdjudicationPacket() // category 1
+	if got := adjudicationSystemPromptFor(nonTemporal); got != adjudicationVerifierSystemPrompt {
+		t.Fatalf("flag-off non-temporal system prompt diverged")
+	}
+
+	// Flag on: category-2 switches to the temporal reasoning contract.
+	adjudicationTemporalPromptEnabled = true
+	tplan := adjudicationSystemPromptFor(temporal)
+	if tplan == adjudicationVerifierSystemPrompt {
+		t.Fatal("temporal flag on but category-2 prompt is still generic")
+	}
+	for _, want := range []string{"TEMPORAL REASONING PLAN", "[event:", "timeline"} {
+		if !strings.Contains(tplan, want) {
+			t.Fatalf("temporal prompt missing %q", want)
+		}
+	}
+	// Non-temporal categories keep the generic prompt even under the flag.
+	if got := adjudicationSystemPromptFor(nonTemporal); got != adjudicationVerifierSystemPrompt {
+		t.Fatalf("temporal flag must not change non-temporal prompt")
+	}
+
+	// The frozen manifest digest stays generic in every mode (the temporal
+	// contract is a run-time prompt variant, not a manifest rewrite).
+	if got := adjudicationPromptDigest(); got != adjudicationTextDigest(adjudicationVerifierSystemPrompt+"\x00packet-json-v1") {
+		t.Fatalf("manifest prompt digest must stay generic, got %s", got)
+	}
+	// The per-packet input identity must differ between arms (seal identity).
+	adjudicationTemporalPromptEnabled = true
+	tplanInput, err := adjudicationPacketInputDigest(temporal, "runid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adjudicationTemporalPromptEnabled = false
+	genericInput, err := adjudicationPacketInputDigest(temporal, "runid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tplanInput == genericInput {
+		t.Fatal("temporal and generic input digests must differ")
+	}
+}
+
 func TestAdjudicationCallJournalResumeAndOrphanRefusal(t *testing.T) {
 	packet := testAdjudicationPacket()
 	packet.PacketDigest = adjudicationPacketDigest(packet)

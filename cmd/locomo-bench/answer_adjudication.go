@@ -13,6 +13,36 @@ import (
 
 const adjudicationVerifierSystemPrompt = `You are an evidence-grounded answer adjudicator. Choose exactly one supplied candidate answer. Use only the supplied evidence. Return strict JSON with exactly selected_slot, evidence_ids, and confidence. selected_slot must be C1, C2, or C3; evidence_ids must contain at least one supplied evidence ID; confidence must be "high" only when the cited evidence directly supports the selection. If evidence is insufficient, return confidence "low". Never write a new answer.`
 
+// adjudicationTemporalSystemPrompt extends the frozen adjudicator contract
+// with a temporal reasoning plan for category-2 (temporal) questions. It
+// mirrors the answer-side tplan contract (032) that proved GO on temporal: the
+// adjudicator must list [event:] markers, normalize the timeline, and reason
+// the requested order/interval before selecting a candidate. Opt-in via
+// --adjudication-temporal-prompt; default off keeps the run byte-identical.
+const adjudicationTemporalSystemPrompt = adjudicationVerifierSystemPrompt + `
+
+TEMPORAL REASONING PLAN (required for this temporal question):
+- List every supplied evidence's [event: YYYY-MM-DD] marker before deciding.
+- Normalize the candidate dates onto a common timeline, then compare dates and determine the requested order, month, or interval.
+- When the question asks a duration or an inclusive date range, count the boundaries explicitly (include both endpoints).
+- For sequence questions ("which city before X"), order the dated events and pick the city that immediately precedes X.
+- Then choose the single candidate that matches the reasoned answer.`
+
+// adjudicationTemporalPromptEnabled is set by --adjudication-temporal-prompt.
+// When false (default) every system prompt and digest is byte-identical to the
+// frozen 034 generic contract.
+var adjudicationTemporalPromptEnabled bool
+
+// adjudicationSystemPromptFor selects the system prompt for one packet. The
+// temporal contract applies only when explicitly enabled AND the packet is a
+// category-2 question; every other packet keeps the frozen generic prompt.
+func adjudicationSystemPromptFor(packet adjudicationPacket) string {
+	if adjudicationTemporalPromptEnabled && packet.Category == 2 {
+		return adjudicationTemporalSystemPrompt
+	}
+	return adjudicationVerifierSystemPrompt
+}
+
 type adjudicationCandidate struct {
 	Answer       string
 	Normalized   string
@@ -73,7 +103,7 @@ func adjudicationPacketInputDigest(packet adjudicationPacket, runIdentity string
 	if err != nil {
 		return "", err
 	}
-	return adjudicationTextDigest(runIdentity + "\x00" + adjudicationVerifierSystemPrompt + "\x00" + userPrompt), nil
+	return adjudicationTextDigest(runIdentity + "\x00" + adjudicationSystemPromptFor(packet) + "\x00" + userPrompt), nil
 }
 
 func normalizeAdjudicationAnswer(answer string) string {
@@ -262,8 +292,21 @@ func adjudicationTextDigest(text string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// adjudicationPromptDigest returns the digest of the frozen generic prompt.
+// The 034 manifest freezes this digest at build time; the temporal contract is
+// a run-time prompt variant that does NOT rewrite the manifest, so this stays
+// the generic digest in every mode (byte-identical default and opt-in alike).
+// The temporal arm is distinguished by adjudicationPacketInputDigest, which
+// folds the actually-used system prompt into each decision's input identity.
 func adjudicationPromptDigest() string {
 	return adjudicationTextDigest(adjudicationVerifierSystemPrompt + "\x00packet-json-v1")
+}
+
+// adjudicationTemporalPromptDigest is the digest the temporal contract would
+// produce; used only to document the arm in the run summary, never to rewrite
+// the frozen manifest.
+func adjudicationTemporalPromptDigest() string {
+	return adjudicationTextDigest(adjudicationTemporalSystemPrompt + "\x00packet-json-v1")
 }
 
 type adjudicationHiddenCandidate struct {

@@ -411,6 +411,14 @@ func runAdjudicationProviderCLI(ctx context.Context, opt options) error {
 	if err := validateAdjudicationCLIOptions(opt, adjudicationModeRun); err != nil {
 		return err
 	}
+	// The temporal adjudication contract is a run-time prompt variant scoped
+	// to category-2 packets; it changes the per-decision input identity but not
+	// the frozen manifest. Set the package switch from the flag for this run.
+	adjudicationTemporalPromptEnabled = opt.adjudicationTemporalPrompt
+	if adjudicationTemporalPromptEnabled {
+		fmt.Printf("adjudication: temporal reasoning contract enabled for category-2 (prompt digest %s)\n",
+			adjudicationTemporalPromptDigest())
+	}
 	manifest, packets, err := loadAndValidateAdjudicationPublic(opt.adjudicationRunDir, true)
 	if err != nil {
 		return err
@@ -524,7 +532,7 @@ func adjudicateOnePacketWithIdentity(ctx context.Context, packet adjudicationPac
 	if caller == nil {
 		err = fmt.Errorf("adjudication provider caller is nil")
 	} else {
-		raw, usage, err = caller(ctx, adjudicationVerifierSystemPrompt, userPrompt)
+		raw, usage, err = caller(ctx, adjudicationSystemPromptFor(packet), userPrompt)
 	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
 		usage = provider.Usage{}
