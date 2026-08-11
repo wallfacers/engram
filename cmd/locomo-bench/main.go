@@ -3041,12 +3041,19 @@ func toMemories(hits []memory.Result) []retrievedMemory {
 // buildBenchEmbeddingClient builds the embedding client from EMBED_* env, with
 // local defaults. Returns nil (semantic disabled) on failure.
 func buildBenchEmbeddingClient(logger *slog.Logger, usage func(inputTokens, outputTokens int)) embedding.Client {
+	maxInflight := 4
+	if v := os.Getenv("EMBED_MAX_INFLIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxInflight = n
+		}
+	}
 	c, err := embedding.New(embedding.Config{
-		BaseURL: envOr("EMBED_BASE_URL", "http://127.0.0.1:11434/v1"),
-		Model:   envOr("EMBED_MODEL", "qwen3-embedding:0.6b"),
-		APIKey:  os.Getenv("EMBED_API_KEY"),
-		Timeout: 30 * time.Second,
-		Usage:   usage,
+		BaseURL:     envOr("EMBED_BASE_URL", "http://127.0.0.1:11434/v1"),
+		Model:       envOr("EMBED_MODEL", "qwen3-embedding:0.6b"),
+		APIKey:      os.Getenv("EMBED_API_KEY"),
+		Timeout:     30 * time.Second,
+		MaxInflight: maxInflight,
+		Usage:       usage,
 	})
 	if err != nil || c == nil {
 		logger.Warn("hybrid arm: embedding client unavailable; semantic signal disabled (degrades to BM25+entity)")
