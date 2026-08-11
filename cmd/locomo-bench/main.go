@@ -1872,6 +1872,12 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 	if n, err := countExtracted(ctx, es); err != nil {
 		return nil, err
 	} else if n > 0 {
+		// A store built with --chunks must only be reused by a run that also
+		// enables --chunks; otherwise its verbatim chunk entries silently stay
+		// in the retrieval pool (the retriever never filters category="chunk").
+		if err := validateChunkRegime(ctx, st.DB(), opt.chunks, dsn); err != nil {
+			return nil, err
+		}
 		if temporalMechanismEnabled(opt, arms) {
 			if err := validateTemporalStore(ctx, st.DB(), n); err != nil {
 				return nil, err

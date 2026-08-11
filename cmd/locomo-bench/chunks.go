@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -300,6 +301,38 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 		}
 	}
 	return chunkTurns, turnEvidence, n, nil
+}
+
+// countChunkEntries reports how many verbatim-chunk entries a persisted store
+// holds. Chunks live in the SAME memory_entries table as facts, so a store built
+// with --chunks keeps them across runs.
+func countChunkEntries(ctx context.Context, db *sql.DB) (int, error) {
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM memory_entries WHERE category = 'chunk'`,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count chunk entries: %w", err)
+	}
+	return n, nil
+}
+
+// validateChunkRegime enforces that a persisted store is only reused under the
+// chunk configuration that built it. The dangerous direction is a chunks store
+// reused by a run WITHOUT --chunks: extraction reuse skips the chunk pass
+// (countExtracted counts only non-chunk entries), the stale chunk entries stay
+// in the retrieval pool, and the retriever surfaces them (it never filters
+// category="chunk") — a silent third regime matching neither pure-fact nor
+// proper --chunks retrieval. Refuse instead of silently reusing; store path is
+// passed in only for the error message.
+func validateChunkRegime(ctx context.Context, db *sql.DB, chunks bool, storePath string) error {
+	n, err := countChunkEntries(ctx, db)
+	if err != nil {
+		return err
+	}
+	if n > 0 && !chunks {
+		return fmt.Errorf("store %s holds %d verbatim chunk entries (built with --chunks) but this run does not enable --chunks; refusing to reuse a chunks store for a non-chunks run — use a fresh --store-dir (or delete it) so the store is rebuilt without chunks", storePath, n)
+	}
+	return nil
 }
 
 // benchmarkSessionMessages keeps extraction and the canonical raw Ledger on
