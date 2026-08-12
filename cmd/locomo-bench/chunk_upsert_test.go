@@ -111,6 +111,77 @@ func TestChunkIngestReconcilesChangedAndObsoletePersistedChunks(t *testing.T) {
 	}
 }
 
+// TestChunkIngestSkipsUnchangedPersistedChunks guards the idempotent re-ingest
+// fast path: a persisted store reused across runs must NOT rewrite already
+// identical verbatim chunks (that was ~40k transactional Upserts per run on the
+// LME store). Re-ingesting the same conversation must leave every chunk row
+// byte-for-byte untouched (revision and updated_at unchanged).
+func TestChunkIngestSkipsUnchangedPersistedChunks(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	es := memory.NewEntryStore(st.DB())
+
+	conv := conversation{ID: 0, Sessions: []session{{
+		Index: 1,
+		Turns: []turn{
+			{Speaker: "user", Text: "Let's plan the trip to Kyoto next month.", DiaID: "U1"},
+			{Speaker: "assistant", Text: "Sure, I'll book the hotel and the train.", DiaID: "A1"},
+			{Speaker: "user", Text: "And a dinner reservation at the kaiseki place.", DiaID: "U2"},
+		},
+	}}}
+
+	snapshot := func() map[string]string {
+		m := map[string]string{}
+		rows, err := st.DB().QueryContext(ctx,
+			`SELECT name, revision || ':' || updated_at FROM memory_entries WHERE category = 'chunk'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k, v string
+			if err := rows.Scan(&k, &v); err != nil {
+				t.Fatal(err)
+			}
+			m[k] = v
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	_, _, n1, err := ingestChunks(ctx, es, conv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 == 0 {
+		t.Fatal("first ingest produced no chunks")
+	}
+	before := snapshot()
+
+	_, _, n2, err := ingestChunks(ctx, es, conv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != n1 {
+		t.Fatalf("second ingest reported %d chunks, want %d", n2, n1)
+	}
+	after := snapshot()
+	if len(before) != len(after) {
+		t.Fatalf("chunk row count changed across idempotent re-ingest: %d -> %d", len(before), len(after))
+	}
+	for name, rev := range before {
+		if after[name] != rev {
+			t.Fatalf("chunk %s was rewritten across idempotent re-ingest (revision/updated_at changed): %q -> %q", name, rev, after[name])
+		}
+	}
+}
+
 func chunkEmbeddingCount(t *testing.T, ctx context.Context, st *store.Store, name string) int {
 	t.Helper()
 	var count int

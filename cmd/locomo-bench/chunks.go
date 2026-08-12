@@ -273,7 +273,21 @@ func ingestChunks(ctx context.Context, es *memory.EntryStore, conv conversation)
 				FactSource:      "verbatim_chunk",
 				SourceSessionID: fmt.Sprintf("conv%d-sess%d", conv.ID, s.Index),
 			}
-			if previous, ok := existing[name]; ok && previous.Content != e.Content {
+			if previous, ok := existing[name]; ok {
+				if previous.Content == e.Content {
+					// Verbatim chunks are deterministic from the source
+					// conversation, so an identical persisted chunk implies
+					// identical trigger/event/source metadata and (since the
+					// fact ledger itself is reused) identical evidence refs.
+					// Skip the transactional rewrite entirely — a reused store
+					// would otherwise re-Upsert ~40k chunks on every run,
+					// burning minutes of CPU/FTS work for zero net change.
+					if len(chunk.DiaIDs) > 0 {
+						chunkTurns[name] = chunk.DiaIDs
+					}
+					n++
+					continue
+				}
 				if err := es.Delete(ctx, name); err != nil {
 					return chunkTurns, turnEvidence, n, fmt.Errorf("invalidate changed chunk %s: %w", name, err)
 				}

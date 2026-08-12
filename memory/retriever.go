@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wallfacers/engram/embedding"
@@ -71,6 +72,16 @@ type Retriever struct {
 	client   embedding.Client   // may be nil
 	reranker embedding.Reranker // may be nil
 	options  RetrieverOptions
+
+	// vecMu/vecCache memoize the model's stored vectors for the lifetime of the
+	// retriever. A store is immutable after build, so vectors cannot change
+	// between searches; one load per retriever is exact and turns the
+	// per-search full-table scan + decode (~0.3 s at ~1.6k vectors) into a
+	// one-time cost. Failures are not memoized: a transient error on the first
+	// search must not poison every later search. Guarded because one retriever
+	// may serve concurrent question searches.
+	vecMu    sync.Mutex
+	vecCache map[string][]float32
 }
 
 // NewRetriever builds a Retriever. A nil client disables the semantic signal.
@@ -950,6 +961,27 @@ func (r *Retriever) vectorRanks(ctx context.Context, query string, limit int) ma
 	return r.vectorRankContext(ctx, query, limit).ranks
 }
 
+// storedVectors returns the model's stored vectors, loading once and memoizing
+// for the retriever's lifetime. Vectors are immutable after the store build, so
+// this is exact; it exists to avoid re-scanning + re-decoding the full embedding
+// table on every semantic search (500 parallel searches on the LME store
+// serialized on the SQLite mutex, ~18 min wall-clock for the retrieve phase).
+func (r *Retriever) storedVectors(ctx context.Context) (map[string][]float32, error) {
+	if r == nil || r.vectors == nil || r.client == nil {
+		return nil, nil
+	}
+	r.vecMu.Lock()
+	defer r.vecMu.Unlock()
+	if r.vecCache == nil {
+		vecs, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
+		if err != nil {
+			return nil, err
+		}
+		r.vecCache = vecs
+	}
+	return r.vecCache, nil
+}
+
 func (r *Retriever) vectorRankContext(ctx context.Context, query string, limit int) vectorRankContext {
 	if r.client == nil {
 		return vectorRankContext{}
@@ -962,7 +994,7 @@ func (r *Retriever) vectorRankContext(ctx context.Context, query string, limit i
 	if len(vecs) != 1 || len(vecs[0]) == 0 || r.vectors == nil {
 		return vectorRankContext{}
 	}
-	candidates, err := r.vectors.LoadAllForModel(ctx, r.client.Model())
+	candidates, err := r.storedVectors(ctx)
 	if err != nil {
 		slog.Warn("memory: semantic signal degraded", "stage", "vector_load", "err", err)
 		return vectorRankContext{}

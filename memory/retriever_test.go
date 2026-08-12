@@ -1061,3 +1061,50 @@ func (f *vectorFakeClient) Embed(_ context.Context, texts []string) ([][]float32
 	}
 	return out, nil
 }
+
+// TestRetriever_MemoizesStoredVectors guards the stored-vector memoization added
+// for the LME retrieve phase: a store is immutable once built, so a retriever
+// may load the full embedding table once and reuse it across searches. Wiping
+// the stored vectors after the first search must leave ranking unchanged for a
+// memoizing retriever (it loaded once), whereas a non-caching retriever would
+// see an empty candidate set and lose the semantic signal.
+func TestRetriever_MemoizesStoredVectors(t *testing.T) {
+	ctx := context.Background()
+	es, db := newEntryStore(t)
+	vs := memory.NewVectorStore(db)
+	fc := &fakeClient{model: "m"}
+	for _, e := range []*memory.Entry{
+		{Name: "aaa", Content: strings.Repeat("x", 60), CharCount: 60},
+		{Name: "bbb", Content: strings.Repeat("y", 30), CharCount: 30},
+	} {
+		if err := es.Upsert(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emb := memory.NewEmbedder(es, vs, fc, 8)
+	_ = emb.Backfill(ctx)
+	emb.Close()
+
+	r := memory.NewRetriever(es, vs, fc)
+	q := strings.Repeat("z", 45) // shares no keyword with either entry
+	got1, err := r.Search(ctx, q, 3)
+	if err != nil || len(got1) == 0 {
+		t.Fatalf("first search: got=%v err=%v", got1, err)
+	}
+
+	if _, err := db.Exec(`DELETE FROM memory_embeddings`); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := r.Search(ctx, q, 3)
+	if err != nil {
+		t.Fatalf("second search after vector wipe: %v", err)
+	}
+	if len(got1) != len(got2) {
+		t.Fatalf("result count changed after vector wipe: %d -> %d", len(got1), len(got2))
+	}
+	for i := range got1 {
+		if got1[i].Name != got2[i].Name {
+			t.Fatalf("rank %d changed after vector wipe: %q -> %q", i, got1[i].Name, got2[i].Name)
+		}
+	}
+}
