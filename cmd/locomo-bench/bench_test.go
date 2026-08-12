@@ -162,11 +162,11 @@ func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
 }
 
 func TestAbstainAnswerPromptRegime(t *testing.T) {
-	base := answerPromptForRegime(2, false, false, false, false)
+	base := answerPromptForRegime(2, false, false, false)
 	if base != answerSystemPrompt {
 		t.Fatalf("non-abstain regime changed baseline prompt")
 	}
-	abstain := answerPromptForRegime(2, false, false, true, false)
+	abstain := answerPromptForRegime(2, false, false, true)
 	if abstain == base {
 		t.Fatalf("abstain regime did not change the answer prompt")
 	}
@@ -182,7 +182,7 @@ func TestAbstainAnswerPromptRegime(t *testing.T) {
 		t.Fatalf("abstain prompt must keep a refusal outlet: %s", abstain)
 	}
 	// Abstain takes precedence over the category-specific answerable prompts.
-	if answerPromptForRegime(1, false, false, true, false) != abstain || answerPromptForRegime(2, false, true, true, false) != abstain {
+	if answerPromptForRegime(1, false, false, true) != abstain || answerPromptForRegime(2, false, true, true) != abstain {
 		t.Fatalf("abstain regime must override category and temporal prompts")
 	}
 }
@@ -1131,7 +1131,7 @@ func TestSweepAnswerPromptInjectsCurrentDate(t *testing.T) {
 // today's date" rule (written for LoCoMo's absolute "when" questions) must
 // stand unmodified.
 func TestRelativeTimeRuleOnlyWhenDated(t *testing.T) {
-	base := answerPromptForRegime(2, true, false, false, false)
+	base := answerPromptForRegime(2, true, false, false)
 
 	if withCurrentDateRule(base, "") != base {
 		t.Fatal("undated system prompt must be unchanged")

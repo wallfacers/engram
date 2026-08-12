@@ -238,18 +238,6 @@ const openDomainAnswerPrompt = `You answer a question about a person based on re
 After completing the reasoning plan, output ONLY the final short, direct answer as a phrase or sentence. No explanation, no restating the question.
 Only reply "I don't know" when the memories offer no basis whatsoever for even an informed inference.`
 
-// answerFocusSuffix sharpens the generic (single-hop) answer prompt so the
-// model does not substitute a related fact about the same person for the one
-// actually asked. LoCoMo error attribution showed single-hop misses split into
-// "salient-memory suppression" (the model answers the person's most prominent
-// fact instead of the requested one) and exact-value loss; these two rules
-// target exactly that, and mirror the general answer design that PowerContext
-// ships. Gated behind --answer-focus-prompt; off by default keeps the base
-// path byte-identical (TestAnswerPromptGoldenBaseline).
-const answerFocusSuffix = `
-- If the question asks about ONE specific fact — a single name, date, place, item, or event — answer ONLY that requested fact. Do not answer with a different related fact about the same person from another memory.
-- Prefer exact names, identities, places, titles, numbers, and dates over general descriptions.`
-
 const forceAnswerSystemPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. Rules:
 - Answer with the shortest phrase that fully answers the question — a name, a date, a place, a list. No explanation, no restating the question.
 - For "when" questions, read the time from the memory's [event: YYYY-MM-DD] marker (that is when it happened). NEVER answer relative to today's date. Answer at the granularity the memory supports (a month like "May 2023" is fine if that is all that is known).
@@ -304,24 +292,13 @@ func answerPromptForOptions(category int, forceAnswer bool) string {
 }
 
 func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswer bool) string {
-	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false, false)
-}
-
-// withAnswerFocus appends the focus suffix only when the opt-in flag is set.
-// The generic single-hop prompt is the intended target; multi-hop enumeration
-// and open-domain inference must NOT get "answer only the one fact" (it would
-// break list completeness), so focus stays scoped to the default branches.
-func withAnswerFocus(prompt string, focus bool) string {
-	if !focus {
-		return prompt
-	}
-	return prompt + answerFocusSuffix
+	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false)
 }
 
 // answerPromptForRegime selects the answer system prompt. The abstention regime
 // takes precedence over category- and temporal-specific answerable prompts: it
 // is a distinct scoring convention (Strike 3), not a per-category refinement.
-func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, focus bool) string {
+func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain bool) string {
 	if abstain {
 		return abstainAnswerPrompt
 	}
@@ -338,7 +315,7 @@ func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, f
 		case 3:
 			return forceOpenDomainAnswerPrompt
 		default:
-			return withAnswerFocus(forceAnswerSystemPrompt, focus)
+			return forceAnswerSystemPrompt
 		}
 	}
 	switch category {
@@ -347,7 +324,7 @@ func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, f
 	case 3:
 		return openDomainAnswerPrompt
 	default:
-		return withAnswerFocus(answerSystemPrompt, focus)
+		return answerSystemPrompt
 	}
 }
 

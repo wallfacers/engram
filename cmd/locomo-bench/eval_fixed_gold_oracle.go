@@ -702,7 +702,7 @@ func buildFixedGoldAnswerInput(
 		})
 	}
 	system := withCurrentDateRule(
-		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt),
+		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
 		qa.QuestionDate,
 	)
 	return evidencecompiler.AnswerInput{
