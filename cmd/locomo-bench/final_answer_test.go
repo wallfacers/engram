@@ -88,3 +88,37 @@ func TestBuildJudgePromptNonThinkingUntouched(t *testing.T) {
 		t.Errorf("non-thinking completion must pass through untouched, got:\n%s", got)
 	}
 }
+
+// TestAnswerFocusPromptGated: --answer-focus-prompt must be a pure opt-in.
+// Default path is byte-identical; the focus suffix lands only on the generic
+// single-hop prompt, never on multi-hop enumeration or open-domain inference.
+func TestAnswerFocusPromptGated(t *testing.T) {
+	// default (flag off): generic single-hop prompt unchanged
+	base := answerPromptForRegime(4, false, false, false, false)
+	if base != answerSystemPrompt {
+		t.Fatal("default single-hop prompt must stay byte-identical")
+	}
+	// focus on: generic single-hop gains the two rules
+	focused := answerPromptForRegime(4, false, false, false, true)
+	if focused == base {
+		t.Fatal("focus must change the single-hop prompt")
+	}
+	if !strings.Contains(focused, "answer ONLY that requested fact") || !strings.Contains(focused, "Prefer exact names") {
+		t.Errorf("focus suffix missing expected rules:\n%s", focused)
+	}
+	// focus must NOT touch multi-hop (enumeration) or open-domain (inference)
+	if got := answerPromptForRegime(1, false, false, false, true); got != multiHopAnswerPrompt {
+		t.Errorf("focus must not alter multi-hop prompt")
+	}
+	if got := answerPromptForRegime(3, false, false, false, true); got != openDomainAnswerPrompt {
+		t.Errorf("focus must not alter open-domain prompt")
+	}
+	// force variant gets it too
+	fForce := answerPromptForRegime(4, true, false, false, true)
+	if fForce == forceAnswerSystemPrompt {
+		t.Errorf("focus must also extend the force single-hop prompt")
+	}
+	if !strings.Contains(fForce, "answer ONLY that requested fact") {
+		t.Errorf("force focus missing rules")
+	}
+}

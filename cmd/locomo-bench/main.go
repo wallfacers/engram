@@ -143,6 +143,7 @@ type options struct {
 	forceAnswer               bool
 	imageCaptions             bool
 	temporalAnswerPrompt      bool
+	answerFocusPrompt         bool
 	temporalDateScaffold      bool
 	iris                      bool
 	irisDepth                 int
@@ -445,6 +446,7 @@ func run() error {
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
+	flag.BoolVar(&opt.answerFocusPrompt, "answer-focus-prompt", false, "single-hop answer prompt: answer only the exact fact asked, prefer exact names/dates over general descriptions (mirrors PowerContext's singular-focus + exact-value rules)")
 	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
 	flag.BoolVar(&opt.iris, "iris", false, "enable IRIS evidence-gap iterative retrieval for category-2 temporal questions (sufficiency-driven query refinement; fixed MemOS-aligned budget; harness-only, engine untouched)")
 	flag.IntVar(&opt.irisDepth, "iris-depth", 3, "maximum IRIS sufficiency-driven retrieval rounds (including the initial retrieval)")
@@ -2669,7 +2671,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	// trace) from answerer_miss (in context, still wrong). Defaults to the final
 	// hit set; assembly/trace override it below.
 	contextEvidence := hits
-	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt), qa.QuestionDate)
 	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)

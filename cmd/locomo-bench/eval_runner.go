@@ -731,7 +731,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt), qa.QuestionDate)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -840,7 +840,7 @@ func prepareFrozenFormalB1Answer(ctx context.Context, protocol evalProtocol, opt
 		Answer:         evalFormalAnswerRun{RunIndex: runIndex},
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt), qa.QuestionDate)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -1540,10 +1540,10 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 
 func formalAnswerPromptDigest(opt options) string {
 	return evalJSONDigest([]string{
-		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.answerFocusPrompt),
 		currentDateRule,
 		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
 	})
