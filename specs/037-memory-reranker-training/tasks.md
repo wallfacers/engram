@@ -75,7 +75,7 @@
 
 ### 端到端验证（GO 门）
 
-- [ ] T018 [US2] 合并 checkpoint（LoRA merge）并起 vLLM serve（T004 冻结命令 + 合并后模型），写 `tools/serve_trained.sh`
+- [ ] T018 [US2] serve 训练产物（transformers 路线，非 vLLM）：**2026-08-12 冻结**——vLLM cu13↔CUDA 12.8 不兼容（US1 T008）+ vLLM serve 训练产物 bug（merged 分数=base / --enable-lora 冲突），改用 `tools/rerank_server.py`（FastAPI 聚合 /v1/rerank + /v1/embeddings，score equation 与训练冻结一致）serve merged checkpoint（T017 已在 AutoDL merge 完），写 `tools/serve_trained.sh`；**起 serve + preflight 冒烟待远程验证**
 - [ ] T019 [US2] 跑 US2 locomo-bench 全量配对：`--run-dir ./.locomo-run/037-us2 --retrieval 'hybrid,hybrid+rerank'`（三 checkpoint 各自或择优）
 - [ ] T020 [US2] 跨 run 配对 `--compare ./.locomo-run/037-us1 ./.locomo-run/037-us2`：**GO 门判定** = 总体不劣（non-inferiority margin 预注册，p>0.05 本身不证明不劣）+ temporal 类不劣（修复 008 −9）+ 分类逐题 McNemar + flip
 - [ ] T021 [US2] 泛化否决门：留出对话（conv-48/49/50）+ LongMemEval 500 交叉子集评测，任一不过 → 不得宣称"未见对话/跨数据集"泛化

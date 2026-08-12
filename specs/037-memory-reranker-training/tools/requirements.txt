@@ -28,7 +28,13 @@ datasets>=3.0
 # --- vllm 推理服务（Qwen3-Reranker serving；AutoDL GPU 环境） ---
 # vllm 对 Python 版本敏感：本地 WSL2 Python 3.13 不保证可装，不阻塞数据链；
 # 训练/推理端在 AutoDL 上装（建议 Python 3.11 env）。版本实测冻结见 T004。
+# 注 2026-08-12：US1/US2 serving 实际走 transformers 路线（rerank_server.py），
+# vllm cu13↔CUDA 12.8 不兼容 + serve 训练产物 bug，见 T008/T018。
 vllm>=0.8.5
+
+# --- serving 端（rerank_server.py，transformers + FastAPI 聚合端点，T018） ---
+fastapi>=0.110
+uvicorn>=0.29
 
 # --- 推理端可选（低层加速 / 实验） ---
 # accelerate>=1.0
