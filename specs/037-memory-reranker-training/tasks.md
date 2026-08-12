@@ -75,12 +75,12 @@
 
 ### 端到端验证（GO 门）
 
-- [ ] T018 [US2] serve 训练产物（transformers 路线，非 vLLM）：**2026-08-12 冻结**——vLLM cu13↔CUDA 12.8 不兼容（US1 T008）+ vLLM serve 训练产物 bug（merged 分数=base / --enable-lora 冲突），改用 `tools/rerank_server.py`（FastAPI 聚合 /v1/rerank + /v1/embeddings，score equation 与训练冻结一致）serve merged checkpoint（T017 已在 AutoDL merge 完），写 `tools/serve_trained.sh`；**起 serve + preflight 冒烟待远程验证**
-- [ ] T019 [US2] 跑 US2 locomo-bench 全量配对：`--run-dir ./.locomo-run/037-us2 --retrieval 'hybrid,hybrid+rerank'`（三 checkpoint 各自或择优）
-- [ ] T020 [US2] 跨 run 配对 `--compare ./.locomo-run/037-us1 ./.locomo-run/037-us2`：**GO 门判定** = 总体不劣（non-inferiority margin 预注册，p>0.05 本身不证明不劣）+ temporal 类不劣（修复 008 −9）+ 分类逐题 McNemar + flip
-- [ ] T021 [US2] 泛化否决门：留出对话（conv-48/49/50）+ LongMemEval 500 交叉子集评测，任一不过 → 不得宣称"未见对话/跨数据集"泛化
+- [x] T018 [US2] serve 训练产物（transformers 路线，非 vLLM）：**2026-08-12 冻结**——vLLM cu13↔CUDA 12.8 不兼容（US1 T008）+ vLLM serve 训练产物 bug（merged 分数=base / --enable-lora 冲突），改用 **`tools/server.py`（US1/US2 评测实际 serving，2026-08-12 已提交）** serve merged checkpoint（T017 已在 AutoDL merge 完）；远程验证：`HF_HUB_OFFLINE=1` 启动成功（AutoDL 无 HF 外网），`/v1/rerank` 分数与 transformers 直接算一致（HTTP=score equation 冻结），merged≠base（训练生效，score collapse 信号见 T019）
+- [x] T019 [US2] 跑 US2 locomo-bench 全量配对：`--run-dir /root/autodl-tmp/.locomo-run/037-us2 --retrieval 'hybrid,hybrid+rerank'`（serve merged bce-infonce，与 US1 同协议，2026-08-12 完成）。**结果：run 内配对 −1.1pp（NO-GO）**；temporal +1.6pp 是唯一正向类别（+5 净翻转）；⚠️ hybrid 基线 59.5% vs US1 68.1%（单次 run extraction+answer 噪声 ~8pp，跨 run 不可直接比）——详见 reports/us2-paired.md
+- [x] T020 [US2] **GO 门判定：NO-GO**（run 内配对为准，同 store 自洽）——US2 merged rerank −1.1pp 未转化 e2e，与 US1 base −0.4pp 方向一致（008 铁律下 rerank 第 3 次证伪）；temporal +1.6pp 唯一正向；跨 run `--compare` 因基线漂移（US1/US2 各 2 个 arm results 文件 + hybrid 基线差 8.6pp）不可直接比，两臂增量均为负已足判
+- [x] T021 [US2] 泛化否决门：**不适用**——GO 门已不通过（rerank 增量 −1.1pp），无"泛化"宣称需要否决；heldout（conv-48/49/50）+ LME 500 仅在 GO 门通过时才有意义
 
-**Checkpoint**: US2 GO 门判定完成；显著转正才触发 SC-005 的"是否发布为 opt-in sidecar"决策（**cross-encoder 永不进本地默认栈**）
+**Checkpoint**: **US2 GO 门判定 = NO-GO（2026-08-12）**：merged rerank 未转化 e2e（run 内 −1.1pp），temporal +1.6pp 局部正向但整体不成立；SC-005 opt-in sidecar 决策不触发（cross-encoder 永不进本地默认栈）。**方法论教训**：单次 run 的 extraction+answer 噪声 ~8pp，008 配对需 repeats + store-dir 复用；temporal 继续需针对性配方
 
 ---
 
