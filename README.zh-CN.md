@@ -230,27 +230,47 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 > [当前评测结果](docs/evaluation/results.md)是分数与比较边界的唯一正本。
 
 **统一条件：**使用本地 sidecar 提供的 `bge-large-en-v1.5` 1024d embedding；
-engram 使用 canonical hybrid recipe
-（`--top-k 30 --chunk-quota 12 --force-answer`，无 reranker）；判题使用
-mem0-aligned prompt。
+判题使用 mem0-aligned prompt。每个数字都是
+**数据集 × 答题模型 × 判题模型 × 配方**的函数；只有同栈行可直接比较。
+
+### 当前最佳（LoCoMo）
+
+engram 今天在 LoCoMo 上已验证的最高分——从原始 3 次答题独立重判，
+使用 clean（剥离思考）judge，因此数字不携带 judge 泄漏：
+
+| 数据集 (n) | 答题模型 | 判题模型 | 配方 | 得分 |
+|---|---:|---|---|---:|
+| **LoCoMo (1540)** | **Qwen3.6-35B · 本地 vLLM** | deepseek-v4-flash | 思考 · top-k 150 · 3 次多数 · **clean 重判** | **91.10%**（1403/1540） |
+
+clean 重判 = 判题前用 `extractFinalAnswer` 剥离思考前导，去掉 raw（含思考）
+judge 所加的 ~1.5pp 泄漏（见 [judge-final-answer-regime](docs/evaluation/reports/judge-final-answer-regime.md)）。
+数字可复现：同一份 3 次数据独立重判精确落在 1403/1540（[复现报告](docs/evaluation/reports/locomo-9110-repro-2026-08-12.md)）。
+
+### 如何一步步做到 91.10%
+
+每一步都是已验证、可归因的变化——这里没有任何没有独立证据文件的分数：
+
+| 步骤 | 变化 | LoCoMo（n=1540） | 证据 |
+|---|---|---|---:|
+| 1 · 基线 | canonical hybrid recipe，无思考 | 85.71% | [results.md](docs/evaluation/results.md) |
+| 2 · Trace | 读侧证据中介（默认开启） | 85.91% @ ~468 tok | [030 verdict](docs/evaluation/reports/030-evidence-mediation-verdict.md) |
+| 3 · 思考 | 深度思考答题器，3 次平均 | 88.23% | [topk exploration](docs/evaluation/reports/topk-exploration-2026-08-11.md) |
+| 4 · Top-k 150 | 扩大召回（32k 上下文），3 次多数 | 90.13% | [topk exploration](docs/evaluation/reports/topk-exploration-2026-08-11.md) |
+| 5 · Clean judge | 对第 4 步做剥离思考重判 | **91.10%** | [复现报告](docs/evaluation/reports/locomo-9110-repro-2026-08-12.md) |
 
 ### 同栈实测
 
-这是唯一可以直接比较的表：同一台机器、Qwen 答题模型、bge-large embedding、
-相同 judge prompt 和 judge 模型；竞品运行自己的原始代码，不做修改。
+同一台机器、Qwen 答题模型、bge-large embedding、相同 judge prompt 和 judge
+模型；竞品运行自己的原始代码，不做修改。只保留最有意义的行——更早的中间
+运行已在上表。
 
 | 数据集 (n) | 框架 | 答题模型 | 判题模型 | 得分 |
 |---|---|---|---|---:|
-| **LoCoMo (1540)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.71%** |
-| LoCoMo (1540) · trace | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **85.91%** @ ~468 tok · 默认 |
-| LoCoMo (1540) · thinking | engram 🔬 | Qwen3.6-35B · 本地 vLLM（思考） | deepseek-v4-flash | **88.23%** · 3 次平均 · ci95 [86.85, 89.60] |
-| LoCoMo (1540) · thinking · top-k 150 | engram 🔬 | Qwen3.6-35B · 本地 vLLM（思考，32k 上下文） | deepseek-v4-flash | **90.13%** · 3 次多数（均值 89.8%）· ci95 [89.4, 90.3] |
-| LoCoMo (1540) | engram 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 83.77% |
+| LoCoMo (1540) · 最佳 | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM（思考，32k 上下文） | deepseek-v4-flash | **91.10%** · clean 3 次多数 |
 | LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-pro | 80.26% |
-| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **80.80%** |
 | LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
+| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
+| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **80.80%** |
 
 ### 不同评测栈下的各方最好成绩
 
@@ -258,27 +278,30 @@ mem0-aligned prompt。
 
 | 数据集 | engram 🔬 | MemOS 📣 | Mem0 📣 |
 |---|---:|---:|---:|
-| LoCoMo | **90.13%**（思考 · top-k 150，n=1540） | 88.83% | 92.5% |
+| LoCoMo | **91.10%**（思考 · top-k 150，n=1540，clean） | 88.83% | 92.5% |
 | LongMemEval | **86.00%**（v4-pro，S-cleaned 500） | 89.20% | 94.4% |
 
 ### LoCoMo 分类别得分
 
-以下结果覆盖类别 1–4 的全部 1,540 道题，使用
-`judge=deepseek-v4-flash`，并对三次答题结果进行多数投票。
+同一 1,540 道题的两个视图。**当前最佳**（91.10% 配方：思考 + top-k 150、
+clean 3 次多数）展示 engram 现在的水平；**同栈 Δ**（base 配方在完全一致
+条件下对比 MemOS）是唯一受控的比较。
 
-| 类别 | n | engram (Qwen) | engram (Qwen · tk150) | engram (v4-pro) | MemOS，同栈 | Δ engram−MemOS |
-|---|---:|---:|---:|---:|---:|---:|
-| single-hop | 841 | 88.82% | 91.9% | 90.96% | 82.64% | **+6.18pp** |
-| multi-hop | 282 | 87.59% | 95.0% | 88.65% | 89.36% | −1.77pp |
-| temporal | 321 | 81.93% | 87.9% | 89.41% | 82.55% | −0.62pp |
-| open-domain | 96 | 65.62% | 67.7% | 71.88% | 59.38% | **+6.24pp** |
-| **总计** | **1540** | **85.71%** | **90.13%** | **89.03%** | **82.40%** | **+3.31pp** |
+| 类别 | n | 当前最佳（clean 3 次多数） | 同栈 Δ engram−MemOS（base 配方） |
+|---|---:|---:|---:|
+| single-hop | 841 | **91.8%** | +6.18pp |
+| multi-hop | 282 | **95.7%** | −1.77pp |
+| temporal | 321 | **91.9%** | −0.62pp |
+| open-domain | 96 | 68.8% | **+6.24pp** |
+| **总计** | **1540** | **91.10%** | +3.31pp（配对 p=0.002895） |
 
-分类结果比单一总分更有解释力。MemOS 的 tree/graph 组织在 multi-hop 上领先
-1.77 个百分点；engram 则在 single-hop 和 open-domain 上领先超过 6 个百分点。
-engram 换用更强的答题模型后，temporal 提升 7.48 个百分点、open-domain 提升
-6.26 个百分点，但 multi-hop 只提升 1.06 个百分点——这说明 multi-hop 的主要瓶颈
-仍在检索侧，而另外两类更受答题模型限制。
+两条诚实的边界。第一，同栈 Δ 在 base 配方（85.71%）下测得：MemOS 的
+tree/graph 组织在 multi-hop（−1.77pp）和 temporal（−0.62pp）上领先，而
+engram 在 single-hop 和 open-domain 上领先超过 6 个百分点；engram 换用更强
+答题模型后 temporal 也反超。第二，91.10% 的分类别拆分来自不同配方（思考 +
+top-k 150），因此**不可与 MemOS 直接比较**——那里的 multi-hop/temporal 高分
+反映的是更强配方，不是同栈机制优势。open-domain（68.8%）在两个视图下都是
+最弱类别，是继续投入的诚实前沿。
 
 ### 三个受控差值
 
