@@ -560,8 +560,39 @@ func judgeSystemPromptFor(mode string) string {
 	return judgeSystemPrompt
 }
 
+// thinkingCloseDelims are model-agnostic closing markers for a reasoning
+// preamble. We strip everything up to and including the LAST occurrence and
+// grade what follows. A completion with no thinking structure passes through
+// unchanged, so this is an identity transform for non-thinking models.
+var thinkingCloseDelims = []string{"</thinking>", "</think>", "[/thinking]", "[/reasoning]"}
+
+// extractFinalAnswer returns the model's final answer from a completion that
+// may embed a reasoning preamble. Judge consumers should grade the answer,
+// not the thinking: thinking-capable models (Qwen-style "<think>…</think>",
+// DeepSeek reasoning) interleave candidate values and self-corrections in the
+// preamble, and feeding that to the judge leaks them into the verdict and
+// makes "pred unchanged, verdict flipped" the dominant judge noise. Non-thinking
+// completions (no closing marker) are returned untouched.
+func extractFinalAnswer(pred string) string {
+	best, cut := -1, 0
+	for _, d := range thinkingCloseDelims {
+		if i := strings.LastIndex(pred, d); i > best {
+			best, cut = i, i+len(d)
+		}
+	}
+	if best < 0 {
+		return strings.TrimSpace(pred)
+	}
+	after := strings.TrimSpace(pred[cut:])
+	// Some chat templates append a stray "response" label after the closing tag.
+	if len(after) >= len("response") && strings.EqualFold(after[:len("response")], "response") {
+		after = strings.TrimLeft(after[len("response"):], " :\n\t")
+	}
+	return strings.TrimSpace(after)
+}
+
 func buildJudgePrompt(question, gold, predicted string) string {
-	return fmt.Sprintf("QUESTION: %s\n\nGOLD ANSWER: %s\n\nPREDICTED ANSWER: %s\n\nReturn the JSON verdict now.", question, gold, predicted)
+	return fmt.Sprintf("QUESTION: %s\n\nGOLD ANSWER: %s\n\nPREDICTED ANSWER: %s\n\nReturn the JSON verdict now.", question, gold, extractFinalAnswer(predicted))
 }
 
 // parseJudgeVerdict extracts {"correct": bool} tolerantly.
