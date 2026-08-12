@@ -62,28 +62,34 @@ done
 ## 场景 4：US1 现成模型基准（冻结 run，与训练并行）
 
 ```bash
-# vLLM 版本与命令先实测冻结（pooling runner + HF overrides + Jinja 模板；vllm#19229 坑）
+# **serving（2026-08-12 冻结，替代 vLLM）**：vLLM cu13↔CUDA 12.8 不兼容 + serve 训练产物
+# 分数=base bug → 用 tools/server.py（transformers + FastAPI 聚合 /v1/rerank + /v1/embeddings）
+# serve base 或 merged 训练产物，仅改 --model 路径。启动前 export HF_HUB_OFFLINE=1
+# （AutoDL 无 HF 外网；bge-small 需本地缓存）。
+python3 tools/server.py --model <model_dir> --port 8000
 # rerank 与 embedding 共享 EMBED_BASE_URL（不存在 EMBED_RERANK_BASE_URL）；多臂用 --retrieval，无 --arm
 EMBED_RERANK_MODEL=Qwen/Qwen3-Reranker-0.6B \
-EMBED_BASE_URL=http://<vllm>:8000/v1 \
+EMBED_BASE_URL=http://<host>:8000/v1 \
 setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
     --run-dir ./.locomo-run/037-us1 --retrieval "hybrid,hybrid+rerank" \
     ... >us1.log 2>&1; echo $? >us1.exit' </dev/null >/dev/null 2>&1 & disown
 # preflight：rerank 请求成功/失败计数，零成功 → INVALID（禁止静默回退后出报告）
 ```
 
-**预期**：配对表（总体 + 四类别 + McNemar + flip + paired CI）；与 008 bge-reranker-v2-m3 记录同口径可比；temporal 单独行（确认通用模型是否依旧被害）；**全量配对含训练对话的污染标注**。
+**预期**：配对表（总体 + 四类别 + McNemar + flip + paired CI）；与 008 bge-reranker-v2-m3 记录同口径可比；temporal 单独行（确认通用模型是否依旧被害）；**全量配对含训练对话的污染标注**。US1 实测：base rerank −0.4pp（NO-GO，multi-hop 被害 −4.3pp）。
 
 ## 场景 5：US2 训练产物端到端配对（GO 门）
 
 ```bash
-# vLLM 换 serve 训练产物（合并后模型）；同场景 4 协议分别冻结跑 US2
+# tools/server.py 换 serve merged 训练产物（ckpts/bce-infonce/merged）；同场景 4 协议跑 US2
 EMBED_RERANK_MODEL=engram-memory-reranker-0.6b-v1 \
-EMBED_BASE_URL=http://<vllm>:8000/v1 \
+EMBED_BASE_URL=http://<host>:8000/v1 \
 setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
     --run-dir ./.locomo-run/037-us2 --retrieval "hybrid,hybrid+rerank" \
     ... >us2.log 2>&1; echo $? >us2.exit' </dev/null >/dev/null 2>&1 & disown
 # 跨 run 逐题配对：go run ./cmd/locomo-bench --compare ./.locomo-run/037-us1 ./.locomo-run/037-us2
+#   注意：--compare 要求 run-dir 只有 1 个 arm results 文件（US1/US2 各含 hybrid +
+#   hybrid+rerank 两个 → ambiguous）；先复制单臂到独立目录再 compare
 ```
 
 **GO 门判定（008 铁律）**：
@@ -91,6 +97,10 @@ setsid bash -c 'go run ./cmd/locomo-bench --data testdata/locomo/locomo.json \
 - **temporal 类不劣**（修复 008 −9）；
 - **heldout 对话 + LME 500 泛化否决门**：任一不过 → 不得宣称泛化能力；
 - 显著转正（p<0.05、幅度>噪声标尺）→ 触发 SC-005 的"是否发布为 opt-in sidecar"决策（cross-encoder 永不进本地默认栈）。
+
+**US2 实测（2026-08-12）：NO-GO**——merged rerank run 内 −1.1pp（未转化）；temporal +1.6pp 唯一正向。
+⚠️ **方法警告**：单次 run 的 extraction+answer 噪声 ~8.6pp（US1/US2 hybrid 基线 68.1 vs 59.5%），
+跨 run 单臂对比不可靠；**判定以 run 内配对为准，且需 repeats ≥3 + `--store-dir` 复用**。
 
 ## 常见失败与排查
 

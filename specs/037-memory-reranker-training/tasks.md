@@ -100,9 +100,9 @@
 
 **Purpose**: 硬门验证 + 全场景复跑 + 结论落档
 
-- [ ] T025 引擎零改动验证：`git diff --name-only -- memory embedding provider store internal` 为空 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿（parity/isolation 测试实际断言）
-- [ ] T026 quickstart.md 全场景实跑：场景 1（数据构建校验）→ 场景 2（smoke）→ 场景 3（全量训练）→ 场景 4/5（US1/US2 配对），验证命令与实际 flag/env 一致
-- [ ] T027 verdict 落 tracked docs：`docs/evaluation/reports/037-memory-reranker-verdict.md`（GO 门判定、三 checkpoint 消融结果、temporal 表现、成本账、泛化否决门；失败则按 008 收口为"第 N 次证伪"）
+- [x] T025 引擎零改动验证：`git diff afe1cd9^..aae45b4 -- memory embedding provider store internal` 为空 + `CGO_ENABLED=0 go test -count=1 ./...` 全绿（exit=0，0 FAIL）
+- [x] T026 quickstart.md 全场景实跑：场景 1（数据构建校验）→ 2（smoke）→ 3（全量训练 bce-infonce）→ 4（US1 base 配对）→ 5（US2 merged 配对）均实跑；quickstart 已更新场景 4/5 为 transformers 路线（vLLM 弃用）并加 --compare ambiguous 注意
+- [x] T027 verdict 落 tracked docs：`docs/evaluation/reports/037-memory-reranker-verdict.md`——**NO-GO（008 铁律 run 内配对）**，rerank e2e 第 3 次证伪（008 bge → US1 base → US2 trained）；temporal +1.6pp 唯一正向；成本 ~$20；泛化否决门不适用；方法警告：单次 run 噪声 ~8.6pp
 
 ---
 
