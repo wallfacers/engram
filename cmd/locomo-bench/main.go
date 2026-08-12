@@ -144,6 +144,7 @@ type options struct {
 	imageCaptions             bool
 	temporalAnswerPrompt      bool
 	temporalDateScaffold      bool
+	lmeTypedPrompts           bool
 	iris                      bool
 	irisDepth                 int
 	judgeMem0Aligned          bool
@@ -323,6 +324,11 @@ type options struct {
 	notebookAdvise  bool    // --notebook-advise: draft "how to solve this class" advice via the answerer LLM
 	notebookDir     string  // --notebook-dir: output dir for notebook.jsonl / mistakes-*.md / index.md (default ./eval-notebook)
 	notebookFactTau float64 // --notebook-fact-tau: notebook attribution fact-coverage threshold (lower than factCoverageTau: the notebook must flag "gold plausibly in context" rather than require strict lexical proof). Does NOT affect retrieval or the formal protocol.
+
+	// --counter-refine (L2): after the first answer, verify the draft against
+	// counter-evidence selected from the retrieved hits and optionally REVISE.
+	// Default off → results stay byte-identical (CounterRefine arXiv:2603.16091).
+	counterRefine bool // --counter-refine: answer-conditioned counter-evidence revise pass
 }
 
 func main() {
@@ -445,6 +451,7 @@ func run() error {
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
+	flag.BoolVar(&opt.lmeTypedPrompts, "lme-typed-prompts", false, "LongMemEval: map question_type to the matching LoCoMo contract (multi-session→multi-hop, temporal-reasoning→temporal); default off, eval-config change")
 	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
 	flag.BoolVar(&opt.iris, "iris", false, "enable IRIS evidence-gap iterative retrieval for category-2 temporal questions (sufficiency-driven query refinement; fixed MemOS-aligned budget; harness-only, engine untouched)")
 	flag.IntVar(&opt.irisDepth, "iris-depth", 3, "maximum IRIS sufficiency-driven retrieval rounds (including the initial retrieval)")
@@ -485,6 +492,7 @@ func run() error {
 	flag.BoolVar(&opt.notebook, "notebook", false, "after the run, capture per-question gold attribution (gold_resolved/candidate_covered/bundle_covered) + accumulate mistakes into the notebook dir (default ./eval-notebook); off = results byte-identical (SC-004)")
 	flag.BoolVar(&opt.notebookAdvise, "notebook-advise", false, "with --notebook, ask the answerer LLM to draft 'how to solve this class next time' advice for this run's mistakes (writes advice-<run_id>.md)")
 	flag.StringVar(&opt.notebookDir, "notebook-dir", "", "notebook output dir (default ./eval-notebook)")
+	flag.BoolVar(&opt.counterRefine, "counter-refine", false, "L2: after the first answer, verify the draft against counter-evidence selected from the retrieved hits and REVISE if better supported (default off; off = results byte-identical)")
 	flag.Float64Var(&opt.notebookFactTau, "notebook-fact-tau", defaultNotebookFactTau, "notebook attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it. Lower than --fact-coverage-tau so the notebook flags 'gold plausibly in context' instead of requiring strict lexical proof; does NOT touch retrieval or the formal protocol")
 	flag.BoolVar(&opt.traceMultiEvidence, "trace-multi-evidence", false, "032: relax the trace sidecar to intent-breadth evidence (fact_lookup/preference_recall → 1-2, multi_hop/temporal_state_tracking → 3-6 statements) instead of the legacy single-evidence prompt; off = legacy prompt (SC-004)")
 	flag.IntVar(&opt.traceEvidenceCap, "trace-evidence-cap", 0, "with --trace-multi-evidence, hard cap on the number of evidence statements kept (0 = no cap)")
@@ -2669,7 +2677,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	// trace) from answerer_miss (in context, still wrong). Defaults to the final
 	// hit set; assembly/trace override it below.
 	contextEvidence := hits
-	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
 	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)
@@ -2814,6 +2822,19 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 				answerDiagnostics = retryDiagnostics
 			}
 			sweepUsed = sweepUsed || retryDiagnostics.SweepUsed || hasClusterSweepHit(retryHits)
+		}
+	}
+	// --counter-refine (L2): verify the draft against candidate-internal
+	// counter-evidence and optionally REVISE before judging. Default off →
+	// results byte-identical (CounterRefine, arXiv:2603.16091).
+	if opt.counterRefine && !hardGated && len(answerHits) > 0 {
+		revised, reviseUsage, rerr := counterRefineAnswer(ctx, answerCall, opt, qa, predicted, answerHits)
+		if rerr == nil {
+			predicted = revised
+			usage.InputTokens += reviseUsage.InputTokens
+			usage.OutputTokens += reviseUsage.OutputTokens
+		} else {
+			logger.Warn("counter-refine call failed; keeping draft", "err", rerr)
 		}
 	}
 	if hardGated {
@@ -3011,6 +3032,115 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 		return "", usage, nil, diagnostics, false
 	}
 	return retry, usage, hits, diagnostics, true
+}
+
+// counterRefineAnswer verifies the draft answer a0 against candidate-internal
+// counter-evidence (no second retrieval — the evidence is selected from the
+// hits already retrieved) and returns the REVISED answer, or a0 unchanged when
+// the revise call fails, returns empty, or bails out (L2, CounterRefine).
+func counterRefineAnswer(ctx context.Context, answerCall usageModelCaller, opt options, qa locomoQA, a0 string, hits []memory.Result) (string, provider.Usage, error) {
+	counter := selectCounterEvidence(a0, qa.Question, hits, opt.answerInputTokenCap)
+	if len(counter) == 0 {
+		return a0, provider.Usage{}, nil
+	}
+	user := counterRefineUserPrompt(qa, a0, counter, opt.temporalDateScaffold)
+	revised, usage, err := answerCall(ctx, counterRefineSystemPrompt, user)
+	if err != nil {
+		return a0, usage, err
+	}
+	revised = strings.TrimSpace(revised)
+	if revised == "" || isIDK(revised) {
+		return a0, usage, nil
+	}
+	return revised, usage, nil
+}
+
+// counterRefineUserPrompt assembles the REVISE input: the answer context the
+// model already saw (rendered counter-evidence) plus the explicit draft, then
+// a KEEP/REVISE instruction. The counter-evidence is a hit subset, so this stays
+// within the answer-input budget used for the first answer.
+func counterRefineUserPrompt(qa locomoQA, draft string, counter []memory.Result, scaffold bool) string {
+	ctx := buildAnswerContextPrompt(qa.Question, counter, qa.QuestionDate, qa.Category, scaffold)
+	return fmt.Sprintf("%s\nDRAFT ANSWER: %s\n\nVerify the draft. If the counter-evidence contradicts it or supports a different correct answer, REVISE; otherwise KEEP. Output ONLY the final answer:", ctx, draft)
+}
+
+// counterRefineKeyChars keeps draft terms that are discriminative enough to
+// match candidate evidence: 4+ letters and not a stop/generic word.
+var counterRefineStop = map[string]bool{
+	"that": true, "with": true, "have": true, "this": true, "from": true, "they": true,
+	"there": true, "would": true, "about": true, "what": true, "were": true, "when": true,
+	"which": true, "their": true, "been": true, "will": true, "more": true, "into": true,
+	"your": true, "them": true, "only": true, "some": true, "then": true, "than": true,
+	"after": true, "before": true, "because": true, "could": true, "should": true,
+}
+
+// counterRefineKeys extracts draft terms used to select candidate-internal
+// counter-evidence. A draft like "Fixing cars" yields {"fixing","cars"}; an
+// IDK bail-out yields none and selects the hit head instead.
+func counterRefineKeys(draft string) []string {
+	var keys []string
+	for _, f := range strings.Fields(strings.ToLower(draft)) {
+		t := strings.Trim(f, ",.:;\"'()[]-")
+		if len(t) < 4 || counterRefineStop[t] {
+			continue
+		}
+		keys = append(keys, t)
+	}
+	return keys
+}
+
+// selectCounterEvidence chooses candidate-internal counter-evidence from the
+// retrieved hits: memories that mention a draft key-term first (the relevant
+// but possibly-ignored candidates), falling back to the head of the hits when
+// the draft has no discriminative terms. Order is stable (original rank);
+// capped by a rough char budget derived from the answer-input token cap.
+func selectCounterEvidence(draft, question string, hits []memory.Result, cap int) []memory.Result {
+	if len(hits) == 0 {
+		return nil
+	}
+	keys := counterRefineKeys(draft)
+	charBudget := 0
+	if cap > 0 {
+		charBudget = cap * 3 // token→char rough budget, keep the REVISE prompt small
+	}
+	take := func(from []memory.Result) []memory.Result {
+		out := []memory.Result{}
+		chars := 0
+		for _, h := range from {
+			chars += len(h.Content) + len(h.SourceSessionID)
+			if charBudget > 0 && chars > charBudget {
+				break
+			}
+			out = append(out, h)
+		}
+		return out
+	}
+	if len(keys) == 0 {
+		return take(hits)
+	}
+	var matched, rest []memory.Result
+	for _, h := range hits {
+		if counterRefineHit(keys, h.Content) {
+			matched = append(matched, h)
+		} else {
+			rest = append(rest, h)
+		}
+	}
+	if len(matched) == 0 {
+		return take(rest)
+	}
+	return take(matched)
+}
+
+// counterRefineHit reports whether the memory content mentions any draft key.
+func counterRefineHit(keys []string, content string) bool {
+	low := strings.ToLower(content)
+	for _, k := range keys {
+		if strings.Contains(low, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // toMemories converts retrieval hits into the prompt-facing form.

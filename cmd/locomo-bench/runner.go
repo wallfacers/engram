@@ -292,15 +292,33 @@ func answerPromptForOptions(category int, forceAnswer bool) string {
 }
 
 func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswer bool) string {
-	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false)
+	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false, false)
 }
 
 // answerPromptForRegime selects the answer system prompt. The abstention regime
 // takes precedence over category- and temporal-specific answerable prompts: it
 // is a distinct scoring convention (Strike 3), not a per-category refinement.
-func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain bool) string {
+// lmeTyped opts LongMemEval question_types (which map to category 8=multi-session,
+// 9=temporal-reasoning, 10=knowledge-update, 12=single-session-preference) into
+// the LoCoMo-validated category contracts they match, instead of the generic
+// force/default prompt. Default off; eval-config change, declared separately.
+func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, lmeTyped bool) string {
 	if abstain {
 		return abstainAnswerPrompt
+	}
+	if lmeTyped {
+		switch category {
+		case 8: // LME multi-session（聚合/计数/比较）→ multi-hop 契约
+			if forceAnswer {
+				return forceMultiHopAnswerPrompt
+			}
+			return multiHopAnswerPrompt
+		case 9: // LME temporal-reasoning → temporal 契约
+			if forceAnswer {
+				return forceTemporalAnswerPrompt
+			}
+			return temporalAnswerPrompt
+		}
 	}
 	if temporalAnswer && category == 2 {
 		if forceAnswer {
@@ -331,6 +349,18 @@ func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain bo
 // queryRewriteSystemPrompt turns a failed question into an alternative retrieval
 // query (EverMemOS-style second-round rewriting, triggered only on IDK).
 const queryRewriteSystemPrompt = `A memory search for the following question returned nothing relevant. Write ONE alternative search query for the same information need: use different words — synonyms, the underlying event or object, likely entity names — not a rephrasing of the question. Output ONLY the query text, a short keyword-style phrase, no quotes, no explanation.`
+
+// counterRefineSystemPrompt drives the L2 answer-conditioned REVISE pass
+// (CounterRefine, arXiv:2603.16091). Unlike a fresh re-selection it makes the
+// model VERIFY its draft against counter-evidence: the key mechanism the flash
+// cohort showed can change a wrong choice that re-ordering candidates cannot.
+const counterRefineSystemPrompt = `You are verifying a draft answer against counter-evidence for a question about a conversation. The draft may be wrong.
+Rules:
+- Read the retrieved counter-evidence memories carefully.
+- If the counter-evidence supports a DIFFERENT, better answer than the draft, REVISE to the best-supported answer.
+- If the counter-evidence supports the draft or is inconclusive, KEEP the draft.
+- Output ONLY the final answer — the shortest phrase that fully answers the question. No explanation, no restating the question.
+- Do not invent facts not in the memories. Make your best supported inference from the evidence.`
 
 // isIDK reports whether a predicted answer is an "I don't know" bail-out.
 func isIDK(predicted string) bool {

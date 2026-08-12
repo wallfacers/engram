@@ -347,7 +347,7 @@ func validateFormalLegacyMechanismOptions(opt options) error {
 // --representation, but the frozen manifest difference is the episode_cluster
 // key alone). They are deliberately NOT part of formalTreatmentForOptions — a
 // density flag never replaces the legacy B1 control, it extends it.
-var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution"}
+var densityMechanismKeys = []string{"write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution", "counter_refine"}
 
 // densityMechanismFlagsForOptions returns the additive mechanism flags derived
 // from the CLI. Absent flags are omitted so a run with neither mechanism set
@@ -372,6 +372,9 @@ func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	}
 	if opt.temporalResolution {
 		flags["temporal_resolution"] = true
+	}
+	if opt.counterRefine {
+		flags["counter_refine"] = true
 	}
 	return flags
 }
@@ -572,7 +575,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	}
 	for name := range flags {
 		switch name {
-		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution":
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution", "counter_refine":
 			continue
 		default:
 			return false
@@ -731,7 +734,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -840,7 +843,7 @@ func prepareFrozenFormalB1Answer(ctx context.Context, protocol evalProtocol, opt
 		Answer:         evalFormalAnswerRun{RunIndex: runIndex},
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -1540,10 +1543,10 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 
 func formalAnswerPromptDigest(opt options) string {
 	return evalJSONDigest([]string{
-		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
-		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
 		currentDateRule,
 		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
 	})

@@ -336,7 +336,7 @@ func validateActiveFormalBundleReceipt(
 	}
 
 	system := withCurrentDateRule(
-		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt),
+		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts),
 		qa.QuestionDate,
 	)
 	if contextRecoverable && len(results) == len(bundle.Items) {
