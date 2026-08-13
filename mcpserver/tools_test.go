@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/pipeline"
 )
 
@@ -23,6 +24,9 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 	t.Cleanup(func() { _ = registry.Close() })
 	server := NewServer(registry)
 	clientSession, serverSession := connectInMemory(t, ctx, server)
+	if got := clientSession.InitializeResult().Instructions; got != memoryEvidenceGuidanceInstructions {
+		t.Fatalf("initialize instructions = %q, want portable evidence guidance", got)
+	}
 
 	tools, err := clientSession.ListTools(ctx, nil)
 	if err != nil {
@@ -67,6 +71,9 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 		"query": "dark mode",
 	})
 	searchOutput := structuredMap(t, search)
+	if searchOutput["scope"] != "ranked_subset" || searchOutput["limit"] != float64(8) || searchOutput["returned"] != float64(1) {
+		t.Fatalf("unexpected bounded search envelope: %#v", searchOutput)
+	}
 	results, ok := searchOutput["results"].([]any)
 	if !ok || len(results) != 1 {
 		t.Fatalf("unexpected search results: %#v", searchOutput)
@@ -74,6 +81,14 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 	firstResult := results[0].(map[string]any)
 	if firstResult["name"] != "preferences" || firstResult["content"] != "The user prefers dark mode." {
 		t.Fatalf("unexpected search hit: %#v", firstResult)
+	}
+	if firstResult["id"] == "" {
+		t.Fatalf("search hit lacks stable entry id: %#v", firstResult)
+	}
+	for _, field := range []string{"projection_id", "projection_kind", "source_session_id"} {
+		if _, ok := firstResult[field]; !ok {
+			t.Fatalf("search hit lacks additive provenance field %q: %#v", field, firstResult)
+		}
 	}
 	degraded, ok := searchOutput["degraded"].(map[string]any)
 	if !ok || degraded["semantic"] != true || degraded["reason"] != offlineDegradedReason {
@@ -106,6 +121,100 @@ func TestMemoryToolsRoundTripOverInMemoryMCP(t *testing.T) {
 	}
 
 	_ = serverSession
+}
+
+func TestSearchResultOutputPreservesPublicProvenance(t *testing.T) {
+	eventDate := time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC)
+	createdAt := time.Date(2026, time.August, 13, 9, 30, 0, 0, time.UTC)
+	got := toSearchResultOutput(memory.Result{
+		ID:              "entry-7",
+		ProjectionID:    "projection-9",
+		ProjectionKind:  memory.ProjectionSemanticEpisode,
+		Name:            "travel-plan",
+		Trigger:         "next trip",
+		Content:         "The user plans to travel by train.",
+		EventDate:       &eventDate,
+		CreatedAt:       createdAt,
+		SourceSessionID: "session-3",
+		Score:           0.75,
+	})
+
+	if got.ID != "entry-7" || got.ProjectionID != "projection-9" || got.ProjectionKind != "semantic_episode" || got.SourceSessionID != "session-3" {
+		t.Fatalf("public provenance was not preserved: %#v", got)
+	}
+	if got.Name != "travel-plan" || got.Content != "The user plans to travel by train." || got.EventDate != &eventDate || got.CreatedAt != createdAt || got.Score != 0.75 {
+		t.Fatalf("existing result fields changed: %#v", got)
+	}
+}
+
+func TestToolAnnotationsDescribeSideEffects(t *testing.T) {
+	ctx := context.Background()
+	registry, err := NewRegistry(ctx, RegistryConfig{
+		DataDir: t.TempDir(),
+		LLMCaller: pipeline.ModelCaller(func(context.Context, string, string) (string, error) {
+			return `{"facts":[]}`, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	client, _ := connectInMemory(t, ctx, NewServer(registry))
+	listed, err := client.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type profile struct {
+		readOnly, destructive, idempotent, openWorld bool
+	}
+	want := map[string]profile{
+		"memory_write":              {false, true, false, false},
+		"memory_search":             {true, false, false, false},
+		"memory_list":               {true, false, false, false},
+		"memory_get":                {true, false, false, false},
+		"memory_delete":             {false, true, true, false},
+		"memory_ingest_v2":          {false, false, false, true},
+		"memory_evidence_get":       {true, false, false, false},
+		"memory_evidence_tombstone": {false, true, false, false},
+		"memory_evidence_restore":   {false, false, false, false},
+		"memory_evidence_purge":     {false, true, false, false},
+		"memory_ingest":             {false, false, false, true},
+	}
+	for _, tool := range listed.Tools {
+		profile, ok := want[tool.Name]
+		if !ok {
+			t.Fatalf("unexpected tool %q", tool.Name)
+		}
+		if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || tool.Annotations.OpenWorldHint == nil {
+			t.Errorf("tool %q lacks explicit annotations: %#v", tool.Name, tool.Annotations)
+			continue
+		}
+		got := profileFromAnnotations(tool.Annotations)
+		if got != profile {
+			t.Errorf("tool %q annotations = %#v, want %#v", tool.Name, got, profile)
+		}
+		if tool.Description == "" {
+			t.Errorf("tool %q lacks a description", tool.Name)
+		}
+		delete(want, tool.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing annotation profiles: %#v", want)
+	}
+}
+
+func profileFromAnnotations(annotations *mcp.ToolAnnotations) struct {
+	readOnly, destructive, idempotent, openWorld bool
+} {
+	return struct {
+		readOnly, destructive, idempotent, openWorld bool
+	}{
+		readOnly:    annotations.ReadOnlyHint,
+		destructive: *annotations.DestructiveHint,
+		idempotent:  annotations.IdempotentHint,
+		openWorld:   *annotations.OpenWorldHint,
+	}
 }
 
 // TestToolsListExposesFullContractWithLLM is the tools/list smoke test for the

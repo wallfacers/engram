@@ -43,6 +43,9 @@ func TestMemorySearchMatchesDirectRetrieverOrder(t *testing.T) {
 		"limit": 8,
 	})
 	output := structuredMap(t, result)
+	if output["scope"] != "ranked_subset" || output["limit"] != float64(8) || output["returned"] != float64(len(want)) {
+		t.Fatalf("search envelope does not describe the direct result set: %#v", output)
+	}
 	gotResults, ok := output["results"].([]any)
 	if !ok {
 		t.Fatalf("search output has no results array: %#v", output)
@@ -52,8 +55,14 @@ func TestMemorySearchMatchesDirectRetrieverOrder(t *testing.T) {
 	}
 	for i, direct := range want {
 		got := gotResults[i].(map[string]any)
-		if got["name"] != direct.Name {
-			t.Fatalf("result %d name = %v, direct = %q; full output %#v", i, got["name"], direct.Name, output)
+		if got["id"] != direct.ID || got["name"] != direct.Name || got["content"] != direct.Content || got["trigger"] != direct.Trigger {
+			t.Fatalf("result %d does not preserve direct identity/content: got %#v, direct %#v", i, got, direct)
+		}
+		if got["projection_id"] != direct.ProjectionID || got["projection_kind"] != string(direct.ProjectionKind) || got["source_session_id"] != direct.SourceSessionID {
+			t.Fatalf("result %d does not preserve direct provenance: got %#v, direct %#v", i, got, direct)
+		}
+		if got["score"] != direct.Score {
+			t.Fatalf("result %d score = %v, direct = %v", i, got["score"], direct.Score)
 		}
 	}
 }

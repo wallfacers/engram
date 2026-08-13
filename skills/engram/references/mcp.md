@@ -9,7 +9,7 @@ actually exposes the required engram tool. The authoritative names are in
 | Tool | Required input | Optional input | Result evidence |
 |---|---|---|---|
 | `memory_write` | `name`, `content` | `namespace`, `trigger`, `category`, `pinned` | `name`, `written:true` |
-| `memory_search` | `query` | `namespace`, positive `limit` (default 8) | `results`, `degraded.semantic`, `degraded.reason` |
+| `memory_search` | `query` | `namespace`, positive `limit` (default 8) | `scope`, `limit`, `returned`, ranked `results`, degradation |
 | `memory_list` | — | `namespace` | `entries` |
 | `memory_get` | `name` | `namespace` | `entry`, or a tool error when absent |
 | `memory_delete` | `name` | `namespace` | `deleted:true` or `deleted:false` |
@@ -31,6 +31,42 @@ memory must stay pinned. Do not send likely credentials or secrets in `content`
 or `trigger`. Content over the adapter budget (1,200 Unicode code points) and a
 trigger over 120 single-line code points remain rejected; preserve that error
 rather than truncating it.
+
+## Search evidence semantics
+
+Every successful `memory_search` response includes:
+
+```json
+{
+  "scope": "ranked_subset",
+  "limit": 8,
+  "returned": 1,
+  "results": [
+    {
+      "id": "...",
+      "projection_id": "...",
+      "projection_kind": "...",
+      "source_session_id": "...",
+      "name": "...",
+      "content": "...",
+      "event_date": null,
+      "created_at": "..."
+    }
+  ],
+  "degraded": {"semantic": true, "reason": "..."}
+}
+```
+
+`limit` is the effective top-k bound and `returned` equals the number of result
+objects. `scope:"ranked_subset"` means the response does not report an exhaustive
+match count. Reaching the limit, returning fewer rows, returning no rows, or
+reporting semantic degradation does not prove a requested fact absent.
+
+`id` is the stable entry ID. Projection and source-session fields are empty when
+the engine result has no such public provenance. `event_date` is an event-time
+hint when present; `created_at` is entry storage time and must not be silently
+used as the event date. Read [the evidence guidance](evidence-guidance.md) before
+using these results to answer a user.
 
 ## Lossless and conditional ingest
 
@@ -69,6 +105,11 @@ returned structural fact, but do not probe engine-internal signal failures.
 An empty search/list, `memory_get` tool error, `deleted:false`, validation
 error, unavailable Evidence, or adapter error stays empty, not-found, blocked,
 or failed—not success.
+
+MCP tool annotations describe read-only, destructive, idempotent, and open-world
+behavior for planning. They are hints, not authorization. Ingest tools may be
+marked open-world because optional extraction can call a configured replaceable
+model endpoint; this does not make any endpoint a server startup requirement.
 
 These MCP tools do **not** exist and must never be called:
 

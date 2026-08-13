@@ -39,18 +39,25 @@ type memorySearchInput struct {
 }
 
 type memorySearchOutput struct {
+	Scope    string               `json:"scope"`
+	Limit    int                  `json:"limit"`
+	Returned int                  `json:"returned"`
 	Results  []searchResultOutput `json:"results"`
 	Degraded degradedOutput       `json:"degraded"`
 }
 
 type searchResultOutput struct {
-	Name      string     `json:"name"`
-	Trigger   string     `json:"trigger"`
-	Snippet   string     `json:"snippet"`
-	Content   string     `json:"content"`
-	Score     float64    `json:"score"`
-	EventDate *time.Time `json:"event_date"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID              string     `json:"id"`
+	ProjectionID    string     `json:"projection_id"`
+	ProjectionKind  string     `json:"projection_kind"`
+	SourceSessionID string     `json:"source_session_id"`
+	Name            string     `json:"name"`
+	Trigger         string     `json:"trigger"`
+	Snippet         string     `json:"snippet"`
+	Content         string     `json:"content"`
+	Score           float64    `json:"score"`
+	EventDate       *time.Time `json:"event_date"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 type degradedOutput struct {
@@ -251,7 +258,10 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, memorySearchOutput{}, err
 	}
 	output := memorySearchOutput{
-		Results: make([]searchResultOutput, 0, len(results)),
+		Scope:    "ranked_subset",
+		Limit:    limit,
+		Returned: len(results),
+		Results:  make([]searchResultOutput, 0, len(results)),
 		Degraded: degradedOutput{
 			Semantic: a.registry.embClient == nil,
 		},
@@ -260,17 +270,25 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 		output.Degraded.Reason = offlineDegradedReason
 	}
 	for _, result := range results {
-		output.Results = append(output.Results, searchResultOutput{
-			Name:      result.Name,
-			Trigger:   result.Trigger,
-			Snippet:   makeSnippet(result.Content),
-			Content:   result.Content,
-			Score:     result.Score,
-			EventDate: result.EventDate,
-			CreatedAt: result.CreatedAt,
-		})
+		output.Results = append(output.Results, toSearchResultOutput(result))
 	}
 	return nil, output, nil
+}
+
+func toSearchResultOutput(result memory.Result) searchResultOutput {
+	return searchResultOutput{
+		ID:              result.ID,
+		ProjectionID:    result.ProjectionID,
+		ProjectionKind:  string(result.ProjectionKind),
+		SourceSessionID: result.SourceSessionID,
+		Name:            result.Name,
+		Trigger:         result.Trigger,
+		Snippet:         makeSnippet(result.Content),
+		Content:         result.Content,
+		Score:           result.Score,
+		EventDate:       result.EventDate,
+		CreatedAt:       result.CreatedAt,
+	}
 }
 
 func (a *toolAdapter) memoryList(ctx context.Context, _ *mcp.CallToolRequest, input memoryListInput) (*mcp.CallToolResult, memoryListOutput, error) {

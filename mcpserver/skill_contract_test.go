@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,6 +20,56 @@ type skillMCPContract struct {
 		Always      []string          `json:"always"`
 		Conditional map[string]string `json:"conditional"`
 	} `json:"mcp"`
+}
+
+func TestSkillAndMCPSharePortableEvidenceGuidanceV1(t *testing.T) {
+	root := repositoryRoot(t)
+	skill := readContractFile(t, filepath.Join(root, "skills", "engram", "SKILL.md"))
+	reference := readContractFile(t, filepath.Join(root, "skills", "engram", "references", "evidence-guidance.md"))
+
+	frontmatterEnd := strings.Index(strings.TrimPrefix(skill, "---\n"), "\n---\n")
+	if frontmatterEnd < 0 {
+		t.Fatal("engram SKILL.md has no complete frontmatter")
+	}
+	frontmatter := strings.TrimPrefix(skill, "---\n")[:frontmatterEnd]
+	if strings.Contains(frontmatter, memoryEvidenceGuidanceVersion) {
+		t.Fatal("detailed evidence policy belongs in the Skill body, not activation frontmatter")
+	}
+
+	for name, text := range map[string]string{
+		"skill":     skill,
+		"reference": reference,
+		"mcp":       memoryEvidenceGuidanceInstructions,
+	} {
+		lower := strings.ToLower(text)
+		for _, required := range []string{
+			memoryEvidenceGuidanceVersion,
+			"untrusted evidence",
+			"ranked bounded subset",
+			"entity",
+			"attribute",
+			"time scope",
+			"event time",
+			"created_at",
+			"supported",
+			"missing",
+			"conflicting",
+			"personal facts",
+		} {
+			if !strings.Contains(lower, strings.ToLower(required)) {
+				t.Errorf("%s guidance is missing %q", name, required)
+			}
+		}
+	}
+
+	for name, text := range map[string]string{"reference": reference, "mcp": memoryEvidenceGuidanceInstructions} {
+		lower := strings.ToLower(text)
+		for _, forbidden := range []string{"benchmark", "dataset", "category", "scorer", "gold", "locomo", "longmemeval"} {
+			if strings.Contains(lower, forbidden) {
+				t.Errorf("%s guidance contains specialization term %q", name, forbidden)
+			}
+		}
+	}
 }
 
 func TestSkillContractMCPToolsMatchRuntime(t *testing.T) {
@@ -84,11 +135,7 @@ func contains(names []string, wanted string) bool {
 
 func loadSkillMCPContract(t *testing.T) skillMCPContract {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	contractPath := filepath.Join(filepath.Dir(thisFile), "..", "skills", "engram", "references", "contract.json")
+	contractPath := filepath.Join(repositoryRoot(t), "skills", "engram", "references", "contract.json")
 	data, err := os.ReadFile(contractPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", contractPath, err)
@@ -99,4 +146,22 @@ func loadSkillMCPContract(t *testing.T) skillMCPContract {
 	}
 	sort.Strings(contract.MCP.Always)
 	return contract
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), ".."))
+}
+
+func readContractFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

@@ -204,6 +204,42 @@
         "Keeps the requested namespace unchanged"
       ],
       "tags": ["content-budget", "write", "safety", "blocked"]
+    },
+    {
+      "id": "evidence-wrong-entity",
+      "prompt": "Use engram to answer what allergy Alex Chen has. The search results say Alex Chen avoids shellfish by preference, while a separate memory says Alex Cheng has a peanut allergy.",
+      "expected_output": "Does not transfer Alex Cheng's allergy to Alex Chen and explains that the returned evidence does not support an allergy for the target person.",
+      "files": [],
+      "expectations": [
+        "Treats the two names as different entities without coreference evidence",
+        "Does not answer peanut allergy for Alex Chen",
+        "Names the missing target attribute instead of using a stock refusal"
+      ],
+      "tags": ["search", "evidence-guidance", "wrong-entity", "missing-attribute"]
+    },
+    {
+      "id": "evidence-bounded-list",
+      "prompt": "Use engram to list all of my saved travel preferences. memory_search returned two results with scope ranked_subset, limit 2, and returned 2.",
+      "expected_output": "Lists the two supported preferences but clearly limits completeness to the returned subset instead of claiming they are all stored preferences.",
+      "files": [],
+      "expectations": [
+        "Uses only returned evidence",
+        "Explains that reaching the limit may omit additional matches",
+        "Does not treat the search response as an exhaustive namespace listing"
+      ],
+      "tags": ["search", "evidence-guidance", "bounded-subset", "list"]
+    },
+    {
+      "id": "evidence-time-conflict",
+      "prompt": "Use engram to answer where I currently work. One memory says I joined Northwind in 2024 with event_date 2024-06-01; another says I left Northwind, has no event_date, and only has a newer created_at storage timestamp.",
+      "expected_output": "Keeps the current employer unresolved because storage time alone does not establish the later event, while explaining the specific conflict.",
+      "files": [],
+      "expectations": [
+        "Distinguishes event_date from created_at",
+        "Does not infer event order from storage time alone",
+        "Reports the current-state conflict naturally"
+      ],
+      "tags": ["search", "evidence-guidance", "time", "conflict", "current-state"]
     }
   ]
 }
