@@ -32,8 +32,14 @@ type result struct {
 	SweepUsed           bool                      `json:"sweep_used,omitempty"`
 	SweepOverBudget     bool                      `json:"sweep_over_budget,omitempty"`
 	EvidenceDiagnostics *sweepEvidenceDiagnostics `json:"evidence_diagnostics,omitempty"`
-	B0Continuity        *evalB0ContinuityRun      `json:"b0_continuity,omitempty"`
-	Formal022           *evalFormalQuestionRun    `json:"formal_022,omitempty"`
+	// UnifiedPairAudit is present only for the frozen hybrid versus
+	// hybrid+unified prompt experiment. It binds scoring eligibility to the
+	// actual provider-facing answer context and to one successful answer/judge
+	// call, while keeping raw prompts, outputs, errors, and credentials out of
+	// the journal.
+	UnifiedPairAudit *unifiedPromptPairQuestionAudit `json:"unified_pair_audit,omitempty"`
+	B0Continuity     *evalB0ContinuityRun            `json:"b0_continuity,omitempty"`
+	Formal022        *evalFormalQuestionRun          `json:"formal_022,omitempty"`
 	// Notebook is populated only under --notebook (SC-004: off → field absent,
 	// results byte-identical). Inline gold attribution against the actual
 	// candidate set and answer context; consumed by notebook.go.

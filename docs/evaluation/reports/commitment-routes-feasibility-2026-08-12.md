@@ -1,10 +1,10 @@
 ---
 title: 反证据/时间戳路线可行性诊断：LoCoMo 137 + LME 77 错题归属量化
-summary: 零代码启发式 + temporal 逐题人工归因，把 commitment failure 文献给出的两条候选路线（确定性时间戳聚合、反证据检索）映射到错题占比。结论：LoCoMo temporal 主导机制是 event 锚定/推算错（38%），真候选冲突仅 ~23%；LME knowledge-update 才是多值冲突主导（44%）。两条路线可救上限合计 ~13–17 题（~0.8–1pp），且 LoCoMo 时间戳方向可能反。意外发现：两数据集错题大头是 ENTITY_SHIFT（显著记忆压制，LoCoMo 48% / LME 42%），两条路线均覆盖不了。
+summary: 零代码启发式 + temporal 逐题人工归因，把确定性时间戳聚合、反证据检索两条候选路线映射到错题占比。LoCoMo temporal 主导机制是 event 锚定/推算错（38%），LME knowledge-update 多值冲突占 44%；历史 ~0.8–1pp 数字只是错因覆盖上限。后续 counter-refine+trace 混合臂为 −0.4pp 且独立效应未识别，ENTITY_SHIFT 的候选删除/排序也已收口。
 status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-08-12
+last_reviewed: 2026-08-13
 tags: [research, locomo, longmemeval, commitment-failure, diagnostic, feasibility]
 ---
 
@@ -12,7 +12,7 @@ tags: [research, locomo, longmemeval, commitment-failure, diagnostic, feasibilit
 
 ## 背景与问题
 
-[commitment failure 审计](committed-failure-retrieval-wrong-answer.md) 给出两条从未试过的
+[commitment failure 审计](../../research/committed-failure-retrieval-wrong-answer.md) 给出两条从未试过的
 候选路线：① 写侧确定性时间戳/序列元数据 + 读侧确定性 `max()`（把新旧比较移出 LLM）；
 ② 答题后反证据二次检索 + 验证门（CounterRefine）。本报告回答：**这两条路线在本栈错题上
 分别能覆盖多大比例、哪条更可行**。
@@ -97,11 +97,13 @@ engram 写侧（chunk 表示）也无 fact 粒度时间戳，需先抽取——�
 ## 建议下一步（按可行性与成本排序）
 
 1. **不投入时间戳写侧抽取**（027/028 已两次证伪 event 表示；LoCoMo 方向可能反）。
-2. **反证据路线可做一个小型验证**（低成本）：eval harness 内 `--counter-refine` flag，
-  只对 clean 判错的题触发 answer-conditioned 反查 + KEEP/REVISE，宪法 IV 归因、default-off，
-  先用 036 稳定错题 cohort（8 题）验证机制再全量。预期收益 ≤1pp，若 cohort 不转正即收口。
-3. **ENTITY_SHIFT（减竞争噪音）作为下一探索主线**：诊断 top-k 150 大池中「同人物相似记忆」
-  的竞争密度，评估确定性去重/候选压缩是否释放 single-hop 精度（与大池收益正交验证）。
+2. **反证据路线后续（2026-08-13）**：小样本曾有 2/10 救回；Qwen LME 500 的
+  `counter-refine + trace` 组合臂为 432/500，对 trace-off baseline 434/500，`p=0.8776`。组合配方
+  无正向信号，但 trace 未对齐使单机制效应不可识别。基于额外调用成本停止投入；若未来需要因果裁决，
+  必须补 trace-off 的完全配对实验。见 [全量组合臂报告](counter-refine-verdict-2026-08-13.md)。
+3. **ENTITY_SHIFT 后续（2026-08-12）**：竞争密度诊断虽显著，但候选删除先导出现误伤、非删除排序
+  没有改变答案，候选侧减竞争路线已收口，不再作为当前主线。若未来重开，应提出不同于删除/排序的
+  新机制并重新预注册，不能沿用本报告的错因覆盖率声称收益。
 4. 全部机制未经 eval 验证前**禁止声称涨点**（宪法 IV）。
 
 ## 诚实边界

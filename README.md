@@ -239,8 +239,12 @@ your installed version for its exact startup contract.
 | Benchmark | Score | Configuration |
 |---|---:|---|
 | LoCoMo (1,540) | **91.10%** (1,403/1,540) | Local Qwen3.6-35B · thinking · top-k 150 · 3-run majority · clean final-answer judge |
+| LongMemEval-S (500) | **91.1%** (3-run) | DeepSeek v4-pro answerer (付费 API) · 融合 prompt · 3-run · post-hoc 诊断 |
 
-The result was independently reproduced from the original answer runs.
+LoCoMo 结果由原始 answer runs 独立复现。LongMemEval-S 行是 **answerer 升级诊断**:
+使用 DeepSeek v4-pro 付费 API + 已随 [specs/038-unified-answer-contract](specs/038-unified-answer-contract/)
+移除的数据集特化 prompt,属 **post-hoc 兼容性诊断**,不代表默认本地栈得分;系统能力
+得分路径见 038 unified contract。[实验详情 →](docs/evaluation/reports/deepseek-v4pro-lme-verdict-2026-08-13.md)
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 

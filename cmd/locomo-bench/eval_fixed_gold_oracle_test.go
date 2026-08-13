@@ -91,6 +91,25 @@ func TestRunFixedGoldOracleQuestionUsesOnlyAllActiveGoldEvidence(t *testing.T) {
 	}
 }
 
+func TestFixedGoldAnswerInputUsesUnifiedAnswerContract(t *testing.T) {
+	protocol := fixedGoldTestProtocol()
+	qa := locomoQA{
+		QuestionID: "generic-contract-case",
+		Question:   "Which subject did the user ask about?",
+		Category:   8,
+	}
+	input := buildFixedGoldAnswerInput(
+		protocol,
+		options{unifiedAnswerContract: true},
+		qa,
+		nil,
+		nil,
+	)
+	if input.System != unifiedAnswerContractPrompt {
+		t.Fatalf("fixed-gold path bypassed unified answer contract: %q", input.System)
+	}
+}
+
 func TestFixedGoldOracleModeIsExclusive(t *testing.T) {
 	if err := validateFixedGoldOracleMode(options{}); err != nil {
 		t.Fatalf("non-oracle options unexpectedly rejected: %v", err)

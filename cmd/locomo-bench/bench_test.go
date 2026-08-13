@@ -202,6 +202,211 @@ func TestTemporalAnswerPromptIsOptIn(t *testing.T) {
 	}
 }
 
+func TestUnifiedAnswerContractIsCategoryAndDatasetIndependent(t *testing.T) {
+	for _, format := range []string{"locomo", "longmemeval"} {
+		opt := options{datasetFormat: format, unifiedAnswerContract: true}
+		for category := 1; category <= 12; category++ {
+			for _, currentDate := range []string{"", "2026-08-13"} {
+				qa := locomoQA{Category: category, QuestionDate: currentDate}
+				if got := answerSystemPromptForEval(qa, opt); got != unifiedAnswerContractPrompt {
+					t.Fatalf("format=%s category=%d date=%q selected %q, want the one frozen contract", format, category, currentDate, got)
+				}
+			}
+		}
+	}
+}
+
+func TestUnifiedAnswerContractDefaultOffPreservesLegacyPrompts(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		for _, typed := range []bool{false, true} {
+			opt := options{forceAnswer: force, lmeTypedPrompts: typed}
+			for category := 1; category <= 12; category++ {
+				want := answerPromptForRegime(category, force, false, false, typed)
+				if got := answerPromptForEval(category, opt); got != want {
+					t.Fatalf("flag-off category=%d force=%t typed=%t changed legacy prompt", category, force, typed)
+				}
+			}
+		}
+	}
+}
+
+func TestUnifiedAnswerContractHasNoBenchmarkOrGoldText(t *testing.T) {
+	prompt := strings.ToLower(unifiedAnswerContractPrompt)
+	for _, required := range []string{
+		"untrusted evidence",
+		"retrieved subset",
+		"never transfer facts",
+		"event time, record time",
+		"historical state",
+		"general factual questions",
+		"give a useful general answer",
+		"high-stakes",
+		"private chain-of-thought",
+		"do not know from the available memories",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Errorf("unified contract is missing general rule %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"locomo", "longmemeval", "category", "gold answer", "answerable evaluation",
+		"the information provided is not enough", "q:", "a:",
+		"reminding herself of her successes", "a trophy", "first place",
+		"vintage films", "vintage cameras", "table tennis", "football", "baseball",
+		"project atlas", "project beacon", "dr. rowan", "dr. vale",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("unified contract contains benchmark/scorer/example text %q", forbidden)
+		}
+	}
+}
+
+func TestUnifiedAnswerContractMatchesFrozenContract(t *testing.T) {
+	path := filepath.Join("..", "..", "specs", "038-unified-answer-contract", "contracts", "answer-contract.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read frozen answer contract: %v", err)
+	}
+	const open = "```text\n"
+	start := strings.Index(string(raw), open)
+	if start < 0 {
+		t.Fatal("frozen answer contract has no text code fence")
+	}
+	start += len(open)
+	end := strings.Index(string(raw)[start:], "\n```")
+	if end < 0 {
+		t.Fatal("frozen answer contract text fence is not closed")
+	}
+	if got := string(raw)[start : start+end]; got != unifiedAnswerContractPrompt {
+		t.Fatal("implemented unified prompt differs from the reviewed frozen contract")
+	}
+}
+
+func TestUnifiedAnswerContractArmSelection(t *testing.T) {
+	spec, err := parseArm("hybrid+unified")
+	if err != nil || !spec.mechanisms["unified"] {
+		t.Fatalf("parse unified arm = %+v, err=%v", spec, err)
+	}
+	if got := optionsForArm(options{}, "hybrid+unified"); !got.unifiedAnswerContract {
+		t.Fatal("+unified arm did not enable the unified answer contract")
+	}
+	if got := optionsForArm(options{}, "hybrid"); got.unifiedAnswerContract {
+		t.Fatal("bare control arm unexpectedly enabled the unified answer contract")
+	}
+	global := options{unifiedAnswerContract: true, traceMediation: false}
+	if got := optionsForRun(global, "hybrid", false); !got.unifiedAnswerContract {
+		t.Fatal("single-arm global unified mode was not preserved")
+	}
+	if got := optionsForRun(global, "hybrid", true); !got.unifiedAnswerContract {
+		t.Fatal("multi-arm bare arm silently cleared the global unified mode")
+	}
+	if got := optionsForRun(global, "hybrid+assoc", true); !got.unifiedAnswerContract {
+		t.Fatal("a retrieval suffix silently cleared the global unified mode")
+	}
+}
+
+func TestAnswerPromptBytesAreFingerprintBound(t *testing.T) {
+	baseOpt := options{forceAnswer: true}
+	typedOpt := options{forceAnswer: true, lmeTypedPrompts: true}
+	unifiedOpt := options{unifiedAnswerContract: true}
+
+	base := answerRegimeFingerprint(baseOpt)
+	typed := answerRegimeFingerprint(typedOpt)
+	unified := answerRegimeFingerprint(unifiedOpt)
+	for name, tc := range map[string]struct {
+		opt options
+		got string
+	}{
+		"base":    {opt: baseOpt, got: base},
+		"typed":   {opt: typedOpt, got: typed},
+		"unified": {opt: unifiedOpt, got: unified},
+	} {
+		want := ";answer_prompt_digest=" + formalAnswerPromptDigest(tc.opt)
+		if !strings.Contains(tc.got, want) {
+			t.Errorf("%s prompt bytes are not journal-bound: fingerprint=%q want=%q", name, tc.got, want)
+		}
+	}
+	if base == typed || base == unified || typed == unified {
+		t.Fatalf("prompt regimes share a journal fingerprint: base=%q typed=%q unified=%q", base, typed, unified)
+	}
+
+	formalBase := formalAnswerPromptDigest(baseOpt)
+	formalTyped := formalAnswerPromptDigest(typedOpt)
+	formalUnified := formalAnswerPromptDigest(unifiedOpt)
+	if formalBase == formalTyped || formalBase == formalUnified || formalTyped == formalUnified {
+		t.Fatalf("prompt regimes share a formal digest: base=%q typed=%q unified=%q", formalBase, formalTyped, formalUnified)
+	}
+}
+
+func TestPostRetrievalAnswerModesAreFingerprintBound(t *testing.T) {
+	base := answerRegimeFingerprint(options{})
+	for name, tc := range map[string]struct {
+		opt  options
+		want string
+	}{
+		"trace":          {opt: options{traceMediation: true}, want: ";trace_mediation=true"},
+		"relation":       {opt: options{relationContext: true}, want: ";relation_context=true"},
+		"consolidate":    {opt: options{consolidate: true}, want: ";consolidate=true"},
+		"counter-refine": {opt: options{counterRefine: true}, want: ";counter_refine=true"},
+		"trace breadth": {opt: options{
+			traceMultiEvidence: true,
+			traceEvidenceCap:   6,
+			traceFallbackTopk:  12,
+		}, want: ";trace_multi_evidence=true;trace_evidence_cap=6;trace_fallback_topk=12"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := answerRegimeFingerprint(tc.opt)
+			if got == base || !strings.Contains(got, tc.want) {
+				t.Fatalf("answer mode is not journal-bound: base=%q got=%q want fragment=%q", base, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
+	for name, opt := range map[string]options{
+		"force answer":     {unifiedAnswerContract: true, forceAnswer: true},
+		"abstain prompt":   {unifiedAnswerContract: true, abstainPrompt: true},
+		"temporal prompt":  {unifiedAnswerContract: true, temporalAnswerPrompt: true},
+		"LME typed prompt": {unifiedAnswerContract: true, lmeTypedPrompts: true},
+		"counter refine":   {unifiedAnswerContract: true, counterRefine: true},
+		"hard abstain":     {unifiedAnswerContract: true, abstainHard: true},
+		"soft abstain":     {unifiedAnswerContract: true, abstainSoft: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validatePromptModes(opt); err == nil {
+				t.Fatal("ambiguous unified answer-policy composition was accepted")
+			}
+		})
+	}
+	for _, format := range []string{"locomo", "longmemeval"} {
+		if err := validatePromptModes(options{datasetFormat: format, unifiedAnswerContract: true, traceMediation: true}); err != nil {
+			t.Fatalf("standalone unified mode rejected for %s: %v", format, err)
+		}
+	}
+	if err := validatePromptModes(options{unifiedAnswerContract: true, unifiedPairAudit: true, traceMediation: false}); err == nil || !strings.Contains(err.Error(), "--no-idk-retry") {
+		t.Fatalf("unified experiment accepted prompt-dependent retrieval retries: %v", err)
+	}
+	for name, opt := range map[string]options{
+		"temporal scaffold":  {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, temporalDateScaffold: true},
+		"trace mediation":    {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, traceMediation: true},
+		"category top-k":     {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, catTopKSpec: "1=30"},
+		"category chunk cap": {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, catQuotaSpec: "1=12"},
+	} {
+		t.Run("pair "+name, func(t *testing.T) {
+			if err := validatePromptModes(opt); err == nil {
+				t.Fatal("paired isolation conflict was accepted")
+			}
+		})
+	}
+}
+
+func TestLMEPromptModesRequireLongMemEval(t *testing.T) {
+	if err := validatePromptModes(options{datasetFormat: "locomo", forceAnswer: true, lmeTypedPrompts: true}); err == nil {
+		t.Fatal("LME-only typed prompt accepted for LoCoMo")
+	}
+}
+
 func TestValidateTemporalStoreRejectsLegacyFacts(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
@@ -561,6 +766,79 @@ func TestRunDirRejectsAssemblyEntityOrderResumeMix(t *testing.T) {
 	}
 }
 
+func TestRunDirRegimeBindsPerArmPromptDigests(t *testing.T) {
+	runDir := t.TempDir()
+	opt := options{
+		runDir: runDir, retrieval: "hybrid,hybrid+unified",
+		noIDKRetry: true, traceMediation: false,
+	}
+	if err := checkRunDirRegime(opt); err != nil {
+		t.Fatalf("pin paired unified regime: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(runDir, "regime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	baseDigest := formalAnswerPromptDigest(options{noIDKRetry: true, traceMediation: false})
+	unifiedDigest := formalAnswerPromptDigest(options{noIDKRetry: true, traceMediation: false, unifiedAnswerContract: true})
+	for _, want := range []string{
+		"hybrid={", "hybrid+unified={",
+		"answer_prompt_digest=" + baseDigest,
+		"answer_prompt_digest=" + unifiedDigest,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("paired regime file missing %q: %s", want, got)
+		}
+	}
+	if baseDigest == unifiedDigest {
+		t.Fatal("control and unified prompt digests collided")
+	}
+}
+
+func TestRunDirRegimeRejectsLegacyResultsWithoutRegime(t *testing.T) {
+	runDir := t.TempDir()
+	legacy := filepath.Join(runDir, "results-hybrid.jsonl")
+	if err := os.WriteFile(legacy, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := checkRunDirRegime(options{runDir: runDir, retrieval: "hybrid"})
+	if err == nil || !strings.Contains(err.Error(), "legacy result journal") || !strings.Contains(err.Error(), "fresh --run-dir") {
+		t.Fatalf("legacy journal without regime was accepted: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(runDir, "regime.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("regime.json was created despite legacy journal rejection: %v", statErr)
+	}
+}
+
+func TestQuestionWhitelistRejectsDuplicatesAndMissingSelectedIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "questions.txt")
+	if err := os.WriteFile(path, []byte("conv-0-q-0\nconv-0-q-0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readQuestionWhitelist(path); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate whitelist accepted: %v", err)
+	}
+
+	qa := locomoQA{QuestionID: "conv-0-q-0", Category: 4}
+	opt := options{onlyQuestions: map[string]bool{"conv-0-q-0": true, "conv-0-q-999": true}}
+	err := validateQuestionWhitelistCoverage([]conversation{{ID: 0, QA: []locomoQA{qa}}}, opt)
+	if err == nil || !strings.Contains(err.Error(), "conv-0-q-999") {
+		t.Fatalf("missing whitelist ID accepted: %v", err)
+	}
+}
+
+func TestQuestionWhitelistCoverageUsesPostMaxConvsCohort(t *testing.T) {
+	convs := []conversation{
+		{ID: 0, QA: []locomoQA{{QuestionID: "conv-0-q-0", Category: 4}}},
+		{ID: 1, QA: []locomoQA{{QuestionID: "conv-1-q-0", Category: 4}}},
+	}
+	opt := options{onlyQuestions: map[string]bool{"conv-1-q-0": true}, maxConvs: 1}
+	if err := validateQuestionWhitelistCoverage(convs[:opt.maxConvs], opt); err == nil || !strings.Contains(err.Error(), "conv-1-q-0") {
+		t.Fatalf("whitelist ID outside max-convs cohort accepted: %v", err)
+	}
+}
+
 func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
 	global := options{assoc: true, temporalScore: true, conflictResolution: true, abstainPrompt: true}
 	plain := optionsForArm(global, "hybrid")
@@ -700,8 +978,8 @@ func TestTPlanArmsWriteDistinctAnswerRegimes(t *testing.T) {
 	for _, tc := range []struct {
 		arm, want string
 	}{
-		{"fts", "force_answer=true;abstain_prompt=false;no_idk_retry=true"},
-		{"fts+tplan", "force_answer=true;abstain_prompt=false;no_idk_retry=true;temporal_answer_prompt=true"},
+		{"fts", "force_answer=true;abstain_prompt=false;no_idk_retry=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true})},
+		{"fts+tplan", "force_answer=true;abstain_prompt=false;no_idk_retry=true;temporal_answer_prompt=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true, temporalAnswerPrompt: true})},
 	} {
 		items, err := readResultsJSONL(filepath.Join(runDir, "results-"+tc.arm+".jsonl"))
 		if err != nil || len(items) != 1 {

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/wallfacers/engram/memory/pipeline"
@@ -26,12 +27,62 @@ func TestSummarizeRunsUsesTDistributionCI(t *testing.T) {
 func TestMcNemarUsesExactSmallSamplePath(t *testing.T) {
 	a := []bool{true, false, false, false, false}
 	b := []bool{false, true, true, true, false}
-	got := mcnemar(a, b)
+	got, err := mcnemar(a, b)
+	if err != nil {
+		t.Fatalf("McNemar: %v", err)
+	}
 	if got.AToB != 1 || got.BToA != 3 {
 		t.Fatalf("discordant counts = %d/%d, want 1/3", got.AToB, got.BToA)
 	}
 	if math.Abs(got.PValue-0.625) > 1e-12 {
 		t.Fatalf("exact p = %.12f, want 0.625", got.PValue)
+	}
+}
+
+func TestCompareReportsUseExactMcNemarForThirtyOneWayDiscordantPairs(t *testing.T) {
+	runA := make([]result, 0, 30)
+	runB := make([]result, 0, 30)
+	for index := 0; index < 30; index++ {
+		questionID := "q" + strconv.Itoa(index)
+		runA = append(runA, result{QuestionID: questionID, Correct: false})
+		runB = append(runB, result{QuestionID: questionID, Correct: true})
+	}
+
+	want := 2 / math.Pow(2, 30)
+	for _, test := range []struct {
+		name            string
+		pairedInProcess bool
+		report          func() (compareReport, error)
+	}{
+		{
+			name: "ordinary compare",
+			report: func() (compareReport, error) {
+				return compareResults([][]result{runA}, [][]result{runB}, false)
+			},
+		},
+		{
+			name:            "paired report",
+			pairedInProcess: true,
+			report: func() (compareReport, error) {
+				return pairedReport([][]result{runA}, [][]result{runB})
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report, err := test.report()
+			if err != nil {
+				t.Fatalf("compare report: %v", err)
+			}
+			if report.PairedInProcess != test.pairedInProcess {
+				t.Fatalf("paired-in-process = %t, want %t", report.PairedInProcess, test.pairedInProcess)
+			}
+			if report.FlipsAToB != 30 || report.FlipsBToA != 0 {
+				t.Fatalf("flip counts = %d/%d, want 30/0", report.FlipsAToB, report.FlipsBToA)
+			}
+			if math.Abs(report.McNemarP-want) > 1e-15 {
+				t.Fatalf("exact p = %.18f, want %.18f", report.McNemarP, want)
+			}
+		})
 	}
 }
 

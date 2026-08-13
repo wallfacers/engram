@@ -70,9 +70,10 @@ func scanResultsJSONL(path string, visit func(result)) error {
 	return nil
 }
 
-// scanResultsJSONLStrict is for formal 022 artifacts only.  Legacy journals
-// intentionally tolerate a torn final line for resume, but formal materialize
-// must never turn a malformed line into a silently smaller denominator.
+// scanResultsJSONLStrict is for fail-closed evaluation artifacts. Legacy
+// journals intentionally tolerate a torn final line for ordinary resume, but
+// formal materialization and isolated paired experiments must never turn a
+// malformed line into a silently smaller denominator.
 func scanResultsJSONLStrict(path string, visit func(result) error) error {
 	f, err := os.Open(path) //nolint:gosec // operator-selected formal run artifact
 	if err != nil {

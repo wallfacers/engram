@@ -41,6 +41,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,123 +61,130 @@ import (
 )
 
 type options struct {
-	adjudicationBuildDir      string
-	adjudicationValidateDir   string
-	adjudicationRunDir        string
-	adjudicationScoreDir      string
-	adjudicationCandidates    []string
-	adjudicationTracePath     string
-	adjudicationSeed          string
-	adjudicationAllowPaid     bool
-	adjudicationMaxTokens     int
+	adjudicationBuildDir       string
+	adjudicationValidateDir    string
+	adjudicationRunDir         string
+	adjudicationScoreDir       string
+	adjudicationCandidates     []string
+	adjudicationTracePath      string
+	adjudicationSeed           string
+	adjudicationAllowPaid      bool
+	adjudicationMaxTokens      int
 	adjudicationTemporalPrompt bool
-	dataPath                  string
-	runDir                    string
-	storeDir                  string
-	aliasShadow               string
-	aliasShadowPrepared       bool
-	doc2query                 string
-	doc2queryPrepared         bool
-	doc2queryBuild            bool
-	datasetFormat             string
-	compareSpec               string
-	evalValidate              string
-	evalB0ProtocolPath        string
-	evalFreezeB0Protocol      string
-	b0Protocol                *evalProtocol
-	evalProtocolPath          string
-	fixedGoldOracle           bool
-	evalFreezeProtocol        string
-	controlProtocolPath       string
-	evalBudgetProfile         string
-	answerInputTokenCap       int
-	counterFingerprint        string
-	tokenCounterCalibrate     bool
-	tokenCounterBaseURL       string
-	formalProtocol            *evalProtocol
-	formalCounter             evidencecompiler.TokenCounter
-	formalQuestionGate        chan struct{}
-	formalReplay              *formalQuestionReplay
-	formalCalls               *formalCallJournal
-	formalRunIndex            int
-	repeats                   int
-	judgeAuditPrepare         string
-	judgeAuditFinalize        string
-	auditControlArm           string
-	auditTreatmentArm         string
-	auditBenchmark            string
-	auditRepeats              int
-	auditPlanSeed             string
-	auditConcordantPerStratum int
-	auditAccuracyGate         float64
-	auditReviews              string
-	auditDecisions            string
-	estimate                  bool
-	noIDKRetry                bool
-	budgetBaseline            float64
-	retrieval                 string
-	multiQuery                bool
-	mqMaxSubqueries           int
-	recallDiagnostic          bool
-	maxConvs                  int
-	maxQuestions              int
-	onlyCategory              int
-	onlyEnumeration           bool
-	onlyQuestionsFile         string          // --only-questions: path to a question-ID whitelist
-	onlyQuestions             map[string]bool // parsed whitelist (nil = no filter)
-	topK                      int
-	maxTokens                 int
-	concurrency               int
-	chunks                    bool
-	chunkQuota                int
-	filterPool                int
-	assoc                     bool
-	assocDepth                int
-	clusterSweep              bool
-	temporalScore             bool
-	temporalHardFilter        bool
-	conflictResolution        bool
-	supersededPenalty         float64
-	abstainPrompt             bool
-	abstainHard               bool
-	abstainSoft               bool
-	forceAnswer               bool
-	imageCaptions             bool
-	temporalAnswerPrompt      bool
-	temporalDateScaffold      bool
-	lmeTypedPrompts           bool
-	iris                      bool
-	irisDepth                 int
-	judgeMem0Aligned          bool
-	answerModel               string
-	judgeModel                string
-	rerank                    bool
-	pcic                      bool
-	oracle                    bool
-	pcicAnnotate              bool
-	pcicFillTurns             string
-	pcicMetaPath              string
-	pcicMeta                  *PCICMeta
-	abstainProbe              bool
-	abstainProbeOut           string
-	abstainGateSpec           string
-	abstainGate               AbstainGate
-	selector                  chunkSelector
-	opinionPass               bool
-	adversarial               int
-	catTopKSpec               string
-	catQuotaSpec              string
-	catTopK                   map[int]int
-	catQuota                  map[int]int
-	coverageOnly              bool
-	temporalDiagnostic        bool
-	attributionTrace          bool
-	joinResults               string
-	embedProbe                bool
-	outrankCap                int
-	widePool                  int
-	factCoverageTau           float64
-	contextParity             *contextParityJournal
+	dataPath                   string
+	runDir                     string
+	storeDir                   string
+	aliasShadow                string
+	aliasShadowPrepared        bool
+	doc2query                  string
+	doc2queryPrepared          bool
+	doc2queryBuild             bool
+	datasetFormat              string
+	compareSpec                string
+	evalValidate               string
+	evalB0ProtocolPath         string
+	evalFreezeB0Protocol       string
+	b0Protocol                 *evalProtocol
+	evalProtocolPath           string
+	fixedGoldOracle            bool
+	evalFreezeProtocol         string
+	controlProtocolPath        string
+	evalBudgetProfile          string
+	answerInputTokenCap        int
+	counterFingerprint         string
+	tokenCounterCalibrate      bool
+	tokenCounterBaseURL        string
+	formalProtocol             *evalProtocol
+	formalCounter              evidencecompiler.TokenCounter
+	formalQuestionGate         chan struct{}
+	formalReplay               *formalQuestionReplay
+	formalCalls                *formalCallJournal
+	formalRunIndex             int
+	repeats                    int
+	judgeAuditPrepare          string
+	judgeAuditFinalize         string
+	auditControlArm            string
+	auditTreatmentArm          string
+	auditBenchmark             string
+	auditRepeats               int
+	auditPlanSeed              string
+	auditConcordantPerStratum  int
+	auditAccuracyGate          float64
+	auditReviews               string
+	auditDecisions             string
+	estimate                   bool
+	noIDKRetry                 bool
+	budgetBaseline             float64
+	retrieval                  string
+	multiQuery                 bool
+	mqMaxSubqueries            int
+	recallDiagnostic           bool
+	maxConvs                   int
+	maxQuestions               int
+	onlyCategory               int
+	onlyEnumeration            bool
+	onlyQuestionsFile          string          // --only-questions: path to a question-ID whitelist
+	onlyQuestions              map[string]bool // parsed whitelist (nil = no filter)
+	topK                       int
+	maxTokens                  int
+	concurrency                int
+	chunks                     bool
+	chunkQuota                 int
+	filterPool                 int
+	assoc                      bool
+	assocDepth                 int
+	clusterSweep               bool
+	temporalScore              bool
+	temporalHardFilter         bool
+	conflictResolution         bool
+	supersededPenalty          float64
+	abstainPrompt              bool
+	abstainHard                bool
+	abstainSoft                bool
+	forceAnswer                bool
+	imageCaptions              bool
+	temporalAnswerPrompt       bool
+	temporalDateScaffold       bool
+	lmeTypedPrompts            bool
+	unifiedAnswerContract      bool
+	unifiedPairAudit           bool // runtime-only: exact hybrid vs hybrid+unified fail-closed call/context audit
+	unifiedPairDatasetDigest   string
+	unifiedProbeFixture        string
+	unifiedProbeOut            string
+	unifiedProbeRepeats        int
+	explicitFlags              map[string]bool // runtime-only: used to reject ignored flags in dedicated modes
+	iris                       bool
+	irisDepth                  int
+	judgeMem0Aligned           bool
+	answerModel                string
+	judgeModel                 string
+	rerank                     bool
+	pcic                       bool
+	oracle                     bool
+	pcicAnnotate               bool
+	pcicFillTurns              string
+	pcicMetaPath               string
+	pcicMeta                   *PCICMeta
+	abstainProbe               bool
+	abstainProbeOut            string
+	abstainGateSpec            string
+	abstainGate                AbstainGate
+	selector                   chunkSelector
+	opinionPass                bool
+	adversarial                int
+	catTopKSpec                string
+	catQuotaSpec               string
+	catTopK                    map[int]int
+	catQuota                   map[int]int
+	coverageOnly               bool
+	temporalDiagnostic         bool
+	attributionTrace           bool
+	joinResults                string
+	embedProbe                 bool
+	outrankCap                 int
+	widePool                   int
+	factCoverageTau            float64
+	contextParity              *contextParityJournal
 	// formalEvidence is the active, namespace-local Evidence Ledger reader
 	// used by formal source expansion and the independent pre-answer
 	// span/citation validator. It is runtime-only and is never serialized.
@@ -452,6 +460,10 @@ func run() error {
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.lmeTypedPrompts, "lme-typed-prompts", false, "LongMemEval: map question_type to the matching LoCoMo contract (multi-session→multi-hop, temporal-reasoning→temporal); default off, eval-config change")
+	flag.BoolVar(&opt.unifiedAnswerContract, "unified-answer-contract", false, "experimental dataset/category-independent evidence-grounded answer contract (default off; isolated scoring also requires --no-idk-retry and --trace-mediation=false)")
+	flag.StringVar(&opt.unifiedProbeFixture, "unified-answer-probe", "", "run the dedicated paired generic-vs-unified behavior probe from this fixture JSON and exit")
+	flag.StringVar(&opt.unifiedProbeOut, "unified-answer-probe-out", "", "write the paired behavior-probe audit report to this JSON path")
+	flag.IntVar(&opt.unifiedProbeRepeats, "unified-answer-probe-repeats", 3, "paired behavior-probe repetitions (must be a positive odd number)")
 	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
 	flag.BoolVar(&opt.iris, "iris", false, "enable IRIS evidence-gap iterative retrieval for category-2 temporal questions (sufficiency-driven query refinement; fixed MemOS-aligned budget; harness-only, engine untouched)")
 	flag.IntVar(&opt.irisDepth, "iris-depth", 3, "maximum IRIS sufficiency-driven retrieval rounds (including the initial retrieval)")
@@ -499,6 +511,15 @@ func run() error {
 	flag.IntVar(&opt.traceFallbackTopk, "trace-fallback-topk", 0, "compiler-miss guard: if the trace sidecar cites NONE of the retrieval top-k candidates, use the top-k raw candidates as the answer context instead (0 = off)")
 	if err := flag.CommandLine.Parse(normalizeCompareArgs(os.Args[1:])); err != nil {
 		return err
+	}
+	opt.explicitFlags = make(map[string]bool)
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		opt.explicitFlags[f.Name] = true
+	})
+	if probeMode, err := validateUnifiedAnswerContractProbeMode(opt); err != nil {
+		return err
+	} else if probeMode {
+		return runUnifiedAnswerContractProbeMode(context.Background(), opt, os.Getenv)
 	}
 	opt.adjudicationCandidates = append([]string(nil), adjudicationCandidates...)
 	if adjudicationMode, err := adjudicationModeFor(opt); err != nil {
@@ -594,6 +615,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if unifiedPromptPairExperimentRequested(opt, arms) {
+		if err := validateUnifiedPromptPairExperiment(opt, arms); err != nil {
+			return err
+		}
+		opt.unifiedPairAudit = true
+	}
 	if opt.evalB0ProtocolPath != "" {
 		if opt.evalProtocolPath != "" || opt.fixedGoldOracle {
 			return fmt.Errorf("--eval-b0-protocol cannot be combined with B1 or fixed-gold modes")
@@ -648,7 +675,7 @@ func run() error {
 		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
 	}
 	for _, arm := range arms {
-		if err := validatePromptModes(optionsForArm(opt, arm)); err != nil {
+		if err := validatePromptModes(optionsForRun(opt, arm, len(arms) > 1)); err != nil {
 			return fmt.Errorf("arm %s: %w", arm, err)
 		}
 		spec, _ := parseArm(arm)
@@ -703,12 +730,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if opt.unifiedPairAudit {
+		rawDataset, err := os.ReadFile(opt.dataPath)
+		if err != nil {
+			return fmt.Errorf("bind unified prompt paired dataset bytes: %w", err)
+		}
+		opt.unifiedPairDatasetDigest = evalTextDigest(string(rawDataset))
+	}
 	if opt.onlyQuestionsFile != "" {
 		ids, err := readQuestionWhitelist(opt.onlyQuestionsFile)
 		if err != nil {
 			return err
 		}
 		opt.onlyQuestions = ids
+		if err := validateQuestionWhitelistCoverage(convs, opt); err != nil {
+			return err
+		}
 	}
 	if opt.formalProtocol != nil || opt.b0Protocol != nil {
 		if opt.maxConvs != 0 || opt.maxQuestions != 0 || opt.onlyCategory != 0 || opt.onlyEnumeration || opt.adversarial != 0 {
@@ -746,6 +783,9 @@ func run() error {
 	if opt.maxConvs > 0 && opt.maxConvs < len(convs) {
 		sampledConversations = opt.maxConvs
 		convs = convs[:opt.maxConvs]
+		if err := validateQuestionWhitelistCoverage(convs, opt); err != nil {
+			return err
+		}
 	}
 	if err := prepareAliasShadowStore(&opt); err != nil {
 		return err
@@ -921,6 +961,11 @@ func run() error {
 	if !opt.coverageOnly {
 		// The regime pin guards answer-journal resume from mixing 口径; coverage
 		// writes no journal, so it has no regime to protect.
+		if opt.unifiedPairAudit {
+			if err := requireFreshUnifiedPromptPairRunDir(opt.runDir); err != nil {
+				return err
+			}
+		}
 		if err := checkRunDirRegime(opt); err != nil {
 			return err
 		}
@@ -983,6 +1028,12 @@ func run() error {
 	judgeProviderCall := newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage)
 	answerUsageCall := gateUsage(sem, answerProviderCall)
 	judgeUsageCall := gateUsage(sem, judgeProviderCall)
+	if opt.unifiedPairAudit {
+		// The paired audit records wrapper calls. Keep provider attempts at one so
+		// a transient first failure cannot be hidden by gateUsage's retry.
+		answerUsageCall = gateUsageOnce(sem, answerProviderCall)
+		judgeUsageCall = gateUsageOnce(sem, judgeProviderCall)
+	}
 	if opt.nav {
 		// 029 navigation decide caller: direct vLLM HTTP with thinking disabled
 		// for fast, pure-JSON tool calls (Qwen3.6 reasoning model otherwise
@@ -1095,6 +1146,9 @@ func run() error {
 		embClient = buildBenchEmbeddingClient(logger, func(inputTokens, outputTokens int) {
 			ledger.Add("embed", envOr("EMBED_MODEL", "qwen3-embedding:0.6b"), inputTokens, outputTokens)
 		})
+		if opt.unifiedPairAudit && embClient == nil {
+			return fmt.Errorf("unified prompt paired experiment requires a configured embedding endpoint; refusing silent hybrid degradation")
+		}
 	}
 
 	logger.Info("starting", "conversations", len(convs), "arms", arms, "concurrency", opt.concurrency,
@@ -1213,6 +1267,11 @@ func run() error {
 	}
 
 	for repeat := 1; repeat <= opt.repeats; repeat++ {
+		if opt.unifiedPairAudit {
+			if retrying, ok := embClient.(*retryingEmbedder); ok && retrying.exhausted.Load() != 0 {
+				return fmt.Errorf("unified prompt paired experiment observed %d exhausted embedding calls before repetition %d; refusing to score a degraded hybrid run", retrying.exhausted.Load(), repeat)
+			}
+		}
 		repeatOpt := opt
 		repeatOpt.formalRunIndex = repeat
 		if opt.repeats > 1 {
@@ -1339,12 +1398,6 @@ func run() error {
 		}
 		for _, state := range states {
 			state.journal.Close()
-			if formalRepeatScoresVisible(repeatOpt) {
-				report(state, repeatOpt)
-			} else {
-				fmt.Printf("formal repetition=%d recorded=%d/%d score=pending-validation\n",
-					repeat, state.journal.count(), repeatOpt.formalProtocol.Benchmark.QuestionCount)
-			}
 		}
 		if err := parity.Close(); err != nil {
 			return err
@@ -1355,7 +1408,30 @@ func run() error {
 		if currentRepeatErr != nil {
 			return currentRepeatErr
 		}
-		if len(states) == 2 {
+		if repeatOpt.unifiedPairAudit {
+			if retrying, ok := embClient.(*retryingEmbedder); ok && retrying.exhausted.Load() != 0 {
+				return fmt.Errorf("unified prompt paired experiment observed %d exhausted embedding calls in repetition %d; refusing to score a degraded hybrid run", retrying.exhausted.Load(), repeat)
+			}
+			receipt, validationErr := validateUnifiedPromptPairRepeat(repeatOpt.runDir, repeatOpt, convs, arms)
+			if err := writeUnifiedPromptPairValidationReceipt(repeatOpt.runDir, receipt, validationErr); err != nil {
+				return fmt.Errorf("write unified prompt pair validation receipt: %w", err)
+			}
+			if validationErr != nil {
+				return fmt.Errorf("unified prompt pair validation failed before scoring: %w", validationErr)
+			}
+		}
+		for _, state := range states {
+			if repeatOpt.unifiedPairAudit {
+				fmt.Printf("unified prompt repetition=%d arm=%s recorded=%d score=pending-all-repeat-validation\n",
+					repeat, state.name, state.journal.count())
+			} else if formalRepeatScoresVisible(repeatOpt) {
+				report(state, repeatOpt)
+			} else {
+				fmt.Printf("formal repetition=%d recorded=%d/%d score=pending-validation\n",
+					repeat, state.journal.count(), repeatOpt.formalProtocol.Benchmark.QuestionCount)
+			}
+		}
+		if len(states) == 2 && !repeatOpt.unifiedPairAudit {
 			reportDelta(states[0], states[1])
 		}
 	}
@@ -1603,6 +1679,186 @@ func buildAnnotateProvider(apiKey, baseURL string, maxTokens int) (provider.Prov
 	}
 }
 
+// unifiedAnswerContractProbeRuntimeConfig is intentionally private and
+// short-lived. Credentials are needed to construct providers but are never
+// copied into the probe's persisted manifest or terminal summary.
+type unifiedAnswerContractProbeRuntimeConfig struct {
+	answerProvider string
+	answerBaseURL  string
+	answerAPIKey   string
+	answerMetadata unifiedAnswerContractProbeModelMetadata
+	judge          judgeConfig
+	judgeMetadata  unifiedAnswerContractProbeModelMetadata
+}
+
+// validateUnifiedAnswerContractProbeMode recognizes the dedicated behavior
+// probe before ordinary dataset/run validation. Both paths are explicit so an
+// output typo cannot silently fall through into a benchmark run.
+func validateUnifiedAnswerContractProbeMode(opt options) (bool, error) {
+	fixturePath := strings.TrimSpace(opt.unifiedProbeFixture)
+	reportPath := strings.TrimSpace(opt.unifiedProbeOut)
+	requested := fixturePath != "" || reportPath != ""
+	if !requested {
+		return false, nil
+	}
+	if fixturePath == "" {
+		return true, fmt.Errorf("--unified-answer-probe is required when --unified-answer-probe-out is set")
+	}
+	if reportPath == "" {
+		return true, fmt.Errorf("--unified-answer-probe-out is required with --unified-answer-probe")
+	}
+	if opt.unifiedProbeRepeats <= 0 || opt.unifiedProbeRepeats%2 == 0 {
+		return true, fmt.Errorf("--unified-answer-probe-repeats must be a positive odd number, got %d", opt.unifiedProbeRepeats)
+	}
+	if opt.maxTokens <= 0 {
+		return true, fmt.Errorf("--max-tokens must be positive for --unified-answer-probe")
+	}
+	allowed := map[string]bool{
+		"unified-answer-probe":         true,
+		"unified-answer-probe-out":     true,
+		"unified-answer-probe-repeats": true,
+		"max-tokens":                   true,
+		"concurrency":                  true,
+	}
+	var ignored []string
+	for name := range opt.explicitFlags {
+		if !allowed[name] {
+			ignored = append(ignored, "--"+name)
+		}
+	}
+	if len(ignored) > 0 {
+		sort.Strings(ignored)
+		return true, fmt.Errorf("--unified-answer-probe is a dedicated mode; unsupported flags would be ignored: %s", strings.Join(ignored, ", "))
+	}
+	if opt.dataPath != "" || opt.runDir != "" || opt.compareSpec != "" {
+		return true, fmt.Errorf("--unified-answer-probe is a dedicated mode and cannot be combined with --data, --run-dir, or --compare")
+	}
+	return true, nil
+}
+
+func resolveUnifiedAnswerContractProbeRuntimeConfig(getenv func(string) string) (unifiedAnswerContractProbeRuntimeConfig, error) {
+	var config unifiedAnswerContractProbeRuntimeConfig
+	if getenv == nil {
+		return config, fmt.Errorf("resolve unified answer contract probe configuration: environment reader is nil")
+	}
+	config.answerProvider = strings.ToLower(strings.TrimSpace(envValueOr(getenv, "LOCOMO_PROVIDER", defaultLoCoMoProvider)))
+	config.answerBaseURL = envValueOr(getenv, "LOCOMO_BASE_URL", defaultLoCoMoBaseURL)
+	config.answerAPIKey = getenv("LOCOMO_API_KEY")
+	if strings.TrimSpace(config.answerAPIKey) == "" {
+		return config, fmt.Errorf("LOCOMO_API_KEY is required for --unified-answer-probe (credentials are accepted through the environment only)")
+	}
+	answerModel := envValueOr(getenv, "LOCOMO_MODEL", defaultLoCoMoModel)
+	config.answerMetadata = unifiedAnswerContractProbeModelMetadata{
+		Provider: config.answerProvider,
+		Model:    answerModel,
+		Revision: modelRevisionMetadata(getenv, "LOCOMO_MODEL_REVISION", answerModel),
+	}
+
+	config.judge = resolveJudgeConfig(getenv)
+	config.judge.Provider = strings.ToLower(strings.TrimSpace(config.judge.Provider))
+	if strings.TrimSpace(config.judge.APIKey) == "" {
+		return config, fmt.Errorf("JUDGE_API_KEY or LOCOMO_API_KEY is required for --unified-answer-probe (credentials are accepted through the environment only)")
+	}
+	config.judgeMetadata = unifiedAnswerContractProbeModelMetadata{
+		Provider: config.judge.Provider,
+		Model:    config.judge.Model,
+		Revision: modelRevisionMetadata(getenv, "JUDGE_MODEL_REVISION", config.judge.Model),
+	}
+	return config, nil
+}
+
+func envValueOr(getenv func(string) string, key, fallback string) string {
+	if value := getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func modelRevisionMetadata(getenv func(string) string, key, model string) string {
+	if revision := strings.TrimSpace(getenv(key)); revision != "" {
+		return revision
+	}
+	return "unverified:" + strings.TrimSpace(model)
+}
+
+func runUnifiedAnswerContractProbeMode(ctx context.Context, opt options, getenv func(string) string) error {
+	runtime, err := resolveUnifiedAnswerContractProbeRuntimeConfig(getenv)
+	if err != nil {
+		return err
+	}
+	answerProvider, err := buildBenchProvider(runtime.answerProvider, runtime.answerAPIKey, runtime.answerBaseURL, opt.maxTokens, "LOCOMO_PROVIDER")
+	if err != nil {
+		return err
+	}
+	judgeProvider, err := buildBenchProvider(runtime.judge.Provider, runtime.judge.APIKey, runtime.judge.BaseURL, opt.maxTokens, "JUDGE_PROVIDER")
+	if err != nil {
+		return err
+	}
+	concurrency := opt.concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	sem := make(chan struct{}, concurrency)
+	// The probe records failures as experimental outcomes. Transparent retries
+	// would hide those outcomes, so both roles make exactly one provider attempt.
+	answerCall := gateUsageOnce(sem, newUsageModelCallerWithUsage(
+		answerProvider, runtime.answerMetadata.Model, opt.maxTokens, "answer", nil,
+	))
+	judgeCall := gateUsageOnce(sem, newUsageModelCallerWithUsage(
+		judgeProvider, runtime.judgeMetadata.Model, opt.maxTokens, "judge", nil,
+	))
+	binaryDigest, sourceRevision, sourceModified, err := unifiedAnswerContractProbeBuildProvenance()
+	if err != nil {
+		return err
+	}
+	report, err := runUnifiedAnswerContractProbeCLI(ctx, unifiedAnswerContractProbeCLIConfig{
+		FixturePath:          opt.unifiedProbeFixture,
+		ReportPath:           opt.unifiedProbeOut,
+		Repeats:              opt.unifiedProbeRepeats,
+		AnswerModel:          runtime.answerMetadata,
+		JudgeModel:           runtime.judgeMetadata,
+		AnswerEndpointDigest: evalTextDigest(strings.TrimSpace(runtime.answerBaseURL)),
+		JudgeEndpointDigest:  evalTextDigest(strings.TrimSpace(runtime.judge.BaseURL)),
+		MaxTokens:            opt.maxTokens,
+		ThinkingDisabled:     benchNoThinking,
+		BinaryDigest:         binaryDigest,
+		SourceRevision:       sourceRevision,
+		SourceModified:       sourceModified,
+	}, answerCall, judgeCall)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("unified-answer-probe: completed %d paired arm attempts; report=%s\n", len(report.Results), opt.unifiedProbeOut)
+	return nil
+}
+
+func unifiedAnswerContractProbeBuildProvenance() (binaryDigest, sourceRevision string, sourceModified bool, err error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", "", false, fmt.Errorf("locate unified answer probe binary: %w", err)
+	}
+	raw, err := os.ReadFile(executable) //nolint:gosec // hashes the running binary; never persists its bytes
+	if err != nil {
+		return "", "", false, fmt.Errorf("hash unified answer probe binary: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	binaryDigest = "sha256:" + hex.EncodeToString(sum[:])
+	sourceRevision = "unknown"
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				if strings.TrimSpace(setting.Value) != "" {
+					sourceRevision = setting.Value
+				}
+			case "vcs.modified":
+				sourceModified = setting.Value == "true"
+			}
+		}
+	}
+	return binaryDigest, sourceRevision, sourceModified, nil
+}
+
 func buildBenchProvider(providerName, apiKey, baseURL string, maxTokens int, envName string) (provider.Provider, error) {
 	switch strings.ToLower(providerName) {
 	case "openai":
@@ -1704,6 +1960,7 @@ var supportedArmMechanisms = map[string]struct{}{
 	"rerank":       {},
 	"pcic":         {},
 	"oracle":       {},
+	"unified":      {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -1756,6 +2013,7 @@ func optionsForArm(global options, name string) options {
 		arm.rerank = false
 		arm.pcic = false
 		arm.oracle = false
+		arm.unifiedAnswerContract = global.unifiedAnswerContract
 		return arm
 	}
 	arm := global
@@ -1768,6 +2026,7 @@ func optionsForArm(global options, name string) options {
 	arm.abstainHard = spec.mechanisms["abstain-hard"]
 	arm.abstainSoft = spec.mechanisms["abstain-soft"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
+	arm.unifiedAnswerContract = global.unifiedAnswerContract || spec.mechanisms["unified"]
 	arm.rerank = spec.mechanisms["rerank"]
 	arm.pcic = spec.mechanisms["pcic"]
 	arm.oracle = spec.mechanisms["oracle"]
@@ -2112,9 +2371,19 @@ func temporalNowForConversation(conv conversation) time.Time {
 // different regime would silently mix results graded under two 口径 in one
 // artifact; refuse instead.
 func checkRunDirRegime(opt options) error {
-	// Arm suffixes can override answer-regime mechanisms per arm (e.g.
-	// +abstain), so the arm layout is part of the pinned regime too.
-	regime := answerRegimeFingerprint(opt) + ";retrieval=" + opt.retrieval
+	// Arm suffixes can override answer-regime mechanisms per arm. Bind every
+	// effective arm fingerprint, not only the arm names: a prompt edit under a
+	// stable suffix such as +unified must make legacy journal resume fail closed.
+	arms, err := armsFor(opt.retrieval)
+	if err != nil {
+		return err
+	}
+	armRegimes := make([]string, 0, len(arms))
+	for _, arm := range arms {
+		armOpt := optionsForRun(opt, arm, len(arms) > 1)
+		armRegimes = append(armRegimes, arm+"={"+answerRegimeFingerprint(armOpt)+"}")
+	}
+	regime := "retrieval=" + opt.retrieval + ";arms=" + strings.Join(armRegimes, ",")
 	if opt.multiQuery {
 		regime += ";" + retrievalFingerprint(opt)
 	}
@@ -2129,6 +2398,14 @@ func checkRunDirRegime(opt options) error {
 	}
 	if !os.IsNotExist(err) {
 		return fmt.Errorf("read run dir regime: %w", err)
+	}
+	legacyJournals, err := filepath.Glob(filepath.Join(opt.runDir, "results-*.jsonl"))
+	if err != nil {
+		return fmt.Errorf("inspect legacy result journals: %w", err)
+	}
+	if len(legacyJournals) > 0 {
+		sort.Strings(legacyJournals)
+		return fmt.Errorf("run dir %s contains legacy result journal %s without regime.json — use a fresh --run-dir (prompt provenance cannot be reconstructed)", opt.runDir, filepath.Base(legacyJournals[0]))
 	}
 	if err := os.WriteFile(path, []byte(regime+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write run dir regime: %w", err)
@@ -2147,6 +2424,37 @@ func answerRegimeFingerprint(opt options) string {
 	}
 	if opt.temporalAnswerPrompt {
 		fingerprint += ";temporal_answer_prompt=true"
+	}
+	if opt.lmeTypedPrompts {
+		fingerprint += ";lme_typed_prompts=true"
+	}
+	if opt.unifiedAnswerContract {
+		fingerprint += ";unified_answer_contract=true"
+	}
+	if opt.unifiedPairAudit {
+		fingerprint += ";unified_pair_audit=true;provider_attempts=1"
+	}
+	// Prompt text is executable protocol. Bind the effective bytes for every
+	// regime so a changed constant cannot silently resume into an old journal
+	// under the same boolean flags.
+	fingerprint += ";answer_prompt_digest=" + formalAnswerPromptDigest(opt)
+	if opt.traceMediation {
+		fingerprint += ";trace_mediation=true"
+	}
+	if opt.traceMultiEvidence {
+		fingerprint += fmt.Sprintf(";trace_multi_evidence=true;trace_evidence_cap=%d", opt.traceEvidenceCap)
+	}
+	if opt.traceFallbackTopk > 0 {
+		fingerprint += fmt.Sprintf(";trace_fallback_topk=%d", opt.traceFallbackTopk)
+	}
+	if opt.consolidate {
+		fingerprint += ";consolidate=true"
+	}
+	if opt.relationContext {
+		fingerprint += ";relation_context=true"
+	}
+	if opt.counterRefine {
+		fingerprint += ";counter_refine=true"
 	}
 	if opt.temporalDateScaffold {
 		fingerprint += ";temporal_date_scaffold=true"
@@ -2267,6 +2575,54 @@ func validateRepresentationArm(arm RepresentationKind) error {
 func validatePromptModes(opt options) error {
 	if opt.forceAnswer && opt.abstainPrompt {
 		return fmt.Errorf("--force-answer and --abstain-prompt are mutually exclusive")
+	}
+	if opt.lmeTypedPrompts && opt.datasetFormat != "longmemeval" {
+		return fmt.Errorf("--lme-typed-prompts requires --dataset-format=longmemeval")
+	}
+	if opt.unifiedAnswerContract {
+		var conflicts []string
+		for _, conflict := range []struct {
+			enabled bool
+			name    string
+		}{
+			{opt.forceAnswer, "--force-answer"},
+			{opt.abstainPrompt, "--abstain-prompt"},
+			{opt.temporalAnswerPrompt, "--temporal-answer-prompt"},
+			{opt.lmeTypedPrompts, "--lme-typed-prompts"},
+			{opt.counterRefine, "--counter-refine"},
+			{opt.abstainHard, "--abstain-hard"},
+			{opt.abstainSoft, "--abstain-soft"},
+		} {
+			if conflict.enabled {
+				conflicts = append(conflicts, conflict.name)
+			}
+		}
+		if len(conflicts) > 0 {
+			sort.Strings(conflicts)
+			return fmt.Errorf("--unified-answer-contract cannot be combined with answer-policy override(s): %s", strings.Join(conflicts, ", "))
+		}
+		if opt.unifiedPairAudit {
+			if !opt.noIDKRetry {
+				return fmt.Errorf("--unified-answer-contract requires --no-idk-retry during the isolated prompt experiment so the answer text cannot change retrieval evidence")
+			}
+			for _, conflict := range []struct {
+				enabled bool
+				name    string
+			}{
+				{opt.temporalDateScaffold, "--temporal-date-scaffold"},
+				{opt.traceMediation, "--trace-mediation"},
+				{strings.TrimSpace(opt.catTopKSpec) != "", "--cat-top-k"},
+				{strings.TrimSpace(opt.catQuotaSpec) != "", "--cat-chunk-quota"},
+			} {
+				if conflict.enabled {
+					conflicts = append(conflicts, conflict.name)
+				}
+			}
+			if len(conflicts) > 0 {
+				sort.Strings(conflicts)
+				return fmt.Errorf("--unified-answer-contract paired experiment must isolate the system prompt; incompatible configuration: %s", strings.Join(conflicts, ", "))
+			}
+		}
 	}
 	return nil
 }
@@ -2417,7 +2773,14 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 				if armOpt.abstainHard || armOpt.abstainSoft {
 					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
 				}
-				correct, predicted, usage, sweepUsed, evidence, retrievalMeta, notebookAttribution := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], answerCall, filterCall, rewriteCall, judgeCall, armOpt, qa, runtime.chunkTurns, turnTextIndex(conv), abstainRuntime, logger)
+				effectiveAnswerCall, effectiveJudgeCall := answerCall, judgeCall
+				var pairObserver *unifiedPromptPairObserver
+				if armOpt.unifiedPairAudit {
+					pairObserver = newUnifiedPromptPairObserver()
+					effectiveAnswerCall = pairObserver.wrapAnswer(answerCall)
+					effectiveJudgeCall = pairObserver.wrapJudge(judgeCall)
+				}
+				correct, predicted, usage, sweepUsed, evidence, retrievalMeta, notebookAttribution := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], effectiveAnswerCall, filterCall, rewriteCall, effectiveJudgeCall, armOpt, qa, runtime.chunkTurns, turnTextIndex(conv), abstainRuntime, logger)
 				if writeParity && armOpt.contextParity != nil {
 					record := contextParityRecord{
 						Conv:                key.Conv,
@@ -2443,8 +2806,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 						return
 					}
 				}
-				s.agg.add(qa.Category, correct)
-				s.journal.write(result{
+				item := result{
 					Conv:                key.Conv,
 					Q:                   key.Q,
 					QuestionID:          qa.QuestionID,
@@ -2465,8 +2827,18 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					SweepUsed:           sweepUsed,
 					SweepOverBudget:     sweepOverBudget(armOpt, sweepUsed, usage),
 					EvidenceDiagnostics: evidence,
+					UnifiedPairAudit:    nil,
 					Notebook:            notebookAttribution,
-				})
+				}
+				if pairObserver != nil {
+					audit := pairObserver.snapshot()
+					item.UnifiedPairAudit = &audit
+				}
+				s.agg.add(qa.Category, correct)
+				if err := s.journal.writeResult(item, armOpt.unifiedPairAudit); err != nil {
+					recordFormalErr(err)
+					logger.Error("write result failed", "conversation", key.Conv, "question", key.Q, "err", err)
+				}
 			}(s, qa, key, armOpt, s == parityState)
 		}
 	}
@@ -2692,7 +3064,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	// trace) from answerer_miss (in context, still wrong). Defaults to the final
 	// hit set; assembly/trace override it below.
 	contextEvidence := hits
-	prompt := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
+	prompt := answerSystemPromptForEval(qa, opt)
 	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
 	if err != nil {
 		logger.Warn("abstain signal failed; answering normally", "err", err)
@@ -3292,7 +3664,7 @@ func report(s *armState, opt options) {
 }
 
 func formalRepeatScoresVisible(opt options) bool {
-	return opt.formalProtocol == nil
+	return opt.formalProtocol == nil && !opt.unifiedPairAudit
 }
 
 // reportDelta prints the A-B uplift between two arms (typically fts vs hybrid).
@@ -3386,12 +3758,38 @@ func readQuestionWhitelist(path string) (map[string]bool, error) {
 		if id == "" || strings.HasPrefix(id, "#") {
 			continue
 		}
+		if set[id] {
+			return nil, fmt.Errorf("--only-questions file %q contains duplicate question ID %q", path, id)
+		}
 		set[id] = true
 	}
 	if len(set) == 0 {
 		return nil, fmt.Errorf("--only-questions file %q contains no question IDs", path)
 	}
 	return set, nil
+}
+
+func validateQuestionWhitelistCoverage(convs []conversation, opt options) error {
+	if opt.onlyQuestions == nil {
+		return nil
+	}
+	selected := make(map[string]bool, len(opt.onlyQuestions))
+	for _, conv := range convs {
+		for _, item := range selectQuestions(conv, opt) {
+			selected[item.QA.QuestionID] = true
+		}
+	}
+	var missing []string
+	for id := range opt.onlyQuestions {
+		if !selected[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("--only-questions contains %d ID(s) absent from the selected dataset/cohort: %s", len(missing), strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func countSelectedQuestions(convs []conversation, opt options) int {

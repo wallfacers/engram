@@ -1,77 +1,103 @@
 ---
-title: LME counter-refine 全量验证 verdict — 2026-08-13
-summary: M3 反证据验证门（score-increase-plan 2026-08-12）Qwen 全量验证。死锁排查（build/answer 500 并发 SQLite + store 残留锁）→ harness 并发修复（build=16 / answer=32）。同批重判 counter-refine vs 三臂 A baseline，McNemar 归因。结果待重判。
-status: active
+title: LME counter-refine 全量组合臂验证 — 2026-08-13
+summary: M3 反证据验证门的 Qwen 全量 500 运行完成；同批 clean 重判中 counter-refine+trace 组合臂 86.40% vs trace-off baseline 86.80%，McNemar p=0.8776。该组合配方无正向信号，但 trace 未对齐使 counter-refine 独立效应不可识别；可按成本收益停止投入，不能写成 isolated causal NO-GO。
+status: done
 audience: [maintainers, agents]
 owner: engram-maintainers
 last_reviewed: 2026-08-13
-tags: [research, longmemeval, counter-refine, verdict, harness-infra]
+tags: [research, longmemeval, counter-refine, diagnostic, harness-infra]
 ---
 
-# LME counter-refine 全量验证 verdict — 2026-08-13
+# LME counter-refine 全量组合臂验证 — 2026-08-13
 
-## 背景
+## 裁决
 
-[score-increase-plan](score-increase-plan-2026-08-12.md) 的 **M3 反证据验证门**（`--counter-refine`，default-off）
-harness 已在 `1cf1a2b` 实现，flash 先导 2/10 正向信号，**Qwen 全量验证此前被云机占用阻塞**。
-本报告 = 在克隆机（RTX 6000D 85G）上跑通 Qwen 全量验证。
+**已测试的 `counter-refine + trace-mediation` 组合配方没有正向信号；counter-refine 的独立因果效应未识别。**
 
-**机制**：草稿 `a0` → 从检索 hits 选含 `a0` 关键词的记忆作反证据 → REVISE（+1 LLM call）→
-空/IDK/err 回退 `a0`（fail-safe）。**实测 453/500 题（90.6%）pred 含反证据分析**，机制确实在跑。
+同批 clean 重判（1000/1000 judge 调用完成）：
 
-## 死锁排查与 harness 修复（宪法 IV 归因）
+| 臂 | 得分 | 命中 |
+|---|---:|---:|
+| counter-refine + trace-mediation | 86.40% | 432/500 |
+| A baseline：force-answer、trace off | 86.80% | 434/500 |
+| 观测差 | −0.40pp | −2 |
 
-### 现象
-全量 500 在 build 或 answer 阶段反复死锁（`buildWG.Wait` / `wg.Wait` 永久等待，0 answered），
-SIGQUIT goroutine dump 显示大量 `sync.Mutex.Lock`（modernc SQLite）+ `chan receive`（embedder drain）+ GC 风暴。
+配对 discordants：组合臂对 / baseline 错 = 20，组合臂错 / baseline 对 = 22；McNemar exact 双侧
+`p=0.8776`。这表明该**组合臂**在这次单次全量运行中没有净收益，且差异落在噪声内。
 
-### 两个独立根因
-1. **build/answer 阶段 500 并发 goroutine 无限制**：`main.go` 的 build（`for ci := range convs` 全启动）
-   与 answer（同模式）都对 500 个 conv 起 goroutine，`concurrency` 只限制 LLM 调用不限制 SQLite 操作。
-   500 并发 SQLite 句柄打开/检索 → 锁 convoy 死锁。
-   （三臂 8-12 能跑是 store 干净 + 时序未撞上；58b180d 的 commit message 已自述
-   "500-parallel LME retrieve phase serialized on the SQLite mutex ~18min"。）
-2. **kill -9 留下的 store 残留锁**：进程被 SIGKILL 后 `.db-wal`/`.db-shm` 残留（500 个 × 4-5MB），
-   其中 `-shm` 的残留锁让后续 run 打开 store 时永久等锁，且不清理会连锁恶化。
+由于两臂的 trace 配置不同，观测差同时包含 counter-refine、trace 及其交互，不能推出
+counter-refine 独立增量为零或为负。若按额外一次 answer 调用/题的成本收益门，可以停止继续投入；若要
+下 isolated causal verdict，仍需补 `--trace-mediation=false --counter-refine` 的同配置对照。
 
-### 修复（`cmd/locomo-bench/main.go`，纯 eval harness，不触引擎）
-- build 阶段加 `buildSem`（并发 16）
-- answer 阶段加 `ansSem`（复用 `opt.concurrency`=32，即 vllm `max-num-seqs` 上限）
-- run 前清理 `*.db-wal`/`*.db-shm`（残留锁）
+## 背景与机制
 
-修复后全量验证：build 500 完成 → answer 正常启动（GPU 100%、vllm 32 reqs 打满），无死锁。
+[score-increase-plan](score-increase-plan-2026-08-12.md) 的 M3 机制为：草稿 `a0` → 从已检索 hits
+中选择与草稿相关的候选内反证据 → REVISE/KEEP → 在空结果、IDK 或调用错误时保留 `a0`。flag
+`--counter-refine` 默认关闭。
 
-### 并发安全经验值
-| 操作 | 约束 | 安全并发 |
-|---|---|---|
-| build（SQLite 写：chunks/FTS/backfill） | SQLite 写锁 | ≤16 |
-| answer/retrieve（SQLite 读 + vllm） | vllm `max-num-seqs` | ≤32 |
-| judge（云端 DeepSeek API） | 无本地资源约束，但受 answer 瓶颈 | 共享 32 足够 |
+flash 先导曾在 10 道错题上救回 2 道，足以支持启动全量验证，但它是小样本方向信号，不是 LoCoMo
+全量结论。本次 LME 组合臂没有复现出端到端净收益。
 
-## 方法（同批重判）
+## 并发问题与 harness 修复
 
-- 数据：counter-refine results（500，新跑）+ **三臂 A baseline predicted（500，8-12 复用，不重跑）**
-- `rejudge_cr.py`：clean 提取（`extractFinalAnswer`）→ DeepSeek anthropic 端点
-  （`thinking:disabled`、temp 0、max_tokens 512、judge prompt 与 harness 逐字一致）→ **1000 次调用同批交错**
-- McNemar exact（配对二项）
+### 观察
 
-## 结果
+早期全量运行在 build/answer 阶段长时间无进展。SIGQUIT 栈显示大量 goroutine 等待 modernc SQLite
+mutex、embedder drain 与 GC；旧实现会为 500 个 LongMemEval conversation 同时启动 goroutine，而
+`--concurrency` 只限制 LLM 调用，不限制 SQLite build/retrieve 工作。
 
-**⚠️ 同批重判被机器关机中断（judged 300/1000）**，counter-refine vs baseline 的 McNemar 归因**未完成**。
+### 已落地修复
 
-- 重判脚本 `rejudge_cr.py`（同批交错 1000 次 judge）在 300/1000 时机器关机（AutoDL 停机）。
-- 重判输出在克隆机数据盘 `/root/autodl-tmp/rejudge-cr.out`（关机保留，开机可续跑）。
-- **当前只有 harness 原始分数**（非归因依据）：counter-refine 432/500 = **86.4%**（run 时 judge，跨批不可比）。
-- 三臂 A baseline 的 predicted（500 条，8-12）已在数据盘，续跑重判即可归因。
+commit `9037bde` 在 eval harness 中加入：
 
-## verdict
+- build 阶段并发门：16；
+- answer/retrieve 阶段并发门：`opt.concurrency`，本次为 32。
 
-**待续**：counter-refine 机制已确认在跑（453/500 REVISE 触发），Qwen 全量链路已跑通，
-但同批重判被关机中断，**无法下涨点/NO-GO 结论**。续跑重判后补 verdict。
+修复后本机观察到 build 500 完成、answer 正常推进并跑完全量。16/32 是本次硬件与工作负载上验证可用
+的设置，不是通用“安全上限”。改动仅在评测 harness，engine 未修改。
 
-## 诚实边界
+### WAL/SHM 边界
 
-- 单次 run（repeats=1），与三臂 A（1-rep）同批才可比；绝对分不与历史 3-rep 84.60% 比（跨批 judge 漂移 ±2.5pp）。
-- 453/500 REVISE 触发率是 pred 文本含反证据关键词的计数，非"REVISE 改变答案"率。
-- build/answer 并发修复是 eval harness 改动，检索/引擎行为不变（`--counter-refine` 本身 default-off）。
-- harness 原始 432/500 = 86.4% **不可作为归因**（judge 跨批漂移），必须等同批重判。
+被 SIGKILL 的实验目录曾遗留 `*.db-wal`/`*.db-shm`，但残留文件本身不能证明存在永久 OS 文件锁，
+本次提交也没有实现自动删除 sidecar。对需保留的 SQLite store 不应直接删 WAL：应先确认无活进程并做
+checkpoint/integrity 检查；对完全可再生的实验 store，清理整个明确 run store 后重建更安全。
+
+## 方法
+
+- 数据：新组合臂 results 500 条 + 复用的三臂 A baseline predicted 500 条；
+- clean：使用与 harness 一致的 final-answer 提取；
+- judge：DeepSeek endpoint，thinking disabled、temperature 0、max tokens 512；
+- 两臂 1000 次 judge 调用同批交错，以减小跨批 judge 漂移；
+- 配对键：同一 LME question；显著性为双侧 exact McNemar。
+
+重判此前在 300/1000 时因机器关机中断，随后从已有产物续跑到 1000/1000。`lme-cr-200` 是被全量
+任务替代的空 run，不参与结果。
+
+## 配置混杂（硬边界）
+
+- 组合臂运行时没有显式关闭 `--trace-mediation`，因此采用默认 `true`；`trace-gate.jsonl` 500 行及
+  cost 中 trace calls=650 / 7.4M input tokens 证实 trace 路径确实执行；
+- A baseline 显式设置 `--trace-mediation=false`。
+
+因此本报告的唯一稳健结论是“这个混合配方没有正向信号”。不能用 LoCoMo 上不同模型、检索栈或数据集
+的 trace/relation 结果替代本实验缺失的 LME trace 对照；另一项 LME 探索中
+`trace-mediation + relation-context` 组合甚至呈负向，更说明效应符号不能先验假定。
+
+## 诚实边界与复现缺口
+
+- 单次 answer generation；不显著不等于等效，粗略区间仍容许小幅正向或负向；
+- “453/500 pred 含反证据分析”只能证明相关文本出现，不能等同 453 次有效 REVISE 或答案改变；
+- 绝对分不与历史 3-repeat 84.60% 跨批比较；
+- `rejudge_cr.py`、`run-cr.sh`、`lme-contract.sh` 与 artifact SHA256 未入仓，当前证据不能由仓库独立
+  复现；后续实验必须提交命令、数据/模型 revision、失败重试计数和 hashes；
+- 旧产物的 answer-regime 字段没有绑定 trace/counter/relation 等后处理开关；当前版本新建的 run-dir
+  已把这些开关纳入 fingerprint，并让 LME 实验 prompt 绑定实际字节 digest，配置变化会 fail-fast。
+  这不能追溯补齐旧 `regime.json` 的缺失状态，因此旧 run-dir 一律不得续跑；
+- 远程盘点时 `lme-counterrefine` 的三类 500 行产物完整，且无运行中进程；该运行状态记录不是长期
+  artifact 保证。
+
+## 下一步
+
+默认保持 off。基于“组合臂零收益 + 每题额外调用”的成本，可将本路线停止投入；这是一项资源决策，
+不是 counter-refine isolated effect 已被因果证伪。只有维护者仍需要独立归因时，才值得补完全对齐的
+trace-off paired repeats。

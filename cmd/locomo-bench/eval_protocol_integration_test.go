@@ -292,6 +292,9 @@ func TestFormalRepeatScoresRemainPendingUntilFullValidation(t *testing.T) {
 	if !formalRepeatScoresVisible(options{}) {
 		t.Fatal("legacy non-formal repetition unexpectedly suppressed its report")
 	}
+	if formalRepeatScoresVisible(options{unifiedPairAudit: true}) {
+		t.Fatal("paired prompt repetition exposed a score before all repetitions were validated")
+	}
 }
 
 func TestFormalQuestionReplayMaterializesOnceAcrossThreeAnswerRuns(t *testing.T) {

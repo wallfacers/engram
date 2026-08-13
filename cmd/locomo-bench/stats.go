@@ -181,10 +181,9 @@ type mcnemarResult struct {
 	PValue float64 `json:"mcnemar_p"`
 }
 
-// mcnemar returns the paired two-sided McNemar p-value. Small discordant
-// samples use an exact binomial test; larger samples use the continuity-
-// corrected chi-square approximation.
-func mcnemar(a, b []bool) mcnemarResult {
+// mcnemar returns the paired exact two-sided McNemar p-value for every
+// discordant-pair count; it never switches to a chi-square approximation.
+func mcnemar(a, b []bool) (mcnemarResult, error) {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)
@@ -198,47 +197,12 @@ func mcnemar(a, b []bool) mcnemarResult {
 			result.BToA++
 		}
 	}
-	discordant := result.AToB + result.BToA
-	if discordant == 0 {
-		result.PValue = 1
-		return result
+	pValue, err := exactMcNemarTwoSided(result.AToB, result.BToA)
+	if err != nil {
+		return result, fmt.Errorf("exact McNemar: %w", err)
 	}
-	if discordant < 25 {
-		result.PValue = exactBinomialTwoSided(discordant, result.AToB)
-		return result
-	}
-	delta := math.Abs(float64(result.AToB-result.BToA)) - 1
-	stat := delta * delta / float64(discordant)
-	result.PValue = math.Erfc(math.Sqrt(stat / 2))
-	return result
-}
-
-func exactBinomialTwoSided(n, observed int) float64 {
-	observedProbability := binomialProbability(n, observed)
-	var total float64
-	for k := 0; k <= n; k++ {
-		if binomialProbability(n, k) <= observedProbability+1e-15 {
-			total += binomialProbability(n, k)
-		}
-	}
-	if total > 1 {
-		return 1
-	}
-	return total
-}
-
-func binomialProbability(n, k int) float64 {
-	if k < 0 || k > n {
-		return 0
-	}
-	if k > n-k {
-		k = n - k
-	}
-	probability := 1.0
-	for i := 1; i <= k; i++ {
-		probability *= float64(n-k+i) / float64(i)
-	}
-	return probability / math.Pow(2, float64(n))
+	result.PValue = pValue
+	return result, nil
 }
 
 func ciOverlap(a, b metricSummary) bool {
@@ -442,7 +406,10 @@ func compareResults(runsA, runsB [][]result, pairedInProcess bool) (compareRepor
 		aOutcomes = append(aOutcomes, a.Correct)
 		bOutcomes = append(bOutcomes, b.Correct)
 	}
-	mcnemarResult := mcnemar(aOutcomes, bOutcomes)
+	mcnemarResult, err := mcnemar(aOutcomes, bOutcomes)
+	if err != nil {
+		return compareReport{}, fmt.Errorf("compare paired outcomes: %w", err)
+	}
 	report.McNemarP = mcnemarResult.PValue
 	statsA := statsFromRuns(runsA)
 	statsB := statsFromRuns(runsB)

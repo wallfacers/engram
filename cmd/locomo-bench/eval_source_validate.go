@@ -335,10 +335,7 @@ func validateActiveFormalBundleReceipt(
 		results = append(results, formalEvidenceResult(item.ItemID, item.Text, evidence))
 	}
 
-	system := withCurrentDateRule(
-		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts),
-		qa.QuestionDate,
-	)
+	system := answerSystemPromptForEval(qa, opt)
 	if contextRecoverable && len(results) == len(bundle.Items) {
 		renderedContext := buildAnswerContextPrompt(qa.Question, results, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
 		if bundle.RenderedContext != renderedContext ||

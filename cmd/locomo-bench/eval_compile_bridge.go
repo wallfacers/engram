@@ -168,10 +168,7 @@ func buildCompileBundle(ctx context.Context, protocol evalProtocol, opt options,
 		resultHits = append(resultHits, formalEvidenceResult(item.ItemID, item.Text, source.Evidence))
 	}
 
-	system := withCurrentDateRule(
-		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts),
-		qa.QuestionDate,
-	)
+	system := answerSystemPromptForEval(qa, opt)
 	answerInput := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -267,7 +264,7 @@ func compileFormalSources(
 	resolver := evidencecompiler.LedgerResolver{Reader: opt.formalEvidence}
 	renderer := formalCompileRenderer{
 		model:  protocol.Models.Answerer.ID,
-		system: withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate),
+		system: answerSystemPromptForEval(qa, opt),
 	}
 
 	return evidencecompiler.Compile(ctx, evidencecompiler.CompileRequest{

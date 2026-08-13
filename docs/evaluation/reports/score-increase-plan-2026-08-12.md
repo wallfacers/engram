@@ -1,14 +1,14 @@
 ---
-title: 涨点计划 2026-08-12：ENTITY_SHIFT 竞争缓解为主线
-summary: 基于 commitment-routes-feasibility 诊断的行动路线图。当前锚点 LoCoMo 91.10% / LME 84.60%（clean）。最大未动用错因是 ENTITY_SHIFT（显著记忆压制，LoCoMo 48% / LME 42%），两文献路线（时间戳/反证据）合计可救仅 ~0.6–1pp。计划：零代码竞争诊断 → 候选压缩/去重（主线）→ 反证据 cohort 验证（副线，default-off）→ LME 时序仅在有可靠写侧元数据时进入。全部机制宪法 IV 归因、单变量、禁止未验证声称涨点。
+title: 涨点计划复盘 2026-08-12：ENTITY_SHIFT 与反证据路线
+summary: 基于 commitment-routes-feasibility 诊断启动、并按后续实验证据更新的行动记录。当前锚点 LoCoMo 91.10% / LME 84.60%（clean）。ENTITY_SHIFT 候选删除/排序已收口；counter-refine+trace 组合臂无正向信号且独立效应未识别；LME 时序路线仍以可靠写侧元数据为前置。全部机制按宪法 IV 单变量归因，禁止把错因上限或混合臂观测写成实测涨点。
 status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-08-12
+last_reviewed: 2026-08-13
 tags: [plan, locomo, longmemeval, entity-shift, scoring]
 ---
 
-# 涨点计划 2026-08-12
+# 涨点计划复盘 2026-08-12
 
 ## 锚点（clean 口径，可复现）
 
@@ -23,7 +23,8 @@ tags: [plan, locomo, longmemeval, entity-shift, scoring]
 - **预算下提质**（`lever-philosophy-signal-not-volume`）：不加 top-k、不加上下文预算、不加量；只用确定性/去噪/验证类机制提精度。
 - **无 paid cloud rerank/recall**（DEATH RULE）。
 - **纯 Go 确定性优先**：需 LLM 调用的机制（反证据 refine）只能作副线，且 flag default-off。
-- 单次 run 噪声 ~8.6pp（037 教训）→ 一切结论需要 repeats≥3 + store 复用。
+- 037 在重新抽取 store、随机回答的两次独立 run 中曾观察到 8.6pp 漂移；这不是通用噪声尺度，
+  但足以要求 repeats≥3、store 复用与配对报告。
 
 ## 错因地图（诊断依据）
 
@@ -33,16 +34,17 @@ tags: [plan, locomo, longmemeval, entity-shift, scoring]
 - **event 锚定/推算错**：LoCoMo temporal 38%——answerer 信 harness `[event:]` 标记，读侧确定性信 event 会固化错误。
 - **覆盖错**：LoCoMo ~8 题 temporal / LME ~3 题——gold 记忆未进 thinking。
 
-## 杠杆栈（按优先级）
+## 杠杆路线状态
 
-| 杠杆 | 目标错因 | 预期收益* | 成本 | 机制类型 |
-|---|---|---|---:|---|---|
-| **L1 候选压缩/去重**（主线） | ENTITY_SHIFT 66 题 | +1–2pp（救 1/4–1/2） | 低·纯 Go 确定性 | 减竞争噪音 |
-| **L2 反证据验证门**（副线） | 候选冲突 ~6–10+7 题 | +0.5–1pp | 中·LLM +1 call/题 | answer-conditioned 反查 + KEEP/REVISE |
-| **L3 LME 时序确定性选择** | LME knowledge-update 7 题 | +1.4pp | 高·依赖写侧元数据 | 读侧确定性选择 |
+| 杠杆 | 目标错因 | 当前证据 | 成本 | 机制类型 |
+|---|---|---|---:|---|
+| **L1 候选压缩/去重** | ENTITY_SHIFT 66 题 | 删除 7/16 vs 8/16；排序 6/16 vs 6/16，已收口 | 低·纯 Go 确定性 | 减竞争噪音 |
+| **L2 反证据验证门** | 候选冲突 ~6–10+7 题 | 混合臂 −0.4pp、`p=0.8776`；独立效应未识别，按成本停止 | 中·LLM +1 call/题 | answer-conditioned 反查 + KEEP/REVISE |
+| **L3 LME 时序确定性选择** | LME knowledge-update 7 题 | 未验证；约 +1.4pp 仅为错因覆盖上限 | 高·依赖写侧元数据 | 读侧确定性选择 |
 | ~~时间戳写侧抽取~~ | — | — | **排除**（027/028 证伪 + LoCoMo 方向反） | — |
 
-\* **全部为机制上限估算（错因映射，非实测）**；实际需 eval 验证。L1 的 1–2pp 是最乐观估计（假定竞争缓解对压制题有效且不反伤大池收益）。
+表中的 L1/L2 是已观察结果，不是跨实验可叠加的收益；L3 的数字只是错因映射上限，必须经独立 eval
+验证后才可作为实测结果。
 
 ## 里程碑与验证门
 
@@ -92,16 +94,16 @@ tags: [plan, locomo, longmemeval, entity-shift, scoring]
 - **影响**：ENTITY_SHIFT 无候选侧快杠杆。剩余候选侧方向需 model-side（训练/推理偏好调整，SaaS 类）或
   放弃该类。涨点计划主线清空 → 看 L2 反证据（副线）是否仍是唯一候选机制。
 
-### M3 · 反证据 cohort 验证（副线）—— ✅ flash 先导正向信号 2026-08-12
-- **机制**：harness `--counter-refine` flag（default-off）——草稿 `a0` → `(q, a0)` 反查 → KEEP/REVISE 门 + 确定性验证。
+### M3 · 反证据 cohort 验证（副线）—— ⚠️ 组合臂无正向信号，独立效应未识别 2026-08-13
+- **机制**：harness `--counter-refine` flag（default-off）——草稿 `a0` → `(q, a0)` 反查 → 显式 LLM KEEP/REVISE 验证/纠错门；候选选择、结果解析与失败回退是确定性的。
 - **flash 先导**（`m2c_flash_revise.py` → `m2c-flash-results.json`）：取 M2b flash R 答错的 10 题，给
   「R 里含 gold 词的记忆」作 answer-conditioned 反证据 + 显式验证/纠错 prompt（draft vs counter-evidence，
   KEEP/REVISE）。**结果 2/10 真实救回**——conv-8-q-60（Painting→Kayaking）、conv-8-q-96（拒答→
   strength and resilience），逐题核对非 judge 假象。
-- **关键对比**：候选排序（M2b）0/16 救回 vs 验证框架（M2c）2/10——**验证/纠错框架本身触发选择改变，
-  CounterRefine 机制成立**（不是"重新看候选"，而是"验证草稿"）。顽固压制题（conv-9-q-151 Fixing cars、
+- **关键对比**：候选排序（M2b）0/16 救回 vs 验证框架（M2c）2/10——验证/纠错框架在这个小样本中
+  确实触发了答案改变（不是"重新看候选"，而是"验证草稿"）。顽固压制题（conv-9-q-151 Fixing cars、
   conv-3-q-54）反证据也救不回 → 收益上限有限。
-- **门**：✅ 通过（机制有真实信号）→ **harness 实现完成（2026-08-12）**：
+- **历史实现门**：flash 定向先导达到当时的实现门，但不构成总体效应证据；**harness 实现完成（2026-08-12）**：
   - `--counter-refine` flag（default-off）已实现：`cmd/locomo-bench/main.go`（options 字段 + flag 注册 +
     `counterRefineAnswer`/`selectCounterEvidence`/`counterRefineKeys`/`counterRefineHit`/`counterRefineUserPrompt`
     函数 + 插入点=IDK retry 后 judge 前），`runner.go`（`counterRefineSystemPrompt` 常量），
@@ -111,8 +113,13 @@ tags: [plan, locomo, longmemeval, entity-shift, scoring]
     REVISE prompt（+1 LLM call）→ 空/IDK/err 回退 a0 保持草稿（fail-safe）。
   - 单元测试 `counter_refine_test.go`（keys 提取/证据筛选/回退/归因）全过；
     `CGO_ENABLED=0 go build ./...` + `go test ./cmd/locomo-bench` 全绿。
-  - 全量验证需云机 Qwen vllm（当前被占）；默认 off 保证 byte-identical（宪法 IV）。
-- **诚实边界**：小样本（10 题）2/10 是方向信号非精确率；救回集中在"草稿错但候选含 gold 信息"的题。
+  - 2026-08-13 Qwen LME 500 已跑完，但 treatment 实际为 `counter-refine + trace-mediation`，对照为
+    trace-off baseline：432/500 vs 434/500，McNemar `p=0.8776`。**该组合配方无正向信号**；trace
+    未对齐，不能据此识别 counter-refine 独立效应。
+- **资源裁决**：额外一次 answer 调用/题没有换来组合臂收益，路线可按成本停止投入；这不等同 isolated
+  causal NO-GO。完整边界见 [全量组合臂报告](counter-refine-verdict-2026-08-13.md)。
+- **诚实边界**：小样本 2/10 仅为启动全量的方向信号；全量又有 trace 混杂。当前既不能声称涨点，也
+  不能声称 counter-refine 单机制已被因果证伪。
 
 ### M4 · LME 时序确定性选择（条件进入）
 - **前置**：先诊断 LoCoMo `[event:]` 标记质量（多少题 event 标记与 gold 事件日期一致）；若标记不可靠，关闭此线（与 M2 的 conv-4-q-10/80 教训一致）。
@@ -121,21 +128,22 @@ tags: [plan, locomo, longmemeval, entity-shift, scoring]
 
 ## 执行顺序建议
 
-1. **M1 零代码诊断**（今天可做，零成本）→ 决定主线方向。
-2. M2 cohort 先导（低成本，先看选择是否改变）。
-3. M3 反证据 cohort（可与 M2 并行）。
-4. M1/M2/M3 的 cohort 结果齐了 → 决策：全量宪法 IV eval 走哪条（或都不走）。
-5. M4 仅当 M1 显示 event 标记可靠才开。
+1. **M1 已完成**：竞争症状显著，但只建立相关性。
+2. **M2/M2b 已完成并收口**：删除会误伤，排序没有改变答案；L1 不进入全量。
+3. **M3 已完成混合臂验证**：组合配方无正向信号；因 trace 混杂，独立效应仍未知，但按调用成本停止投入。
+4. **M4 暂不进入**：只有新的写侧时间元数据可靠性证据通过预注册门，才设计单变量实验。
+5. 后续任何新杠杆先冻结假设、配置、held-out 与停止规则，再运行可比较的宪法 IV eval。
 
 ## 预期收益（诚实边界）
 
-- 全部杠杆收益为**机制上限估算**，非实测；任何宣称必须在宪法 IV eval 后。
-- L1 乐观 +1–2pp（LoCoMo），L2 +0.5–1pp，L3 +1.4pp（LME）——乐观叠加 ~2–3pp，但每条都有独立验证门，允许任意一条 NO-GO 收口。
-- 若 M1 显示竞争假设不成立，L1 关闭，主线上限即降至 L2（~1pp）——计划本身接受该结果。
+- 历史错因映射给出的收益数字都只是**机制上限估算**，不是实测；任何新收益宣称必须在宪法 IV eval 后。
+- L1 已由 M2a/M2b 收口；L2 的全量混合配方实测 −0.4pp、独立效应未识别，不再保留 +0.5–1pp
+  的收益预期；L3 仍只是未验证上限估算。
+- 任何后续收益必须来自重新预注册且配置完全对齐的实验，不能叠加这里的历史乐观估计。
 
 ## 与既有文档衔接
 
-- 诊断依据：[commitment-routes-feasibility](commitment-routes-feasibility-2026-08-12.md)、[commitment failure 审计](../research/committed-failure-retrieval-wrong-answer.md)。
+- 诊断依据：[commitment-routes-feasibility](commitment-routes-feasibility-2026-08-12.md)、[commitment failure 审计](../../research/committed-failure-retrieval-wrong-answer.md)。
 - 错因画像：[LoCoMo 错题画像](locomo-error-patterns-2026-08-12.md)（机制三=显著记忆压制，sweep 配对证 k150 不反伤 single-hop）。
 - LME 90 目标：[90pp 方向探索](90pp-direction-exploration.md)。
 - 竞争噪音文献：Separating Semantic Competition（arXiv:2605.27294，竞争者越多越有害）。

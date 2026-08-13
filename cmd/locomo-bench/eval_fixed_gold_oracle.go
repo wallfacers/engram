@@ -701,10 +701,7 @@ func buildFixedGoldAnswerInput(
 			SourceSessionID: source.SourceSessionID,
 		})
 	}
-	system := withCurrentDateRule(
-		answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts),
-		qa.QuestionDate,
-	)
+	system := answerSystemPromptForEval(qa, opt)
 	return evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,

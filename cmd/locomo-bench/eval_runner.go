@@ -734,7 +734,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		frozen.InvalidReasons = append(frozen.InvalidReasons, "candidate_invalid")
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
+	system := answerSystemPromptForEval(qa, opt)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -843,7 +843,7 @@ func prepareFrozenFormalB1Answer(ctx context.Context, protocol evalProtocol, opt
 		Answer:         evalFormalAnswerRun{RunIndex: runIndex},
 	}
 
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts), qa.QuestionDate)
+	system := answerSystemPromptForEval(qa, opt)
 	input := evidencecompiler.AnswerInput{
 		Model:  protocol.Models.Answerer.ID,
 		System: system,
@@ -1542,14 +1542,33 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 }
 
 func formalAnswerPromptDigest(opt options) string {
-	return evalJSONDigest([]string{
+	if opt.unifiedAnswerContract {
+		return evalJSONDigest([]string{
+			unifiedAnswerContractPrompt,
+			"unified_answer_contract=true",
+			"runtime_current_date=user_context_only",
+		})
+	}
+	prompts := []string{
 		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
 		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
 		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
 		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
 		currentDateRule,
 		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
-	})
+	}
+	// Preserve the historical LoCoMo digest byte-for-byte when the LME typed
+	// mode is off. When enabled, bind every LongMemEval category prompt and the
+	// switch so replay cannot cross regimes.
+	if opt.lmeTypedPrompts {
+		for _, category := range []int{6, 7, 8, 9, 10, 11, 12} {
+			prompts = append(prompts, answerPromptForEval(category, opt))
+		}
+		prompts = append(prompts,
+			fmt.Sprintf("lme_typed_prompts=%t", opt.lmeTypedPrompts),
+		)
+	}
+	return evalJSONDigest(prompts)
 }
 
 type evalFreezeIngestion struct {
