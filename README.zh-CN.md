@@ -224,122 +224,12 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 ## 基准评测
 
-> **读表前必读：**每一个数字都是
-> **数据集 × 答题模型 × 判题模型 × 配方**的函数，不是简单的“engram 得分”。
-> 只有其他轴受到控制时，跨行比较才有效。🔬 表示本项目实测；📣 表示厂商自报、尚未复现。
-> [当前评测结果](docs/evaluation/results.md)是分数与比较边界的唯一正本。
+> **LoCoMo 91.10%** —— 全量 1,540 题中答对 1,403 题。
 
-**统一条件：**使用本地 sidecar 提供的 `bge-large-en-v1.5` 1024d embedding；
-判题使用 mem0-aligned prompt。每个数字都是
-**数据集 × 答题模型 × 判题模型 × 配方**的函数；只有同栈行可直接比较。
+采用本地 Qwen3.6-35B、thinking + top-k 150、三次多数投票与 clean 最终答案
+判题；同一批原始答题结果经独立重判得到一致成绩。
 
-### 当前最佳（LoCoMo）
-
-engram 今天在 LoCoMo 上已验证的最高分——从原始 3 次答题独立重判，
-使用 clean（剥离思考）judge，因此数字不携带 judge 泄漏：
-
-| 数据集 (n) | 答题模型 | 判题模型 | 配方 | 得分 |
-|---|---:|---|---|---:|
-| **LoCoMo (1540)** | **Qwen3.6-35B · 本地 vLLM** | deepseek-v4-flash | 思考 · top-k 150 · 3 次多数 · **clean 重判** | **91.10%**（1403/1540） |
-
-clean 重判 = 判题前用 `extractFinalAnswer` 剥离思考前导，去掉 raw（含思考）
-judge 所加的 ~1.5pp 泄漏（见 [judge-final-answer-regime](docs/evaluation/reports/judge-final-answer-regime.md)）。
-数字可复现：同一份 3 次数据独立重判精确落在 1403/1540（[复现报告](docs/evaluation/reports/locomo-9110-repro-2026-08-12.md)）。
-
-### 如何一步步做到 91.10%
-
-每一步都是已验证、可归因的变化——这里没有任何没有独立证据文件的分数：
-
-| 步骤 | 变化 | LoCoMo（n=1540） | 证据 |
-|---|---|---|---:|
-| 1 · 基线 | canonical hybrid recipe，无思考 | 85.71% | [results.md](docs/evaluation/results.md) |
-| 2 · Trace | 读侧证据中介（默认开启） | 85.91% @ ~468 tok | [030 verdict](docs/evaluation/reports/030-evidence-mediation-verdict.md) |
-| 3 · 思考 | 深度思考答题器，3 次平均 | 88.23% | [topk exploration](docs/evaluation/reports/topk-exploration-2026-08-11.md) |
-| 4 · Top-k 150 | 扩大召回（32k 上下文），3 次多数 | 90.13% | [topk exploration](docs/evaluation/reports/topk-exploration-2026-08-11.md) |
-| 5 · Clean judge | 对第 4 步做剥离思考重判 | **91.10%** | [复现报告](docs/evaluation/reports/locomo-9110-repro-2026-08-12.md) |
-
-### 同栈实测
-
-同一台机器、Qwen 答题模型、bge-large embedding、相同 judge prompt 和 judge
-模型；竞品运行自己的原始代码，不做修改。只保留最有意义的行——更早的中间
-运行已在上表。
-
-| 数据集 (n) | 框架 | 答题模型 | 判题模型 | 得分 |
-|---|---|---|---|---:|
-| LoCoMo (1540) · 最佳 | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM（思考，32k 上下文） | deepseek-v4-flash | **91.10%** · clean 3 次多数 |
-| LoCoMo (1540) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **89.03%** |
-| LongMemEval-S (500) | engram 🔬 | deepseek-v4-pro · API | deepseek-v4-flash | **86.00%** |
-| LoCoMo (1540) | MemOS 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | 82.40% |
-| **LongMemEval-S (500)** | **engram** 🔬 | Qwen3.6-35B · 本地 vLLM | deepseek-v4-flash | **80.80%** |
-
-### 不同评测栈下的各方最好成绩
-
-这些数字可作为背景信息，但**不能直接横向比较**：
-
-| 数据集 | engram 🔬 | MemOS 📣 | Mem0 📣 |
-|---|---:|---:|---:|
-| LoCoMo | **91.10%**（思考 · top-k 150，n=1540，clean） | 88.83% | 92.5% |
-| LongMemEval | **86.00%**（v4-pro，S-cleaned 500） | 89.20% | 94.4% |
-
-### LoCoMo 分类别得分
-
-同一 1,540 道题的两个视图。**当前最佳**（91.10% 配方：思考 + top-k 150、
-clean 3 次多数）展示 engram 现在的水平；**同栈 Δ**（base 配方在完全一致
-条件下对比 MemOS）是唯一受控的比较。
-
-| 类别 | n | 当前最佳（clean 3 次多数） | 同栈 Δ engram−MemOS（base 配方） |
-|---|---:|---:|---:|
-| single-hop | 841 | **91.8%** | +6.18pp |
-| multi-hop | 282 | **95.7%** | −1.77pp |
-| temporal | 321 | **91.9%** | −0.62pp |
-| open-domain | 96 | 68.8% | **+6.24pp** |
-| **总计** | **1540** | **91.10%** | +3.31pp（配对 p=0.002895） |
-
-两条诚实的边界。第一，同栈 Δ 在 base 配方（85.71%）下测得：MemOS 的
-tree/graph 组织在 multi-hop（−1.77pp）和 temporal（−0.62pp）上领先，而
-engram 在 single-hop 和 open-domain 上领先超过 6 个百分点；engram 换用更强
-答题模型后 temporal 也反超。第二，91.10% 的分类别拆分来自不同配方（思考 +
-top-k 150），因此**不可与 MemOS 直接比较**——那里的 multi-hop/temporal 高分
-反映的是更强配方，不是同栈机制优势。open-domain（68.8%）在两个视图下都是
-最弱类别，是继续投入的诚实前沿。
-
-### 三个受控差值
-
-| 轴 | 受控变化 | 净效应 | 解读 |
-|---|---|---:|---|
-| **框架** | engram − MemOS，LoCoMo 1540 | **+3.31pp**（v4-flash judge）/ **+3.51pp**（v4-pro judge） | 两个 judge 下方向一致；1529 个去重配对的配对 McNemar exact **p=0.002895** |
-| **答题模型** | Qwen → v4-pro | **+3.32pp**（LoCoMo）/ **+5.20pp**（LongMemEval-S，p=0.0049） | 强答题模型主要改善 temporal 和 open-domain |
-| **判题模型** | v4-flash → v4-pro | **−2 至 −3pp** | 产生加性偏移，但框架差值方向不变 |
-
-框架差值是上表唯一有配对统计证据的行。原始 1540 行含 11 组重复问题，按
-`(conv, question)` 折叠后得到 1529 个配对（engram 85.68%，MemOS 82.47%，+3.20pp），
-双侧 exact McNemar 检验 **p=0.002895**，主要由 single-hop 驱动（p=0.000014）。
-v4-pro judge 未保存逐题 verdict，其 +3.51pp 不能声称配对显著。[上下文预算剥离](docs/evaluation/reports/budget-ablation.md)
-进一步表明该 +3.20pp 完全由预算驱动：将 engram answerer 预算对齐 MemOS 的
-~1059 token（从 3614 降下）后，差距反转为 −5.62pp（p=0.000006）——领先反映的是
-engram ~3.4 倍的上下文预算，而非记忆机制优势。
-
-### 读侧证据中介 —— 预算高效（trace）
-
-读侧阶段（`--trace-mediation`，[spec 030](specs/030-evidence-mediation/spec.md)），
-**在评测 harness 中默认开启**：先用一个小中介把检索候选蒸馏成一条有据可依的证据，
-再交给答题模型；一道确定性的 fail-closed 门保证每个引用都落在检索边界内。在全量
-1540 题 LoCoMo 上，答题上下文从 ~3,614 token 降到 ~468 token（约 1/7.7），3 次多数
-**85.91%**（vs base 单次 84.9% / 历史多数 85.19%）——更少 token、正确率更高，类别
-无回落。分类别（trace，3 次多数）：single-hop 88.23% · multi-hop 87.23% ·
-temporal 84.42% · open-domain 66.67%。由于 token 节省在任何正确率差值下都成立，
-这是上面"预算驱动 +3.20pp"的预算高效对应物——预算对齐视角下第一个"更少 token、
-更多信号"的结果。该阶段默认开启：需要已配置的 answerer LLM 作为 sidecar，sidecar
-不可用时优雅降级为 legacy 路径（字节一致）；`--trace-mediation=false` 可显式回到
-legacy 路径。
-
-Mem0 的 92.5% / 94.4% 来自托管平台，其中包含开源 SDK 未提供的优化，并使用
-`top_200` 检索预算，因此无法在同栈条件下复现，对 Mem0 的真实受控差距仍然
-**未知**。MemOS 自报的 88.83% 在受控栈下变为 82.40%，−6.43 个百分点的评测
-regime 差异主要来自答题模型与 judge 条件。
-
-canonical recipe 的复现步骤见
-[LoCoMo 评测运行手册](docs/operations/evaluation/locomo-runbook.md)。
+[评测详情与复现证据 →](docs/evaluation/results.md)
 
 ## 文档
 

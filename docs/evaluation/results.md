@@ -1,17 +1,19 @@
 ---
 title: 当前评测结果
-summary: 本文维护 engram 当前可引用的 LoCoMo 与 LongMemEval-S 结果及其复现口径；不把不同评测栈的数字当作可直接比较的系统排名。
+summary: 本文集中维护 engram 的当前最高分、复现口径、得分演进、分类结果与比较边界。
 status: active
 audience: [users, maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-07-31
+last_reviewed: 2026-08-13
 canonical_for: [evaluation-results]
 tags: [evaluation, locomo, longmemeval, results]
 ---
 
 # 当前评测结果
 
-本文是当前分数的唯一正本。每条结果都由数据集、答题模型、判题模型和配方共同定义；查看实验取舍请转至[实验裁决](experiment-verdicts.md)，复现步骤请转至[评测运维](../operations/evaluation/locomo-runbook.md)。
+本文是当前分数与 benchmark 详情的唯一正本。这里集中记录最高分、完整口径、
+得分演进、分类结果和比较边界；逐项实验取舍见[实验裁决](experiment-verdicts.md)，
+复现步骤见[评测运维](../operations/evaluation/locomo-runbook.md)。
 
 ## 读取规则
 
@@ -29,6 +31,53 @@ tags: [evaluation, locomo, longmemeval, results]
 | LoCoMo（cat 1–4） | 1540 | deepseek-v4-pro | deepseek-v4-flash | canonical recipe、3 次答题多数 | 89.03% | 强 answerer 探针，不能与本地基线混作默认分 |
 | LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local-first、3 次答题多数 | 80.80% | 历史 full 500 本地栈测量；见下方口径更正 |
 | LongMemEval-S（cleaned） | 500 | deepseek-v4-pro | deepseek-v4-flash | 与本地臂相同检索、3 次答题多数 | 86.00% | 历史强 answerer 探针；同受下方口径更正约束 |
+
+## 当前最高分：LoCoMo 91.10%
+
+engram 在 LoCoMo 全量 1,540 题上的当前最高已验证成绩为
+**91.10%（1,403/1,540）**。运行使用本地 Qwen3.6-35B-A3B-FP8、thinking、
+top-k 150、三次答题多数投票与 deepseek-v4-flash clean 重判。
+
+clean 重判只把 answerer 的最终答案交给 judge，剥离 thinking 前导，避免 judge
+从推理过程中的候选答案“捡到”正确值。原始三次答题数据经过两次独立重判，均得到
+1,403/1,540；完整方法与逐类结果见
+[91.10% 复现报告](reports/locomo-9110-repro-2026-08-12.md)，judge 口径变更见
+[final-answer regime 报告](reports/judge-final-answer-regime.md)。
+
+### 得分演进
+
+| 阶段 | 变化 | LoCoMo（n=1540） | 证据 |
+|---|---|---:|---|
+| Base | canonical hybrid recipe，无 thinking | 85.71% | 本页当前结果矩阵 |
+| Trace | 读侧证据中介 | 85.91% @ ~468 token | [030 verdict](reports/030-evidence-mediation-verdict.md) |
+| Thinking | 深度思考 answerer，3 次均值 | 88.23% | [top-k 探索](reports/topk-exploration-2026-08-11.md) |
+| Top-k 150 | 扩大召回，3 次多数 | 90.13% | [top-k 探索](reports/topk-exploration-2026-08-11.md) |
+| Clean judge | 只判最终答案 | **91.10%** | [复现报告](reports/locomo-9110-repro-2026-08-12.md) |
+
+### 分类别结果
+
+以下分类来自 91.10% 的同一套 clean 3 次多数结果，不与其他 recipe 或竞品行混算。
+
+| 类别 | 正确/总数 | 得分 |
+|---|---:|---:|
+| single-hop | 772/841 | **91.8%** |
+| multi-hop | 270/282 | **95.7%** |
+| temporal | 295/321 | **91.9%** |
+| open-domain | 66/96 | 68.8% |
+| **总计** | **1403/1540** | **91.10%** |
+
+## 读侧证据中介（trace）
+
+`--trace-mediation` 在评测 harness 中默认开启：它先把检索候选压缩成一条带引用的
+证据，再交给 answerer，并通过 fail-closed gate 保证引用不越过检索边界。全量
+LoCoMo 上，answer context 从约 3,614 token 降到约 468 token（约 7.7 倍），
+三次多数为 85.91%。分类别结果为 single-hop 88.23%、multi-hop 87.23%、
+temporal 84.42%、open-domain 66.67%。
+
+该结果证明的是显著的上下文节省，正确率增量本身未完成严格的 base 三次 vs trace
+三次配对显著性验证。answerer sidecar 不可用时会退化到 legacy 路径；
+`--trace-mediation=false` 可显式关闭。机制拆解、配对边界与复现位置见
+[030 verdict](reports/030-evidence-mediation-verdict.md)。
 
 ## 022/027 证据：B0 连续性 + B1 正式基线（85% 级已登记）
 
@@ -93,6 +142,17 @@ accepted result；022 状态由 `HOLD` 转为 `PARTIAL`（LoCoMo B1 基线已收
 
 唯一已完成的同栈对照固定 Qwen3.6-35B-A3B-FP8 answerer、bge-large-en-v1.5 embedding、同一 judge prompt 与同一 judge：LoCoMo 原始 1540 行汇总中 engram 为 85.71%，MemOS 为 82.40%。
 
+### 三个受控差值
+
+| 轴 | 受控变化 | 净效应 | 解释 |
+|---|---|---:|---|
+| 框架 | engram − MemOS，LoCoMo 1540 | +3.31pp（v4-flash judge）/ +3.51pp（v4-pro judge） | 两个 judge 下方向一致；只有 v4-flash 保存了逐题配对证据 |
+| Answerer | Qwen → v4-pro | +3.32pp（LoCoMo）/ +5.20pp（LongMemEval-S） | 强 answerer 主要改善 temporal 与 open-domain |
+| Judge | v4-flash → v4-pro | −2 至 −3pp | 产生整体偏移，但框架差值方向不变 |
+
+只有框架的 v4-flash 行完成了逐题配对统计；answerer 与 judge 行是受控汇总差值，
+不声明配对显著。LongMemEval-S 的 answerer 差值还受上方“口径更正待刷新”约束。
+
 原始数据含 11 组重复问题。按唯一 `(conv, question)` 折叠并复现 bench 的三次运行多数票后，得到 1529 个完整配对：engram 为 1310/1529（85.68%），MemOS 为 1261/1529（82.47%），差为 +3.20 个百分点；不一致对 `b=155`（engram 对、MemOS 错）、`c=106`（反向），双侧 McNemar exact `p=0.002895`。分类别结果如下：
 
 | 类别 | n | engram | MemOS | 差值 | exact p |
@@ -119,6 +179,20 @@ accepted result；022 状态由 `HOLD` 转为 `PARTIAL`（LoCoMo B1 基线已收
 | 1083 tok（≈ MemOS 1059）| 76.85% | −5.62pp | 0.000006 | 极显著落后 |
 
 领先随预算下降**单调消失并反转**；对齐 MemOS 预算后 engram 极显著落后。**因此 +3.20pp 完全由上下文预算驱动，不是记忆机制优势**——engram 需约 2.1 倍 MemOS 预算才持平，3.4 倍才显著领先；同预算下 MemOS 的 tree/graph 在 multi-hop/temporal 上显著优于 engram 扁平检索。完整数据、分类别趋势、诚实边界与复算入口见[上下文预算剥离报告](reports/budget-ablation.md)。
+
+## 不同评测栈下的公开成绩
+
+下表仅保留各项目公开的最高结果作为市场背景，不用于计算系统间差值。
+
+| 数据集 | engram 实测 | MemOS 自报 | Mem0 自报 |
+|---|---:|---:|---:|
+| LoCoMo | **91.10%**（全量 1540，clean） | 88.83% | 92.5% |
+| LongMemEval | **86.00%**（S-cleaned 500） | 89.20% | 94.4% |
+
+Mem0 的公开高分来自托管平台，包含开源 SDK 未提供的优化与不同检索预算，尚无同栈
+复现；MemOS 的公开分数在 engram 的受控栈下测得 82.40%。因此这些跨栈数字只表示
+各自运行条件下的已报告结果，不构成统一排行榜。来源与比较规则见
+[竞品与基准口径](competitors.md)。
 
 ## 结果维护要求
 
