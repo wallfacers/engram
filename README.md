@@ -236,12 +236,11 @@ your installed version for its exact startup contract.
 
 ## Benchmarks
 
-> **91.10% on LoCoMo** — 1,403 correct answers across the full 1,540-question
-> benchmark.
+| Benchmark | Score | Configuration |
+|---|---:|---|
+| LoCoMo (1,540) | **91.10%** (1,403/1,540) | Local Qwen3.6-35B · thinking · top-k 150 · 3-run majority · clean final-answer judge |
 
-Verified with Qwen3.6-35B running locally, thinking + top-k 150, three-run
-majority, and clean final-answer judging. The result was independently
-reproduced from the original answer runs.
+The result was independently reproduced from the original answer runs.
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
