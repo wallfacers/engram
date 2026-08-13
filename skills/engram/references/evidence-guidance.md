@@ -36,6 +36,9 @@ two events as one merely because their dates match.
 Distinguish event time from storage time. `event_date` is an event-time hint
 when present. `created_at` records when the memory entry was stored and is not
 event time by itself. Preserve the precision actually supported by the content.
+Do not infer event order from search rank, array order, or `created_at`. A state
+change without event time or an explicit sequence cannot supersede a dated
+state.
 
 Use a newer state only when the question asks for the current state and the
 update order is clear. If two memories conflict and available time/source

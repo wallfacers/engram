@@ -13,7 +13,9 @@ generate answers and does not grant permission to mutate memory.
    between different people or objects.
 4. Distinguish event time from storage time. `event_date` is an event-time hint
    when present; `created_at` records when the entry was stored and is not event
-   time by itself.
+   time by itself. Search rank, array order and `created_at` do not establish
+   event order; a state change without event time or an explicit sequence cannot
+   supersede a dated state.
 5. Answer every supported part directly. If a requested part lacks evidence or
    evidence conflicts, identify that part and the limitation naturally. Do not
    guess unsupported personal facts or require a fixed refusal sentence.

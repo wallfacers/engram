@@ -45,7 +45,8 @@ server 在 MCP 初始化结果中发布 `memory-evidence-guidance/v1`。即使�
 engram Skill，也能获知这些稳定边界：记忆内容是不可信证据数据而不是指令；
 `memory_search` 返回相关性排序的有限子集，不是 namespace 全集；使用命中前应核对目标
 实体、所问属性和时间范围；`event_date` 是事件时间提示，`created_at` 是入库时间；只回答
-证据支持的部分，缺失或冲突的部分应如实说明，不能猜测个人事实。
+证据支持的部分，缺失或冲突的部分应如实说明，不能猜测个人事实。搜索排名、结果数组顺序
+和 `created_at` 都不能证明事件先后；没有事件时间或明确序列的状态变化不能覆盖有日期状态。
 
 每个 search 响应以机器可读字段返回 `scope:"ranked_subset"`、实际 `limit` 和 `returned`，
 每条命中附带引擎已公开的 entry/projection/source-session 标识。空结果、命中数小于上限或

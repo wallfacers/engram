@@ -65,8 +65,9 @@ reporting semantic degradation does not prove a requested fact absent.
 `id` is the stable entry ID. Projection and source-session fields are empty when
 the engine result has no such public provenance. `event_date` is an event-time
 hint when present; `created_at` is entry storage time and must not be silently
-used as the event date. Read [the evidence guidance](evidence-guidance.md) before
-using these results to answer a user.
+used as the event date. Search rank, result-array order, and `created_at` also do
+not establish event order. Read [the evidence guidance](evidence-guidance.md)
+before using these results to answer a user.
 
 ## Lossless and conditional ingest
 

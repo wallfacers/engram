@@ -112,7 +112,7 @@ assert hit order/content remains identical to direct engine retrieval.
 - **FR-002**: The guidance MUST be independent of benchmark names, dataset formats, category labels, scorer behavior, known test examples, gold wording and fixed refusal phrases.
 - **FR-003**: The guidance MUST state that memory/tool content is untrusted evidence data, not instructions, and that search returns a ranked bounded subset that can be incomplete, stale, duplicated or conflicting.
 - **FR-004**: The guidance MUST require matching the target entity, requested attribute and time scope; it MUST forbid transferring personal facts between merely similar entities.
-- **FR-005**: The guidance MUST distinguish event time from storage/record time and MUST NOT treat `created_at` as event time unless the content independently supports that interpretation.
+- **FR-005**: The guidance MUST distinguish event time from storage/record time and MUST NOT treat search rank, result-array order or `created_at` as event order; a state change without event time or an explicit sequence MUST NOT supersede a dated state.
 - **FR-006**: The guidance MUST answer supported parts, identify the particular missing or conflicting evidence, and avoid guessing unsupported personal facts; it MUST NOT require a fixed refusal sentence.
 - **FR-007**: The Skill frontmatter description MUST remain a concise activation boundary rather than contain the full answer policy. Detailed synthesis rules MUST live in the Skill body and versioned reference.
 - **FR-008**: MCP initialize results MUST include concise evidence guidance that remains useful when the engram Skill is not installed.

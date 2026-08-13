@@ -207,7 +207,7 @@
     },
     {
       "id": "evidence-wrong-entity",
-      "prompt": "Use engram to answer what allergy Alex Chen has. The search results say Alex Chen avoids shellfish by preference, while a separate memory says Alex Cheng has a peanut allergy.",
+      "prompt": "An engram memory_search call has already completed; do not call another tool. Answer what allergy Alex Chen has from this result: {\"scope\":\"ranked_subset\",\"limit\":8,\"returned\":2,\"results\":[{\"id\":\"entry-chen\",\"name\":\"alex-chen-food\",\"content\":\"Alex Chen avoids shellfish because he dislikes the taste.\",\"event_date\":null,\"created_at\":\"2026-08-12T09:00:00Z\"},{\"id\":\"entry-cheng\",\"name\":\"alex-cheng-allergy\",\"content\":\"Alex Cheng has a peanut allergy.\",\"event_date\":null,\"created_at\":\"2026-08-11T09:00:00Z\"}],\"degraded\":{\"semantic\":false,\"reason\":\"\"}}",
       "expected_output": "Does not transfer Alex Cheng's allergy to Alex Chen and explains that the returned evidence does not support an allergy for the target person.",
       "files": [],
       "expectations": [
@@ -219,7 +219,7 @@
     },
     {
       "id": "evidence-bounded-list",
-      "prompt": "Use engram to list all of my saved travel preferences. memory_search returned two results with scope ranked_subset, limit 2, and returned 2.",
+      "prompt": "An engram memory_search call has already completed; do not call another tool. List all of my saved travel preferences from this result: {\"scope\":\"ranked_subset\",\"limit\":2,\"returned\":2,\"results\":[{\"id\":\"entry-train\",\"name\":\"travel-by-train\",\"content\":\"The user prefers trains to short-haul flights.\",\"event_date\":null,\"created_at\":\"2026-08-10T09:00:00Z\"},{\"id\":\"entry-seat\",\"name\":\"travel-seat\",\"content\":\"The user prefers an aisle seat.\",\"event_date\":null,\"created_at\":\"2026-08-11T09:00:00Z\"}],\"degraded\":{\"semantic\":false,\"reason\":\"\"}}",
       "expected_output": "Lists the two supported preferences but clearly limits completeness to the returned subset instead of claiming they are all stored preferences.",
       "files": [],
       "expectations": [
@@ -231,7 +231,7 @@
     },
     {
       "id": "evidence-time-conflict",
-      "prompt": "Use engram to answer where I currently work. One memory says I joined Northwind in 2024 with event_date 2024-06-01; another says I left Northwind, has no event_date, and only has a newer created_at storage timestamp.",
+      "prompt": "An engram memory_search call has already completed; do not call another tool. Answer where I currently work from this result: {\"scope\":\"ranked_subset\",\"limit\":8,\"returned\":2,\"results\":[{\"id\":\"entry-joined\",\"name\":\"joined-northwind\",\"content\":\"The user joined Northwind in June 2024.\",\"event_date\":\"2024-06-01T00:00:00Z\",\"created_at\":\"2024-06-02T09:00:00Z\"},{\"id\":\"entry-left\",\"name\":\"left-northwind\",\"content\":\"The user left Northwind.\",\"event_date\":null,\"created_at\":\"2026-08-12T09:00:00Z\"}],\"degraded\":{\"semantic\":false,\"reason\":\"\"}}",
       "expected_output": "Keeps the current employer unresolved because storage time alone does not establish the later event, while explaining the specific conflict.",
       "files": [],
       "expectations": [

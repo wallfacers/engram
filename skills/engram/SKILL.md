@@ -101,7 +101,9 @@ Before using a result, match the target entity, requested attribute, and time sc
 Similar names alone do not establish identity, and personal facts must
 not move between different people or objects. Distinguish event time from
 storage time: `event_date` is an event-time hint when present, while
-`created_at` is storage time and is not event time by itself.
+`created_at` is storage time and is not event time by itself. Do not infer event
+order from search rank, array order, or `created_at`; a state change without
+event time or an explicit sequence cannot supersede a dated state.
 
 Answer supported parts directly. For each requested part that is missing or
 conflicting, name the limitation naturally instead of guessing unsupported

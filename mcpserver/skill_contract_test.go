@@ -51,6 +51,8 @@ func TestSkillAndMCPSharePortableEvidenceGuidanceV1(t *testing.T) {
 			"time scope",
 			"event time",
 			"created_at",
+			"search rank",
+			"explicit sequence",
 			"supported",
 			"missing",
 			"conflicting",
