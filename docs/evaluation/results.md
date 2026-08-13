@@ -21,6 +21,8 @@ tags: [evaluation, locomo, longmemeval, results]
 - `full 500` 指 LongMemEval-S（cleaned）的完整 500 题，而不是早期的小样本先导运行。
 - `deepseek-v4-pro` answerer 的结果是公平探针，不是产品默认模型或默认配置。
 
+> **全量矩阵与复跑清单**：跨所有 recipe 的完整评测矩阵——含每个实验的 数据集/答题模型/判题模型/检索/top-k/契约/口径/得分/复跑状态，过时项归档与重跑判定规则——见 [result-matrix.md](result-matrix.md)。本文保持当前分数正本，矩阵是全集视图。
+
 ## 当前结果矩阵
 
 | 数据集 | 样本 | 答题模型 | 判题模型 | 配方与聚合 | 结果 | 解释边界 |
