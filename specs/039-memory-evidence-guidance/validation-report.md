@@ -2,8 +2,8 @@
 
 **Date**: 2026-08-13
 
-**Status**: Offline implementation gates passed; model-backed Skill behavior run
-handed off, not run in this change.
+**Status**: All non-model implementation and release-candidate gates passed;
+model-backed Skill behavior run handed off, not run in this change.
 
 ## Delivered contract
 
@@ -22,7 +22,13 @@ handed off, not run in this change.
 CGO_ENABLED=0 go test -count=1 ./mcpserver
 ok github.com/wallfacers/engram/mcpserver
 
+CGO_ENABLED=0 go test -count=1 ./...
+PASS (all packages)
+
 CGO_ENABLED=0 go build ./...
+PASS
+
+CGO_ENABLED=0 go vet ./...
 PASS
 
 jq empty skills/engram/evals/evals.json
@@ -38,6 +44,12 @@ git diff --name-only -- memory embedding provider store internal
 The MCP test suite includes in-memory initialization, tool discovery,
 annotations, offline CRUD/degradation, namespace isolation, public provenance,
 and direct `Retriever.Search` order/content parity.
+
+The Skill Creator static validator also returned `Skill is valid!`. A candidate
+`engram.skill` archive was generated outside the repository and inspected with
+Python's standard zip tooling. It contains `SKILL.md`, the license, and all five
+runtime references including `evidence-guidance.md`; development eval files are
+correctly excluded from the distributable package.
 
 ## Deliberately not run
 

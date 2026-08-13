@@ -75,6 +75,7 @@ metadata while `mcpserver/parity_test.go` still matches the direct retriever.
 - [x] T013 Run `CGO_ENABLED=0 go build ./...`.
 - [x] T014 Confirm `git diff --name-only -- memory embedding provider store internal` is empty and review the quickstart commands.
 - [x] T015 Record offline verification and the intentionally unrun Skill behavior handoff in `specs/039-memory-evidence-guidance/validation-report.md`.
+- [x] T016 Run the full offline repository tests, `go vet`, Skill validation, and candidate package-content inspection without invoking model evaluation.
 
 ---
 
