@@ -245,6 +245,7 @@ LoCoMo 结果由原始 answer runs 独立复现。LongMemEval-S 行是 **answere
 使用 DeepSeek v4-pro 付费 API + 已随 [specs/038-unified-answer-contract](specs/038-unified-answer-contract/)
 移除的数据集特化 prompt,属 **post-hoc 兼容性诊断**,不代表默认本地栈得分;系统能力
 得分路径见 038 unified contract。[实验详情 →](docs/evaluation/reports/deepseek-v4pro-lme-verdict-2026-08-13.md)
+[038 unified contract 配对评测 verdict(NO-GO,保持 default-off)→](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
