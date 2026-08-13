@@ -1109,6 +1109,12 @@ func run() error {
 	buildOpt := opt
 	buildOpt.storeDir = storeDir
 	runtimes := make([]*conversationRuntime, len(convs))
+	// Bound the store-build phase: each conversation opens its own SQLite handle
+	// and ingests verbatim chunks; unbounded N-parallel opens convoy on the
+	// modernc SQLite mutex and stall (LME 500/200 stall, 50 fine). A modest cap
+	// keeps build throughput high without the lock convoy.
+	const buildConcurrency = 16
+	buildSem := make(chan struct{}, buildConcurrency)
 	var buildWG sync.WaitGroup
 	var buildMu sync.Mutex
 	var buildErr error
@@ -1116,6 +1122,8 @@ func run() error {
 		buildWG.Add(1)
 		go func(index int) {
 			defer buildWG.Done()
+			buildSem <- struct{}{}
+			defer func() { <-buildSem }()
 			runtime, err := buildConversationRuntime(ctx, buildOpt, convs[index], extractCall, embClient, arms, logger)
 			buildMu.Lock()
 			defer buildMu.Unlock()
@@ -1286,10 +1294,17 @@ func run() error {
 		var wg sync.WaitGroup
 		var repeatErrMu sync.Mutex
 		var repeatErr error
+		// Bound the answer phase like the build phase: per-conversation retrieval
+		// hits the SQLite store concurrently, and unbounded N-parallel retrieval
+		// convoys on the modernc SQLite mutex (same stall as build). Reuse the
+		// LLM concurrency as the retrieval ceiling.
+		ansSem := make(chan struct{}, opt.concurrency)
 		for ci := range convs {
 			wg.Add(1)
 			go func(conv conversation, current []*armState) {
 				defer wg.Done()
+				ansSem <- struct{}{}
+				defer func() { <-ansSem }()
 				index := conv.ID
 				if index < 0 || index >= len(runtimes) || runtimes[index] == nil {
 					logger.Warn("conversation runtime unavailable", "conversation", conv.ID)
