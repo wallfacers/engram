@@ -5,7 +5,7 @@
 ## Status
 
 向后兼容新增（additive）。不改动 022.v1 schema 的既有字段与既有 `mechanism_flags` key 语义；
-不 bump MAJOR（宪法 III）。沿用 [024 mechanism-bindings](../024-memory-density/contracts/mechanism-bindings.md)
+不 bump MAJOR（宪法 III）。沿用 [024 mechanism-bindings](../../024-memory-density/contracts/mechanism-bindings.md)
 的契约形态与 026 compiler 的接线模式。
 
 ## Schema Extension

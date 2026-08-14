@@ -5,10 +5,11 @@ status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
 last_reviewed: 2026-08-14
+canonical_for: [evaluation-result-matrix]
 tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 ---
 
-# 评测结果全量矩阵
+# 评测结果全量矩阵（复跑全集）
 
 本文是把散落在各 verdict 里的评测结果重排成的**复跑全集**。目的：(1) 一个表格看清
 全部可复用的分数；(2) 明确哪些分数已过时、哪些需要重跑；(3) 统一未来复跑的 recipe——

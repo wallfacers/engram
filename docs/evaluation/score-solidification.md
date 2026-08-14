@@ -5,10 +5,11 @@ status: active
 audience: [maintainers, agents]
 owner: engram-maintainers
 last_reviewed: 2026-08-14
+canonical_for: [score-solidification]
 tags: [evaluation, scoring, verdict, protocol, locomo, longmemeval]
 ---
 
-# 分数坐实协议
+# 分数坐实协议 — 从 post-hoc 观测到 verified 基线
 
 ## 背景：为什么 90.4% 未坐实
 

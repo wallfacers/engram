@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-08-06
-**Feature**: [spec.md](specs/031-evidence-relation-assembly/spec.md)
+**Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 

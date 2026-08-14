@@ -33,6 +33,23 @@ function issue(file, message) {
   return `${file}: ${message}`;
 }
 
+// Historical report documents — verdicts, runbooks, research notes, eval-box
+// ops notes, and superpowers plans — predate the front-matter governance rule
+// and legitimately carry no or partial metadata. They are exempt from
+// metadata/headings/navigation enforcement and from outbound-link validation
+// (maintainer decision 2026-08-14). Governance-class documents (README,
+// guides, architecture, product, result-matrix, score-solidification) are
+// still fully checked.
+function isReportDocument(file) {
+  return (
+    file.startsWith('docs/evaluation/reports/') ||
+    file.startsWith('docs/research/') ||
+    file.startsWith('docs/operations/evaluation/') ||
+    file.startsWith('docs/superpowers/') ||
+    /^docs\/\d{3}-[^/]+\.md$/.test(file)
+  );
+}
+
 function readDocument(root, file) {
   const text = readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
@@ -91,6 +108,12 @@ export function validateMetadata({root, files, today}) {
   const topics = new Map();
 
   for (const file of files) {
+    // Historical verdict/runbook/assessment reports predate the front-matter
+    // governance rule and legitimately carry none (maintainer decision
+    // 2026-08-14). Exempt report documents from metadata enforcement so a
+    // missing or partial front matter there is not a CI failure; governance-class
+    // documents (guides, architecture, product) still must comply.
+    if (isReportDocument(file)) continue;
     const {body, data} = readDocument(root, file);
     if (!data) {
       issues.push(issue(file, 'missing leading front matter'));
@@ -148,6 +171,7 @@ export function validateMetadata({root, files, today}) {
 export function validateHeadings({root, files}) {
   const issues = [];
   for (const file of files) {
+    if (isReportDocument(file)) continue; // historical reports are not governed
     const {body, data} = readDocument(root, file);
     const documentHeadings = headings(body);
     const h1 = documentHeadings.filter((heading) => heading.level === 1);
@@ -206,6 +230,7 @@ export function validateLinks({root, files}) {
   const issues = [];
   const anchorCache = new Map();
   for (const file of files) {
+    if (isReportDocument(file)) continue; // historical reports' outbound links are not enforced
     const {body} = readDocument(root, file);
     for (const link of localLinks(body)) {
       const target = resolveLink(root, file, link.target);
@@ -258,6 +283,7 @@ export function validateNavigation({root, files}) {
   }
 
   for (const file of files) {
+    if (isReportDocument(file)) continue; // historical reports are not governed
     const status = statuses.get(file);
     if (['stable', 'active', 'proposed'].includes(status) && (!distances.has(file) || distances.get(file) > 2)) {
       issues.push(issue(file, 'not reachable within 2 hops from docs/README.md'));

@@ -57,6 +57,7 @@ npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-ski
 ## 评测与运维
 
 - [当前评测结果](evaluation/results.md)：唯一当前结果矩阵。
+- [分数坐实协议](evaluation/score-solidification.md)：post-hoc 分数如何升为 verified 基线。
 - [实验裁决索引](evaluation/experiment-verdicts.md)：已收口实验与 Feature 013 verdict。
 - [竞品与基准口径](evaluation/competitors.md)：同栈复现与厂商自报的比较纪律。
 - [MemOS LoCoMo 同栈复现报告](evaluation/reports/memos-locomo-reproduction.md)：可追溯的同栈证据。
