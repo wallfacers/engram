@@ -373,3 +373,43 @@ func utilityTestAnswerAttempt() utilityAnswerAttempt {
 		FinalAnswer:     "Oslo",
 	}
 }
+
+// T040 [P] adversarial regression: label-before-decision access and
+// decision-label blindness.
+
+func TestUtilityDecisionLabelBlindness(t *testing.T) {
+	// A runtime decision record must never carry correctness/label/gold fields,
+	// so the public decision phase cannot leak the hidden score.
+	d := utilityUtilityDecision{
+		DecisionKey:      utilityTestDecisionKey(0, "q0", 1),
+		RuleID:           utilityEndpointDigest("rule"),
+		SignalStatus:     "available",
+		Action:           utilityActionDeepen,
+		Reason:           utilityReasonPredictedBenefit,
+		ShallowAttemptID: utilityEndpointDigest("sh"),
+		DeepAttemptID:    utilityEndpointDigest("de"),
+		DecisionDigest:   utilityEndpointDigest("decision"),
+	}
+	raw, err := utilityCanonicalDigest(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"correct", "label", "utility", "gold", "shallow_correct", "deep_correct"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("decision serialized forbidden field %q", forbidden)
+		}
+	}
+}
+
+func TestUtilityOrdinaryModeProducesNoArtifacts(t *testing.T) {
+	// With --utility-stage empty, not even a manifest may be written into the
+	// ordinary run dir.
+	dir := t.TempDir()
+	opt := options{runDir: dir, retrieval: "hybrid", datasetFormat: "locomo", repeats: 3, explicitFlags: map[string]bool{}}
+	if err := validateUtilityCLIOptions(&opt); err != nil {
+		t.Fatalf("ordinary options validate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, utilityManifestFile)); !os.IsNotExist(err) {
+		t.Fatal("ordinary run must not create a utility manifest")
+	}
+}
