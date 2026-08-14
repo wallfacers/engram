@@ -236,24 +236,12 @@ your installed version for its exact startup contract.
 
 ## Benchmarks
 
-| Benchmark | Score | Configuration |
-|---|---:|---|
-| LoCoMo (1,540) | **87.9%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
-| LongMemEval-S (500) | **90.2%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
-
-Gain vs legacy control (paired, context-parity verified) — [038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md):
-
-| Benchmark | Gain | p |
-|---|---:|---:|
-| LoCoMo | **+1.4pp** | 0.019 |
-| LongMemEval-S | **+4.4pp** | 0.000112 |
-
-Historical anchors (legacy / dataset-specific prompts, since removed — not the current stack):
-
-| Anchor | Score | Note |
-|---|---:|---|
-| LoCoMo · top-k 150 (legacy tuned) | 91.10% | unified 复测 within-noise (042) — top-k 150 buys context, not a contract gain |
-| LME · DeepSeek v4-pro paid | 91.1% | post-hoc diagnostic, not a default-stack capability |
+| Benchmark | Contract | Score | Gain vs legacy | p | Validation | Note |
+|---|---|---|---:|---:|---|---|
+| LoCoMo (1,540) | **unified** | **87.9%** | **+1.4pp** | 0.019 | above-noise · context parity ✓ | Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
+| LongMemEval-S (500) | **unified** | **90.2%** | **+4.4pp** | 0.000112 | above-noise · context parity ✓ | same config as above |
+| LoCoMo | legacy · top-k 150 | 91.10% | — | — | historical anchor · not current stack | legacy tuned prompt (removed); unified re-test within-noise (042) — top-k 150 buys context, not a contract gain |
+| LME | DeepSeek v4-pro paid | 91.1% | — | — | historical anchor · not current stack | post-hoc diagnostic, not a default-stack capability |
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
