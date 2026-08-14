@@ -16,7 +16,12 @@ export const TOKEN_ALGORITHM = "engram-body-token-estimate-v1";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const expectedMcpTools = [
   "memory_delete",
+  "memory_evidence_get",
+  "memory_evidence_purge",
+  "memory_evidence_restore",
+  "memory_evidence_tombstone",
   "memory_get",
+  "memory_ingest_v2",
   "memory_list",
   "memory_search",
   "memory_write",
@@ -40,7 +45,7 @@ const expectedIntents = [
   ["get", false, "memory_get", "get", null],
   ["list", false, "memory_list", "list", null],
   ["delete", true, "memory_delete", "delete", "explicit user intent"],
-  ["ingest", true, "memory_ingest", "ingest", "explicit intent + LLM"],
+  ["ingest", true, "memory_ingest_v2", "ingest", "explicit intent + stable session and source IDs"],
   ["curate", true, null, "curate", "explicit intent + LLM"],
   ["stats", false, null, "stats", "CLI store identity confirmed"],
   ["export", false, null, "export", "CLI store identity confirmed"],
