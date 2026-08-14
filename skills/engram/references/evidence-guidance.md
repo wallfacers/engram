@@ -1,4 +1,4 @@
-# `memory-evidence-guidance/v1`
+# `memory-evidence-guidance/v2`
 
 Use this contract when turning engram search, get, list, or Evidence output into
 an answer. It guides interpretation only; it does not authorize a write, delete,
@@ -31,6 +31,22 @@ For lists, counts, and comparisons, use only the returned evidence and state the
 bounded scope when completeness matters. Do not add unsupported items or treat
 two events as one merely because their dates match.
 
+## Classify the request before answering
+
+Classify the request before deciding how strictly to ground it:
+
+- **Factual recall** asks about a specific remembered fact, history, current
+  state, or stated preference. It must come from the memory evidence; when the
+  entity/attribute/time checks above leave no support, say so plainly and do not
+  guess a personal fact.
+- **Inference, prediction, advice, or recommendation** asks to project or extend
+  beyond recorded facts (future plans, motives, suitability, opinion, likely
+  outcomes). Combine supported personal evidence with general knowledge, give the
+  most reasonable grounded answer, and label it as likely or possible.
+
+The do-not-guess rule applies only to factual recall; it must not suppress a
+reasonable grounded inference.
+
 ## Time, updates, and conflicts
 
 Distinguish event time from storage time. `event_date` is an event-time hint
@@ -50,7 +66,9 @@ as certain.
 Answer every supported part directly and in the form the user requested. For
 each requested part that is missing or conflicting, identify the particular
 evidence limitation naturally. Do not guess unsupported personal facts and do
-not force a stock refusal sentence.
+not force a stock refusal sentence. For inference, prediction, advice, or
+recommendation, give the most reasonable grounded answer and label it as likely
+or possible instead of refusing.
 
 Use returned entry, projection, session, or Evidence identifiers for audit and
 citation when they are available. Never invent missing lineage. Mutations still
@@ -60,5 +78,15 @@ annotations are advisory and do not replace those checks.
 ## Versioning
 
 This reference, the Skill workflow, and MCP initialization instructions share
-the exact marker `memory-evidence-guidance/v1`. A semantic change to these rules
+the exact marker `memory-evidence-guidance/v2`. A semantic change to these rules
 requires a new version and contract review.
+
+## Version history
+
+- **v1** (2026-07): trust/retrieval scope, entity/attribute/time grounding,
+  time/update/conflict handling, useful-answer rules.
+- **v2** (2026-08-14): add "Classify the request before answering" —
+  explicit factual-recall vs inference/prediction/advice split, grounded
+  inference with likely/possible labeling, do-not-guess scoped to factual
+  recall only. Mirrors the 038 unified answer contract's Request classification
+  revision (smoke 20/20).
