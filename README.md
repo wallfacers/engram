@@ -237,7 +237,7 @@ your installed version for its exact startup contract.
 ## Benchmarks
 
 | Benchmark | Contract | Answer model | Judge model | Score | p | Validation |
-|---|---|---|---|---|---:|---:|---|
+|---|---|---|---|---:|---:|---|
 | LoCoMo (1,540) · top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
 | LoCoMo (1,540) · top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 paired · within-noise |
 | LongMemEval-S (500) · top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
