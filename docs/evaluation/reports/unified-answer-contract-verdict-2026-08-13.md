@@ -5,11 +5,14 @@ Protocol: [evaluation-protocol.md](../../../specs/038-unified-answer-contract/co
 
 ## 一句话结论
 
-`--unified-answer-contract`(数据集无关的统一证据约束回答契约)在 **LoCoMo
-全量(严格配对)non-inferiority 通过但 within-noise**(+0.6pp, p=0.477),**LME
-(post-hoc)+4.3pp(preference 类 +38.9pp 大幅受益)**;但 **LoCoMo cat3 open-domain
--6.2pp / LME assistant -4.1pp**(`don't guess` 对合理推断过度保守),不能判定 GO。
-**保持 default-off**,不推荐产品启用,除非先细化「推断 vs 拒答」边界。
+`--unified-answer-contract`(数据集无关的统一证据约束回答契约)**必须作为唯一允许
+的 prompt 路径推进**(消除 per-dataset / category 特调 = 产品正确性与可移植性,
+特调高分无意义,见 [result-matrix](../result-matrix.md))。当前**分数未坐实**:
+LoCoMo 全量严格配对 +0.6pp within-noise(p=0.477)、LME post-hoc 非配对 +4.3pp
+(preference +38.9pp);且 `don't guess` 对合理推断过度保守(cat3 open-domain
+-6.2pp / LME assistant -4.1pp)。**NO-GO 指「当前分数不足以转正为涨点工具」,
+不意味着放弃 unified 方向**——下一步:truncate 修 embed 512 上限 → LME 配对坐实
+(最高优先)+ 细化「推断 vs 拒答」边界 → LoCoMo 高配重跑。
 
 ## 评测配置
 
@@ -123,7 +126,14 @@ unified 的 per-run 上升趋势(88.4→92.2)值得后续排查(repeats 漂移�
 - **方向一致**:unified 契约「减少 unsupported + 避免有害拒答」在 preference 类
   验证有效(preference 是 LoCoMo cat4 / LME 的双重核心类),但 `don't guess` 对
   推断类过度保守,是统一契约的两面。
-- **verdict:NO-GO(不转正),default-off 保持**。建议后续迭代:细化「推断 vs 拒答」
-  边界(只对敏感/未支持的事实拒答,允许 grounded inference),然后重跑
-  LoCoMo + LME(严格配对需解决 embed 512 上限)。
-- **held-out gate 未跑**(需 149+ 题 blinded 人工标注),未满足 promotion 前置。
+- **Unified 必须要有(维护者立场)**:unified 是**唯一允许的 prompt 路径**,禁止
+  退回 per-dataset / category 特调——特调高分是数据集目标额,不代表系统能力。
+  本 verdict 的 NO-GO **只针对「当前分数未坐实」**,不是对 unified 方向的否定。
+- **下一步(按 [result-matrix](../result-matrix.md) 优先级)**:
+  1. **truncate 修 embed 512 上限**(0.031% 超长 chunk、0/122 承载 gold,截断
+     零影响)→ LME unified **配对坐实**(最高优先,验证 90.4% 是否真实)。
+  2. 细化「推断 vs 拒答」边界(只对敏感/未支持事实拒答,允许 grounded
+     inference)→ LoCoMo unified top-k150 高配配对重跑,过 non-inferiority gate。
+  3. held-out 行为门(149+ 题 blinded 人工标注)作为 promotion 前置。
+- **分数层级**:当前 unified LoCoMo = within-noise / LME = post-hoc,未达 verified;
+  坐实后按 [score-solidification](../score-solidification.md) 8 步升级。
