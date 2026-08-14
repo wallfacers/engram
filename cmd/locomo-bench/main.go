@@ -139,6 +139,7 @@ type options struct {
 	confidenceGateJournal *confidenceGateJournal // runtime-only writer for conf_gate_decisions.jsonl
 	probeHesitation       bool                   // --probe-hesitation: US1 offline discrimination probe
 	probeHesitationJSONL  string                 // --probe-hesitation-jsonl: results-hybrid.jsonl path override
+	confidenceCalibrate   bool                   // --confidence-calibrate: US3 threshold sweep
 	concurrency                int
 	chunks                     bool
 	chunkQuota                 int
@@ -462,7 +463,8 @@ func run() error {
 	flag.Float64Var(&opt.confidenceThreshold, "confidence-threshold", 3.0, "041: hesitation score at or above which the shallow answer triggers a deepen pass")
 	flag.IntVar(&opt.confidenceMaxRounds, "confidence-max-rounds", 2, "041: maximum iteration rounds (>=2; round 2 is final regardless of remaining hesitation)")
 	flag.BoolVar(&opt.probeHesitation, "probe-hesitation", false, "041 US1: run the zero-cost hesitation-discrimination probe over an existing results-hybrid.jsonl and exit (writes run-dir/hesitation-probe.json)")
-	flag.StringVar(&opt.probeHesitationJSONL, "probe-hesitation-jsonl", "", "041 US1: results-hybrid.jsonl to probe (default <run-dir>/results-hybrid.jsonl)")
+	flag.StringVar(&opt.probeHesitationJSONL, "probe-hesitation-jsonl", "", "041 US1/US3: results-hybrid.jsonl to probe or calibrate (default <run-dir>/results-hybrid.jsonl)")
+	flag.BoolVar(&opt.confidenceCalibrate, "confidence-calibrate", false, "041 US3: sweep the hesitation threshold over an existing results-hybrid.jsonl and exit (writes run-dir/confidence-calibrate.json)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
 	flag.BoolVar(&opt.chunks, "chunks", false, "union store: index verbatim session chunks alongside extracted facts (applies to every arm)")
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
@@ -573,6 +575,16 @@ func run() error {
 		return err
 	}
 
+	if opt.probeHesitation {
+		// 041 US1: zero-cost offline discrimination probe over an existing
+		// results-hybrid.jsonl. Runs before the --data / dataset load — it needs
+		// only the results file and the hesitation threshold.
+		return runHesitationProbeCLI(opt)
+	}
+	if opt.confidenceCalibrate {
+		// 041 US3: threshold sweep over the same results file.
+		return runConfidenceCalibrateCLI(opt)
+	}
 	if opt.compareSpec != "" {
 		dirs, err := parseCompareSpec(opt.compareSpec)
 		if err != nil {
@@ -971,11 +983,6 @@ func run() error {
 	}
 	if opt.abstainProbe {
 		return runAbstainProbeCLI(context.Background(), opt, convs, arms, logger)
-	}
-	if opt.probeHesitation {
-		// 041 US1: zero-cost offline discrimination probe over an existing
-		// results-hybrid.jsonl. Needs no LLM/retriever.
-		return runHesitationProbeCLI(opt)
 	}
 	apiKey := os.Getenv("LOCOMO_API_KEY")
 	if apiKey == "" {
