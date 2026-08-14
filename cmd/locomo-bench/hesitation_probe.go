@@ -109,7 +109,7 @@ func runHesitationProbeCLI(opt options) error {
 	}
 
 	fmt.Printf("hesitation probe: n=%d wrong=%d (hesitant %.1f%%) right=%d (false-pos %.1f%%) gates=%.0f%%/%.0f%% pass=%t report=%s\n",
-		report.Questions, report.WrongTotal, report.WrongRecall*100, report.RightTotal, report.RightFalsePos,
+		report.Questions, report.WrongTotal, report.WrongRecall*100, report.RightTotal, report.RightFalsePos*100,
 		hesitationWrongRecallGate*100, hesitationRightFpGate*100, report.Pass, out)
 	return nil
 }

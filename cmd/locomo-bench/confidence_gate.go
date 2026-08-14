@@ -73,10 +73,16 @@ type confidenceGateConfig struct {
 
 // signal phrase sets, one weight per category (any single phrase in a category
 // adds that weight once — a list of hedges is not stronger than one).
+//
+// The phrase sets were tuned on the 040 top-k-30 thinking run (032-think3,
+// DeepSeek "Here's a thinking process:" style): "maybe it", "guess", and
+// "or maybe" were added after a conditional-probability sweep showed they are
+// strongly wrong-enriched (lift 8×/3.6×/5× over right answers) while keeping
+// the right-answer false-positive rate inside the 30% gate.
 var (
-	strongHesitationPhrases = []string{"not sure", "uncertain", "not confident", "unsure", "not certain"}
-	midGuessPhrases         = []string{"could be", "might be", "may be", "possibly", "maybe", "perhaps"}
-	weakHedgePhrases        = []string{"i think", "i guess", "i believe", "probably", "likely", "approximately"}
+	strongHesitationPhrases = []string{"not sure", "uncertain", "not confident", "unsure", "not certain", "maybe it"}
+	midGuessPhrases         = []string{"could be", "might be", "may be", "possibly", "maybe", "perhaps", "guess"}
+	weakHedgePhrases        = []string{"i think", "i guess", "i believe", "probably", "likely", "approximately", "seem"}
 )
 
 // thinkingCloseDelimsForDetect are the closing markers of a reasoning preamble;
@@ -155,7 +161,7 @@ func detectHesitation(pred string, threshold float64) (HesitationSignal, bool) {
 	}
 	// Strong (+3): explicit uncertainty / undecided multi-candidate thinking.
 	addOnce("strong_uncertainty", 3, strongHesitationPhrases)
-	if strings.Contains(lower, "either ") || strings.Contains(lower, "not sure which") {
+	if strings.Contains(lower, "either ") || strings.Contains(lower, "not sure which") || strings.Contains(lower, "or maybe") {
 		if !containsHit(sig, "strong_uncertainty") {
 			sig.Score += 3
 		}
