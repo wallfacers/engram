@@ -89,9 +89,36 @@ func (p *Provider) streamLoop(ctx context.Context, resp *http.Response, ch chan<
 	defer close(ch)
 	defer resp.Body.Close() //nolint:errcheck
 
+	// A provider that returns 200 but never terminates its SSE stream (observed
+	// with vllm under Qwen thinking whose output hits max_tokens) leaves ParseSSE
+	// blocked in a chunked read forever; that read never re-checks ctx, so the
+	// caller's per-call deadline cannot interrupt it — the goroutine holds its
+	// concurrency slot and the whole run deadlocks on the semaphore. Closing the
+	// body on ctx cancellation unblocks ParseSSE so the caller can surface the
+	// cancellation and retry instead of hanging indefinitely.
+	stopped := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			resp.Body.Close() //nolint:errcheck
+		case <-stopped:
+		}
+	}()
+	defer close(stopped)
+
 	st := &openaiStreamState{toolCalls: map[int]*toolCallBuf{}}
 
 	emit := func(ev provider.ProviderEvent) bool {
+		if ev.Type == provider.EventError {
+			// Errors must never be dropped by the ctx-cancel branch: a caller
+			// waiting on the deadline still needs to learn the stream failed.
+			select {
+			case ch <- ev:
+				return true
+			default:
+				return false
+			}
+		}
 		select {
 		case ch <- ev:
 			return true
@@ -154,6 +181,18 @@ func (p *Provider) streamLoop(ctx context.Context, resp *http.Response, ch chan<
 			pe = provider.NewProviderError(p.Name(), 0, provider.CodeStreamBroken, "sse read error", parseErr)
 		}
 		emit(provider.ProviderEvent{Type: provider.EventError, Error: pe})
+	} else if ctx.Err() != nil {
+		// Closing the body on cancellation can surface as a clean read end, so
+		// ParseSSE reports no error while the stream is actually truncated. The
+		// caller must still see the cancellation: a truncated stream must not be
+		// mistaken for a complete answer, and the per-call timeout must free the
+		// concurrency slot. Send non-blocking so the ctx-cancel branch of emit()
+		// cannot drop the error.
+		select {
+		case ch <- provider.ProviderEvent{Type: provider.EventError,
+			Error: provider.NewProviderError(p.Name(), 0, provider.CodeCanceled, "stream canceled", ctx.Err())}:
+		default:
+		}
 	}
 }
 

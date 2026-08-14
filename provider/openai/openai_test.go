@@ -399,3 +399,61 @@ func TestOpenAI_MidStreamErrorNoFlush(t *testing.T) {
 		t.Error("expected an error event after mid-stream failure")
 	}
 }
+
+func TestOpenAI_ContextCancelUnblocksHangingStream(t *testing.T) {
+	// A provider that returns 200 but never terminates its SSE stream (vllm under
+	// Qwen thinking that hits max_tokens) must not hold the caller's goroutine
+	// forever: ctx cancellation must close the body and unblock ParseSSE.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, chunks(`{"choices":[{"index":0,"delta":{"content":"hi"}}]}`))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		// Never send [DONE], never close the body; hang until the client cancels.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	p := openai.New(openai.Options{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	ch, err := p.Stream(ctx, provider.Request{
+		Model: "m",
+		Messages: []provider.Message{{Role: provider.RoleUser,
+			Content: []provider.ContentBlock{{Type: provider.BlockText, Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	textDeltas := 0
+	var gotErr error
+	deadline := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			switch ev.Type {
+			case provider.EventTextDelta:
+				textDeltas++
+			case provider.EventError:
+				if ev.Error != nil {
+					gotErr = ev.Error
+				}
+			}
+		case <-deadline:
+			t.Fatal("stream did not unblock after ctx cancellation; body close failed")
+		}
+	}
+	if textDeltas == 0 {
+		t.Fatalf("expected the first text delta before the hang, got none")
+	}
+	if gotErr == nil {
+		t.Fatalf("expected a stream error after ctx cancellation, got clean close")
+	}
+}
