@@ -99,14 +99,58 @@ jq '{verdict, counts, claim}' /root/autodl-tmp/042-runs/label-audit/label-report
 预期：`verdict=GO`、BENEFIT=56、HARM=31、NEUTRAL=1453、claim 仅为 label constructor regression。任何偏差都停止，
 先查 denominator、clean/raw judge 口径和 run-root identity；不得修改 truth table 去对齐数字。
 
-## 4. Stage `collect`: fresh paired LoCoMo signals/outcomes
+## 4. Stage `pilot`: 2-conversation signal-existence kill-gate
 
-这是长任务，必须脱离运行。下例沿用高分栈的 frozen recipe；dataset/store 路径以当机权威路径替换：
+全量 collect 前先跑 pilot，用前两条 conversation 验证固定 ridge 得分对 BENEFIT 存在可路由信息（AUC≥0.65）。
+这也是对抗式评审要求的低成本 kill-gate：NO-GO 时省下其余 8/10 采集预算。环境/recipe/model/store 与 collect 一致，
+只自动限定 conversation_ids[0..1]：
+
+```bash
+setsid bash -c '/root/autodl-tmp/042-bin/locomo-bench \
+  --utility-stage pilot \
+  --utility-label-source /root/autodl-tmp/042-runs/label-audit \
+  --data /root/autodl-tmp/datasets/locomo.json \
+  --dataset-format locomo \
+  --store-dir /root/autodl-tmp/032-store \
+  --run-dir /root/autodl-tmp/042-runs/pilot \
+  --retrieval hybrid \
+  --chunks --chunk-quota 12 \
+  --force-answer --judge-mem0-aligned \
+  --trace-mediation=false \
+  --repeats 3 --max-tokens 8000 --concurrency 32 \
+  > /root/autodl-tmp/042-runs/pilot.log 2>&1; \
+  echo $? > /root/autodl-tmp/042-runs/pilot.exit' \
+  </dev/null >/dev/null 2>&1 & disown
+```
+
+单次即时轮询：
+
+```bash
+test -f /root/autodl-tmp/042-runs/pilot.exit && cat /root/autodl-tmp/042-runs/pilot.exit
+tail -n 5 /root/autodl-tmp/042-runs/pilot.log
+```
+
+检查：
+
+```bash
+jq '{verdict, claim, auc, auc_gate, counts, conversation_ids, production_authorized}' \
+  /root/autodl-tmp/042-runs/pilot/pilot-report.json
+```
+
+预期：`verdict=GO`、`auc>=0.65`、`claim=signal_existence_pilot_only`、恰为前两条 conversation。
+AUC<0.65 或 BENEFIT/HARM 缺类（`auc=null + reason=pilot_class_missing`）时 `verdict=NO-GO`，feature 在此收口，
+不启动 collect、不换信号族、不事后选 conversation。
+
+## 5. Stage `collect`: fresh paired LoCoMo signals/outcomes
+
+这是长任务，必须脱离运行。下例沿用高分栈的 frozen recipe；dataset/store 路径以当机权威路径替换。collect 必须先持有
+`label` 与 `pilot` 两个 GO seal：
 
 ```bash
 setsid bash -c '/root/autodl-tmp/042-bin/locomo-bench \
   --utility-stage collect \
   --utility-label-source /root/autodl-tmp/042-runs/label-audit \
+  --utility-pilot-source /root/autodl-tmp/042-runs/pilot \
   --data /root/autodl-tmp/datasets/locomo.json \
   --dataset-format locomo \
   --store-dir /root/autodl-tmp/032-store \
@@ -133,7 +177,7 @@ tail -n 5 /root/autodl-tmp/042-runs/collect.log
 大于 logical calls；每次 retry 的 calls/latency/token charge 都必须入账。成功 response 但 logprob capability unavailable 是低成本
 NO-GO；retry 耗尽、non-retryable call failure、provenance mismatch 或 tamper 是 INVALID，二者不能混写。
 
-## 5. Stage `diagnose`: offline LOCO gate
+## 6. Stage `diagnose`: offline LOCO gate
 
 该步骤纯离线、无需 provider env或网络：
 
@@ -159,7 +203,7 @@ same-batch deep、absolute accuracy ≥90%、simulated full-path token ratio ≤
 
 若 verdict 不是 GO，本 feature 在这里 NO-GO 收口：不启动 confirm，不看某个 feature/threshold 的事后替代，不运行 LME。
 
-## 6. Stage `confirm`: fresh LoCoMo conditional execution
+## 7. Stage `confirm`: fresh LoCoMo conditional execution
 
 只有 diagnostic GO 才运行。它必须是新 run-dir、新 answer generations；环境/recipe/model/store 与 collect 一致：
 
@@ -191,7 +235,7 @@ jq '{verdict, claim, quality, utility, cost, categories, gates, production_autho
 LoCoMo final GO 是严格合取：policy correct 不低于 fixed k150、绝对分 ≥90%、完整 policy token ratio ≤0.60、类别门通过。
 exact McNemar/CI 只解释噪声，不可用“不显著”豁免少一题。`production_authorized` 必须仍为 false。
 
-## 7. Stage `transfer`: LongMemEval non-regression
+## 8. Stage `transfer`: LongMemEval non-regression
 
 只有 confirm GO 才运行。global rule 已在 LME 标签可见前冻结；下例不得增加 LME-specific router 或 threshold：
 
@@ -223,7 +267,7 @@ jq '{verdict, claim, no_retune, quality, cost, categories, portable_claim_author
 LME policy correct 少于同批 fixed-k150 即 transfer NO-GO。此时最终表述必须是“LoCoMo mechanism GO，但不可移植、不得产品
 晋级”；不能回到 LoCoMo 改 feature/scaler/threshold 后重测同一 LME。即使 transfer GO，生产接线仍需新的 contract-first feature。
 
-## 8. Final audit
+## 9. Final audit
 
 每个 source chain 均应离线重验：
 

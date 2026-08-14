@@ -58,7 +58,8 @@ Canonical logical-call key在 decision key 后增加 `stage` 与 `arm`；provide
 
 **Invariants**:
 
-- `stage` closed enum：`label | collect | diagnose | confirm | transfer`。
+- `stage` closed enum：`label | pilot | collect | diagnose | confirm | transfer`。
+- `collect` 必须同时绑定 `label` GO 与 `pilot` GO 的 receipt；`pilot` 只在前两条 conversation 上运行，是全量 collect 前的信号存在性 kill-gate。
 - `collect/confirm/transfer` 必须为 local OpenAI-compatible answer endpoint；无托管 default。
 - `collect/confirm/transfer` 必须显式配置 embedder；store fingerprint 中所有 embedding rows 的 model/dims 必须单一且与 sidecar probe 一致。
 - answer request 不得序列化 `temperature`；若实现或 sidecar config digest 改变该 wire/default 语义，manifest 不兼容且不得 resume。
@@ -282,6 +283,23 @@ JudgeOutcome。
 
 Verdict precedence：artifact/coverage/leakage/call-contract 失败先判 INVALID；有效实验再按硬门判 GO/NO-GO。INVALID 不可被
 转换为 NO-GO 以掩盖基础设施错误。
+
+## Entity: PilotReceipt
+
+全量 collect 前信号存在性 pilot 的 terminal receipt，只承担负向 kill-gate，不构成 held-out 成绩。
+
+| Section | Content |
+|---|---|
+| `identity` | benchmark、conversation_ids（恰为前两条）、questions/repetitions 计数、source label-GO digests |
+| `signal` | shallow 信号可用性、unavailable reasons、final length strata |
+| `labels` | pilot 语料的 BENEFIT/HARM/NEUTRAL attempt 计数；BENEFIT 或 HARM 为 0 时 AUC 不可定义 |
+| `auc` | 固定 ridge 得分对 BENEFIT 类别的 in-sample AUC（面积）；`null+reason` 当类别缺失 |
+| `gate` | `auc_gate=0.65`、observed、passed；AUC<0.65 或不可定义 → NO-GO |
+| `cost` | pilot 的浅/深 answer、judge calls/tokens/latency，作为 8/10 采集预算的对照 |
+| `verdict` | `GO | NO-GO`（valid）；coverage/provenance/数值错误为 `INVALID` |
+| `claim_boundary` | `signal_existence_pilot_only`；production=false |
+
+pilot `verdict=GO` 只授权全量 collect；后续诊断的 held-out 权威仍来自 10-conversation LOCO cross-fit。pilot AUC 使用 pilot 自身数据拟合并计算（in-sample），其乐观性是该 kill-gate 的设计意图，不作为可部署性能。
 
 ## Entity: StageSeal
 

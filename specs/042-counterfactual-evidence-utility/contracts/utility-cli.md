@@ -9,9 +9,10 @@ flag、journal、provider caller、输出与默认行为保持不变。该模式
 
 | Flag | Type / default | Meaning |
 |---|---|---|
-| `--utility-stage` | string / empty | closed enum: `label | collect | diagnose | confirm | transfer`; empty=off |
+| `--utility-stage` | string / empty | closed enum: `label | pilot | collect | diagnose | confirm | transfer`; empty=off |
 | `--utility-source` | path / empty | `diagnose` 的 collect dir；`confirm` 的 diagnose dir；`transfer` 的 confirm dir |
 | `--utility-label-source` | path / empty | `collect` 专用：已通过的历史 label-regression stage directory |
+| `--utility-pilot-source` | path / empty | `collect` 专用：已通过的 2-conversation 信号存在性 pilot stage directory |
 | `--utility-shallow-source` | path / empty | `label` 专用：历史 k30 root run directory |
 | `--utility-deep-source` | path / empty | `label` 专用：历史 k150 root run directory |
 | `--utility-shallow-k` | int / 30 | v1 shallow retrieval depth；正式 stage 只接受 30 |
@@ -67,6 +68,44 @@ Holm alpha 0.05、response limit 64 MiB、每个逻辑 answer/judge call 最多 
 - 任何其他计数：valid NO-GO；必须先解决口径/constructor，不得继续 collect。
 - identity/provenance/coverage invalid：INVALID。
 
+## Stage: `pilot`
+
+### Purpose
+
+全量 collect 前用前两条 conversation 做信号存在性 kill-gate。只在前两条 conversation（`conversation_ids[0..1]`）上
+执行 k30 shallow answer+signal 与 k150 `paired_deep` answer，同一 clean mem0-aligned judge 判定，再以固定 ridge 得分对
+BENEFIT 类别计算 in-sample AUC。pilot GO 只授权全量 collect，不构成 held-out 成绩。
+
+### Required inputs
+
+```text
+--utility-stage pilot
+--utility-label-source <label-GO-dir>
+--data <locomo.json>
+--dataset-format locomo
+--run-dir <new-output-dir>
+--store-dir <frozen-032-compatible-store-root>
+--retrieval hybrid
+--chunks
+--chunk-quota 12
+--force-answer
+--judge-mem0-aligned
+--trace-mediation=false
+--repeats 3
+--utility-shallow-k 30
+--utility-deep-k 150
+```
+
+模型环境、retry 契约与 provenance preflight 与 collect 完全一致（loopback endpoint、省略 `temperature`、embedding
+fingerprint + 两次 probe、logprob capability preflight）。pilot 自动限定为前两条 conversation，不接受
+`--conversations/--questions/--only-category/--only-questions` 覆盖。
+
+### Terminal condition
+
+- AUC≥0.65 且 pilot 语料 BENEFIT≥1 且 HARM≥1：valid GO，collect manifest 绑定 pilot GO receipt。
+- AUC<0.65，或 BENEFIT==0 / HARM==0（AUC 不可定义）：valid NO-GO；不进入全量 collect，8/10 采集预算不支出。
+- coverage/provenance/数值/call-contract 错误：INVALID。
+
 ## Stage: `collect`
 
 ### Purpose
@@ -79,6 +118,7 @@ judge 得到 repetition-level utility labels。它不拟合规则、不输出 po
 ```text
 --utility-stage collect
 --utility-label-source <label-GO-dir>
+--utility-pilot-source <pilot-GO-dir>
 --data <locomo.json>
 --dataset-format locomo
 --run-dir <new-output-dir>
@@ -123,7 +163,8 @@ preflight 必须通过。成功 response 但缺少 logprob 能力写 receipt 后
 其他 4xx、response-too-large、decode/schema/empty-answer、invalid usage、judge parse 不重试。每个 attempt 必须写 journal 并计
 calls/latency/usage；失败 answer attempt 无 usage 时按 32768 combined-token conservative charge 计入所属臂 ratio。provider
 failure 不能转换为 signal-unavailable。
-label source 必须是 valid `label` GO seal；其 report/seal digest 写入 collect manifest，但历史答案本身不复制进 collect。
+label source 必须是 valid `label` GO seal，`--utility-pilot-source`（新增）必须是 valid `pilot` GO seal；两者的 report/seal digest
+写入 collect manifest，但历史/pilot 答案本身不复制进 collect。
 
 ### Outputs
 

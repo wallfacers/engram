@@ -27,7 +27,9 @@
 - 诊断通过后，验证一次浅检索到一次深检索的两档门控策略；
 - 同时衡量答案质量、完整决策路径 token、调用次数与延迟；
 - 仅在 LoCoMo primary GO 后执行 LongMemEval non-regression 迁移门，区分单 benchmark 机制成立与可移植能力；
-- 产出 GO/NO-GO verdict，并保留可复现审计记录。
+- 产出 GO/NO-GO verdict，并保留可复现审计记录；
+- 全量 collect 前先执行 2-conversation 信号存在性 pilot：仅用前两条 conversation 的浅/深配对，以固定 ridge 得分对 BENEFIT 类别测 AUC；AUC<0.65 或类别缺失致 AUC 不可定义时立即 valid NO-GO，避免把 8/10 采集预算花在无信号方向上（来源：042 对抗式评审可行性结论，冻结于 research.md）；
+- 用显式 harm 上限取代"只看净效用"：门控路由须满足冻结精度前沿 `56c−31h≥25`（c=BENEFIT 捕获率、h=HARM 触发率，56/31 为历史锚计数），写成可逐题复算的判据。
 
 **Out of scope**:
 
@@ -51,6 +53,11 @@
 - Q: fresh 批次的净效用门如何处理批次内 deep-vs-shallow 差值 `D`？ → A: 保留独立的硬 `+25` 效应量门，并同时要求不低于同批 deep；若 `D<25`，有意从严地要求 policy 比 deep 多至少 `25-D` 题。
 - Q: 新 caller 如何对齐现有 answer sampling recipe？ → A: 与现有 OpenAI adapter 的实际 wire shape 一样省略 `temperature` 字段；不把 Go 零值误写成有效温度 0，并冻结 sidecar 配置摘要。
 - Q: 长批次是否允许 provider retry？ → A: 每个逻辑模型调用最多 3 次 attempt，只重试预注册的瞬时错误；每次 attempt 都写 journal 并计入对应臂成本，耗尽或非瞬时失败使 stage INVALID。
+
+### Session 2026-08-14 (external review closure — 补两个已评审确认缺失的约束)
+
+- Q: 全量 collect 前是否需要先验证概率信号存在？ → A: 需要。新增 2-conversation 信号存在性 pilot stage：只在前两条 conversation（`conversation_ids[0..1]`）上采集浅/深配对，用固定 ridge 得分对 BENEFIT 类别测 AUC。AUC<0.65 或 BENEFIT/HARM 缺类致 AUC 不可定义时，立即 valid NO-GO，省下其余 8 条 conversation 的采集预算。pilot AUC 是 in-sample 存在性 kill-gate，本身不授权任何后续 stage；完整 10-conversation collect + LOCO 诊断仍是唯一 GO authority。pilot 的来源是 042 对抗式评审的可行性结论，见 research.md。
+- Q: +25 净效用门是否足以约束路由精度？ → A: 不够。新增显式精度前沿 `56c−31h≥25`：c=BENEFIT 捕获率、h=HARM 触发率（分母用 held-out 实际计数），56/31 为历史锚。等价 harm 上限 `h≤(56c−25)/31`；c=0.70 时要求 h≤0.46。仅净效用达标但精度前沿不满足的 held-out 结果判 NO-GO，不得只看净效用。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -83,8 +90,10 @@
 1. **Given** 浅答案生成成功且概率信号可得，**When** 记录诊断样本，**Then** 样本只包含运行时可观察的信号、问题身份和成本数据，不包含 gold、judge verdict 或效用标签作为门控输入。
 2. **Given** 全部诊断样本，**When** 执行校准与验证，**Then** 每个 conversation 只出现在训练侧或验证侧之一，且最终报告覆盖全部 conversation。
 3. **Given** 概率信号缺失、部分缺失或无法对应最终答案，**When** 执行诊断，**Then** 该问题被标为 signal-unavailable 并计入覆盖率，不得用文本犹豫或自我判断填补。
-4. **Given** held-out 结果未达到预注册门槛，**When** 维护者形成 verdict，**Then** feature 以 NO-GO 收口，不启动完整门控评测。
-5. **Given** 特征族、校准规则族和复杂度上限已冻结，**When** 查看 held-out 结果，**Then** 不得再增加特征、切换高容量分类器或引入 LLM router 来改善结果。
+4. **Given** 信号存在性 pilot 在前两条 conversation 上完成采集，**When** 评估固定 ridge 得分对 BENEFIT 的 AUC，**Then** AUC<0.65 或 BENEFIT/HARM 缺失致 AUC 不可定义时立即 valid NO-GO 且不启动全量 collect；AUC≥0.65 且类别齐全才授权全量 collect。pilot 本身不构成任何 held-out 成绩。
+5. **Given** held-out 结果未达到预注册门槛，**When** 维护者形成 verdict，**Then** feature 以 NO-GO 收口，不启动完整门控评测。
+6. **Given** held-out 净效用达标但精度前沿 `56c−31h≥25` 不满足，**When** 维护者形成 verdict，**Then** 判 NO-GO；不得只凭净效用晋级。c=0.70 时的 harm 上限为 h≤0.46。
+7. **Given** 特征族、校准规则族和复杂度上限已冻结，**When** 查看 held-out 结果，**Then** 不得再增加特征、切换高容量分类器或引入 LLM router 来改善结果。
 
 ---
 
@@ -147,12 +156,15 @@
 - **FR-022**: LongMemEval 回退 MUST 阻止可移植能力声明与后续产品晋级，但不得改写已经冻结的 LoCoMo 机制 verdict。
 - **FR-023**: 效用决策器 MUST 使用预注册的低容量校准规则；允许的信号特征族、规则族和复杂度上限 MUST 在 held-out 评估前冻结，禁止任意高容量分类器或 LLM/router 自主决策。
 - **FR-024**: 每个 answer/judge 逻辑调用 MUST 最多执行 3 次 provider attempt；只有 timeout、network error、HTTP 429 和 HTTP 5xx 可重试，每次 attempt 的调用、usage 与延迟 MUST 写入 journal 并计入所属实验臂。其他 4xx、上下文超限、response/decode/schema/empty-answer 与 judge-parse 错误不得重试；重试耗尽或非可重试失败 MUST 使 stage INVALID。
+- **FR-025**: 全量 collect 前 MUST 执行 2-conversation 信号存在性 pilot；pilot 以固定 ridge 得分对 BENEFIT 类别测 AUC，AUC<0.65 或 BENEFIT/HARM 缺类致 AUC 不可定义时 MUST 以 valid NO-GO 收口，不得进入全量 collect。
+- **FR-026**: 门控路由 MUST 满足冻结精度前沿 `56c−31h≥25`（c=BENEFIT 捕获率、h=HARM 触发率，56/31 为历史锚，等价 harm 上限 `h≤(56c−25)/31`）；诊断与确认 verdict 不得只报告净效用而不校验 harm 上限。
 
 ### Key Entities
 
 - **Paired Retrieval Outcome（配对检索结果）**：同一问题在浅预算和深预算下的冻结答案、判定及可比性元数据。
 - **Counterfactual Utility Label（反事实效用标签）**：由配对结果唯一导出的 BENEFIT、NEUTRAL 或 HARM，不作为运行时输入。
 - **Probability Signal Record（概率信号记录）**：浅答案正常生成时可观察的预注册概率特征、覆盖状态和生成成本，不含结果标签。
+- **Signal-Existence Pilot（信号存在性 pilot）**：全量 collect 前在前两条 conversation 上执行的浅/深配对小批采集，输出固定 ridge 得分对 BENEFIT 的 in-sample AUC、类别计数与覆盖率；AUC≥0.65 且类别齐全才授权全量 collect。
 - **Calibration Fold（校准折）**：以完整 conversation 为隔离单元的训练/验证划分及其冻结参数。
 - **Calibrated Utility Rule（校准效用规则）**：从预注册概率特征映射到“保留浅答案/执行深检索”的低容量规则；其特征族、规则族和复杂度上限在 held-out 前冻结。
 - **Utility Decision（效用决策）**：运行时对“保留浅答案”或“执行深检索”的一次决定及可审计依据。
@@ -164,7 +176,7 @@
 
 - **SC-001**: 对所有可比的浅/深配对问题，100% 生成且仅生成一个效用标签；冻结输入重复处理时标签与汇总逐字节一致。
 - **SC-002**: 诊断覆盖全部 conversation，并在每一折保持 conversation 零泄漏；signal-unavailable 问题占比和原因覆盖 100% 问题。
-- **SC-003**: 在 fresh collect 的同批 k30/k150 配对语料上，10 个 LOCO folds 的 cross-fitted held-out 合并决策相对同批固定浅预算取得至少 +25 题净效用，且正确题数不低于同批固定深预算；任何 HARM 触发均从净效用中扣除。`+25` 是独立、刻意从严的效应量下限：若同批 deep 相对 shallow 的净值 `D<25`，policy 仍须比 deep 多至少 `25-D` 题；历史 040 不参与该门。
+- **SC-003**: 在 fresh collect 的同批 k30/k150 配对语料上，10 个 LOCO folds 的 cross-fitted held-out 合并决策相对同批固定浅预算取得至少 +25 题净效用，且正确题数不低于同批固定深预算；任何 HARM 触发均从净效用中扣除。`+25` 是独立、刻意从严的效应量下限：若同批 deep 相对 shallow 的净值 `D<25`，policy 仍须比 deep 多至少 `25-D` 题；历史 040 不参与该门。同时 MUST 满足显式精度前沿 `56c−31h≥25`（c=BENEFIT 捕获率、h=HARM 触发率，56/31 为历史锚）；仅净效用达标而精度前沿不满足判 NO-GO。
 - **SC-004**: 只有 SC-003 达标才允许在同一 feature 内实现并执行完整门控评测；未达标时立即以 NO-GO 收口、停止后续 story/tasks，且默认行为零变化。
 - **SC-005**: 完整门控策略的答案质量达到 90% 以上，且同批配对正确题数不低于固定深预算；任一类别不得出现超出预注册容差的实质性回退。统计检验仍须报告，但不能替代正确题数硬门。
 - **SC-006**: 完整门控策略的全部 generation 输入/输出 token（含浅作答、条件深作答、概率信号与任何额外模型门控开销，不含评测 judge）不超过同批固定深预算的 60%。固定本地 query embedding 的 ratio contribution 按协议为不适用，但 policy/control 的 embedding 调用次数、失败与延迟，以及全部 answer/judge/provider attempts，均须完整分臂报告。
@@ -173,6 +185,7 @@
 - **SC-009**: 最终 verdict 明确区分历史 label-constructor audit、fresh held-out 预测结果与 fresh 全量端到端结果，不把历史结果、oracle、训练折或中间指标表述为可部署成绩。
 - **SC-010**: LoCoMo GO 后，LongMemEval 使用冻结策略完成 100% 同批可比问题的 non-regression 配对；若正确题数低于同批固定深预算，则迁移门失败并阻止可移植/产品声明。
 - **SC-011**: 全部 held-out folds 使用同一预注册特征族、规则族与复杂度上限；评估开始后发生 0 次事后扩特征、换规则或引入 LLM/router 的变更。
+- **SC-012**: 全量 collect 前，2-conversation pilot 在前两条 conversation 上得到固定 ridge 得分对 BENEFIT 的 AUC≥0.65 且 BENEFIT/HARM 类别齐全，才允许全量 collect；AUC<0.65 或不可定义时 pilot 产出 valid NO-GO，8/10 采集预算不支出，且 pilot 不作为任何 held-out 成绩。
 
 ## Assumptions
 
@@ -186,5 +199,7 @@
 - 当前 answerer 的 Go 请求零值会被 OpenAI wire 的 `omitempty` 省略，因此冻结的 sampling recipe 是 `temperature_request_mode=omitted`，不是 `temperature=0`；有效服务端采样配置由 model revision 与 sidecar configuration digest 共同绑定。
 - 正式 hybrid run 的 query embedder 必须与 store 的 embedding fingerprint/维度相容；endpoint、model revision 与 sidecar 参数只以非 secret 身份/digest 冻结，任何不匹配在首个 benchmark call 前拒绝。
 - 若当前 answerer 端点不能返回可归因到最终答案的概率信号，本 feature 直接判为 signal-unavailable/NO-GO；不得为追求结果扩大为 provider 公共契约改造。
+- 2-conversation pilot 使用 benchmark 顺序的前两条 conversation（`conversation_ids[0..1]`），该选择是预注册的确定性规则；pilot AUC 是 in-sample 存在性 kill-gate，本身不构成 held-out 成绩，也绝不授权除全量 collect 以外的任何 stage。
+- `56c−31h≥25` 中的 56/31 是历史 label audit 必须复现的历史锚计数，只作为精度前沿的固定权重；历史行不进入训练或 held-out 行，pilot 与精度前沿的系数都不是训练参数。
 - 本 feature 是研究与评测资产，不承诺进入产品默认路径。即使 verdict 为 GO，生产接线仍需新的契约优先 feature。
 - LongMemEval 只承担迁移门，不参与 LoCoMo 阶段的信号家族、特征或阈值选择。

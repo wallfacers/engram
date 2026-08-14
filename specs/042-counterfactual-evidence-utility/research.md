@@ -286,6 +286,51 @@ schema version 不同、digest tamper、非有限数值、label 先于 decision 
 **Rationale**: 研究需要复算信号和成本，但没有理由持久化 reasoning 或 endpoint secret。分阶段 seal 使 label-blind 的运行时
 决策边界可被测试，而不仅是文档约定。
 
+## Decision 9: 全量 collect 前先做 2-conversation 信号存在性 pilot（对抗式评审补入）
+
+**Decision**: 在全量 10-conversation collect 之前增加一个 2-conversation 信号存在性 pilot
+（来源：042 对抗式评审的可行性结论——先花小钱证明信号存在，再花大钱全量采集）。pilot 只运行
+`conversation_ids[0..1]` 两条 conversation，每 question × 3 repetitions 各做一次 k30 shallow answer（logprob
+caller）与一次 `paired_deep` k150 answer，同一 clean mem0-aligned judge 判定。pilot 数据上执行与诊断相同的固定
+`lambda=1` 三变量 ridge（Decision 4），并以 ridge 得分对 BENEFIT 类别（`utility=+1`）计算 in-sample AUC：
+
+```text
+pilot_gate = AUC(ridge score, label = utility==+1) on pilot corpus
+pilot GO   = AUC >= 0.65 AND pilot BENEFIT >= 1 AND pilot HARM >= 1
+pilot NO-GO = AUC < 0.65 OR (BENEFIT==0 OR HARM==0)   # 类别缺失 => AUC 不可定义
+```
+
+pilot AUC 是 **in-sample** 存在性 kill-gate：即使 in-sample 乐观，AUC 仍 <0.65 说明该组信号不携带任何可路由信息，
+不值得把 8/10 采集预算花在完整 collect 上。pilot 自身绝不授权除全量 collect 以外的任何 stage；held-out 权威仍只能是
+10-conversation LOCO cross-fit。pilot 的 answer/judge 成本单列报告，作为预算对照。
+
+**Rationale**: 041 在全量运行后才确认触发器无效。pilot 把同类型的"信号无信息"失败前移到 20% 成本的探测，
+符合 fail-fast 与成本纪律；类别缺失（BENEFIT/HARM 为 0）意味着 pilot 语料未锻炼反事实，fail-closed 不授权后续。
+
+## Decision 10: 路由精度前沿 `56c−31h≥25`（对抗式评审补入）
+
+**Decision**: `policy_net >= max(25, D)` 的净效用门单独存在时，会被"高捕获+高触发"的粗放 router 满足
+（例如 c=0.95、h=0.8 时净效用仍为正）。为此补入显式精度前沿，把净效用门改写成可逐题复算的 harm 上限：
+
+```text
+c = caught_BENEFIT / total_BENEFIT     # BENEFIT 捕获率，held-out question-majority
+h = triggered_HARM / total_HARM        # HARM 触发率，held-out question-majority
+precision_frontier: 56*c - 31*h >= 25  # 56/31 为历史 label audit 锚计数，固定权重
+equivalent harm cap: h <= (56*c - 25)/31
+At c = 0.70:  h <= 0.46                # 显式可校验判据，取代"只看净效用"
+```
+
+56 与 31 是历史 label audit 必须精确复现的 BENEFIT/HARM 计数，只作为精度前沿的固定权重，不是训练参数。当 fresh
+B=56、H=31 时该式退化为 `net >= 25`；当 fresh 批次 B/H 混比漂移时，精度前沿仍以预注册锚计数约束 (c,h) 工作点，
+防止批次流行度漂移掩盖粗放路由。diagnose 与 confirm 的 verdict 都 MUST 校验该判据，报告同时展示 c、h 与
+`required harm cap`；仅净效用达标而前沿不满足判 NO-GO。
+
+**Alternatives rejected**:
+
+- 只看 fresh-batch net：`B*c−H*h>=25` 与 `net>=25` 恒等，无法新增约束。
+- 事后从 held-out 选 (c,h) 工作点：multiple-comparison / 事后泄漏。
+- 把 56/31 换成运行时拟合权重：把历史锚变成训练参数，违反冻结纪律。
+
 ## Paper-direction boundary
 
 现有 alphaXiv 调研的共同启示是 `relevance != utility`，并把 logits/log-prob 留作 040/041 后尚未验证的确定性信号。

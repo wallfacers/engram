@@ -37,6 +37,8 @@
 - [x] Bounded retry, per-attempt accounting, response limit and stage INVALID semantics are consistent
 - [x] `paired_deep`, query-embedding cost and sparse-fold semantics are represented end to end
 - [x] Implementation baseline and AutoDL host/layout preconditions are explicit
+- [x] 2-conversation signal-existence pilot precedes full collect: in-sample ridge-vs-BENEFIT AUC<0.65 or class-missing → valid NO-GO, saving 8/10 collection budget; pilot is a kill-gate, never held-out authority
+- [x] Routing precision frontier `56c−31h≥25` (harm cap h≤(56c−25)/31, c=0.70→h≤0.46) is an explicit verifiable gate, not net-utility only
 
 ## Notes
 
