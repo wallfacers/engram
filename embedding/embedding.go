@@ -49,6 +49,12 @@ type Config struct {
 	// Local endpoints may omit usage, in which case the callback still records
 	// the call with zero token counts.
 	Usage func(inputTokens, outputTokens int)
+	// TruncatePromptTokens, when non-zero, is passed as the OpenAI-compatible
+	// `truncate_prompt_tokens` request field (vllm extension). -1 asks the
+	// server to truncate each input to its model max length instead of failing
+	// with a 400. Zero (default) omits the field, preserving the historical
+	// byte-identical request and strict fail-on-overlong behavior.
+	TruncatePromptTokens int
 }
 
 // HTTPClient is the concrete OpenAI-compatible implementation.
@@ -83,9 +89,10 @@ func New(cfg Config) (*HTTPClient, error) {
 func (c *HTTPClient) Model() string { return c.cfg.Model }
 
 type embedRequest struct {
-	Model      string   `json:"model"`
-	Input      []string `json:"input"`
-	Dimensions int      `json:"dimensions,omitempty"`
+	Model                string   `json:"model"`
+	Input                []string `json:"input"`
+	Dimensions           int      `json:"dimensions,omitempty"`
+	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 }
 
 type embedResponse struct {
@@ -114,9 +121,10 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float32, er
 	}
 	defer func() { <-c.sem }()
 	body, err := json.Marshal(embedRequest{
-		Model:      c.cfg.Model,
-		Input:      texts,
-		Dimensions: c.cfg.Dimensions,
+		Model:                c.cfg.Model,
+		Input:                texts,
+		Dimensions:           c.cfg.Dimensions,
+		TruncatePromptTokens: c.cfg.TruncatePromptTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("embedding: marshal request: %w", err)

@@ -27,6 +27,62 @@ func TestNew_DisabledWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestEmbed_TruncatePromptTokensPassthrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input                []string `json:"input"`
+			TruncatePromptTokens int      `json:"truncate_prompt_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.TruncatePromptTokens != -1 {
+			t.Errorf("truncate passthrough: got %d, want -1", req.TruncatePromptTokens)
+		}
+		type item struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}
+		items := make([]item, len(req.Input))
+		for i := range req.Input {
+			items[i] = item{Embedding: []float32{float32(i), 0, 0}, Index: i}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": items})
+	}))
+	defer srv.Close()
+
+	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m", TruncatePromptTokens: -1})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	vecs, err := c.Embed(context.Background(), []string{"long text"})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	if len(vecs) != 1 {
+		t.Fatalf("got %d vectors", len(vecs))
+	}
+}
+
+func TestEmbed_TruncateOffByDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), "truncate_prompt_tokens") {
+			t.Errorf("truncate_prompt_tokens should be omitted by default; body=%s", raw)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"embedding": []float32{0, 0, 0}, "index": 0},
+		}})
+	}))
+	defer srv.Close()
+
+	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m"})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if _, err := c.Embed(context.Background(), []string{"a"}); err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+}
+
 func TestEmbed_RoundTripAndOrder(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret-key" {
