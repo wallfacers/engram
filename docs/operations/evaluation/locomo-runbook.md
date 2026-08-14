@@ -40,6 +40,26 @@ locomo-bench \
 `/v1/models` 返回的 served model ID 完全一致；使用短名会让 semantic signal
 静默降级，不能作为可比较评测。
 
+## 041 置信度门控迭代检索（实验 recipe，默认关闭）
+
+`--confidence-gated` 是 041 的 opt-in 迭代检索（specs/041）：浅检索作答 → 检测 answerer 生成中的犹豫信号 → 犹豫则加深重答、自信则停。**默认关闭，关闭时与固定 top-k 逐字节一致**。experiment-only，非 canonical。
+
+```bash
+# 基线（同批对照，防 judge 漂移）
+locomo-bench --data testdata/locomo/locomo.json --store-dir <frozen-store> \
+  --chunks --top-k 150 --chunk-quota 12 --retrieval hybrid --force-answer \
+  --judge-mem0-aligned --trace-mediation=false --repeats 3 --run-dir <base-150>
+# 迭代臂（浅 30 → 深 150）
+locomo-bench --data testdata/locomo/locomo.json --store-dir <frozen-store> \
+  --chunks --top-k 30 --chunk-quota 12 --retrieval hybrid --force-answer \
+  --judge-mem0-aligned --trace-mediation=false --confidence-gated --repeats 3 \
+  --run-dir <iter-30-150>
+```
+
+- **必须 `LOCOMO_NO_THINKING=0`**：犹豫信号从 answerer 的 thinking 段提取（DeepSeek/Qwen "Here's a thinking process" 风格）；禁 thinking 时信号退化为 final 规则。
+- 辅助工具：`--probe-hesitation`（离线区分度探针）、`--confidence-calibrate`（阈值 sweep，默认 threshold 3.0 已校准）。
+- 迭代臂 run-dir 产出 `conf_gate_decisions.jsonl`（每题的浅/深轮犹豫信号 + 预算审计）。
+
 ## 运行后验证
 
 首先检查 `<run-dir>/regime.json`：它必须记录 `force_answer=true`、`judge=mem0-aligned` 与实际 judge 模型。再检查失败调用、context token 分布、store embedding 维度和结果文件完整性。`cost.json` 中的零价格不等于没有调用 judge，必须结合 regime 与日志判断。
