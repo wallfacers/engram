@@ -1061,6 +1061,15 @@ func run() error {
 		recordBenchUsage(ledger, role, model, usage)
 	}
 	answerProviderCall := newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage)
+	if opt.confidenceGated {
+		// 041: the confidence-gated answerer must see its own thinking so the
+		// hesitation detector has a signal. DeepSeek (API and vllm alike)
+		// streams reasoning as a separate block the plain caller drops — without
+		// the merge the gated loop never deepens (041D-iter: deepened=0). Qwen
+		// thinking is plain text deltas, so this is a no-op there. Off (default)
+		// this branch is not entered and the answerer stays byte-identical.
+		answerProviderCall = newUsageModelCallerWithThinking(prov, model, opt.maxTokens, "answer", recordUsage)
+	}
 	judgeProviderCall := newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage)
 	answerUsageCall := gateUsage(sem, answerProviderCall)
 	judgeUsageCall := gateUsage(sem, judgeProviderCall)
