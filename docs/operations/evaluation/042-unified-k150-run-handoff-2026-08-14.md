@@ -15,13 +15,24 @@
 
 ## 2. 正在跑的 run
 
-- 启动：**2026-08-14 18:01:40**（box 时间），脚本 `/root/autodl-tmp/038-runs/run-locomo-paired-150.sh`
-  （setsid 已脱离，SSH 断开不影响；脚本自带 rm -rf + 全新目录）
+- 启动：**2026-08-14 18:26:50**（box 时间，第三次也是最终一次启动），脚本
+  `/root/autodl-tmp/038-runs/run-locomo-paired-150.sh`（setsid 已脱离；自带 rm -rf 全新目录）
 - 内容：LoCoMo 1540 × 3 reps × 2 臂（`hybrid`=control 即 legacy 同批、`hybrid+unified`=treatment）
   top-k **150**、chunk-quota 12、max-tokens 16000、judge-mem0-aligned、context parity fail-closed
 - run-dir：`/root/autodl-tmp/038-runs/locomo-paired-150/`
-- 健康吞吐实测 **~52 答案/分钟**（p2/p3 两次有界验证）→ 9240 答案 ≈ **3 小时**，
-  预计 21:00–21:30 出 `run.exit`
+- ETA：每 repeat ≈ 60 分钟（见下方车队效应），3 repeats ≈ 3-3.5 小时 → **预计 21:30–22:00 出 run.exit**
+
+### ⚠️ 先读：records 冻结是预期行为，不要杀 run（重要更正）
+
+18:18 的 goroutine dump 已定案（`/root/autodl-tmp/042-scratch/goroutine-dump-18q.log`）：
+10 个 conversation 并行启动 → ~3040 个答案 goroutine 在单一 32 槽 FIFO 信号量上排队，
+judge 请求排在全部原始 answer 之后 → **每个 repeat 的前 ~50-60 分钟 records 会冻结在
+~40 条左右（启动头 2 分钟挤过去的），vllm 请求速率却保持 ~60-65/min**。这不是病。
+约 55-65 分钟处 judges 集中排空，records 一口气 +3000、10 个 `conversation done` 连发，
+然后进入下一 repeat。判健康看**请求速率**，不要看记录数。
+
+（前两次启动 16:35 / 18:01 均为健康 run，因误判"记录冻结=病理"被杀——详见
+[autodl-slow-run-troubleshooting.md](autodl-slow-run-troubleshooting.md) 的误诊教训。）
 
 ### 进度检查（复制即用，paramiko 或 ssh 均可）
 
@@ -33,19 +44,12 @@ curl -s -m 5 http://127.0.0.1:8000/metrics | grep num_requests_running | grep -v
 cat /root/autodl-tmp/038-runs/locomo-paired-150/run.exit 2>/dev/null
 ```
 
-### 健康 vs 病理判据（重要，今天已踩过一次坑）
+### 时间线预期（以 18:26 启动计）
 
-- **健康**：每个 conversation 完成（~150 题×2 臂）约 6–9 分钟，日志出现
-  `conversation done conversation=N answered=~150`，records 按 run-1/2/3 递增
-  （记录按批 flush，单 conversation 内前几分钟 0 条属正常，临近完成才大量落盘）。
-- **病理**（16:35 那次启动的真实死法）：`conversation done` 永不出现、records 冻结在几十条、
-  但 vllm `num_requests_running=32` 持续满载 —— 请求风暴、答案全废。**判据：t+20 分钟仍
-  convdone=0 且 records < 100 → 病理复现。** 处置：`kill -QUIT <harness pid>`（run 本来就废，
-  换 goroutine dump 定位根因），dump 会落在 run.log 尾部；再决定是否重跑。
-- 已排除：judge（实测 1s）、SSE 流（实测 5.9s/10.5k prompt）、embed（max-num-seqs 1）、
-  KV/preemption（0 抢占、18% 使用率）、重试循环（attempts=1）、外部客户端（32 连接全 127.0.0.1）。
-  有界复现：1 conv×1 rep 与 2 conv×3 rep 全绿（52 答/分钟、exit 0），病理只在 10-conv 全量触发过一次；
-  18:01 这次是首次全量重试，18:08 时 7 分钟已 flush 39 条（≈5 倍于病历起步速度），谨慎乐观。
+- 18:26–19:25：repeat-1 answer 相。records 冻结 ~40 条、convdone=0、请求 ~60/min —— **全部正常**
+- ~19:25–19:35：repeat-1 judge 排空，records 跳到 ~3000，10 个 conversation done 连发
+- ~19:35–20:35：repeat-2 同样节奏；~20:35–21:35：repeat-3；随后配对校验+统计 → run.exit
+- **唯一该担心的信号**：请求速率掉到 ~0 且 running=0 且长时间无推进 → 真停滞，按手册查
 
 ## 3. 完成后（run.exit=0）
 
