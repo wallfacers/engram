@@ -40,5 +40,5 @@ survival，不能据此声明竞品优劣。数值与 artifact hashes 只在
 
 LoCoMo/LongMemEval 的完整系统分数、受控机制实验、工程依赖和口径差异统一记录在
 [长期记忆系统成绩与机制证据登记](../research/high-scoring-memory-systems.md)。该记录
-允许未达到 90% 的论文提供机制证据，但不把跨论文 leaderboard 数字或完整 bundle
+允许未跨过 90 目标线的论文提供机制证据，但不把跨论文 leaderboard 数字或完整 bundle
 写成受控竞品结论。
