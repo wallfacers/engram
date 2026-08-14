@@ -30,16 +30,16 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | legacy | thinking 3-rep majority | 88.51% | 多数票口径（[topk](reports/topk-exploration-2026-08-11.md)） | ⚠️ 同上 |
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | thinking 3-rep majority | 90.13% | top-k150 全局扩预算（+1.6pp，2.4× 上下文税，需 32768 上下文 answerer，[topk](reports/topk-exploration-2026-08-11.md)） | ⚠️ 高分 recipe，但 legacy prompt + 加量型，保留作目标参考 |
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | thinking 3-rep majority + **clean** | **91.10%** (1403/1540) | **当前最高已验证**，独立重判一致（[repro](reports/locomo-9110-repro-2026-08-12.md)）；open-domain 68.8% 是短板 | ✅ **已验证可复现**，作当前基线锚 |
-| LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 3-rep majority | **87.7%**（control 87.1%） | +0.6pp within-noise（p=0.477）；cat3 open-domain **-6.2pp**（`don't guess` 过度保守）→ **NO-GO**（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | 🔴 **重跑**：细化「推断 vs 拒答」边界后，用 unified 契约在 top-k150 高配下配对重跑 |
+| LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 3-rep majority | **87.7%**（control 87.1%） | +0.6pp within-noise（p=0.477）；cat3 open-domain **-6.2pp** 根因=`don't guess` 过度保守，已由「Request classification」修订修复（smoke 20/20，3 边界 case 全过）；分类修订在 LME 配对 +4.4pp 不破坏（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | 🔴 **重跑**：分类修订后 unified 配对（top-k30 归因 cat3 救回 + top-k150 高配过 non-inferiority） |
 
 ## 主表 · LongMemEval-S（cleaned 500 题）
 
 | 数据集 | 答题模型 | 判题模型 | 检索模式 | top-k | 契约/提示词 | 聚合·口径 | 得分 | 得分说明 | 复跑状态 |
 |---|---|---:|---|---|---|---:|---|---|
 | LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | 3-rep + clean | **84.60%** | clean 真实基线（judge 作弊 +1.6pp 已剥除，[rejudge](reports/lme-clean-rejudge-2026-08-12.md)） | 🔴 **重跑**：store 在 buildSessionChunks 修复前（1100 code point 截断），须重建后同配方重跑 |
-| LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 待确认* | **unified** | post-hoc 非配对 | **90.4%**（control 86.1%） | +4.3pp；preference +38.9pp（58.9→97.8）、assistant -4.1pp；**非显著（ci 重叠）**、无 context parity（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | 🔴 **重跑（最高优先）**：修 embed 512 上限 → 配对 + 同批 + 3-rep + clean；LME 是 unified 契约最亮信号，须坐实 |
+| LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 配对 3-rep + clean | **90.2%**（control 85.8%） | **+4.4pp，McNemar p=0.000112 above-noise**；preference +30.0pp（20→29/30）、multi-session +8.3、knowledge-update +7.7、temporal -0.8 / assistant 0.0 持平；context parity 3-run 全过；分类修订后契约 digest `1d8a8d0f`（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | ✅ **已坐实**（2026-08-14） |
 
-\* 038 verdict 只声明 LoCoMo 的 top-k 30；LME 臂的检索配置未在报告中注明，重跑前需从 run-dir 确认。
+（旧 post-hoc 90.4% / control 86.1% 已归档——无 parity、assistant -4.1pp 为配对伪影。）
 
 ## 探针（非主路径，仅记录，不构成引擎能力）
 
@@ -81,8 +81,9 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 
 ## 复跑建议顺序
 
-1. **LME unified 配对**（最高优先）：修 embed 512 上限 → 配对（context parity）+ 同批 judge + 3-rep + clean，验证 90.4% 是否坐实。这是 unified 契约方向最强的信号。
-2. **LoCoMo unified + top-k150 高配**：细化「推断 vs 拒答」边界（只对敏感/未支持事实拒答，允许 grounded inference）后，unified 在 top-k150 高配下配对，过 non-inferiority gate（≥-0.5pp）。
-3. **重建 LME 基线**：修复 store 后同配方重跑 clean 84.60% 基线。
+1. ✅ **LME unified 配对**（2026-08-14 完成）：truncate 修 embed 512 上限 → 配对（context parity）+ 同批 judge + 3-rep + clean → **+4.4pp above-noise 坐实**。
+2. 🔴 **LoCoMo unified 配对重跑**（最高优先）：分类修订（Request classification）后，(a) top-k30 配对归因 cat3 open-domain 是否救回（与 -6.2pp 同配置可比），(b) top-k150 高配过 non-inferiority gate（≥-0.5pp）。注意 top-k150 单请求可能 >3min perCallTimeout（[locomo-9110] 教训），需评估在线可行性。
+3. **重建 LME 基线**：修复 store（buildSessionChunks 1100 code point 截断）后同配方重跑 clean 84.60% 基线。
 4. **重建 LoCoMo trace 默认栈基线**：同批 judge + clean，与 85.91% 对齐。
-5. 全程遵守宪法 IV：eval-config 与算法改动分开 commit，prompt 只允许统一契约，跨批/单次分数一律标注。
+5. **held-out 行为门**（149+ 题 blinded 人工标注）作为 unified 契约 promotion 前置。
+6. 全程遵守宪法 IV：eval-config 与算法改动分开 commit，prompt 只允许统一契约，跨批/单次分数一律标注。
