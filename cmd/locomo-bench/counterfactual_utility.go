@@ -705,3 +705,50 @@ func utilityFiniteFloats(values []float64) error {
 func utilityTrimSpaceLower(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
+
+// --- US1: historical label constructor ---
+
+// utilityHistoricalResult is the per-repetition question outcome read from an
+// old hybrid results JSONL (no model call, no modern provenance guaranteed).
+type utilityHistoricalResult struct {
+	QuestionID string
+	Conv       int
+	Q          int
+	Category   string
+	Correct    bool
+}
+
+// utilityHistoricalPair is one repetition's shallow/deep outcome for a question.
+type utilityHistoricalPair struct {
+	QuestionID     string
+	Conv, Q        int
+	Category       string
+	ShallowCorrect bool
+	DeepCorrect    bool
+}
+
+// utilityHistoricalSummary aggregates question-majority utility counts.
+type utilityHistoricalSummary struct {
+	Benefit                        int
+	Harm                           int
+	Neutral                        int
+	Questions                      int
+	HistoricalProvenanceIncomplete bool
+}
+
+// utilityTruthTable maps a (shallow, deep) correctness pair to the counterfactual
+// utility label: F→T BENEFIT(+1), T→F HARM(-1), otherwise NEUTRAL(0).
+func utilityTruthTable(shallow, deep bool) (int, utilityLabelKind, error) {
+	u := 0
+	switch {
+	case !shallow && deep:
+		u = 1
+	case shallow && !deep:
+		u = -1
+	}
+	label, err := utilityLabelFromUtility(u)
+	if err != nil {
+		return 0, "", err
+	}
+	return u, label, nil
+}
