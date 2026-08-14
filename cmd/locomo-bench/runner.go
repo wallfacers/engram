@@ -120,83 +120,38 @@ func newUsageModelCaller(p provider.Provider, model string, maxTokens int, tempe
 				Content: []provider.ContentBlock{{Type: provider.BlockText, Text: user}},
 			}},
 		}
-		return streamModelCall(ctx, p, req, role, false, record)
-	}
-}
-
-// newUsageModelCallerWithThinking is the 041 confidence-gated answerer variant
-// of newUsageModelCaller. It additionally merges the provider's reasoning
-// deltas into the returned string, wrapped as a <thinking>…</thinking> preamble
-// in front of the final text, so the answerer's own chain-of-thought reaches
-// the deterministic hesitation detector. Some providers (DeepSeek via the
-// Anthropic-compatible API) stream thinking as a separate content block that
-// the plain caller drops — which starved the detector and made the gated loop
-// never deepen (041D-iter: deepened=0, thinking process count 0). Qwen-on-vllm
-// emits thinking as ordinary text deltas, so this is a no-op there; and a
-// provider that emits no thinking (or thinking disabled) yields output
-// byte-identical to the plain caller. The judge caller is never this variant:
-// extractFinalAnswer already strips the preamble before the judge prompt, but
-// keeping the verdict path text-only avoids polluting parseJudgeVerdict.
-func newUsageModelCallerWithThinking(p provider.Provider, model string, maxTokens int, role string, record func(role, model string, usage provider.Usage)) usageModelCaller {
-	return func(ctx context.Context, system, user string) (string, provider.Usage, error) {
-		req := provider.Request{
-			Model:            model,
-			System:           system,
-			MaxTokens:        maxTokens,
-			ThinkingDisabled: benchNoThinking,
-			Messages: []provider.Message{{
-				Role:    provider.RoleUser,
-				Content: []provider.ContentBlock{{Type: provider.BlockText, Text: user}},
-			}},
-		}
-		return streamModelCall(ctx, p, req, role, true, record)
-	}
-}
-
-// streamModelCall streams one request and assembles the completion string.
-// With mergeThinking, reasoning deltas accumulate into a <thinking>…</thinking>
-// preamble emitted ahead of the text (thinking always precedes the answer in
-// both Anthropic- and OpenAI-protocol streams); without it only text deltas are
-// kept. Usage and error accounting are identical across both paths.
-func streamModelCall(ctx context.Context, p provider.Provider, req provider.Request, role string, mergeThinking bool, record func(role, model string, usage provider.Usage)) (string, provider.Usage, error) {
-	ch, err := p.Stream(ctx, req)
-	if err != nil {
-		if record != nil {
-			record(role, req.Model, provider.Usage{})
-		}
-		return "", provider.Usage{}, err
-	}
-	var textSB, thinkSB strings.Builder
-	usage := provider.Usage{}
-	for ev := range ch {
-		switch ev.Type {
-		case provider.EventTextDelta:
-			textSB.WriteString(ev.TextDelta)
-		case provider.EventReasoningDelta:
-			if mergeThinking {
-				thinkSB.WriteString(ev.ReasoningDelta)
+		ch, err := p.Stream(ctx, req)
+		if err != nil {
+			if record != nil {
+				record(role, model, provider.Usage{})
 			}
-		case provider.EventUsage:
-			if ev.Usage != nil {
-				usage.InputTokens += ev.Usage.InputTokens
-				usage.OutputTokens += ev.Usage.OutputTokens
-			}
-		case provider.EventError:
-			if ev.Error != nil {
-				if record != nil {
-					record(role, req.Model, usage)
+			return "", provider.Usage{}, err
+		}
+		var sb strings.Builder
+		usage := provider.Usage{}
+		for ev := range ch {
+			switch ev.Type {
+			case provider.EventTextDelta:
+				sb.WriteString(ev.TextDelta)
+			case provider.EventUsage:
+				if ev.Usage != nil {
+					usage.InputTokens += ev.Usage.InputTokens
+					usage.OutputTokens += ev.Usage.OutputTokens
 				}
-				return "", usage, ev.Error
+			case provider.EventError:
+				if ev.Error != nil {
+					if record != nil {
+						record(role, model, usage)
+					}
+					return "", usage, ev.Error
+				}
 			}
 		}
+		if record != nil {
+			record(role, model, usage)
+		}
+		return sb.String(), usage, nil
 	}
-	if record != nil {
-		record(role, req.Model, usage)
-	}
-	if mergeThinking && thinkSB.Len() > 0 {
-		return "<thinking>\n" + thinkSB.String() + "\n</thinking>\n" + textSB.String(), usage, nil
-	}
-	return textSB.String(), usage, nil
 }
 
 // perCallTimeout bounds one LLM call for as long as it holds a semaphore

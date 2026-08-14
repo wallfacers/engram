@@ -127,19 +127,6 @@ type options struct {
 	onlyQuestions              map[string]bool // parsed whitelist (nil = no filter)
 	topK                       int
 	maxTokens                  int
-	// confidenceGated enables 041 confidence-gated iterative retrieval: a
-	// shallow retrieve→answer, a deterministic hesitation check on the answerer
-	// generation, and a deepen→answer pass only when hesitant. Off = the
-	// fixed-top-k path byte-identical (SC-003). Harness-only, engine untouched.
-	confidenceGated      bool
-	confidenceShallowK   int
-	confidenceDeepK      int
-	confidenceThreshold  float64
-	confidenceMaxRounds  int
-	confidenceGateJournal *confidenceGateJournal // runtime-only writer for conf_gate_decisions.jsonl
-	probeHesitation       bool                   // --probe-hesitation: US1 offline discrimination probe
-	probeHesitationJSONL  string                 // --probe-hesitation-jsonl: results-hybrid.jsonl path override
-	confidenceCalibrate   bool                   // --confidence-calibrate: US3 threshold sweep
 	concurrency                int
 	chunks                     bool
 	chunkQuota                 int
@@ -455,16 +442,6 @@ func run() error {
 	flag.StringVar(&opt.onlyQuestionsFile, "only-questions", "", "run only these question IDs (one `conv-N-q-M` per line, # = comment; research-subset mode — formal B0/B1 allowed, terminal coverage validation reports an error on subsets)")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
-	// 041 confidence-gated iterative retrieval (specs/041). Default off; off is
-	// byte-identical to fixed top-k. deep > shallow is enforced in validation.
-	flag.BoolVar(&opt.confidenceGated, "confidence-gated", false, "041: iterative retrieval — shallow retrieve→answer, deepen→answer only when the answerer's generation is hesitant (default off; off = fixed top-k byte-identical)")
-	flag.IntVar(&opt.confidenceShallowK, "confidence-shallow-k", 30, "041: first-round retrieval depth (shallow)")
-	flag.IntVar(&opt.confidenceDeepK, "confidence-deep-k", 150, "041: second-round retrieval depth (deep, reached only when the shallow answer is hesitant)")
-	flag.Float64Var(&opt.confidenceThreshold, "confidence-threshold", 3.0, "041: hesitation score at or above which the shallow answer triggers a deepen pass")
-	flag.IntVar(&opt.confidenceMaxRounds, "confidence-max-rounds", 2, "041: maximum iteration rounds (>=2; round 2 is final regardless of remaining hesitation)")
-	flag.BoolVar(&opt.probeHesitation, "probe-hesitation", false, "041 US1: run the zero-cost hesitation-discrimination probe over an existing results-hybrid.jsonl and exit (writes run-dir/hesitation-probe.json)")
-	flag.StringVar(&opt.probeHesitationJSONL, "probe-hesitation-jsonl", "", "041 US1/US3: results-hybrid.jsonl to probe or calibrate (default <run-dir>/results-hybrid.jsonl)")
-	flag.BoolVar(&opt.confidenceCalibrate, "confidence-calibrate", false, "041 US3: sweep the hesitation threshold over an existing results-hybrid.jsonl and exit (writes run-dir/confidence-calibrate.json)")
 	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
 	flag.BoolVar(&opt.chunks, "chunks", false, "union store: index verbatim session chunks alongside extracted facts (applies to every arm)")
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
@@ -571,20 +548,7 @@ func run() error {
 	if err := validateMechanismArms(opt); err != nil {
 		return err
 	}
-	if err := validateConfidenceGatedOptions(opt); err != nil {
-		return err
-	}
 
-	if opt.probeHesitation {
-		// 041 US1: zero-cost offline discrimination probe over an existing
-		// results-hybrid.jsonl. Runs before the --data / dataset load — it needs
-		// only the results file and the hesitation threshold.
-		return runHesitationProbeCLI(opt)
-	}
-	if opt.confidenceCalibrate {
-		// 041 US3: threshold sweep over the same results file.
-		return runConfidenceCalibrateCLI(opt)
-	}
 	if opt.compareSpec != "" {
 		dirs, err := parseCompareSpec(opt.compareSpec)
 		if err != nil {
@@ -949,7 +913,7 @@ func run() error {
 		}
 		return runPCICAnnotate(opt, convs, apiKey, envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic"), logger)
 	}
-	if opt.runDir == "" && !opt.abstainProbe && !opt.probeHesitation {
+	if opt.runDir == "" && !opt.abstainProbe {
 		return fmt.Errorf("--run-dir is required unless --estimate or --compare is used")
 	}
 	if opt.runDir != "" && !opt.abstainProbe {
@@ -1061,15 +1025,6 @@ func run() error {
 		recordBenchUsage(ledger, role, model, usage)
 	}
 	answerProviderCall := newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage)
-	if opt.confidenceGated {
-		// 041: the confidence-gated answerer must see its own thinking so the
-		// hesitation detector has a signal. DeepSeek (API and vllm alike)
-		// streams reasoning as a separate block the plain caller drops — without
-		// the merge the gated loop never deepens (041D-iter: deepened=0). Qwen
-		// thinking is plain text deltas, so this is a no-op there. Off (default)
-		// this branch is not entered and the answerer stays byte-identical.
-		answerProviderCall = newUsageModelCallerWithThinking(prov, model, opt.maxTokens, "answer", recordUsage)
-	}
 	judgeProviderCall := newUsageModelCallerWithUsage(judgeProv, judgeConfig.Model, opt.maxTokens, "judge", recordUsage)
 	answerUsageCall := gateUsage(sem, answerProviderCall)
 	judgeUsageCall := gateUsage(sem, judgeProviderCall)
@@ -1332,14 +1287,6 @@ func run() error {
 			}
 			repeatOpt.navTraj = traj
 			defer func() { _ = traj.Close() }()
-		}
-		if opt.confidenceGated {
-			cgj, err := openConfidenceGateJournal(filepath.Join(repeatOpt.runDir, "conf_gate_decisions.jsonl"))
-			if err != nil {
-				return fmt.Errorf("open conf_gate_decisions.jsonl: %w", err)
-			}
-			repeatOpt.confidenceGateJournal = cgj
-			defer func() { _ = cgj.Close() }()
 		}
 		if opt.assemblyAudit {
 			j, err := openAssemblyJournal(filepath.Join(repeatOpt.runDir, "assembly-audit.jsonl"))
@@ -2562,36 +2509,6 @@ func validateAssocDepth(depth int) error {
 	return nil
 }
 
-// validateConfidenceGatedOptions enforces the 041 flag contract
-// (specs/041 contracts/cli-confidence-gated.md). Off (default) is a no-op.
-func validateConfidenceGatedOptions(opt options) error {
-	if !opt.confidenceGated {
-		return nil
-	}
-	if opt.confidenceDeepK <= opt.confidenceShallowK {
-		return fmt.Errorf("--confidence-deep-k (%d) must exceed --confidence-shallow-k (%d)", opt.confidenceDeepK, opt.confidenceShallowK)
-	}
-	if opt.confidenceThreshold < 0 {
-		return fmt.Errorf("--confidence-threshold must be >= 0, got %v", opt.confidenceThreshold)
-	}
-	if opt.confidenceMaxRounds < 2 {
-		return fmt.Errorf("--confidence-max-rounds must be at least 2, got %d", opt.confidenceMaxRounds)
-	}
-	if opt.multiQuery {
-		return fmt.Errorf("--confidence-gated cannot be combined with --multi-query (SearchMulti's final budget must stay fixed)")
-	}
-	if strings.TrimSpace(opt.catTopKSpec) != "" {
-		return fmt.Errorf("--confidence-gated cannot be combined with --cat-top-k (per-category depth overrides are undefined for the two-tier ladder)")
-	}
-	if strings.TrimSpace(opt.evalProtocolPath) != "" || strings.TrimSpace(opt.evalFreezeProtocol) != "" || strings.TrimSpace(opt.evalFreezeB0Protocol) != "" || opt.fixedGoldOracle {
-		return fmt.Errorf("--confidence-gated is an independent opt-in path and cannot be combined with a frozen 022 B0/B1 protocol (its RetrievalCallLimit/AnswerCallLimit differ from the frozen one-call contract)")
-	}
-	if opt.abstainHard {
-		return fmt.Errorf("--confidence-gated cannot be combined with --abstain-hard (the hard gate returns before any answerer generation, so no hesitation signal can be extracted)")
-	}
-	return nil
-}
-
 func validateMechanismArms(opt options) error {
 	if err := validateRepresentationArm(opt.representationArm); err != nil {
 		return err
@@ -2852,53 +2769,6 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					return
 				}
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
-				// 041 confidence-gated iterative retrieval (specs/041). On =
-				// shallow retrieve→answer→hesitation check→deepen→answer; off
-				// (default) this branch is never entered, keeping the single-shot
-				// fixed-top-k path byte-identical (SC-003).
-				if armOpt.confidenceGated {
-					correct, predicted, usage, rec, iterErr := runConfidenceGatedQuestion(
-						ctx, runtime.retrievers[s.name], qa, armOpt,
-						budgetLadder{ShallowTopK: armOpt.confidenceShallowK, DeepTopK: armOpt.confidenceDeepK, ChunkQuota: armOpt.chunkQuota},
-						confidenceGateConfig{Threshold: armOpt.confidenceThreshold, MaxRounds: armOpt.confidenceMaxRounds},
-						answerCall, judgeCall,
-					)
-					if iterErr != nil {
-						recordFormalErr(iterErr)
-						logger.Error("confidence-gated question failed; result left resumable", "conversation", key.Conv, "question", key.Q, "err", iterErr)
-						return
-					}
-					if armOpt.confidenceGateJournal != nil {
-						if jerr := armOpt.confidenceGateJournal.Write(rec); jerr != nil {
-							recordFormalErr(jerr)
-							logger.Error("write confidence-gate decision failed", "conversation", key.Conv, "question", key.Q, "err", jerr)
-						}
-					}
-					item := result{
-						Conv:                key.Conv,
-						Q:                   key.Q,
-						QuestionID:          qa.QuestionID,
-						Category:            qa.Category,
-						CategoryName:        qa.CategoryName,
-						QuestionType:        qa.QuestionType,
-						Adversarial:         qa.Adversarial || qa.Category == adversarialCategory,
-						Correct:             correct,
-						Question:            qa.Question,
-						Gold:                goldFor(qa),
-						Predicted:           predicted,
-						RetrievalFlags:      retrievalFingerprint(armOpt),
-						AnswerRegime:        answerRegimeFingerprint(armOpt),
-						InputTokens:         usage.InputTokens,
-						OutputTokens:        usage.OutputTokens,
-						AnswerContextTokens: usage.InputTokens,
-					}
-					s.agg.add(qa.Category, correct)
-					if err := s.journal.writeResult(item, false); err != nil {
-						recordFormalErr(err)
-						logger.Error("write result failed", "conversation", key.Conv, "question", key.Q, "err", err)
-					}
-					return
-				}
 				var abstainRuntime *abstainRuntimeContext
 				if armOpt.abstainHard || armOpt.abstainSoft {
 					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
