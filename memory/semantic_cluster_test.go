@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -16,8 +17,18 @@ func seedClusterEvidence(t *testing.T, ledger *memory.LedgerStore, sessions map[
 	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	// Iterate sessions in sorted order so the returned slice and the IDs it
+	// carries are deterministic across runs. Go map iteration order is random;
+	// tests below index into ev (e.g. ev[2]/ev[3]) and a drifting order turns
+	// a correct cluster into an apparent leak.
+	keys := make([]string, 0, len(sessions))
+	for sessionID := range sessions {
+		keys = append(keys, sessionID)
+	}
+	sort.Strings(keys)
 	var out []memory.Evidence
-	for sessionID, contents := range sessions {
+	for _, sessionID := range keys {
+		contents := sessions[sessionID]
 		inputs := make([]memory.EvidenceInput, len(contents))
 		for i, content := range contents {
 			inputs[i] = memory.EvidenceInput{
