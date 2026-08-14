@@ -26,6 +26,25 @@
 └── seal.json
 ```
 
+### `pilot`
+
+```text
+<run-dir>/
+├── manifest.json
+├── preflight.json
+├── call-journal.jsonl
+├── public/
+│   └── answer-attempts.jsonl      # 前两条 conversation 的 shallow + paired deep
+├── hidden/
+│   ├── judge-outcomes.jsonl
+│   └── utility-labels.jsonl       # repetition-level
+├── pilot-report.json              # AUC/类别计数/覆盖率/成本；无 held-out 或路由声明
+└── seal.json
+```
+
+`pilot` 只覆盖 `conversation_ids[0..1]`，`claim_boundary=signal_existence_pilot_only`。AUC 由固定 ridge 得分对
+BENEFIT 类别计算；BENEFIT 或 HARM 计数为 0 时 `auc=null + reason=pilot_class_missing`，pilot 判 valid NO-GO。
+
 ### `collect`
 
 ```text
@@ -180,7 +199,8 @@ Stage-specific source chain：
 | Stage | Required source |
 |---|---|
 | label | two historical run roots digests |
-| collect | label GO manifest/seal/report digests |
+| pilot | label GO manifest/seal/report digests |
+| collect | label GO + pilot GO manifest/seal/report digests |
 | diagnose | collect manifest/seal digests |
 | confirm | diagnose GO manifest/seal/report + fold/global rule digests |
 | transfer | confirm GO manifest/seal/report + global rule digest |
@@ -485,10 +505,26 @@ crossfit decision 的 deep attempt ID 指向 collect `paired_deep`（offline sim
 ```
 
 Gate order固定：validity、coverage/leakage、historical label regression receipt（diagnose only，不提供训练/held-out rows）、fresh
-cross-fit net +25（diagnose only）、quality not below same-batch deep、absolute accuracy、token ratio、category tolerance、Holm
-negative category、primary authorization / transfer non-regression。fresh diagnostic 必须同时报告
-`deep_net_vs_shallow=D`、`policy_net_vs_shallow` 和 `required=max(25,D)`；`D<25` 时超越 deep 是刻意从严，不得把 25 改成 D。
+cross-fit net +25（diagnose only）、precision frontier `56c−31h≥25`（diagnose/confirm）、quality not below same-batch deep、absolute
+accuracy、token ratio、category tolerance、Holm negative category、primary authorization / transfer non-regression。fresh diagnostic
+必须同时报告 `deep_net_vs_shallow=D`、`policy_net_vs_shallow`、`required=max(25,D)`、`benefit_capture=c`、`harm_trigger=h` 与
+`required_harm_cap=(56c−25)/31`；`D<25` 时超越 deep 是刻意从严，不得把 25 改成 D。
 report consumer不得只读最后一个 bool而忽略 earlier invalidity。
+
+### Pilot report minimum fields
+
+```text
+verdict
+claim = signal_existence_pilot_only
+conversation_ids (exactly the first two)
+questions / decision_units / repetitions coverage
+signal availability + unavailable reasons + length strata
+attempt B/N/H counts; B==0 or H==0 => auc null + reason=pilot_class_missing
+auc = AUC(ridge score, label=utility==+1)  # in-sample, kill-gate only
+auc_gate = 0.65, observed, passed
+pilot cost (shallow/deep answer + judge calls/tokens/latency)
+production_authorized = false
+```
 
 ### Diagnostic report minimum fields
 
@@ -502,6 +538,7 @@ signal availability + unavailable reasons + length strata
 attempt B/N/H capture/trigger/net
 question-majority shallow/policy/deep correct + accuracy
 fresh D、independent +25 floor、policy required=max(25,D)
+benefit_capture=c、harm_trigger=h、required_harm_cap=(56c−25)/31、precision_frontier=56c−31h
 policy/deep total charged-token ratio + logical calls/provider attempts/query-embedding calls + latency simulation
 category comparisons + exact McNemar/Holm
 gate records
@@ -517,6 +554,7 @@ source diagnostic/rule digests
 runtime signal/decision/degradation coverage
 shallow/policy/fixed-deep majority quality and flips
 BENEFIT captured / HARM triggered / NEUTRAL triggered / net
+benefit_capture=c、harm_trigger=h、required_harm_cap=(56c−25)/31、precision_frontier=56c−31h
 full policy vs control charged-token/logical-call/provider-attempt/retrieval/query-embedding/latency ledger (judge separate)
 category + exact McNemar + paired CI + Holm
 all gate records

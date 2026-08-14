@@ -60,7 +60,7 @@ transfer（500 questions × 3 reps）；研究结论只覆盖冻结模型/recipe
 |---|---|---|
 | I. Local-first, offline by default | PASS — 标签、校准、验证器是本地纯 Go；需要生成的阶段只接受显式配置、可替换的本地 OpenAI-compatible sidecar，默认关闭。 | PASS — CLI 契约不提供托管默认值；离线 `label`/`diagnose` 不读取 provider env；manifest 记录 endpoint digest 而不记录地址或 key。 |
 | II. Engine/adapter separation | PASS — 概率信号仅用于 benchmark harness，不扩展 `provider.ProviderEvent`。 | PASS — 设计只新增 `cmd/locomo-bench/counterfactual_utility_*.go` 并最小修改 `main.go`；受保护目录 diff 必须为空。 |
-| III. Contract-first & namespace isolation | PASS — 五阶段 CLI、artifact schema、错误和 gate 语义先于代码冻结；不新增产品 API 或 namespace 行为。 | PASS — [CLI contract](contracts/utility-cli.md) 与 [artifact contract](contracts/utility-artifacts.md) 固定 stage transition、digests、label-blind boundary、fail-closed 验证。 |
+| III. Contract-first & namespace isolation | PASS — 六阶段 CLI（label/pilot/collect/diagnose/confirm/transfer）、artifact schema、错误和 gate 语义先于代码冻结；不新增产品 API 或 namespace 行为。 | PASS — [CLI contract](contracts/utility-cli.md) 与 [artifact contract](contracts/utility-artifacts.md) 固定 stage transition、digests、label-blind boundary、fail-closed 验证。 |
 | IV. Evaluation regression gate | PASS — feature 本身就是同批浅/深/policy 配对门；不改变默认 retrieval/extraction/storage。 | PASS — 新鲜 confirmation 必须达到 fixed-k150 正确题数、90% 绝对分、类别容差和 60% token；exact McNemar/Holm 仍报告但不能替代硬门；LME 仅在 LoCoMo GO 后运行。 |
 | V. Graceful degradation & honest scale | PASS — 单条信号不可映射则固定深答；端点整体不支持则预检后 NO-GO，避免烧全量。 | PASS — artifact 区分 `unavailable`、`invalid`、`NO-GO`；声明 10-conversation 校准、小样本和 benchmark-specific 边界；不作生产承诺。 |
 
@@ -94,6 +94,9 @@ transfer（500 questions × 3 reps）；研究结论只覆盖冻结模型/recipe
 
 ```text
 historical label audit (must reproduce 56 BENEFIT / 31 HARM)
+                                  |
+2-conversation signal-existence pilot (ridge-vs-BENEFIT AUC>=0.65 kill-gate;
+                                  NO-GO saves the remaining 8/10 collection budget)
                                   |
 fresh LoCoMo collect: k30 signal + k30/k150 judged pairs
                                   |
@@ -146,10 +149,11 @@ NO-GO；数值失败、conversation 泄漏、fold/coverage/provenance 缺失是 
 数值求解失败、fold/coverage/provenance 缺失才使整个 diagnose INVALID。
 
 cross-fitted held-out 结果必须同时满足：相对浅预算净增至少 25 题、正确题数不低于同批 k150、绝对分至少 90%、
-模拟完整路径 token ratio 不超过 0.60、类别损失不超过预注册容差。否则停止。通过时再以同一算法在全部 LoCoMo
-校准记录上拟合一个 global rule 并封存；该规则的 LoCoMo in-sample 结果明确不报告为成绩。
-这里 `+25` 是独立的保守效应量门，不是历史 040 的替代数据；若 fresh deep-vs-shallow 净值 `D<25`，有意要求 policy
-比 deep 多至少 `25-D` 题，报告同时展示 `D` 与 25。
+模拟完整路径 token ratio 不超过 0.60、类别损失不超过预注册容差、以及显式精度前沿 `56c−31h≥25`
+（c=BENEFIT 捕获率、h=HARM 触发率，56/31 为历史锚；等价 harm 上限 `h≤(56c−25)/31`，c=0.70 时 h≤0.46）。
+否则停止。通过时再以同一算法在全部 LoCoMo 校准记录上拟合一个 global rule 并封存；该规则的 LoCoMo in-sample 结果
+明确不报告为成绩。这里 `+25` 是独立的保守效应量门，不是历史 040 的替代数据；若 fresh deep-vs-shallow 净值 `D<25`，
+有意要求 policy 比 deep 多至少 `25-D` 题，报告同时展示 `D` 与 25。仅净效用达标而精度前沿不满足时同样判 NO-GO。
 
 ### Fresh confirmation and verdict
 
