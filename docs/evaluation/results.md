@@ -24,8 +24,9 @@ tags: [evaluation, locomo, longmemeval, results, exploration-journal]
 | LoCoMo（1,540）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 / deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ |
 | LoCoMo（1,540）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 / deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise（离线 clean 重判）|
 | LongMemEval-S（500）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 / deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
+| LongMemEval-S（500）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 / deepseek-v4-flash | **92.0%** | — | 3-rep clean majority · context parity ✓（[补跑记录](../operations/evaluation/lme-unified-k150-3rep-2026-08-15.md)）|
 
-> 口径：全部 **clean 判题**（`extractFinalAnswer` 剥离 thinking，只判 final answer）· 3-rep 配对 majority。clean 是唯一可跨批比较的口径——judge 从 thinking 前导读候选的作弊/被 thinking 误导均为评测伪影，raw 跨批漂移 ±3.4pp、clean 跨批稳定 ±0.3pp（042 实证）。top-k 150 行是 042 配对 run 的离线 clean 重判（control legacy@k150 同口径 91.36%，Δ+1 题），印证两机制正交：unified 修 prompt 病、top-k 150 修上下文量，unified 不威胁高分栈。
+> 口径：全部 **clean 判题**（`extractFinalAnswer` 剥离 thinking，只判 final answer）。clean 是唯一可跨批比较的口径——judge 从 thinking 前导读候选的作弊/被 thinking 误导均为评测伪影，raw 跨批漂移 ±3.4pp、clean 跨批稳定 ±0.3pp（042 实证）。top-k 150 行是 042 配对 run 的离线 clean 重判（control legacy@k150 同口径 91.36%，Δ+1 题），印证两机制正交：unified 修 prompt 病、top-k 150 修上下文量，unified 不威胁高分栈。LME@k150 行是 2026-08-15 补跑的 unified 3-rep（91.0/92.0/91.8，clean majority 92.0%），对照 control 1-rep clean 87.0%（非严格配对，control 仅为参考）。
 
 ### 参考行（非 unified 主路径，仅追溯）
 
@@ -116,8 +117,9 @@ tags: [evaluation, locomo, longmemeval, results, exploration-journal]
 | 08-14 | [040 adaptive topk](reports/040-adaptive-topk-verdict.md) | gap-knee 自适应截断 | 只能救 21% 的召回错因（r 上限 20% < 45% 门槛），**NO-GO** | 30→150 增量 80% 是上下文量；转向 confidence-gated（041） |
 | 08-13→14 | [unified 038 坐实](reports/unified-answer-contract-verdict-2026-08-13.md) | 数据集无关统一契约，严格配对 + context parity fail-closed | 初版 cat3 open-domain 回落 NO-GO → Request classification 修订后 **LoCoMo +1.4pp（p=0.019）/ LME +4.4pp（p=0.000112）above-noise** | **unified 是唯一允许的 answer prompt**；不靠 per-dataset 特调 |
 | 08-14 | [042 unified×k150](../operations/evaluation/042-unified-k150-run-handoff-2026-08-14.md) | unified 契约在 top-k 150 的配对复测 | unified 91.43% vs control(legacy) 91.36%（clean 重判），Δ+1 题 within-noise | 两机制正交：unified 修 prompt 病、k150 修上下文量；口径假象澄清（clean 跨批稳定） |
+| 08-15 | [LME unified@k150 3-rep 补跑](../operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) | LME 的 k150 配对（此前只有 k30 坐实）；同配方跑 unified 3-rep | 3-rep clean majority **92.0%**（91.0/92.0/91.8 高度一致）；preference +33.4pp 为最大增益源；对照 control 1-rep 87.0% | unified 在 LME 高配下同样 above-noise 正分，preference/multi-session/knowledge-update 增益模式与 k30 完全一致 |
 
-**阶段教训**：Entity-verify 的 in-sample 教训把"特调高分"彻底钉死，unified 用零特调在双数据集 above-noise 坐实——**可移植的契约正确性 > 数据集目标额的高分**。042 收尾同时澄清了一个此前困扰的谜团：早期 90+ 与近期 ~89 的落差是 judge 口径差异（raw 判 thinking vs clean 判 final answer），不是能力回退。
+**阶段教训**：Entity-verify 的 in-sample 教训把"特调高分"彻底钉死，unified 用零特调在双数据集 above-noise 坐实——**可移植的契约正确性 > 数据集目标额的高分**。042 收尾同时澄清了一个此前困扰的谜团：早期 90+ 与近期 ~89 的落差是 judge 口径差异（raw 判 thinking vs clean 判 final answer），不是能力回退。08-15 的 LME@k150 补跑把 unified 契约的验证面从「k30 双数据集」扩展到「k150 高配」，增益模式跨 top-k 稳定（preference 始终 +30pp 级），且 control 1-rep（87.0%）作为参考不构成严格配对——如需坐实 control 需补 control 3-rep。
 
 ---
 
@@ -157,7 +159,7 @@ LME-S 500 的历史行来自 store 修复前：`buildSessionChunks` 截断 >1100
 | 数据集 | engram 实测 | MemOS 自报 | Mem0 自报 |
 |---|---|---|---:|
 | LoCoMo | 91.43%（unified·k150·clean） | 88.83% | 92.5% |
-| LongMemEval | 90.2%（unified·k30·clean） | 89.20% | 94.4% |
+| LongMemEval | 92.0%（unified·k150·clean·3rep） | 89.20% | 94.4% |
 
 Mem0 高分来自托管平台，无同栈复现；MemOS 公开分在 engram 受控栈下实测 82.40%。口径与来源见 [competitors.md](competitors.md)。
 

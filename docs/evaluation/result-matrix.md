@@ -42,6 +42,7 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 |---|---|---:|---|---|---|---:|---|---|
 | LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | 3-rep + clean | **84.60%** | clean 真实基线（judge 作弊 +1.6pp 已剥除，[rejudge](reports/lme-clean-rejudge-2026-08-12.md)） | 🔴 **重跑**：store 在 buildSessionChunks 修复前（1100 code point 截断），须重建后同配方重跑 |
 | LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 配对 3-rep + clean | **90.2%**（control 85.8%） | **+4.4pp，McNemar p=0.000112 above-noise**；preference +30.0pp（20→29/30）、multi-session +8.3、knowledge-update +7.7、temporal -0.8 / assistant 0.0 持平；context parity 3-run 全过；分类修订后契约 digest `1d8a8d0f`（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | ✅ **已坐实**（2026-08-14） |
+| LME-S 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | **unified** | 3-rep + clean majority | **92.0%**（460/500；control 1-rep 87.0%） | 3-rep 高度一致（91.0/92.0/91.8）；clean majority **92.0%**；preference +33.4（19→29/30）、knowledge-update +6.4、multi-session +6.0、temporal +1.5、assistant/user 0.0；对照 control 为 1-rep（87.0%）非严格配对；context parity 全过；契约 digest `1d8a8d0f`（[补跑记录](../operations/evaluation/lme-unified-k150-3rep-2026-08-15.md)） | ✅ 3-rep majority 坐实（2026-08-15）；unified 3-rep 稳定、control 1-rep 参考 |
 
 （旧 post-hoc 90.4% / control 86.1% 已归档——无 parity、assistant -4.1pp 为配对伪影。）
 

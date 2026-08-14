@@ -229,6 +229,7 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 | LoCoMo（1,540）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
 | LoCoMo（1,540）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise |
 | LongMemEval-S（500）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
+| LongMemEval-S（500）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
 
 所有分数均为 clean 判题（只判 final answer）、三次配对多数投票。
 
