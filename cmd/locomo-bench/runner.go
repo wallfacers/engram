@@ -157,9 +157,12 @@ func newUsageModelCaller(p provider.Provider, model string, maxTokens int, tempe
 // perCallTimeout bounds one LLM call for as long as it holds a semaphore
 // slot. Without it a relay connection that dies mid-run leaves every
 // in-flight Stream waiting on headers forever and the whole bench deadlocks
-// on the semaphore (observed 2026-07-19, Strike 1). Streamed bench answers
-// finish in seconds; three minutes is generous.
-const perCallTimeout = 3 * time.Minute
+// on the semaphore (observed 2026-07-19, Strike 1). Most streamed bench
+// answers finish in seconds, but top-k150 retrieval triples the evidence
+// context and Qwen thinking+answer can exceed three minutes (observed
+// 2026-08-14), so eight minutes is a deliberate headroom for local-vllm
+// long requests while still bounding a genuinely dead relay.
+const perCallTimeout = 8 * time.Minute
 
 func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
 	return gateUsageAttempts(sem, c, 2)
