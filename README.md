@@ -241,15 +241,19 @@ your installed version for its exact startup contract.
 | LoCoMo (1,540) | **87.9%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
 | LongMemEval-S (500) | **90.2%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
 
-Strict paired evals of the **unified answer contract** — the only allowed answer
-prompt (dataset-independent, no per-dataset tuning) — verified above-noise with
-context-parity checks: LoCoMo **+1.4pp** (p=0.019), LME **+4.4pp** (p=0.000112).
-[038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
+Gain vs legacy control (paired, context-parity verified) — [038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md):
 
-Historical high-score anchors (legacy / dataset-specific prompts, since removed —
-not the current stack): LoCoMo **91.10%** (top-k 150), LME **91.1%** (DeepSeek
-v4-pro paid API). A unified-contract re-test of the top-k-150 path (042,
-2026-08-14) is within noise — top-k 150 buys context, not a contract gain.
+| Benchmark | Gain | p |
+|---|---:|---:|
+| LoCoMo | **+1.4pp** | 0.019 |
+| LongMemEval-S | **+4.4pp** | 0.000112 |
+
+Historical anchors (legacy / dataset-specific prompts, since removed — not the current stack):
+
+| Anchor | Score | Note |
+|---|---:|---|
+| LoCoMo · top-k 150 (legacy tuned) | 91.10% | unified 复测 within-noise (042) — top-k 150 buys context, not a contract gain |
+| LME · DeepSeek v4-pro paid | 91.1% | post-hoc diagnostic, not a default-stack capability |
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 

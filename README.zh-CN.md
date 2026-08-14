@@ -229,13 +229,19 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 | LoCoMo（1,540） | **87.9%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
 | LongMemEval-S（500） | **90.2%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
 
-两行均为 **unified answer contract（数据集无关统一回答契约，唯一允许的 prompt 路径）的严格配对评测**，
-带 context parity 校验，均 above-noise：LoCoMo **+1.4pp**（p=0.019）、LME **+4.4pp**（p=0.000112）。
-[038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
+相对 legacy control 的增益（配对、context parity 校验）— [038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)：
 
-历史高分锚（legacy / 数据集特调 prompt，已移除，非当前栈）：LoCoMo **91.10%**（top-k 150）、
-LME **91.1%**（DeepSeek v4-pro 付费 API）。unified 契约下 top-k-150 路径已复测（042，2026-08-14），
-within-noise——top-k 150 增的是上下文量，不是契约收益。
+| 基准 | 增益 | p |
+|---|---:|---:|
+| LoCoMo | **+1.4pp** | 0.019 |
+| LongMemEval-S | **+4.4pp** | 0.000112 |
+
+历史高分锚（legacy / 数据集特调 prompt，已移除，非当前栈）：
+
+| 锚点 | 得分 | 说明 |
+|---|---:|---|
+| LoCoMo · top-k 150（legacy 特调） | 91.10% | unified 契约复测 within-noise（042）——top-k 150 增的是上下文量，不是契约收益 |
+| LME · DeepSeek v4-pro 付费 | 91.1% | post-hoc 诊断，非默认栈能力 |
 
 [评测详情与复现证据 →](docs/evaluation/results.md)
 
