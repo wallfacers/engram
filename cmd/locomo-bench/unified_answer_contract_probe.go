@@ -701,9 +701,28 @@ func buildUnifiedAnswerContractProbeJudgePrompt(probeCase unifiedAnswerContractP
 	return string(raw), nil
 }
 
+// extractProbeJudgmentJSON pulls the first '{'..'}' span out of a judge
+// response, tolerating a stray prose prefix (e.g. "No.") or a markdown fence
+// (```json ... ```) that the model occasionally wraps around an otherwise valid
+// verdict. A response with no '{' passes through unchanged so strict decoding
+// still fails closed.
+func extractProbeJudgmentJSON(raw string) string {
+	start := strings.IndexByte(raw, '{')
+	if start < 0 {
+		return raw
+	}
+	if start > 0 {
+		raw = raw[start:]
+	}
+	if end := strings.LastIndexByte(raw, '}'); end >= 0 {
+		raw = raw[:end+1]
+	}
+	return raw
+}
+
 func parseUnifiedAnswerContractProbeJudgment(raw string) (unifiedAnswerContractProbeJudgment, error) {
 	var judgment unifiedAnswerContractProbeJudgment
-	decoder := json.NewDecoder(bytes.NewBufferString(strings.TrimSpace(extractFinalAnswer(raw))))
+	decoder := json.NewDecoder(bytes.NewBufferString(extractProbeJudgmentJSON(strings.TrimSpace(extractFinalAnswer(raw)))))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&judgment); err != nil {
 		return unifiedAnswerContractProbeJudgment{}, fmt.Errorf("decode JSON: %w", err)

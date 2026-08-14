@@ -571,3 +571,44 @@ func TestRunUnifiedAnswerContractProbeCLIRejectsFixtureReportAlias(t *testing.T)
 		t.Fatalf("fixture was overwritten: read_err=%v got=%q", readErr, got)
 	}
 }
+
+func TestParseUnifiedAnswerContractProbeJudgmentToleratesPrefixAndFence(t *testing.T) {
+	t.Parallel()
+	// deepseek-v4-flash occasionally wraps a valid verdict in a stray prose
+	// prefix and a markdown fence ("No." + ```json ... ```). Tolerate it.
+	inputs := []string{
+		`No.` + "```json\n" + `{"pass":true,"violations":[]}` + "\n```",
+		"```json\n{\"pass\":true,\"violations\":[]}\n```",
+		`{"pass":true,"violations":[]}`,
+		` Verdict: {"pass":true,"violations":[]} `,
+	}
+	for i, in := range inputs {
+		got, err := parseUnifiedAnswerContractProbeJudgment(in)
+		if err != nil {
+			t.Fatalf("input %d %q: unexpected error: %v", i, in, err)
+		}
+		if got.Pass == nil || *got.Pass != true {
+			t.Fatalf("input %d %q: pass = %v, want true", i, in, got.Pass)
+		}
+		if len(got.Violations) != 0 {
+			t.Fatalf("input %d %q: violations = %v, want empty", i, in, got.Violations)
+		}
+	}
+	// A fenced pass:false verdict also parses and preserves violations.
+	got, err := parseUnifiedAnswerContractProbeJudgment("```json\n{\"pass\":false,\"violations\":[\"guessed a fact\"]}\n```")
+	if err != nil {
+		t.Fatalf("fenced pass:false: unexpected error: %v", err)
+	}
+	if got.Pass == nil || *got.Pass != false || len(got.Violations) != 1 || got.Violations[0] != "guessed a fact" {
+		t.Fatalf("fenced pass:false = %+v", got)
+	}
+}
+
+func TestParseUnifiedAnswerContractProbeJudgmentStillRejectsNonJSON(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{"not JSON", "", "No.", "correct: true"} {
+		if _, err := parseUnifiedAnswerContractProbeJudgment(in); err == nil {
+			t.Fatalf("input %q: expected error, got nil", in)
+		}
+	}
+}
