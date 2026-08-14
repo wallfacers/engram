@@ -7,15 +7,14 @@ Protocol: [evaluation-protocol.md](../../../specs/038-unified-answer-contract/co
 
 `--unified-answer-contract`(数据集无关的统一证据约束回答契约)**必须作为唯一允许
 的 prompt 路径推进**(消除 per-dataset / category 特调 = 产品正确性与可移植性,
-特调高分无意义,见 [result-matrix](../result-matrix.md))。**方向已配对坐实**:
-LME 严格配对(truncate + context parity + 同批 judge + 3-rep)+4.4pp
-(p=0.000112, above-noise;control 85.8% → unified 90.2%),preference +30.0pp
-不靠特调;LoCoMo 全量严格配对 +0.6pp within-noise(p=0.477)但 cat3 open-domain
--6.2pp。**「Request classification」修订(2026-08-14)已修复过度保守**:
-显式分流 factual recall(严格 do-not-guess)vs inference/prediction/advice
-(grounded inference + likely 标注),smoke 20/20(control 11/20)、3 个新边界
-case 全过,且不破坏 LME 增益。下一步:LoCoMo 高配(top-k150)配对重跑验证 cat3
-救回 + held-out 行为门。
+特调高分无意义,见 [result-matrix](../result-matrix.md))。**方向已双数据集配对
+坐实**:LME 严格配对 +4.4pp(p=0.000112 above-noise,control 85.8%→90.2%);
+LoCoMo 修订后契约配对 **+1.4pp above-noise(p=0.019,control 86.6%→87.9%)**。
+「Request classification」修订(2026-08-14)显式分流 factual recall(严格
+do-not-guess)vs inference/prediction/advice(grounded inference + likely
+标注),smoke 20/20;修复了 cat3 open-domain 推断压制(038 -6.2pp → 修订后
+-2.1pp,flips 8v2→4v2,残余 35 题两臂都错为检索/能力瓶颈)。下一步:top-k150
+高配配对 + held-out 行为门。
 
 ## 评测配置
 
@@ -151,25 +150,53 @@ future-fact-unsupported(无证据未来事实仍拒答 3/3,do-not-guess 未退�
 流不终止挂死,见 `qwen-vllm-16384-sse-hang` 记忆);probe judge 解析容忍
 `No.` 前缀 + markdown fence(`extractProbeJudgmentJSON`)。
 
+## LoCoMo 配对重跑(修订后契约,2026-08-14)
+
+分类修订后契约重新配对 LoCoMo 1540(与 038 同配置:top-k30/chunk-quota12/
+3-rep/clean/mem0-judge/no-idk-retry/trace=false)。3 run validation receipt 全
+valid(qcount=1540,context parity mismatch=0)。
+
+- control 86.6% / unified **87.9%**,**+1.4pp above-noise(McNemar p=0.019)**
+- flips control→unified **47** / unified→control 26(net +21/1540)
+
+**Category 分解(多数票)**:
+
+| category | n | control | unified | Δ |
+|---|---|---|---|---|
+| multi-hop | 282 | 88.7% | 89.0% | +0.4 |
+| temporal | 321 | 84.7% | 86.0% | +1.2 |
+| open-domain | 96 | 61.5% | 59.4% | -2.1 |
+| single-hop | 841 | 89.4% | 91.6% | +2.1 |
+
+**与 038 旧契约对比**:overall +0.6pp within-noise → **+1.4pp above-noise**;
+temporal -0.9 → +1.2;single-hop +1.9 → +2.1;open-domain -6.2 → -2.1。
+
+**cat3 open-domain 归因**:flips 仅 control→unified 4 / unified→control 2
+(净 -2 题),038 是 8v2(-6.2pp)——推断压制基本解决。残余 35 题两臂都错
+(both_bad)是 open-domain 检索覆盖/能力硬伤,与 unified 无关。cat3 96 题小
+样本,单 rep 波动 ±10%(unified per-run 53-62 题),多数票 -2.1pp 在噪声内。
+
 ## 最终结论
 
-- **LoCoMo(严格配对,1540)**:+0.6pp within-noise;cat3 open-domain -6.2pp
-  (根因已定位:`don't guess` 过度保守,已由分类修订修复,待高配重跑验证)。
+- **LoCoMo(严格配对,1540,修订后 2026-08-14)**:**+1.4pp above-noise
+  (p=0.019)**,control 86.6% → unified 87.9%;temporal +1.2 / single-hop +2.1;
+  open-domain -2.1pp(flips 4v2,038 是 -6.2pp/8v2,推断压制基本解决,残余 35
+  题两臂都错为检索/能力瓶颈)。
 - **LME(严格配对,500,2026-08-14)**:**+4.4pp(p=0.000112 above-noise)**;
   preference +30.0pp;multi-session +8.3pp;knowledge-update +7.7pp;
   temporal -0.8pp / assistant 0.0pp 持平(post-hoc 的 -4.1pp 为配对伪影)。
-- **方向坐实**:unified 契约「减少 unsupported + 避免有害拒答」在 preference /
-  multi-session / knowledge-update 类配对验证有效,不靠 per-dataset 特调。
+- **双数据集坐实**:unified 契约在 LoCoMo +1.4pp / LME +4.4pp,均 above-noise
+  配对验证,不靠 per-dataset 特调。
 - **Unified 必须要有(维护者立场)**:unified 是**唯一允许的 prompt 路径**,禁止
   退回 per-dataset / category 特调——特调高分是数据集目标额,不代表系统能力。
   「Request classification」修订是契约内通用规则(非 category 路由),同时满足
   「推断要答」与「unsupported 要拒」。
 - **下一步(按 [result-matrix](../result-matrix.md) 优先级)**:
-  1. LoCoMo unified **top-k150 高配配对重跑**(分类修订后,验证 cat3 open-domain
-     是否救回 + 整体 non-inferiority gate)。
+  1. LoCoMo unified **top-k150 高配配对重跑**(修订后契约,perCallTimeout 8min
+     已放宽,过 non-inferiority gate + 尝试更高分)。
   2. held-out 行为门(149+ 题 blinded 人工标注)作为 promotion 前置。
   3. 按 [score-solidification](../score-solidification.md) 8 步升级:当前
-     LME = verified(配对 + parity + 3-rep),LoCoMo = within-noise 待高配重跑。
-- **分数层级**:LME unified 已达 **verified**(严格配对 + context parity + 同批
-  judge + 3-rep + above-noise);LoCoMo unified 仍 within-noise,待 top-k150
-  高配重跑。
+     LME = verified(配对 + parity + 3-rep);LoCoMo = verified(修订后配对
+     +1.4pp above-noise),top-k150 高配 pending。
+- **分数层级**:LME unified 已达 **verified**;LoCoMo unified 修订后配对
+  **+1.4pp above-noise = verified**,top-k150 高配 pending。
