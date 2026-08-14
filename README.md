@@ -238,8 +238,8 @@ your installed version for its exact startup contract.
 
 | Benchmark | Score | Configuration |
 |---|---:|---|
-| LoCoMo (1,540) | **87.9%** (control 86.6%) | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
-| LongMemEval-S (500) | **90.2%** (control 85.8%) | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
+| LoCoMo (1,540) | **87.9%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
+| LongMemEval-S (500) | **90.2%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
 
 Strict paired evals of the **unified answer contract** — the only allowed answer
 prompt (dataset-independent, no per-dataset tuning) — verified above-noise with

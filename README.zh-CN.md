@@ -226,8 +226,8 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 | 基准 | 得分 | 配置 |
 |---|---:|---|
-| LoCoMo（1,540） | **87.9%**（control 86.6%） | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
-| LongMemEval-S（500） | **90.2%**（control 85.8%） | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
+| LoCoMo（1,540） | **87.9%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
+| LongMemEval-S（500） | **90.2%** | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
 
 两行均为 **unified answer contract（数据集无关统一回答契约，唯一允许的 prompt 路径）的严格配对评测**，
 带 context parity 校验，均 above-noise：LoCoMo **+1.4pp**（p=0.019）、LME **+4.4pp**（p=0.000112）。
