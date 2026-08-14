@@ -27,16 +27,24 @@ tags: [evaluation, locomo, longmemeval, results]
 
 | 数据集 | 样本 | 答题模型 | 判题模型 | 配方与聚合 | 结果 | 解释边界 |
 |---|---:|---|---|---|---:|---|
-| LoCoMo（cat 1–4） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **thinking + top-k 150、3 次答题多数、clean 重判** | **91.10%** | 当前最高、已验证可复现（1403/1540，独立重判一致，见 [复现报告](reports/locomo-9110-repro-2026-08-12.md)） |
+| LoCoMo（cat 1–4） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **unified answer contract** 配对、3 次多数、clean、top-k 30 | **87.9%** | **+1.4pp above-noise（p=0.019，control 86.6%）**；context parity 3-run 全过；unified 是唯一允许的 answer prompt（[038 verdict](reports/unified-answer-contract-verdict-2026-08-13.md)） |
+| LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **unified answer contract** 配对、3 次多数、clean、top-k 30 | **90.2%** | **+4.4pp above-noise（p=0.000112，control 85.8%）**；context parity 全过；unified 是唯一允许的 answer prompt（[038 verdict](reports/unified-answer-contract-verdict-2026-08-13.md)） |
+| LoCoMo（cat 1–4） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **thinking + top-k 150、3 次答题多数、clean 重判** | **91.10%** | 历史高分锚（legacy 特调 prompt + top-k 150，已移除）；unified 契约下重测 pending（[复现报告](reports/locomo-9110-repro-2026-08-12.md)） |
 | LoCoMo（cat 1–4） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local hybrid、3 次答题多数 | 85.71% | 与同栈 MemOS 的可比基线 |
 | LoCoMo（cat 1–4）· trace（默认） | 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | 030 read-side trace、3 次答题多数 | 85.91% | 当前默认路径：answer context 468 vs 3620 tok（省 7.7×）；配对细节见 [030 verdict](reports/030-evidence-mediation-verdict.md) |
 | LoCoMo（cat 1–4） | 1540 | deepseek-v4-pro | deepseek-v4-flash | canonical recipe、3 次答题多数 | 89.03% | 强 answerer 探针，不能与本地基线混作默认分 |
 | LongMemEval-S（cleaned） | 500 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | local-first、3 次答题多数 | 80.80% | 历史 full 500 本地栈测量；见下方口径更正 |
 | LongMemEval-S（cleaned） | 500 | deepseek-v4-pro | deepseek-v4-flash | 与本地臂相同检索、3 次答题多数 | 86.00% | 历史强 answerer 探针；同受下方口径更正约束 |
 
-## 当前最高分：LoCoMo 91.10%
+## 历史高分锚：LoCoMo 91.10%（legacy 特调，非当前允许路径）
 
-engram 在 LoCoMo 全量 1,540 题上的当前最高已验证成绩为
+当前允许的 answer prompt 是 **unified answer contract**（数据集无关统一契约，
+唯一允许的路径，禁止 per-dataset / category 特调）——本页上方矩阵的
+LoCoMo **87.9%** / LongMemEval-S **90.2%** 即其配对 verified 分数（[038 verdict](reports/unified-answer-contract-verdict-2026-08-13.md)）。
+下面的 91.10% 是 legacy 特调 prompt（top-k 150）的历史最高数值，unified
+契约下重测 pending。
+
+engram 在 LoCoMo 全量 1,540 题上曾取得的历史最高验证成绩为
 **91.10%（1,403/1,540）**。运行使用本地 Qwen3.6-35B-A3B-FP8、thinking、
 top-k 150、三次答题多数投票与 deepseek-v4-flash clean 重判。
 

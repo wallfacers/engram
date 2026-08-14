@@ -226,9 +226,17 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 | 基准 | 得分 | 配置 |
 |---|---:|---|
-| LoCoMo（1,540） | **91.10%**（1,403/1,540） | 本地 Qwen3.6-35B · thinking · top-k 150 · 三次多数投票 · clean 最终答案判题 |
+| LoCoMo（1,540） | **87.9%**（control 86.6%） | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
+| LongMemEval-S（500） | **90.2%**（control 85.8%） | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 三次配对多数投票 · clean 判题 |
 
-同一批原始答题结果经独立重判得到一致成绩。
+两行均为 **unified answer contract（数据集无关统一回答契约，唯一允许的 prompt 路径）的严格配对评测**，
+带 context parity 校验，均 above-noise：LoCoMo **+1.4pp**（p=0.019）、LME **+4.4pp**（p=0.000112）。
+[038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
+
+**历史高分锚**（非当前栈——legacy / 数据集特调 prompt，已移除）：
+- LoCoMo **91.10%**（top-k 150，legacy 特调 prompt）——真实历史结果，但 legacy prompt 已不是允许路径，
+  unified 契约下重测 pending。
+- LME **91.1%**（DeepSeek v4-pro 付费 API + 已移除融合 prompt）——post-hoc 诊断，非默认栈能力。
 
 [评测详情与复现证据 →](docs/evaluation/results.md)
 

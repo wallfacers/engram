@@ -238,14 +238,22 @@ your installed version for its exact startup contract.
 
 | Benchmark | Score | Configuration |
 |---|---:|---|
-| LoCoMo (1,540) | **91.10%** (1,403/1,540) | Local Qwen3.6-35B · thinking · top-k 150 · 3-run majority · clean final-answer judge |
-| LongMemEval-S (500) | **91.1%** (3-run) | DeepSeek v4-pro answerer (付费 API) · 融合 prompt · 3-run · post-hoc 诊断 |
+| LoCoMo (1,540) | **87.9%** (control 86.6%) | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
+| LongMemEval-S (500) | **90.2%** (control 85.8%) | **Unified answer contract** · Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge |
 
-LoCoMo 结果由原始 answer runs 独立复现。LongMemEval-S 行是 **answerer 升级诊断**:
-使用 DeepSeek v4-pro 付费 API + 已随 [specs/038-unified-answer-contract](specs/038-unified-answer-contract/)
-移除的数据集特化 prompt,属 **post-hoc 兼容性诊断**,不代表默认本地栈得分;系统能力
-得分路径见 038 unified contract。[实验详情 →](docs/evaluation/reports/deepseek-v4pro-lme-verdict-2026-08-13.md)
-[038 unified contract 配对评测 verdict(NO-GO,保持 default-off)→](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
+Both rows are **strict paired evals of the unified answer contract** — the only
+allowed answer prompt (dataset-independent, no per-dataset tuning), verified
+above-noise with context-parity checks: LoCoMo **+1.4pp** (p=0.019), LME
+**+4.4pp** (p=0.000112). [038 verdict →](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md)
+
+**Historical high-score anchors** (not the current stack — legacy / dataset-specific
+prompts, since removed):
+- LoCoMo **91.10%** (top-k 150, legacy tuned prompt) — a real prior result, but
+  legacy prompt is no longer the allowed path; re-test under the unified contract is pending.
+- LME **91.1%** (DeepSeek v4-pro paid API + removed fused prompt) — post-hoc diagnostic,
+  not a default-stack capability.
+
+[Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
