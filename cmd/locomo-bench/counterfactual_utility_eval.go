@@ -336,12 +336,11 @@ func sanitizedTimestamp() string {
 	return "fixed" // deterministic for tests; real runs replace with a timestamp
 }
 
-// --- US2/US3 stage runners (implemented with their failing tests) ---
+// --- US2/US3 stage runners ---
 
-func runUtilityCollectStage(opt *options) error {
-	return fmt.Errorf("collect stage not yet implemented")
-}
-
+// runUtilityDiagnoseStage runs the offline LOCO cross-fit gate. NO-GO is a valid
+// COMPLETE report (exit 0) that must not authorize confirm; INVALID returns an
+// error (non-zero exit).
 func runUtilityDiagnoseStage(opt *options) error {
 	if opt.utilitySource == "" {
 		return fmt.Errorf("diagnose stage requires a sealed collect source directory")
@@ -355,19 +354,10 @@ func runUtilityDiagnoseStage(opt *options) error {
 		fmt.Printf("utility diagnose: stage=diagnose validity=valid verdict=GO claim=%s\n", report.Claim)
 	case "NO-GO":
 		fmt.Printf("utility diagnose: stage=diagnose validity=valid verdict=NO-GO claim=%s\n", report.Claim)
-		return nil // NO-GO is a valid COMPLETE report; it must not authorize confirm.
 	default:
 		return fmt.Errorf("utility diagnose: unexpected verdict %q", report.Verdict)
 	}
 	return nil
-}
-
-func runUtilityConfirmStage(opt *options) error {
-	return fmt.Errorf("confirm stage not yet implemented")
-}
-
-func runUtilityTransferStage(opt *options) error {
-	return fmt.Errorf("transfer stage not yet implemented")
 }
 
 // --- US2: collect artifact loading ---
@@ -1083,4 +1073,154 @@ func runUtilityPilotStage(opt *options) error {
 	}
 	_ = receipt
 	return fmt.Errorf("pilot stage collection requires the AutoDL sidecar path (not available offline)")
+}
+
+// --- US3: confirm / transfer gate evaluation (offline) ---
+
+// utilityConfirmUnit is one fresh confirm decision unit's outcome.
+type utilityConfirmUnit struct {
+	Key            utilityDecisionKey
+	Action         utilityDecisionAction
+	PolicyCorrect  bool // answer actually kept by the policy
+	ShallowCorrect bool
+	DeepCorrect    bool // fixed-deep control correctness
+	ShallowTokens  int
+	DeepTokens     int
+}
+
+// utilityConfirmGates evaluates the strict LoCoMo confirmation conjunction over
+// fresh decision units: policy correct >= same-batch fixed-deep, accuracy >=
+// 0.90, charged-token ratio <= 0.60, and the precision frontier 56c-31h>=25.
+func utilityConfirmGates(units []utilityConfirmUnit) (utilityEvaluationReceipt, error) {
+	var report utilityEvaluationReceipt
+	report.Schema = utilitySchemaVersion
+	report.Claim = "fresh_locomo_mechanism_confirmation"
+	report.ClaimBoundary = "fresh_locomo_mechanism_confirmation"
+	report.ProductionAuthorized = false
+
+	// Question-majority aggregation.
+	byQ := map[string]*struct{ policy, shallow, deep, actionDeep, n int }{}
+	totalPolicyTokens, totalDeepTokens := 0, 0
+	order := []string{}
+	for i := range units {
+		u := &units[i]
+		totalPolicyTokens += u.ShallowTokens
+		totalDeepTokens += u.DeepTokens
+		if u.Action != utilityActionKeepShallow {
+			totalPolicyTokens += u.DeepTokens
+		}
+		qk := strconv.Itoa(u.Key.ConversationID) + "/" + u.Key.QuestionID
+		qs, ok := byQ[qk]
+		if !ok {
+			qs = &struct{ policy, shallow, deep, actionDeep, n int }{}
+			byQ[qk] = qs
+			order = append(order, qk)
+		}
+		if u.PolicyCorrect {
+			qs.policy++
+		}
+		if u.ShallowCorrect {
+			qs.shallow++
+		}
+		if u.DeepCorrect {
+			qs.deep++
+		}
+		if u.Action != utilityActionKeepShallow {
+			qs.actionDeep++
+		}
+		qs.n++
+	}
+	policyCorrect, deepCorrect, totalB, caughtB, totalH, triggeredH := 0, 0, 0, 0, 0, 0
+	for _, qk := range order {
+		qs := byQ[qk]
+		pm := qs.policy > qs.n/2
+		dm := qs.deep > qs.n/2
+		sm := qs.shallow > qs.n/2
+		ad := qs.actionDeep > qs.n/2
+		_, l, _ := utilityTruthTable(sm, dm)
+		if pm {
+			policyCorrect++
+		}
+		if dm {
+			deepCorrect++
+		}
+		switch l {
+		case utilityLabelBenefit:
+			totalB++
+			if pm {
+				caughtB++
+			}
+		case utilityLabelHarm:
+			totalH++
+			if ad {
+				triggeredH++
+			}
+		}
+	}
+	totalQuestions := len(order)
+	accuracy := 0.0
+	if totalQuestions > 0 {
+		accuracy = float64(policyCorrect) / float64(totalQuestions)
+	}
+	tokenRatio := 0.0
+	if totalDeepTokens > 0 {
+		tokenRatio = float64(totalPolicyTokens) / float64(totalDeepTokens)
+	}
+	c := 0.0
+	if totalB > 0 {
+		c = float64(caughtB) / float64(totalB)
+	}
+	h := 0.0
+	if totalH > 0 {
+		h = float64(triggeredH) / float64(totalH)
+	}
+	precisionPassed := totalB > 0 && totalH > 0 && utilityPrecisionPasses(c, h)
+
+	report.Quality = map[string]any{
+		"policy_correct": policyCorrect, "fixed_deep_correct": deepCorrect, "policy_accuracy": accuracy, "questions": totalQuestions,
+	}
+	report.Cost = map[string]any{"policy_tokens": totalPolicyTokens, "fixed_deep_tokens": totalDeepTokens, "token_ratio": tokenRatio}
+	report.Precision = &utilityPrecisionFrontier{
+		BenefitCapture: c, HarmTrigger: h,
+		FrontierValue: utilityPrecisionBenefitWeight*c - utilityPrecisionHarmWeight*h, RequiredHarmCap: utilityHarmCap(c), Passed: precisionPassed,
+	}
+	report.Gates = []utilityGateRecord{
+		{Name: "quality_not_below_fixed_deep", Observed: policyCorrect, Required: ">=" + itoa2(deepCorrect), Passed: policyCorrect >= deepCorrect, Authority: "fresh-question-majority"},
+		{Name: "absolute_accuracy", Observed: accuracy, Required: ">=0.90", Passed: accuracy >= utilityMinAccuracy, Authority: "fresh-question-majority"},
+		{Name: "token_ratio", Observed: tokenRatio, Required: "<=0.60", Passed: tokenRatio <= utilityMaxTokenRatio, Authority: "full-decision-path"},
+		{Name: "precision_frontier", Observed: utilityPrecisionBenefitWeight*c - utilityPrecisionHarmWeight*h, Required: ">=25", Passed: precisionPassed, Authority: "56c-31h"},
+	}
+	allPass := true
+	for _, g := range report.Gates {
+		if !g.Passed {
+			allPass = false
+		}
+	}
+	if allPass {
+		report.Verdict = "GO"
+	} else {
+		report.Verdict = "NO-GO"
+	}
+	return report, nil
+}
+
+// utilityTransferNonRegression evaluates the zero-retune LongMemEval transfer:
+// policy correct >= same-batch fixed-deep (quality) is the non-regression claim.
+func utilityTransferNonRegression(policyCorrect, fixedDeepCorrect, questions int) (utilityEvaluationReceipt, error) {
+	var report utilityEvaluationReceipt
+	report.Schema = utilitySchemaVersion
+	report.Claim = "external_transfer_non_regression"
+	report.ClaimBoundary = "external_transfer_non_regression"
+	report.ProductionAuthorized = false
+	if policyCorrect < fixedDeepCorrect {
+		report.Verdict = "NO-GO"
+		report.Claim = "locomo_mechanism_only_not_portable"
+	} else {
+		report.Verdict = "GO"
+	}
+	report.Gates = []utilityGateRecord{
+		{Name: "transfer_non_regression", Observed: policyCorrect, Required: ">=" + itoa2(fixedDeepCorrect), Passed: policyCorrect >= fixedDeepCorrect, Authority: "zero-retune-fresh"},
+	}
+	report.Quality = map[string]any{"policy_correct": policyCorrect, "fixed_deep_correct": fixedDeepCorrect, "questions": questions}
+	return report, nil
 }

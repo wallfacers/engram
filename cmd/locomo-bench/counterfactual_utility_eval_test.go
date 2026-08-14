@@ -381,3 +381,96 @@ func TestUtilityPilotGateClassMissing(t *testing.T) {
 		t.Fatalf("class-missing pilot must be NO-GO(pilot_class_missing), got verdict=%s reason=%s", receipt.Verdict, receipt.AUCNullReason)
 	}
 }
+
+// --- US3 confirm/transfer gate tests (T029/T031) ---
+
+func TestUtilityConfirmGatesGO(t *testing.T) {
+	// A policy that keeps shallow correct answers but deepens only the
+	// shallow-wrong/deep-right BENEFITs passes quality/accuracy/token/precision.
+	var units []utilityConfirmUnit
+	// 40 questions x 3 reps. 10 BENEFIT (shallow wrong, deep right, deepened),
+	// 8 HARM (kept shallow), 22 NEUTRAL (kept).
+	for c := 0; c < 4; c++ {
+		qi := 0
+		for b := 0; b < 3; b++ {
+			for r := 1; r <= 3; r++ {
+				units = append(units, utilityConfirmUnit{
+					Key: utilityTestDecisionKey(c, convQID(c, qi), r), Action: utilityActionDeepen,
+					PolicyCorrect: true, ShallowCorrect: false, DeepCorrect: true,
+					ShallowTokens: 4000, DeepTokens: 28000,
+				})
+			}
+			qi++
+		}
+		for h := 0; h < 2; h++ {
+			for r := 1; r <= 3; r++ {
+				units = append(units, utilityConfirmUnit{
+					Key: utilityTestDecisionKey(c, convQID(c, qi), r), Action: utilityActionKeepShallow,
+					PolicyCorrect: true, ShallowCorrect: true, DeepCorrect: false,
+					ShallowTokens: 4000, DeepTokens: 28000,
+				})
+			}
+			qi++
+		}
+		for ; qi < 10; qi++ {
+			for r := 1; r <= 3; r++ {
+				units = append(units, utilityConfirmUnit{
+					Key: utilityTestDecisionKey(c, convQID(c, qi), r), Action: utilityActionKeepShallow,
+					PolicyCorrect: true, ShallowCorrect: true, DeepCorrect: true,
+					ShallowTokens: 4000, DeepTokens: 28000,
+				})
+			}
+		}
+	}
+	report, err := utilityConfirmGates(units)
+	if err != nil {
+		t.Fatalf("confirm gates: %v", err)
+	}
+	if report.Verdict != "GO" {
+		t.Fatalf("expected GO, got %s; gates=%+v quality=%v cost=%v precision=%v", report.Verdict, report.Gates, report.Quality, report.Cost, report.Precision)
+	}
+}
+
+func TestUtilityConfirmGatesRegression(t *testing.T) {
+	// A policy that deepens nothing keeps shallow answers; when deep control
+	// outperforms shallow (benefits exist), the policy regresses -> NO-GO.
+	var units []utilityConfirmUnit
+	for c := 0; c < 2; c++ {
+		for qi := 0; qi < 5; qi++ {
+			for r := 1; r <= 3; r++ {
+				units = append(units, utilityConfirmUnit{
+					Key: utilityTestDecisionKey(c, convQID(c, qi), r), Action: utilityActionKeepShallow,
+					PolicyCorrect: false, ShallowCorrect: false, DeepCorrect: true, // benefit missed
+					ShallowTokens: 4000, DeepTokens: 28000,
+				})
+			}
+		}
+	}
+	report, err := utilityConfirmGates(units)
+	if err != nil {
+		t.Fatalf("confirm gates: %v", err)
+	}
+	if report.Verdict != "NO-GO" {
+		t.Fatalf("missed-benefits policy must be NO-GO, got %s", report.Verdict)
+	}
+}
+
+func TestUtilityTransferNonRegression(t *testing.T) {
+	goReceipt, err := utilityTransferNonRegression(120, 115, 150)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if goReceipt.Verdict != "GO" || goReceipt.Claim != "external_transfer_non_regression" {
+		t.Fatalf("policy>=deep must transfer GO, got %s %s", goReceipt.Verdict, goReceipt.Claim)
+	}
+	noGoReceipt, err := utilityTransferNonRegression(110, 115, 150)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noGoReceipt.Verdict != "NO-GO" || noGoReceipt.Claim != "locomo_mechanism_only_not_portable" {
+		t.Fatalf("policy<deep must transfer NO-GO with portability boundary, got %s %s", noGoReceipt.Verdict, noGoReceipt.Claim)
+	}
+	if noGoReceipt.ProductionAuthorized {
+		t.Fatal("transfer NO-GO must not authorize production")
+	}
+}
