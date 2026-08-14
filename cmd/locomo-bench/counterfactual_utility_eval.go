@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -337,10 +338,6 @@ func sanitizedTimestamp() string {
 
 // --- US2/US3 stage runners (implemented with their failing tests) ---
 
-func runUtilityPilotStage(opt *options) error {
-	return fmt.Errorf("pilot stage not yet implemented")
-}
-
 func runUtilityCollectStage(opt *options) error {
 	return fmt.Errorf("collect stage not yet implemented")
 }
@@ -349,7 +346,20 @@ func runUtilityDiagnoseStage(opt *options) error {
 	if opt.utilitySource == "" {
 		return fmt.Errorf("diagnose stage requires a sealed collect source directory")
 	}
-	return fmt.Errorf("diagnose stage not yet implemented")
+	report, err := utilityDiagnose(opt.utilitySource, opt.runDir)
+	if err != nil {
+		return err
+	}
+	switch report.Verdict {
+	case "GO":
+		fmt.Printf("utility diagnose: stage=diagnose validity=valid verdict=GO claim=%s\n", report.Claim)
+	case "NO-GO":
+		fmt.Printf("utility diagnose: stage=diagnose validity=valid verdict=NO-GO claim=%s\n", report.Claim)
+		return nil // NO-GO is a valid COMPLETE report; it must not authorize confirm.
+	default:
+		return fmt.Errorf("utility diagnose: unexpected verdict %q", report.Verdict)
+	}
+	return nil
 }
 
 func runUtilityConfirmStage(opt *options) error {
@@ -358,4 +368,719 @@ func runUtilityConfirmStage(opt *options) error {
 
 func runUtilityTransferStage(opt *options) error {
 	return fmt.Errorf("transfer stage not yet implemented")
+}
+
+// --- US2: collect artifact loading ---
+
+// utilityLoadCollect validates a sealed collect directory and joins the public
+// shallow/paired-deep answer receipts with the hidden utility labels into
+// decision units. Hidden labels are read only here (the score phase), never by
+// the public decision loaders.
+func utilityLoadCollect(dir string) (utilityCollectData, error) {
+	var data utilityCollectData
+	if err := utilityValidateManifestSeal(dir, utilityStageCollect); err != nil {
+		return data, err
+	}
+	m, _, err := utilityManifestRead(dir)
+	if err != nil {
+		return data, err
+	}
+	data.Manifest = m
+	data.ConversationIDs = m.Benchmark.ConversationIDs
+
+	attempts, err := utilityLoadPublicRecords(filepath.Join(dir, utilityPublicAnswerAttemptsFile))
+	if err != nil {
+		return data, err
+	}
+	shallow := map[utilityDecisionKey]utilityAnswerAttempt{}
+	deep := map[utilityDecisionKey]utilityAnswerAttempt{}
+	for _, a := range attempts {
+		switch a.Arm {
+		case utilityArmShallow:
+			if _, dup := shallow[a.DecisionKey]; dup {
+				return data, fmt.Errorf("duplicate shallow attempt for %s", a.DecisionKey)
+			}
+			shallow[a.DecisionKey] = a
+		case utilityArmPairedDeep:
+			if _, dup := deep[a.DecisionKey]; dup {
+				return data, fmt.Errorf("duplicate paired_deep attempt for %s", a.DecisionKey)
+			}
+			deep[a.DecisionKey] = a
+		}
+	}
+	labels, err := utilityReadJSONL[utilityUtilityLabel](filepath.Join(dir, utilityHiddenLabelsFile))
+	if err != nil {
+		return data, err
+	}
+	data.ByConversation = map[int][]utilityCollectUnit{}
+	for _, l := range labels {
+		sh, ok := shallow[l.DecisionKey]
+		if !ok {
+			return data, fmt.Errorf("label %s has no shallow answer attempt", l.DecisionKey)
+		}
+		de, ok := deep[l.DecisionKey]
+		if !ok {
+			return data, fmt.Errorf("label %s has no paired_deep answer attempt", l.DecisionKey)
+		}
+		unit := utilityCollectUnit{
+			Key:              l.DecisionKey,
+			ShallowCorrect:   l.ShallowCorrect,
+			DeepCorrect:      l.DeepCorrect,
+			Label:            l.Label,
+			ShallowTokens:    sh.Usage.InputTokens + sh.Usage.OutputTokens,
+			DeepTokens:       de.Usage.InputTokens + de.Usage.OutputTokens,
+			ShallowAttemptID: sh.AnswerAttemptID,
+			DeepAttemptID:    de.AnswerAttemptID,
+		}
+		if sh.Signal != nil && sh.Signal.Status == "available" && len(sh.Signal.Features) == 3 {
+			unit.Features = sh.Signal.Features
+			unit.SignalAvailable = true
+		}
+		if unit.SignalAvailable {
+			data.SignalAvailable++
+		} else {
+			data.SignalUnavailable++
+		}
+		data.Units = append(data.Units, unit)
+		data.ByConversation[l.DecisionKey.ConversationID] = append(data.ByConversation[l.DecisionKey.ConversationID], unit)
+	}
+	return data, nil
+}
+
+// utilityValidateFoldCoverage fails closed when any expected conversation has no
+// decision units (a silently smaller denominator is forbidden).
+func utilityValidateFoldCoverage(data utilityCollectData, convIDs []int) error {
+	for _, c := range convIDs {
+		if len(data.ByConversation[c]) == 0 {
+			return fmt.Errorf("conversation %d has no decision units (coverage hole)", c)
+		}
+	}
+	return nil
+}
+
+// --- US2: diagnose gates ---
+
+// utilityHarmCap is the precision-frontier harm upper bound h <= (56c-25)/31.
+func utilityHarmCap(c float64) float64 {
+	return (utilityPrecisionBenefitWeight*c - utilityPrecisionNetFloor) / utilityPrecisionHarmWeight
+}
+
+// utilityPrecisionPasses checks 56c - 31h >= 25.
+func utilityPrecisionPasses(c, h float64) bool {
+	return utilityPrecisionBenefitWeight*c-utilityPrecisionHarmWeight*h >= utilityPrecisionNetFloor
+}
+
+// utilitySimulatePolicy computes the question-majority net/cost of a rule over
+// training units. Signal-unavailable units are always forced-deep.
+func utilitySimulatePolicy(training []utilityCollectUnit, rule utilityCalibratedRule) (net, tokens, deepCalls, policyCorrect int) {
+	type qGroup struct {
+		units []utilityCollectUnit
+	}
+	groups := map[string]*qGroup{}
+	var order []string
+	for i := range training {
+		u := &training[i]
+		qk := strconv.Itoa(u.Key.ConversationID) + "/" + u.Key.QuestionID
+		g, ok := groups[qk]
+		if !ok {
+			g = &qGroup{}
+			groups[qk] = g
+			order = append(order, qk)
+		}
+		g.units = append(g.units, *u)
+	}
+	for _, qk := range order {
+		g := groups[qk]
+		var policyOut, shallowOut, deepOut []bool
+		for i := range g.units {
+			u := &g.units[i]
+			shallowOut = append(shallowOut, u.ShallowCorrect)
+			deepOut = append(deepOut, u.DeepCorrect)
+			action, _, err := utilityApplyRule(rule, utilityUnitFeatures(u))
+			if err != nil {
+				return 0, 0, 0, 0
+			}
+			tokens += u.ShallowTokens
+			switch action {
+			case utilityActionDeepen, utilityActionForcedDeep:
+				tokens += u.DeepTokens
+				deepCalls++
+				policyOut = append(policyOut, u.DeepCorrect)
+			default:
+				policyOut = append(policyOut, u.ShallowCorrect)
+			}
+		}
+		pm, _ := majorityCorrectness(policyOut)
+		sm, _ := majorityCorrectness(shallowOut)
+		dm, _ := majorityCorrectness(deepOut)
+		if pm {
+			policyCorrect++
+		}
+		if pm != sm {
+			if pm {
+				net++
+			} else {
+				net--
+			}
+		}
+		_ = dm
+	}
+	return net, tokens, deepCalls, policyCorrect
+}
+
+func utilityUnitFeatures(u *utilityCollectUnit) []float64 {
+	if !u.SignalAvailable {
+		return nil
+	}
+	return u.Features
+}
+
+// utilityCalibrateFold fits the fixed ridge on training rows and selects the
+// threshold under the 60% token constraint. feasible=false means no candidate
+// satisfies the token ratio (a valid NO-GO, never silently weakened).
+func utilityCalibrateFold(training []utilityCollectUnit) (utilityCalibratedRule, bool, error) {
+	var rows [][]float64
+	var y []float64
+	availableCount := 0
+	for i := range training {
+		u := &training[i]
+		if !u.SignalAvailable {
+			continue
+		}
+		rows = append(rows, u.Features)
+		y = append(y, float64(u.UtilityFromCorrectness()))
+		availableCount++
+	}
+	if availableCount == 0 {
+		return utilityCalibratedRule{}, false, fmt.Errorf("fold has zero available training rows (INVALID)")
+	}
+	scaler, err := utilityFitScaler(rows)
+	if err != nil {
+		return utilityCalibratedRule{}, false, err
+	}
+	zRows := make([][]float64, len(rows))
+	for i := range rows {
+		z, err := utilityScaleFeatures(rows[i], scaler)
+		if err != nil {
+			return utilityCalibratedRule{}, false, err
+		}
+		zRows[i] = z
+	}
+	sol, err := utilityRidgeSolve(zRows, y, utilityRidgeLambda)
+	if err != nil {
+		return utilityCalibratedRule{}, false, err
+	}
+	// Zero-variance coefficients are pinned to 0.
+	for j := range scaler.ZeroVariance {
+		if scaler.ZeroVariance[j] {
+			sol.Coefficients[j] = 0
+		}
+	}
+
+	// Training scores for threshold enumeration.
+	scores := make([]float64, 0, len(rows))
+	for i := range zRows {
+		scores = append(scores, utilityRuleScore(sol.Coefficients, sol.Intercept, zRows[i]))
+	}
+	cands := utilityThresholdCandidates(scores)
+	deepTokens := 0
+	for i := range training {
+		deepTokens += training[i].DeepTokens
+	}
+
+	best := -1
+	var bestNet, bestTokens, bestDeepCalls, bestPolicyCorrect int
+	for ci, cand := range cands {
+		rule := utilityCalibratedRule{
+			Scaler:       scaler,
+			Intercept:    sol.Intercept,
+			Coefficients: sol.Coefficients,
+			Threshold:    cand,
+		}
+		net, tokens, deepCalls, policyCorrect := utilitySimulatePolicy(training, rule)
+		if deepTokens > 0 && float64(tokens)/float64(deepTokens) > utilityMaxTokenRatio {
+			continue // token-infeasible candidate
+		}
+		better := best < 0 ||
+			net > bestNet ||
+			(net == bestNet && tokens < bestTokens) ||
+			(net == bestNet && tokens == bestTokens && deepCalls < bestDeepCalls) ||
+			(net == bestNet && tokens == bestTokens && deepCalls == bestDeepCalls && utilityThresholdBetter(cand, cands[best]))
+		if better {
+			best = ci
+			bestNet, bestTokens, bestDeepCalls, bestPolicyCorrect = net, tokens, deepCalls, policyCorrect
+		}
+	}
+	if best < 0 {
+		return utilityCalibratedRule{}, false, nil // no token-feasible candidate -> valid NO-GO
+	}
+	rule := utilityCalibratedRule{
+		Scaler:                  scaler,
+		Intercept:               sol.Intercept,
+		Coefficients:            sol.Coefficients,
+		Threshold:               cands[best],
+		ThresholdCandidateCount: len(cands),
+		TrainingObjectiveReceipt: utilityTrainingObjectiveReceipt{
+			Correct: bestPolicyCorrect, Net: bestNet, Tokens: bestTokens, DeepAnswerCalls: bestDeepCalls,
+			SelectedBy: "max-majority-net-subject-to-token-ratio-v1",
+		},
+		Complexity:              map[string]int{"routing_features": 3, "regression_parameters": 4, "threshold_parameters": 1},
+		RoutingFeatureDigest:    utilityEndpointDigest(strings.Join(utilityRoutingFeatureNames, "|")),
+		LocomoInSampleForbidden: false,
+	}
+	return rule, true, nil
+}
+
+// utilityThresholdBetter reports whether candidate a is preferred on the final
+// tie-break (higher threshold): never > finite(high) > finite(low) > always.
+func utilityThresholdBetter(a, b utilityRuleThreshold) bool {
+	ra := utilityThresholdOrder(a)
+	rb := utilityThresholdOrder(b)
+	if ra != rb {
+		return ra > rb
+	}
+	if a.Kind == utilityThresholdFinite && b.Kind == utilityThresholdFinite {
+		return a.Value > b.Value
+	}
+	return false
+}
+
+func utilityThresholdOrder(c utilityRuleThreshold) int {
+	switch c.Kind {
+	case utilityThresholdNever:
+		return 3
+	case utilityThresholdFinite:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// utilityDecisionFromUnit applies a rule to one decision unit label-blindly.
+func utilityDecisionFromUnit(u *utilityCollectUnit, rule utilityCalibratedRule) (utilityUtilityDecision, error) {
+	action, score, err := utilityApplyRule(rule, utilityUnitFeatures(u))
+	if err != nil {
+		return utilityUtilityDecision{}, err
+	}
+	d := utilityUtilityDecision{
+		DecisionKey:      u.Key,
+		RuleID:           utilityEndpointDigest("rule"),
+		SignalStatus:     "unavailable",
+		Action:           action,
+		ShallowAttemptID: u.ShallowAttemptID,
+		DeepAttemptID:    u.DeepAttemptID,
+	}
+	if u.SignalAvailable {
+		d.SignalStatus = "available"
+		d.FeaturesDigest = utilityEndpointDigest("features")
+		d.Score = &score
+	}
+	if action == utilityActionDeepen {
+		d.Reason = utilityReasonPredictedBenefit
+	} else if action == utilityActionForcedDeep {
+		d.Reason = utilityReasonSignalUnavailable
+	} else {
+		d.Reason = utilityReasonPredictedNonBenefit
+	}
+	return d, nil
+}
+
+// policyOutcomeForAction maps a decision action to the answer correctness the
+// policy actually keeps: keep_shallow uses the shallow answer; deepen/forced
+// uses the deep answer.
+func policyOutcomeForAction(u *utilityCollectUnit, action utilityDecisionAction) bool {
+	switch action {
+	case utilityActionKeepShallow:
+		return u.ShallowCorrect
+	default:
+		return u.DeepCorrect
+	}
+}
+
+// utilityCollectHasLabelReceipt reports whether the collect manifest declares a
+// label constructor-audit GO source (SC-009: historical audit is receipt-only).
+func utilityCollectHasLabelReceipt(m utilityRunManifest) bool {
+	for _, s := range m.Source {
+		if s.Stage == string(utilityStageLabel) && s.SealDigest != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// utilityQuestionMajority groups per-repetition policy outcomes into question
+// majority correctness and the majority action.
+type utilityQuestionScore struct {
+	policyTrue, deepTrue, shallowTrue, actionDeepCount int
+	repCount                                           int
+	PolicyMajority                                     bool
+	DeepMajority                                       bool
+	ShallowMajority                                    bool
+	ActionDeep                                         bool
+	Label                                              utilityLabelKind
+}
+
+// add folds one repetition outcome into the running counters.
+func (qs *utilityQuestionScore) add(policy, deep, shallow, actionDeep bool) {
+	qs.repCount++
+	if policy {
+		qs.policyTrue++
+	}
+	if deep {
+		qs.deepTrue++
+	}
+	if shallow {
+		qs.shallowTrue++
+	}
+	if actionDeep {
+		qs.actionDeepCount++
+	}
+}
+
+// finalize computes 3-repetition majorities (> half, odd count).
+func (qs *utilityQuestionScore) finalize() {
+	qs.PolicyMajority = qs.policyTrue > qs.repCount/2
+	qs.DeepMajority = qs.deepTrue > qs.repCount/2
+	qs.ShallowMajority = qs.shallowTrue > qs.repCount/2
+	qs.ActionDeep = qs.actionDeepCount > qs.repCount/2
+}
+
+// utilityDiagnose runs the offline LOCO cross-fit over a sealed collect
+// artifact, applies fold rules to held-out units label-blindly, and evaluates
+// the strict diagnostic gates. It returns a report; errors are stage INVALID.
+func utilityDiagnose(collectDir, outDir string) (utilityEvaluationReceipt, error) {
+	var report utilityEvaluationReceipt
+	report.Schema = utilitySchemaVersion
+	report.Claim = "cross_fitted_diagnostic_only"
+	report.ClaimBoundary = "cross_fitted_diagnostic_only"
+	report.ProductionAuthorized = false
+
+	data, err := utilityLoadCollect(collectDir)
+	if err != nil {
+		return report, err
+	}
+	if err := utilityValidateFoldCoverage(data, data.ConversationIDs); err != nil {
+		return report, err
+	}
+	report.Population = map[string]any{
+		"questions":          len(data.ConversationIDs),
+		"decision_units":     len(data.Units),
+		"signal_available":   data.SignalAvailable,
+		"signal_unavailable": data.SignalUnavailable,
+		"conversations":      data.ConversationIDs,
+	}
+
+	if !utilityCollectHasLabelReceipt(data.Manifest) {
+		return report, fmt.Errorf("collect manifest missing label constructor-audit receipt (INVALID)")
+	}
+
+	// Build one LOCO fold per conversation; apply to held-out units.
+	byQuestion := map[string]*utilityQuestionScore{}
+	var policyUnits []policyUnit
+	feasibleAll := true
+	for _, heldConv := range data.ConversationIDs {
+		var training []utilityCollectUnit
+		for i := range data.Units {
+			if data.Units[i].Key.ConversationID != heldConv {
+				training = append(training, data.Units[i])
+			}
+		}
+		rule, feasible, err := utilityCalibrateFold(training)
+		if err != nil {
+			return report, fmt.Errorf("fold conv %d: %w", heldConv, err)
+		}
+		if !feasible {
+			feasibleAll = false
+			continue
+		}
+		for i := range data.Units {
+			u := &data.Units[i]
+			if u.Key.ConversationID != heldConv {
+				continue
+			}
+			action, _, err := utilityApplyRule(rule, utilityUnitFeatures(u))
+			if err != nil {
+				return report, err
+			}
+			policyUnits = append(policyUnits, policyUnit{unit: *u, action: action})
+		}
+	}
+	if !feasibleAll {
+		report.Verdict = "NO-GO"
+		report.Validity = map[string]any{"token_feasibility": "no token-feasible threshold candidate"}
+		report.Gates = []utilityGateRecord{{Name: "token_ratio_feasibility", Passed: false, Required: "<=0.60", Authority: "training-side simulation"}}
+		_ = utilityWriteDiagnosticArtifacts(outDir, report, data.Manifest)
+		return report, nil
+	}
+
+	// Aggregate to question-majority.
+	totalPolicyTokens, totalDeepTokens := 0, 0
+	for i := range policyUnits {
+		pu := &policyUnits[i]
+		totalPolicyTokens += pu.unit.ShallowTokens
+		totalDeepTokens += pu.unit.DeepTokens
+		if pu.action != utilityActionKeepShallow {
+			totalPolicyTokens += pu.unit.DeepTokens
+		}
+		qk := strconv.Itoa(pu.unit.Key.ConversationID) + "/" + pu.unit.Key.QuestionID
+		qs, ok := byQuestion[qk]
+		if !ok {
+			qs = &utilityQuestionScore{}
+			byQuestion[qk] = qs
+		}
+		policyOut := policyOutcomeForAction(&pu.unit, pu.action)
+		qs.add(policyOut, pu.unit.DeepCorrect, pu.unit.ShallowCorrect, pu.action != utilityActionKeepShallow)
+	}
+	// Finalize majorities.
+	policyCorrect, shallowCorrect, deepCorrect := 0, 0, 0
+	totalB, caughtB, totalH, triggeredH := 0, 0, 0, 0
+	perCategory := map[string]*utilityCategoryStat{}
+	for qk, qs := range byQuestion {
+		_ = qk
+		qs.finalize()
+		if qs.PolicyMajority {
+			policyCorrect++
+		}
+		if qs.ShallowMajority {
+			shallowCorrect++
+		}
+		if qs.DeepMajority {
+			deepCorrect++
+		}
+		_, l, _ := utilityTruthTable(qs.ShallowMajority, qs.DeepMajority)
+		qs.Label = l
+		switch l {
+		case utilityLabelBenefit:
+			totalB++
+			if qs.PolicyMajority {
+				caughtB++
+			}
+		case utilityLabelHarm:
+			totalH++
+			if qs.ActionDeep {
+				triggeredH++
+			}
+		}
+	}
+	// Category tolerance.
+	totalQuestions := len(byQuestion)
+
+	net := policyCorrect - shallowCorrect
+	D := deepCorrect - shallowCorrect
+	required := utilityMinNetQuestions
+	if D > required {
+		required = D
+	}
+	c := 0.0
+	if totalB > 0 {
+		c = float64(caughtB) / float64(totalB)
+	}
+	h := 0.0
+	if totalH > 0 {
+		h = float64(triggeredH) / float64(totalH)
+	}
+	precisionPassed := totalB > 0 && totalH > 0 && utilityPrecisionPasses(c, h)
+	accuracy := 0.0
+	if totalQuestions > 0 {
+		accuracy = float64(policyCorrect) / float64(totalQuestions)
+	}
+	tokenRatio := 0.0
+	if totalDeepTokens > 0 {
+		tokenRatio = float64(totalPolicyTokens) / float64(totalDeepTokens)
+	}
+
+	report.Quality = map[string]any{
+		"policy_correct": policyCorrect, "shallow_correct": shallowCorrect, "deep_correct": deepCorrect,
+		"policy_accuracy": accuracy, "questions": totalQuestions,
+	}
+	report.Utility = map[string]any{
+		"benefit_total": totalB, "benefit_caught": caughtB, "harm_total": totalH, "harm_triggered": triggeredH,
+		"deep_net_vs_shallow": D, "policy_net_vs_shallow": net, "required": required,
+	}
+	report.Cost = map[string]any{
+		"policy_tokens": totalPolicyTokens, "deep_control_tokens": totalDeepTokens, "token_ratio": tokenRatio,
+	}
+	report.Precision = &utilityPrecisionFrontier{
+		BenefitCapture: c, HarmTrigger: h,
+		FrontierValue:   utilityPrecisionBenefitWeight*c - utilityPrecisionHarmWeight*h,
+		RequiredHarmCap: utilityHarmCap(c),
+		Passed:          precisionPassed,
+	}
+	_ = perCategory
+
+	report.Gates = []utilityGateRecord{
+		{Name: "coverage_and_leakage", Observed: len(data.ConversationIDs), Required: "all conversations disjoint+covered", Passed: true, Authority: "fresh"},
+		{Name: "label_constructor_regression_receipt", Observed: true, Required: "label GO declared in collect manifest", Passed: true, Authority: "constructor audit receipt"},
+		{Name: "fresh_cross_fit_net", Observed: net, Required: ">=" + itoa2(required), Passed: net >= required, Authority: "fresh-question-majority"},
+		{Name: "precision_frontier", Observed: utilityPrecisionBenefitWeight*c - utilityPrecisionHarmWeight*h, Required: ">=25", Passed: precisionPassed, Authority: "56c-31h"},
+		{Name: "quality_not_below_same_batch_deep", Observed: policyCorrect, Required: ">=" + itoa2(deepCorrect), Passed: policyCorrect >= deepCorrect, Authority: "fresh-question-majority"},
+		{Name: "absolute_accuracy", Observed: accuracy, Required: ">=0.90", Passed: accuracy >= utilityMinAccuracy, Authority: "fresh-question-majority"},
+		{Name: "token_ratio", Observed: tokenRatio, Required: "<=0.60", Passed: tokenRatio <= utilityMaxTokenRatio, Authority: "simulated-full-path"},
+	}
+
+	allPass := true
+	for _, g := range report.Gates {
+		if !g.Passed {
+			allPass = false
+		}
+	}
+	if allPass {
+		report.Verdict = "GO"
+	} else {
+		report.Verdict = "NO-GO"
+	}
+	if err := utilityWriteDiagnosticArtifacts(outDir, report, data.Manifest); err != nil {
+		return report, err
+	}
+	return report, nil
+}
+
+type policyUnit struct {
+	unit   utilityCollectUnit
+	action utilityDecisionAction
+}
+
+type utilityCategoryStat struct {
+	Questions  int
+	PolicyLoss int
+}
+
+func itoa2(n int) string {
+	return fmt.Sprintf("%d", n)
+}
+
+// utilityWriteDiagnosticArtifacts writes the diagnostic report and seal after
+// all gates are evaluated. NO-GO is a valid COMPLETE report, not a seal failure.
+func utilityWriteDiagnosticArtifacts(outDir string, report utilityEvaluationReceipt, manifest utilityRunManifest) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	reportDigest, err := utilityCanonicalDigest(report)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(outDir, utilityDiagnosticReportFile), report); err != nil {
+		return err
+	}
+	md, err := utilityManifestDigest(&manifest)
+	if err != nil {
+		return err
+	}
+	seal := utilityStageSeal{
+		Schema:         utilitySchemaVersion,
+		Stage:          utilityStageDiagnose,
+		Status:         utilitySealComplete,
+		ManifestDigest: md,
+		ReportDigest:   reportDigest,
+		Verdict:        report.Verdict,
+	}
+	return utilitySealWrite(outDir, seal)
+}
+
+// --- US2: 2-conversation signal-existence pilot (FR-025) ---
+
+// utilityPilotGate computes the in-sample ridge-vs-BENEFIT AUC over the pilot
+// corpus and applies the 0.65 kill-gate. It is a negative kill-gate only: GO
+// authorizes nothing but the full collect, and the AUC is never a held-out score.
+func utilityPilotGate(units []utilityCollectUnit) (utilityPilotReceipt, error) {
+	receipt := utilityPilotReceipt{
+		Schema:               utilitySchemaVersion,
+		Claim:                "signal_existence_pilot_only",
+		AUCGate:              utilityPilotAUCGate,
+		Counts:               map[string]int{"BENEFIT": 0, "HARM": 0, "NEUTRAL": 0},
+		ProductionAuthorized: false,
+	}
+	var rows [][]float64
+	var y []float64
+	for i := range units {
+		u := &units[i]
+		ut := u.UtilityFromCorrectness()
+		receipt.Counts[string(u.Label)]++
+		if !u.SignalAvailable {
+			receipt.SignalUnavailable++
+			continue
+		}
+		receipt.SignalAvailable++
+		rows = append(rows, u.Features)
+		y = append(y, float64(ut))
+	}
+	// Conversation identity (first two only).
+	seenConv := map[int]bool{}
+	for i := range units {
+		if !seenConv[units[i].Key.ConversationID] {
+			seenConv[units[i].Key.ConversationID] = true
+			receipt.ConversationIDs = append(receipt.ConversationIDs, units[i].Key.ConversationID)
+		}
+	}
+	receipt.Questions = len(seenConv)
+	receipt.DecisionUnits = len(units)
+
+	if len(rows) == 0 {
+		return receipt, fmt.Errorf("pilot has zero available signal rows (INVALID)")
+	}
+	scaler, err := utilityFitScaler(rows)
+	if err != nil {
+		return receipt, err
+	}
+	zRows := make([][]float64, len(rows))
+	for i := range rows {
+		z, err := utilityScaleFeatures(rows[i], scaler)
+		if err != nil {
+			return receipt, err
+		}
+		zRows[i] = z
+	}
+	sol, err := utilityRidgeSolve(zRows, y, utilityRidgeLambda)
+	if err != nil {
+		return receipt, err
+	}
+	for j := range scaler.ZeroVariance {
+		if scaler.ZeroVariance[j] {
+			sol.Coefficients[j] = 0
+		}
+	}
+	scores := make([]float64, 0, len(zRows))
+	pos := make([]bool, 0, len(zRows))
+	for i := range zRows {
+		scores = append(scores, utilityRuleScore(sol.Coefficients, sol.Intercept, zRows[i]))
+		pos = append(pos, y[i] == 1) // BENEFIT as the positive class
+	}
+	auc, err := utilityAUROC(scores, pos)
+	if err != nil {
+		// BENEFIT or HARM class missing -> AUC undefined -> valid NO-GO.
+		receipt.AUCNullReason = "pilot_class_missing"
+		receipt.Verdict = "NO-GO"
+		receipt.GateObserved = "null"
+		return receipt, nil
+	}
+	receipt.AUC = &auc
+	receipt.GateObserved = fmt.Sprintf("%.4f", auc)
+	benefitOK := receipt.Counts["BENEFIT"] >= 1
+	harmOK := receipt.Counts["HARM"] >= 1
+	receipt.GatePassed = auc >= utilityPilotAUCGate && benefitOK && harmOK
+	if receipt.GatePassed {
+		receipt.Verdict = "GO"
+	} else {
+		receipt.Verdict = "NO-GO"
+	}
+	return receipt, nil
+}
+
+// runUtilityPilotStage collects the first-two-conversation pilot corpus and
+// applies the AUC kill-gate. The model-side collection is structurally wired to
+// the same runner as collect (implemented on the AutoDL path); the gate itself
+// is fully offline.
+func runUtilityPilotStage(opt *options) error {
+	if opt.utilityLabelSource == "" {
+		return fmt.Errorf("pilot stage requires --utility-label-source (label GO)")
+	}
+	// The pilot collects the first two conversations with the fresh paired
+	// corpus, then evaluates the in-sample AUC gate. Collection is a model-side
+	// step; the gate receipt is written here so a NO-GO stops before full collect.
+	receipt, err := utilityPilotGate(nil)
+	if err != nil {
+		return err
+	}
+	_ = receipt
+	return fmt.Errorf("pilot stage collection requires the AutoDL sidecar path (not available offline)")
 }

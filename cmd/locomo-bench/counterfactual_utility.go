@@ -461,6 +461,10 @@ type utilityProbabilitySignal struct {
 	FinalTrace          []utilityTokenTraceEntry   `json:"final_trace,omitempty"`
 	FinalLengthStratum  string                     `json:"final_length_stratum,omitempty"`
 	ThinkingDiagnostic  *utilityThinkingDiagnostic `json:"thinking_diagnostic,omitempty"`
+	// FinalText is the mapped clean final answer. It is never persisted inside
+	// the signal record (the AnswerAttemptReceipt owns final_answer); json:"-"
+	// keeps it out of the artifact JSON.
+	FinalText string `json:"-"`
 }
 
 func (s *utilityProbabilitySignal) available() bool {
@@ -704,6 +708,45 @@ func utilityFiniteFloats(values []float64) error {
 // utilityParseStageAlias trims the enclosing type name for error messages.
 func utilityTrimSpaceLower(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// --- US2: fresh collect unit (decision-unit truth) ---
+
+// utilityCollectUnit is one fresh decision unit's paired truth, joined from the
+// shallow/deep answer receipts and the hidden utility label. It is the row fed
+// to calibration and to held-out gate evaluation. It never contains gold text.
+type utilityCollectUnit struct {
+	Key              utilityDecisionKey
+	Features         []float64 // shallow signal features (available only)
+	SignalAvailable  bool
+	ShallowCorrect   bool
+	DeepCorrect      bool
+	Label            utilityLabelKind
+	ShallowTokens    int
+	DeepTokens       int
+	ShallowAttemptID string
+	DeepAttemptID    string
+}
+
+// UtilityFromCorrectness derives the -1/0/+1 utility from the correctness pair.
+func (u *utilityCollectUnit) UtilityFromCorrectness() int {
+	switch {
+	case !u.ShallowCorrect && u.DeepCorrect:
+		return 1
+	case u.ShallowCorrect && !u.DeepCorrect:
+		return -1
+	}
+	return 0
+}
+
+// utilityCollectData is the sealed collect artifact loaded into memory.
+type utilityCollectData struct {
+	Manifest          utilityRunManifest
+	Units             []utilityCollectUnit
+	ByConversation    map[int][]utilityCollectUnit
+	SignalAvailable   int
+	SignalUnavailable int
+	ConversationIDs   []int
 }
 
 // --- US1: historical label constructor ---
