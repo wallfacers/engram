@@ -249,7 +249,7 @@ above-noise with context-parity checks: LoCoMo **+1.4pp** (p=0.019), LME
 **Historical high-score anchors** (not the current stack — legacy / dataset-specific
 prompts, since removed):
 - LoCoMo **91.10%** (top-k 150, legacy tuned prompt) — a real prior result, but
-  legacy prompt is no longer the allowed path; re-test under the unified contract is pending.
+  legacy prompt is no longer the allowed path; a re-test under the unified contract is cancelled for now (2026-08-14, awaiting the 042 plan).
 - LME **91.1%** (DeepSeek v4-pro paid API + removed fused prompt) — post-hoc diagnostic,
   not a default-stack capability.
 

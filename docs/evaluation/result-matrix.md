@@ -31,7 +31,7 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | legacy | thinking 3-rep majority | 88.51% | 多数票口径（[topk](reports/topk-exploration-2026-08-11.md)） | ⚠️ 同上 |
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | thinking 3-rep majority | 90.13% | top-k150 全局扩预算（+1.6pp，2.4× 上下文税，需 32768 上下文 answerer，[topk](reports/topk-exploration-2026-08-11.md)） | ⚠️ 高分 recipe，但 legacy prompt + 加量型，保留作目标参考 |
 | LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 150 | legacy | thinking 3-rep majority + **clean** | **91.10%** (1403/1540) | **当前最高已验证**，独立重判一致（[repro](reports/locomo-9110-repro-2026-08-12.md)）；open-domain 68.8% 是短板 | ✅ **已验证可复现**，作当前基线锚 |
-| LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 配对 3-rep majority | **87.9%**（control 86.6%） | **+1.4pp above-noise（p=0.019）**；cat3 -2.1pp（flips 4v2，038 -6.2pp/8v2，推断压制基本解决，残余 35 题两臂都错为检索/能力瓶颈）；temporal +1.2 / single-hop +2.1；context parity 3-run 全过；分类修订后契约 digest `1d8a8d0f`（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | ✅ **已坐实**（2026-08-14 修订后）；top-k150 高配 pending |
+| LoCoMo 1540 | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | hybrid | 30 | **unified** | 配对 3-rep majority | **87.9%**（control 86.6%） | **+1.4pp above-noise（p=0.019）**；cat3 -2.1pp（flips 4v2，038 -6.2pp/8v2，推断压制基本解决，残余 35 题两臂都错为检索/能力瓶颈）；temporal +1.2 / single-hop +2.1；context parity 3-run 全过；分类修订后契约 digest `1d8a8d0f`（[038](reports/unified-answer-contract-verdict-2026-08-13.md)） | ✅ **已坐实**（2026-08-14 修订后）；top-k150 高配**已取消**（2026-08-14 维护者决策：远程 qwen-local ~1.7 ans/min，3-rep 全量需 ~90h 不可行；DeepSeek API 全量费用高。等 042 计划，勿复跑勿期待结果） |
 
 ## 主表 · LongMemEval-S（cleaned 500 题）
 
@@ -83,7 +83,7 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 ## 复跑建议顺序
 
 1. ✅ **LME unified 配对**（2026-08-14 完成）：truncate 修 embed 512 上限 → 配对（context parity）+ 同批 judge + 3-rep + clean → **+4.4pp above-noise 坐实**。
-2. 🔴 **LoCoMo unified 配对**：top-k30 已坐实（+1.4pp above-noise，2026-08-14）；top-k150 高配 running（perCallTimeout 已放宽至 8min）。
+2. ✅ **LoCoMo unified 配对**：top-k30 已坐实（+1.4pp above-noise，2026-08-14）。top-k150 高配 **已取消**（2026-08-14：远程 qwen-local ~1.7 ans/min，3-rep 全量需 ~90h 不可行；DeepSeek API 全量费用高。维护者决策等 042 计划，勿复跑）。
 3. **重建 LME 基线**：修复 store（buildSessionChunks 1100 code point 截断）后同配方重跑 clean 84.60% 基线。
 4. **重建 LoCoMo trace 默认栈基线**：同批 judge + clean，与 85.91% 对齐。
 5. **held-out 行为门**（149+ 题 blinded 人工标注）作为 unified 契约 promotion 前置。

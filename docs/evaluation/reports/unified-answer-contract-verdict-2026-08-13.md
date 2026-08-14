@@ -192,11 +192,12 @@ temporal -0.9 → +1.2;single-hop +1.9 → +2.1;open-domain -6.2 → -2.1。
   「Request classification」修订是契约内通用规则(非 category 路由),同时满足
   「推断要答」与「unsupported 要拒」。
 - **下一步(按 [result-matrix](../result-matrix.md) 优先级)**:
-  1. LoCoMo unified **top-k150 高配配对重跑**(修订后契约,perCallTimeout 8min
-     已放宽,过 non-inferiority gate + 尝试更高分)。
+  1. ~~LoCoMo unified top-k150 高配配对重跑~~ **已取消**(2026-08-14 维护者决策:
+     远程 qwen-local ~1.7 ans/min,3-rep 全量需 ~90h 不可行;DeepSeek API 全量
+     费用高;等 042 计划,勿复跑勿期待结果)。
   2. held-out 行为门(149+ 题 blinded 人工标注)作为 promotion 前置。
   3. 按 [score-solidification](../score-solidification.md) 8 步升级:当前
      LME = verified(配对 + parity + 3-rep);LoCoMo = verified(修订后配对
-     +1.4pp above-noise),top-k150 高配 pending。
+     +1.4pp above-noise),top-k150 高配已取消(等 042)。
 - **分数层级**:LME unified 已达 **verified**;LoCoMo unified 修订后配对
-  **+1.4pp above-noise = verified**,top-k150 高配 pending。
+  **+1.4pp above-noise = verified**,top-k150 高配已取消(等 042,勿复跑)。
