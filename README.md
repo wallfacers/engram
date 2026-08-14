@@ -236,12 +236,11 @@ your installed version for its exact startup contract.
 
 ## Benchmarks
 
-| Benchmark | Contract | Score | Gain vs legacy | p | Validation | Note |
+| Benchmark | Contract | Score | Gain vs legacy control | p | Validation | Note |
 |---|---|---|---:|---:|---|---|
-| LoCoMo (1,540) | **unified** | **87.9%** | **+1.4pp** | 0.019 | above-noise · context parity ✓ | Qwen3.6-35B · thinking · top-k 30 · 3-run paired majority · clean judge · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
-| LongMemEval-S (500) | **unified** | **90.2%** | **+4.4pp** | 0.000112 | above-noise · context parity ✓ | same config as above |
-| LoCoMo | legacy · top-k 150 | 91.10% | — | — | historical anchor · not current stack | legacy tuned prompt (removed); unified re-test within-noise (042) — top-k 150 buys context, not a contract gain |
-| LME | DeepSeek v4-pro paid | 91.1% | — | — | historical anchor · not current stack | post-hoc diagnostic, not a default-stack capability |
+| LoCoMo (1,540) · top-k 30 | **unified** | **87.9%** | **+1.4pp** | 0.019 | above-noise · context parity ✓ | Qwen3.6-35B · thinking · 3-run paired majority · clean judge · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
+| LoCoMo (1,540) · top-k 150 | **unified** | **91.43%** | +0.07pp | — | 042 paired · within-noise | Qwen3.6-35B · thinking · 3-run paired majority · clean judge (042 re-judge) |
+| LongMemEval-S (500) · top-k 30 | **unified** | **90.2%** | **+4.4pp** | 0.000112 | above-noise · context parity ✓ | Qwen3.6-35B · thinking · 3-run paired majority · clean judge |
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
