@@ -350,6 +350,16 @@ type options struct {
 	utilityDeepSource    string // --utility-deep-source: historical k150 root (label)
 	utilityShallowK      int    // --utility-shallow-k (v1 fixed 30)
 	utilityDeepK         int    // --utility-deep-k (v1 fixed 150)
+
+	// 043 confidence-gated gap-guided deepening — dedicated, default-off research
+	// mode. --deepen-pilot empty and --confidence-deepen false keep the ordinary
+	// benchmark path byte-identical.
+	confidenceDeepen     bool    // --confidence-deepen: mechanism master switch (requires --unified-answer-contract)
+	deepenPilot          string  // --deepen-pilot: research stage (signal; empty = off)
+	deepenThreshold      float64 // --deepen-threshold: trigger threshold (read-only from pilot seal; 0 = not finalized)
+	deepenSignalFeature  string  // --deepen-signal-feature: chosen signal feature (read-only from pilot seal)
+	deepenK              int     // --deepen-k: gap-refetch single-round depth (appended beyond round-0 quota)
+	deepenMaxGaps        int     // --deepen-max-gaps: per-question gap limit
 }
 
 func main() {
@@ -483,6 +493,12 @@ func run() error {
 	flag.StringVar(&opt.utilityDeepSource, "utility-deep-source", "", "042 historical k150 run root (label only)")
 	flag.IntVar(&opt.utilityShallowK, "utility-shallow-k", 0, "042 shallow retrieval depth (v1 fixed 30)")
 	flag.IntVar(&opt.utilityDeepK, "utility-deep-k", 0, "042 deep retrieval depth (v1 fixed 150)")
+	flag.BoolVar(&opt.confidenceDeepen, "confidence-deepen", false, "043 research mode: confidence-gated gap-guided deepening (requires --unified-answer-contract; default false = ordinary path byte-identical)")
+	flag.StringVar(&opt.deepenPilot, "deepen-pilot", "", "043 research stage: signal (2-conv dual-signal AUC pilot; empty = off)")
+	flag.Float64Var(&opt.deepenThreshold, "deepen-threshold", 0, "043 deepen trigger threshold (read-only from the pilot seal; explicit non-final values are rejected)")
+	flag.StringVar(&opt.deepenSignalFeature, "deepen-signal-feature", "", "043 deepen chosen signal feature name (read-only from the pilot seal)")
+	flag.IntVar(&opt.deepenK, "deepen-k", 30, "043 deepen gap-refetch single-round depth (appended beyond the round-0 quota)")
+	flag.IntVar(&opt.deepenMaxGaps, "deepen-max-gaps", 3, "043 per-question gap limit (schema side enforces the same cap)")
 	flag.StringVar(&opt.unifiedProbeFixture, "unified-answer-probe", "", "run the dedicated paired generic-vs-unified behavior probe from this fixture JSON and exit")
 	flag.StringVar(&opt.unifiedProbeOut, "unified-answer-probe-out", "", "write the paired behavior-probe audit report to this JSON path")
 	flag.IntVar(&opt.unifiedProbeRepeats, "unified-answer-probe-repeats", 3, "paired behavior-probe repetitions (must be a positive odd number)")
@@ -561,6 +577,9 @@ func run() error {
 	if err := validateAssemblyOptions(opt); err != nil {
 		return err
 	}
+	if err := validateDeepenCLIOptions(&opt); err != nil {
+		return err
+	}
 	if err := validateAssocDepth(opt.assocDepth); err != nil {
 		return err
 	}
@@ -615,6 +634,15 @@ func run() error {
 			return err
 		}
 		return runUtilityCLI(&opt)
+	}
+	// 043 confidence-gated deepening pilot: dedicated, default-off research
+	// mode. Dispatched before the --data gate. Empty --deepen-pilot keeps the
+	// ordinary path byte-identical.
+	if opt.deepenPilot != "" {
+		if err := validateDeepenCLIOptions(&opt); err != nil {
+			return err
+		}
+		return runDeepenPilotCLI(&opt)
 	}
 	if opt.dataPath == "" {
 		flag.Usage()

@@ -235,6 +235,7 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.representationArm != "" && opt.representationArm != ReprChunk900, "--representation"},
 		{strings.TrimSpace(opt.eventProjection) != "", "--event-projection"},
 		{opt.gapRefetch, "--gap-refetch"},
+		{opt.confidenceDeepen, "--confidence-deepen"},
 	} {
 		if conflict.enabled {
 			conflicts = append(conflicts, conflict.name)
