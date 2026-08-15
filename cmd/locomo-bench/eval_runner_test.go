@@ -224,9 +224,6 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 		"oracle selector":      func(opt *options) { opt.oracle = true },
 		"abstain hard":         func(opt *options) { opt.abstainHard = true },
 		"abstain soft":         func(opt *options) { opt.abstainSoft = true },
-		"alias shadow":         func(opt *options) { opt.aliasShadow = aliasShadowBaseline },
-		"doc2query":            func(opt *options) { opt.doc2query = doc2queryBaseline },
-		"doc2query build":      func(opt *options) { opt.doc2queryBuild = true },
 		"pcic annotate":        func(opt *options) { opt.pcicAnnotate = true },
 		"recall diagnostic":    func(opt *options) { opt.recallDiagnostic = true },
 		"coverage diagnostic":  func(opt *options) { opt.coverageOnly = true },
@@ -369,7 +366,6 @@ func TestFreezeFormalProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *t
 	}
 	for name, mutate := range map[string]func(*options){
 		"suffixed recipe":  func(opt *options) { opt.retrieval = "hybrid+rerank" },
-		"build mode":       func(opt *options) { opt.doc2queryBuild = true },
 		"diagnostic mode":  func(opt *options) { opt.coverageOnly = true },
 		"representation":   func(opt *options) { opt.representationArm = ReprRawTurnWindow },
 		"event projection": func(opt *options) { opt.eventProjection = "E1" },

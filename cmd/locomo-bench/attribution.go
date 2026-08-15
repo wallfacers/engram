@@ -571,3 +571,45 @@ func writeAttributionTraces(path string, traces []AttributionTrace) error {
 	removeTemp = false
 	return nil
 }
+
+// attributedGoldFactNames uses the same provenance-aware mapping as
+// buildAttributionTrace and returns only stored fact names, never chunk names.
+// Shared by the temporal and recall diagnostic paths (originally hosted in the
+// removed 011 alias-shadow adapter).
+func attributedGoldFactNames(qa locomoQA, hits []memory.Result, chunkTurns map[string][]string, goldTurnText map[string]string, tau float64) []string {
+	goldTurns := parsedGoldTurns(qa.Evidence)
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+	for _, hit := range hits {
+		if _, isChunk := chunkTurns[hit.Name]; isChunk {
+			continue
+		}
+		if len(hitMappedGoldTurns(hit, chunkTurns, goldTurnText, goldTurns, tau)) == 0 {
+			continue
+		}
+		if _, duplicate := seen[hit.Name]; duplicate {
+			continue
+		}
+		seen[hit.Name] = struct{}{}
+		names = append(names, hit.Name)
+	}
+	return names
+}
+
+// attributionStoredFacts lists the non-chunk facts held by the runtime's entry
+// store, mirroring the historical alias-shadow provenance mapping. Shared by
+// the temporal diagnostic path.
+func attributionStoredFacts(ctx context.Context, runtime *conversationRuntime) ([]memory.Result, error) {
+	entries, err := runtime.entries.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	facts := make([]memory.Result, 0, len(entries))
+	for _, entry := range entries {
+		if _, isChunk := runtime.chunkTurns[entry.Name]; isChunk || entry.FactSource == "verbatim_chunk" {
+			continue
+		}
+		facts = append(facts, memory.Result{Name: entry.Name, Content: entry.Content, SourceSessionID: entry.SourceSessionID})
+	}
+	return facts, nil
+}

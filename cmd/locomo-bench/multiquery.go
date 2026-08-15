@@ -196,6 +196,13 @@ func (j *contextParityJournal) Has(conv, q int, arm string) bool {
 	return ok
 }
 
+// contextParityArm tags the context-parity journal row's arm. All flagged
+// mechanisms (alias-shadow/doc2query/multi-query) have been removed by 044;
+// the arm key stays "single" so existing journals resume byte-identically.
+func contextParityArm(_ options) string {
+	return "single"
+}
+
 func validateContextParityResume(opt options, convs []conversation, states []*armState) error {
 	// Formal 022 runs are governed by the frozen Candidate/Trace/Bundle replay
 	// and durable call/result journals. They intentionally never emit the
@@ -332,32 +339,8 @@ func runRecallDiagnosticCLI(ctx context.Context, opt options, convs []conversati
 	if err := validateRecallDiagnosticOptions(opt, arms); err != nil {
 		return err
 	}
-	if aliasShadowEnabled(opt) && !opt.aliasShadowPrepared {
-		if err := prepareAliasShadowStore(&opt); err != nil {
-			return err
-		}
-	}
-	if doc2queryEnabled(opt) && !opt.doc2queryPrepared {
-		if err := prepareDoc2QueryStore(&opt); err != nil {
-			return err
-		}
-	}
 	if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 		return fmt.Errorf("create recall diagnostic run dir: %w", err)
-	}
-	if aliasShadowEnabled(opt) {
-		var embClient embedding.Client
-		if armBackend(arms[0]) == "hybrid" {
-			embClient = buildBenchEmbeddingClient(logger, nil)
-		}
-		return runAliasShadowRecallDiagnosticWithClient(ctx, opt, convs, arms, embClient, logger)
-	}
-	if doc2queryEnabled(opt) {
-		var embClient embedding.Client
-		if armBackend(arms[0]) == "hybrid" {
-			embClient = buildBenchEmbeddingClient(logger, nil)
-		}
-		return runDoc2QueryRecallDiagnosticWithClient(ctx, opt, convs, arms, embClient, logger)
 	}
 
 	apiKey := os.Getenv("LOCOMO_API_KEY")
@@ -531,12 +514,6 @@ func validateRecallDiagnosticOptions(opt options, arms []string) error {
 	}
 	if len(arms) != 1 {
 		return fmt.Errorf("--recall-diagnostic requires exactly one retrieval backend")
-	}
-	if aliasShadowEnabled(opt) && armBackend(arms[0]) != "hybrid" {
-		return fmt.Errorf("--recall-diagnostic with --alias-shadow requires the hybrid retrieval backend")
-	}
-	if doc2queryEnabled(opt) && armBackend(arms[0]) != "hybrid" {
-		return fmt.Errorf("--recall-diagnostic with --doc2query requires the hybrid retrieval backend")
 	}
 	if opt.topK != multiQueryFinalTopK {
 		return fmt.Errorf("--recall-diagnostic is fixed at --top-k %d", multiQueryFinalTopK)

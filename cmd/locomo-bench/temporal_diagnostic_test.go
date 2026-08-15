@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -351,4 +355,25 @@ func seedTemporalDiagnosticStore(t *testing.T, ctx context.Context, path string)
 	if err := st.Close(); err != nil {
 		t.Fatalf("close temporal store: %v", err)
 	}
+}
+
+// readJSONObject reads and decodes a JSON object file (shared test helper,
+// originally hosted in the removed 012 doc2query tests).
+func readJSONObject(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return result
+}
+
+// doc2queryDiscardLogger returns a discard logger (shared test helper,
+// originally hosted in the removed 012 doc2query tests).
+func doc2queryDiscardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

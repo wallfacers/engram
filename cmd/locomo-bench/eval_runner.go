@@ -326,7 +326,6 @@ func validateFormalLegacyRecipe(recipe string) error {
 func validateFormalLegacyMechanismOptions(opt options) error {
 	if opt.iris || opt.rerank || opt.pcic || opt.oracle ||
 		opt.abstainHard || opt.abstainSoft ||
-		aliasShadowEnabled(opt) || doc2queryEnabled(opt) || opt.doc2queryBuild ||
 		opt.pcicAnnotate || opt.recallDiagnostic || opt.coverageOnly ||
 		opt.temporalDiagnostic || opt.attributionTrace || opt.abstainProbe ||
 		opt.estimate {
