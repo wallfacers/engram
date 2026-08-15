@@ -91,7 +91,7 @@ cmd/locomo-bench/
 ## 关键技术决策(承接 research.md)
 
 1. **信号双测**(`research.md` R1):pilot 同时算 logprob 三特征(`final_mean_logprob` / `final_p10_logprob` / `final_mean_top1_top2_margin`,复用 `utilityMapFinalSignal`)与文本犹豫(新 lexicon)的 AUC,选高者;阈值取 pilot ROC 最优点,LoCoMo 定稿后 LME 零改动(R5)。
-2. **答题通道**:机制臂答题走 042 的 `utilityLogprobCaller`(thinking-on、非流式、logprobs=true)以便取信号;对照臂维持现行 streaming 通道——**两条通道的 prompt 字节必须一致**(digest 校验),差异仅 stream/logprobs 参数;pilot 需先验证通道差异本身不改变答案分布(同题双通道对照,若翻转超噪声带则 NO-GO)。
+2. **答题通道**:机制臂答题走 042 的 `utilityLogprobCaller`(thinking-on、非流式、logprobs=true)以便取信号;对照臂维持现行 streaming 通道——**两条通道的 prompt 字节必须一致**(digest 校验),差异仅 stream/logprobs 参数。**thinking 开关必须两臂对齐**(analyze F1:主评测通道默认 `LOCOMO_NO_THINKING != "0"` = thinking off,与 logprob 通道的 thinking-on 是第二个变量):进 pilot 前先核实 87.9% 锚 run 的 thinking 配置,两臂统一到锚配置并写入 manifest;若锚为 thinking-off,则 logprob 通道也须以 thinking-off 跑(`ThinkingDisabled` 透传),thinking 开关差异不得引入。pilot 需先验证通道差异本身不改变答案分布(同题双通道对照,若翻转超噪声带则 NO-GO)。
 3. **gap 输出获取**:重答前置一次"缺口产出"调用?否——缺口与信号同轮产出:answerer 的输出在 final answer 之外附 JSON 缺口块(输出格式契约,非新答题 prompt;契约字节冻结于 contracts/artifacts.md)。解析失败按自信处理(FR-001 场景 2)。
 4. **追加 union**:补检结果按条目去重(与 round-0 id 集合比对)后**整体追加在 round-0 上下文之后**,不重排、不截断 round-0;round-0 chunk 配额在补检前后逐字节相同(校验项)。
 5. **AUC kill-gate**:照抄 `utilityPilotGate` 模式;pilot 对照构造用 R8(「k30 错 k150 对」为正类,已有 042 配对 run 的 judge 结果离线对齐,零新标注)。

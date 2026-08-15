@@ -49,7 +49,7 @@ answerer 在证据不足时的可观测表现。pilot 阶段两种形态并列�
 | deepened_answer_digest | string | 重答最终答案 digest(未触发为空) |
 | final_from_deepen | bool | 最终答案是否取自重答 |
 | round0_context_digest | string | round-0 上下文 digest(补检前后必须一致,FR-007 校验项) |
-| failure_kind | enum: `none` \| `signal_unavailable` \| `gap_parse_failed` \| `query_empty_fallback_question` \| `search_error` \| `search_empty` | 回退路径分类(每题恰好一个终态) |
+| outcome_kind | enum: `none` \| `signal_unavailable` \| `gap_parse_failed` \| `query_empty_fallback_question` \| `search_error` \| `search_empty` | 每题终态分类(含正常回退路径;每题恰好一个终态;analyze F4:命名从 failure_kind 改为 outcome_kind,消除"非失败入失败枚举"歧义) |
 
 ## 工件文件与 seal
 
