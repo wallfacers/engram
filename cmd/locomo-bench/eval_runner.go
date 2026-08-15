@@ -324,8 +324,7 @@ func validateFormalLegacyRecipe(recipe string) error {
 // are not represented in the B1 control contract. Answer and judge prompt
 // variants remain allowed because their exact digests are frozen separately.
 func validateFormalLegacyMechanismOptions(opt options) error {
-	if opt.multiQuery || opt.filterPool > 0 || opt.assoc || opt.clusterSweep ||
-		opt.temporalScore || opt.temporalHardFilter || opt.conflictResolution ||
+	if opt.multiQuery || opt.filterPool > 0 || opt.conflictResolution ||
 		opt.iris || opt.rerank || opt.pcic || opt.oracle ||
 		opt.abstainHard || opt.abstainSoft ||
 		aliasShadowEnabled(opt) || doc2queryEnabled(opt) || opt.doc2queryBuild ||

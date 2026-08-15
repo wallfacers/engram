@@ -126,8 +126,6 @@ func TestFixedGoldOracleModeIsExclusive(t *testing.T) {
 		"alias shadow arm":    {aliasShadow: aliasShadowTreatment},
 		"temporal diagnostic": {temporalDiagnostic: true},
 		"attribution trace":   {attributionTrace: true},
-		"association":         {assoc: true},
-		"temporal score":      {temporalScore: true},
 		"conflict resolver":   {conflictResolution: true},
 		"pcic selector":       {pcic: true},
 		"pcic annotate":       {pcicAnnotate: true},

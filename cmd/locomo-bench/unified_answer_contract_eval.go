@@ -199,10 +199,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		name    string
 	}{
 		{!opt.noIDKRetry, "missing --no-idk-retry"},
-		{opt.assoc, "--assoc"},
-		{opt.clusterSweep, "--cluster-sweep"},
-		{opt.temporalScore, "--temporal-score"},
-		{opt.temporalHardFilter, "--temporal-hard-filter"},
 		{opt.conflictResolution, "--conflict-resolution"},
 		{opt.forceAnswer, "--force-answer"},
 		{opt.abstainPrompt, "--abstain-prompt"},

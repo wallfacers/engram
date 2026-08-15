@@ -123,7 +123,7 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	if plan.Questions != len(selected) || plan.ExtractionCalls != 1 {
 		t.Fatalf("call plan = %+v, want questions=2 extraction=1", plan)
 	}
-	opt.retrieval = "hybrid,hybrid+assoc"
+	opt.retrieval = "hybrid,hybrid+rerank"
 	pairedPlan := buildCallPlan([]conversation{conv}, opt)
 	if pairedPlan.AnswerCalls != 12 || pairedPlan.JudgeCalls != 12 || pairedPlan.FilterCalls != 12 {
 		t.Fatalf("paired call plan = %+v, want answer/filter/judge=12", pairedPlan)
@@ -214,7 +214,7 @@ func TestTPlanDoesNotChangeEstimateCallPlan(t *testing.T) {
 	convs := []conversation{{ID: 1, Sessions: []session{{Index: 1}}, QA: []locomoQA{
 		{Question: "When did the trip happen?", Answer: []byte(`"May"`), Category: 2},
 	}}}
-	baseline := options{retrieval: "hybrid,hybrid+assoc", repeats: 2}
+	baseline := options{retrieval: "hybrid,hybrid+rerank", repeats: 2}
 	tplan := options{retrieval: "hybrid,hybrid+tplan", repeats: 2}
 	if got, want := buildCallPlan(convs, tplan), buildCallPlan(convs, baseline); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tplan call plan = %+v, want unchanged paired plan %+v", got, want)

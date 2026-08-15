@@ -204,7 +204,7 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	if err := validateFormalRunnerOptions(protocol, opt, []string{"fts", "hybrid"}); err == nil {
 		t.Fatal("formal options unexpectedly accepted multiple arms")
 	}
-	for _, recipe := range []string{"hybrid+rerank", "hybrid+pcic", "hybrid+assoc"} {
+	for _, recipe := range []string{"hybrid+rerank", "hybrid+pcic"} {
 		t.Run("recipe "+recipe, func(t *testing.T) {
 			drifted := protocol
 			drifted.Retrieval.Recipe = recipe
@@ -225,10 +225,6 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 		"category top-k":       func(opt *options) { opt.catTopKSpec = "1=40" },
 		"output cap":           func(opt *options) { opt.maxTokens++ },
 		"filter pool":          func(opt *options) { opt.filterPool = 60 },
-		"association":          func(opt *options) { opt.assoc = true },
-		"cluster sweep":        func(opt *options) { opt.clusterSweep = true },
-		"temporal score":       func(opt *options) { opt.temporalScore = true },
-		"temporal hard filter": func(opt *options) { opt.temporalHardFilter = true },
 		"conflict resolution":  func(opt *options) { opt.conflictResolution = true },
 		"iris":                 func(opt *options) { opt.iris = true },
 		"rerank":               func(opt *options) { opt.rerank = true },

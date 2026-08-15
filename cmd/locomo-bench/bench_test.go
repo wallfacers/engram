@@ -19,42 +19,6 @@ import (
 	"github.com/wallfacers/engram/store"
 )
 
-func TestAssociativeBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
-	opt := options{assoc: true, assocDepth: 1}
-	got := retrieverOptionsFor(opt)
-	if !got.Associative || got.AssocDepth != 1 {
-		t.Fatalf("retriever options = %+v, want associative depth 1", got)
-	}
-	flags := retrievalFingerprint(opt)
-	var line result
-	line.RetrievalFlags = flags
-	raw, err := json.Marshal(line)
-	if err != nil {
-		t.Fatalf("marshal result: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("decode result: %v", err)
-	}
-	if decoded["retrieval_flags"] != "assoc=true;assoc_depth=1" {
-		t.Fatalf("retrieval fingerprint = %v", decoded["retrieval_flags"])
-	}
-}
-
-func TestClusterSweepBenchFlagIsForwardedAndFingerprinted(t *testing.T) {
-	opt := options{clusterSweep: true}
-	got := retrieverOptionsFor(opt)
-	if !got.ClusterSweep {
-		t.Fatalf("retriever options = %+v, want cluster sweep enabled", got)
-	}
-	if !strings.Contains(retrievalFingerprint(opt), "cluster_sweep=true") {
-		t.Fatalf("cluster sweep retrieval fingerprint = %q", retrievalFingerprint(opt))
-	}
-	if strings.Contains(retrievalFingerprint(options{}), "cluster_sweep") {
-		t.Fatalf("default retrieval fingerprint unexpectedly mentions cluster sweep: %q", retrievalFingerprint(options{}))
-	}
-}
-
 func TestSweepBudgetGuardAndStatsCountOnlySweepHits(t *testing.T) {
 	if !sweepOverBudget(options{}, true, provider.Usage{InputTokens: 7718}) {
 		t.Fatal("sweep answer above 1.5x default baseline should be marked")
@@ -115,19 +79,6 @@ func TestAnswerAndJudgeTracksSweepHitForBudgetGuard(t *testing.T) {
 	}
 	if evidence == nil || evidence.EvidenceSessionRecall != 1 || evidence.AnswerContextTokens != 8000 {
 		t.Fatalf("sweep evidence diagnostic = %+v", evidence)
-	}
-}
-
-func TestTemporalBenchFlagsAreForwardedAndFingerprinted(t *testing.T) {
-	anchor := time.Date(2024, time.June, 15, 0, 0, 0, 0, time.UTC)
-	opt := options{temporalScore: true, temporalHardFilter: true}
-	got := retrieverOptionsForAt(opt, anchor)
-	if !got.TemporalScore || !got.TemporalHardFilter || !got.Now.Equal(anchor) {
-		t.Fatalf("temporal retriever options = %+v, want enabled flags and anchor", got)
-	}
-	flags := retrievalFingerprint(opt)
-	if !strings.Contains(flags, "temporal_score=true") || !strings.Contains(flags, "temporal_hard_filter=true") {
-		t.Fatalf("temporal retrieval fingerprint = %q", flags)
 	}
 }
 
@@ -371,7 +322,7 @@ func TestUnifiedAnswerContractArmSelection(t *testing.T) {
 	if got := optionsForRun(global, "hybrid", true); !got.unifiedAnswerContract {
 		t.Fatal("multi-arm bare arm silently cleared the global unified mode")
 	}
-	if got := optionsForRun(global, "hybrid+assoc", true); !got.unifiedAnswerContract {
+	if got := optionsForRun(global, "hybrid+rerank", true); !got.unifiedAnswerContract {
 		t.Fatal("a retrieval suffix silently cleared the global unified mode")
 	}
 }
@@ -515,18 +466,6 @@ func TestValidateTemporalStoreAcceptsDatelessExtraction(t *testing.T) {
 	}
 }
 
-func TestAssocDepthAboveMaximumIsRejected(t *testing.T) {
-	if err := validateAssocDepth(3); err == nil {
-		t.Fatal("assoc depth 3 should be rejected at startup")
-	}
-	if err := validateAssocDepth(2); err != nil {
-		t.Fatalf("assoc depth 2 rejected: %v", err)
-	}
-	if got := retrievalFingerprint(options{assoc: true, assocDepth: 0}); got != "assoc=true;assoc_depth=2" {
-		t.Fatalf("zero assoc depth fingerprint = %q", got)
-	}
-}
-
 func TestParseLoCoMoDate(t *testing.T) {
 	cases := map[string]bool{ // input → expect non-zero
 		"1:56 pm on 8 May, 2023":  true,
@@ -637,8 +576,8 @@ func TestArmsFor(t *testing.T) {
 		"fts":                 {"fts"},
 		"hybrid":              {"hybrid"},
 		"both":                {"fts", "hybrid"},
-		"hybrid,hybrid+assoc": {"hybrid", "hybrid+assoc"},
-		"hybrid+sweep":        {"hybrid+sweep"},
+		"hybrid,hybrid+rerank": {"hybrid", "hybrid+rerank"},
+		"hybrid+tplan":        {"hybrid+tplan"},
 		"hybrid+conflict":     {"hybrid+conflict"},
 		"hybrid+abstain":      {"hybrid+abstain"},
 	}
@@ -668,7 +607,7 @@ func TestArmsFor(t *testing.T) {
 
 func TestAllArmMechanismsSupported(t *testing.T) {
 	// Every three-strike mechanism now parses to a single-arm run.
-	for _, arm := range []string{"hybrid+assoc", "hybrid+sweep", "hybrid+temporal", "hybrid+tplan", "hybrid+conflict", "hybrid+abstain"} {
+	for _, arm := range []string{"hybrid+tplan", "hybrid+conflict", "hybrid+abstain"} {
 		if arms, err := armsFor(arm); err != nil || len(arms) != 1 || arms[0] != arm {
 			t.Fatalf("%s arm should be supported: arms=%v err=%v", arm, arms, err)
 		}
@@ -682,7 +621,7 @@ func TestAllArmMechanismsSupported(t *testing.T) {
 func TestThreeArmPairingEmitsLimitWarning(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
-	warnExtraPairedArms(logger, []string{"fts", "hybrid", "hybrid+assoc"})
+	warnExtraPairedArms(logger, []string{"fts", "hybrid", "hybrid+rerank"})
 	if !strings.Contains(logs.String(), "first two") {
 		t.Fatalf("pairing warning = %q, want first two arms explanation", logs.String())
 	}
@@ -911,25 +850,17 @@ func TestQuestionWhitelistCoverageUsesPostMaxConvsCohort(t *testing.T) {
 }
 
 func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
-	global := options{assoc: true, temporalScore: true, conflictResolution: true, abstainPrompt: true}
+	global := options{conflictResolution: true, abstainPrompt: true}
 	plain := optionsForArm(global, "hybrid")
-	if plain.assoc || plain.temporalScore || plain.conflictResolution || plain.abstainPrompt {
+	if plain.conflictResolution || plain.abstainPrompt {
 		t.Fatalf("plain arm should be zero mechanisms when parsed as baseline: %+v", plain)
 	}
-	assoc := optionsForArm(options{}, "hybrid+assoc")
-	if !assoc.assoc || assoc.temporalScore || assoc.conflictResolution || assoc.abstainPrompt {
-		t.Fatalf("assoc suffix did not override global mechanisms: %+v", assoc)
-	}
-	sweep := optionsForArm(options{assoc: true}, "hybrid+sweep")
-	if !sweep.clusterSweep || sweep.assoc {
-		t.Fatalf("sweep suffix did not override global mechanisms: %+v", sweep)
-	}
 	single := optionsForRun(global, "hybrid", false)
-	if !single.assoc || !single.temporalScore || !single.conflictResolution || !single.abstainPrompt {
+	if !single.conflictResolution || !single.abstainPrompt {
 		t.Fatalf("single arm lost global mechanisms: %+v", single)
 	}
 	pairedBaseline := optionsForRun(global, "hybrid", true)
-	if pairedBaseline.assoc || pairedBaseline.temporalScore || pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
+	if pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
 		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
 	}
 }
@@ -986,14 +917,8 @@ func TestTPlanArmMechanismControlsTemporalAnswerPrompt(t *testing.T) {
 
 	global := options{temporalAnswerPrompt: true}
 	legacyBaseline := optionsForArm(global, "hybrid")
-	legacyTemporal := optionsForArm(global, "hybrid+temporal")
-	if !legacyBaseline.temporalAnswerPrompt || !legacyTemporal.temporalAnswerPrompt {
-		t.Fatalf("global temporal prompt compatibility flags = baseline:%t temporal:%t, want true/true", legacyBaseline.temporalAnswerPrompt, legacyTemporal.temporalAnswerPrompt)
-	}
-
-	combined := optionsForArm(options{}, "hybrid+tplan+temporal")
-	if !combined.temporalAnswerPrompt || !combined.temporalScore {
-		t.Fatalf("tplan+temporal arm = %+v, want independent prompt and retrieval mechanisms", combined)
+	if !legacyBaseline.temporalAnswerPrompt {
+		t.Fatalf("global temporal prompt compatibility flag = %t, want true", legacyBaseline.temporalAnswerPrompt)
 	}
 }
 
@@ -1419,7 +1344,7 @@ func TestAnswerJournalStoresFinalAnswerUsage(t *testing.T) {
 	if items[0].InputTokens != 11 || items[0].OutputTokens != 7 || items[0].AnswerContextTokens != 11 {
 		t.Fatalf("journal usage = %+v, want answer 11/7/context 11", items[0])
 	}
-	if items[0].RetrievalFlags != "assoc=false;assoc_depth=2" {
+	if items[0].RetrievalFlags != "" {
 		t.Fatalf("journal retrieval flags = %q", items[0].RetrievalFlags)
 	}
 }

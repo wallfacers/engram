@@ -131,11 +131,6 @@ type options struct {
 	chunks                     bool
 	chunkQuota                 int
 	filterPool                 int
-	assoc                      bool
-	assocDepth                 int
-	clusterSweep               bool
-	temporalScore              bool
-	temporalHardFilter         bool
 	conflictResolution         bool
 	supersededPenalty          float64
 	abstainPrompt              bool
@@ -471,11 +466,6 @@ func run() error {
 	flag.IntVar(&chunkTargetChars, "chunk-target-chars", 900, "soft target per verbatim chunk in code points (store-build time; lower = finer turn-granularity chunks; stores built with different values are NOT comparable)")
 	flag.IntVar(&chunkMaxChars, "chunk-max-chars", 1100, "hard cap per stored verbatim chunk in code points (store-build time; must exceed --chunk-target-chars)")
 	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
-	flag.BoolVar(&opt.assoc, "assoc", false, "enable associative graph retrieval")
-	flag.IntVar(&opt.assocDepth, "assoc-depth", 2, "associative graph walk depth (maximum 2)")
-	flag.BoolVar(&opt.clusterSweep, "cluster-sweep", false, "sweep one-hop entity clusters for enumeration questions")
-	flag.BoolVar(&opt.temporalScore, "temporal-score", false, "enable soft temporal retrieval scoring")
-	flag.BoolVar(&opt.temporalHardFilter, "temporal-hard-filter", false, "experimental hard temporal candidate filter")
 	flag.BoolVar(&opt.conflictResolution, "conflict-resolution", false, "resolve contradictory facts during store build (non-destructive supersede) and downweight superseded entries at retrieval")
 	flag.Float64Var(&opt.supersededPenalty, "superseded-penalty", 0.3, "retrieval score multiplier for superseded entries [0,1]; only applies when --conflict-resolution is on")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
@@ -578,9 +568,6 @@ func run() error {
 		return err
 	}
 	if err := validateDeepenCLIOptions(&opt); err != nil {
-		return err
-	}
-	if err := validateAssocDepth(opt.assocDepth); err != nil {
 		return err
 	}
 	if opt.representationArm == "" {
@@ -2008,9 +1995,6 @@ type armSpec struct {
 }
 
 var supportedArmMechanisms = map[string]struct{}{
-	"assoc":        {},
-	"sweep":        {},
-	"temporal":     {},
 	"tplan":        {},
 	"conflict":     {},
 	"abstain":      {},
@@ -2061,10 +2045,6 @@ func optionsForArm(global options, name string) options {
 	}
 	if !spec.overrides {
 		arm := global
-		arm.assoc = false
-		arm.temporalScore = false
-		arm.temporalHardFilter = false
-		arm.clusterSweep = false
 		arm.conflictResolution = false
 		arm.abstainPrompt = false
 		arm.abstainHard = false
@@ -2076,10 +2056,6 @@ func optionsForArm(global options, name string) options {
 		return arm
 	}
 	arm := global
-	arm.assoc = spec.mechanisms["assoc"]
-	arm.clusterSweep = spec.mechanisms["sweep"]
-	arm.temporalScore = spec.mechanisms["temporal"]
-	arm.temporalHardFilter = false
 	arm.conflictResolution = spec.mechanisms["conflict"]
 	arm.abstainPrompt = spec.mechanisms["abstain"] || spec.mechanisms["abstain-soft"]
 	arm.abstainHard = spec.mechanisms["abstain-hard"]
@@ -2218,11 +2194,6 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 		// in the retrieval pool (the retriever never filters category="chunk").
 		if err := validateChunkRegime(ctx, st.DB(), opt.chunks, dsn); err != nil {
 			return nil, err
-		}
-		if temporalMechanismEnabled(opt, arms) {
-			if err := validateTemporalStore(ctx, st.DB(), n); err != nil {
-				return nil, err
-			}
 		}
 		logger.Info("reusing persisted extraction", "conversation", conv.ID, "facts", n)
 	} else {
@@ -2382,29 +2353,17 @@ func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
 	if opt.conflictResolution {
 		supersededPenalty = opt.supersededPenalty
 	}
+	// assoc/cluster-sweep/temporal 机制已随 044 清理移除(flag 删除),引擎
+	// RetrieverOptions 保持零值:Associative=false 下 AssocDepth 不生效,
+	// depth<=0 时引擎回退到 maxAssociativeDepth,默认路径行为逐字节不变。
 	return memory.RetrieverOptions{
-		Associative:        opt.assoc,
-		AssocDepth:         opt.assocDepth,
-		ClusterSweep:       opt.clusterSweep,
-		TemporalScore:      opt.temporalScore || opt.temporalHardFilter,
-		TemporalHardFilter: opt.temporalHardFilter,
-		SupersededPenalty:  supersededPenalty,
+		SupersededPenalty: supersededPenalty,
 		Now:                now,
 	}
 }
 
 func retrievalFingerprint(opt options) string {
-	depth := opt.assocDepth
-	if depth <= 0 || depth > 2 {
-		depth = 2
-	}
-	fingerprint := fmt.Sprintf("assoc=%t;assoc_depth=%d", opt.assoc, depth)
-	if opt.clusterSweep {
-		fingerprint += ";cluster_sweep=true"
-	}
-	if opt.temporalScore || opt.temporalHardFilter {
-		fingerprint += fmt.Sprintf(";temporal_score=%t;temporal_hard_filter=%t", opt.temporalScore || opt.temporalHardFilter, opt.temporalHardFilter)
-	}
+	fingerprint := ""
 	if opt.conflictResolution {
 		fingerprint += fmt.Sprintf(";conflict_resolution=true;superseded_penalty=%.3f", opt.supersededPenalty)
 	}
@@ -2562,13 +2521,6 @@ func warnExtraPairedArms(logger *slog.Logger, arms []string) {
 		return
 	}
 	logger.Warn("paired report uses first two arms; remaining arms are not paired", "paired_arms", arms[:2], "all_arms", arms)
-}
-
-func validateAssocDepth(depth int) error {
-	if depth > 2 {
-		return fmt.Errorf("--assoc-depth must be at most 2, got %d", depth)
-	}
-	return nil
 }
 
 func validateMechanismArms(opt options) error {
@@ -2949,16 +2901,6 @@ func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
 		}
 	}
 	return n, nil
-}
-
-func temporalMechanismEnabled(opt options, arms []string) bool {
-	for _, arm := range arms {
-		armOpt := optionsForRun(opt, arm, len(arms) > 1)
-		if armOpt.temporalScore || armOpt.temporalHardFilter {
-			return true
-		}
-	}
-	return false
 }
 
 func conflictMechanismEnabled(opt options, arms []string) bool {

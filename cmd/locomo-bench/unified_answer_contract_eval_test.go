@@ -146,7 +146,6 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 		"counter refine":      func(o *options) { o.counterRefine = true },
 		"trace mediation":     func(o *options) { o.traceMediation = true },
 		"rerank":              func(o *options) { o.rerank = true },
-		"association":         func(o *options) { o.assoc = true },
 		"multi query":         func(o *options) { o.multiQuery = true },
 		"filter":              func(o *options) { o.filterPool = 60 },
 		"navigation":          func(o *options) { o.nav = true },
