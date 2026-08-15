@@ -96,7 +96,7 @@ probe GO 后按 008 铁律正批:同批配对、repeats≥3、store 复用、cle
 - **FR-001**: 装填选择器 MUST 确定性、纯客户端、零新增模型调用:relevance 用现有 RRF 融合分,coverage/diversity 用已存 embedding;同输入必同输出。
 - **FR-002**: 目标函数 MUST 四项齐备(relevance 模块项 + query set-cover + facility-location 代表性 + concave 多样性)且 relevance 为最大单一权重项;MUST NOT 退化为纯 top-k 截断或纯 MMR。
 - **FR-003**: token 预算 MUST 锚定同批对照臂(现行 k30 chunk-quota-12 装配)的实际体量(测量锚定,不用硬编码常数);两臂 answer-context tokens 均值 MUST 随每份 e2e 结果报告(体量 parity)。
-- **FR-004**: 检索池加宽(取 top-150)MUST 在 harness 层实现(现有引擎检索接口的参数),引擎五目录(memory/ embedding/ provider/ store/ internal/)MUST 零改动(宪法 II);若需引擎新入口,显式提出契约增量,不得绕过。
+- **FR-004**: 机制 MUST 复用现行装配已存在的宽检索池(harness 现状 ≥300 条;如确需加宽,只调现有引擎检索接口的 k 参数,在 harness 层实现),引擎五目录(memory/ embedding/ provider/ store/ internal/)MUST 零改动(宪法 II);若需引擎新入口,显式提出契约增量,不得绕过。
 - **FR-005**: 机制 MUST 以默认关闭的旗标提供;旗标关闭时评测路径 MUST 与现行 k30 unified 配方逐字节一致(golden 测试锁定)。
 - **FR-006**: 离线保真门(US1)MUST 在调用任何模型端点之前可完整执行;门判据 = 装填 AIC ≥ 同池 top-150 装配的 95% 且装填 token ≤ 预算;不过即 NO-GO 关闭整个 feature。
 - **FR-007**: answer-in-context 的匹配规范化规则(大小写/空白/分词归一)MUST 在门计算前冻结;gold 匹配审计(含池内全不可匹配题目清单)MUST 随门报告;AIC 是止损必要条件与诊断指标,MUST NOT 单独作为 e2e 出货依据(008 教训:coverage 不可单独作为出货依据)。

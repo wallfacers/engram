@@ -10,11 +10,11 @@
 ```bash
 cd <engram>
 CGO_ENABLED=0 go build ./...
-go run ./cmd/locomo-bench aic-gate \
+go run ./cmd/locomo-bench \
   --data testdata/locomo/locomo.json \
   --store <032-store-dir> \
-  --run-dir .locomo-run/045-offline \
-  --full                      # 1540 全量(默认);--slice 0,1 先跑 304 题冒烟
+  --aic-gate .locomo-run/045-offline \
+  --aic-gate-slice 0,1        # 先 304 题冒烟;去掉即 1540 全量
 cat .locomo-run/045-offline/packing_gate.json   # gate.verdict = GO | NO-GO
 ```
 
@@ -31,8 +31,8 @@ setsid bash -c 'locomo-bench --data <locomo.json> --run-dir /root/autodl-tmp/045
 setsid bash -c 'locomo-bench ... 同配方 + --submodular-pack --pack-budget-anchor paired \
   --anchor-run /root/autodl-tmp/045-runs/probe-ctl > pack.log 2>&1; echo $? > pack.exit' & disown
 # ride-along(同批顺序执行):
-setsid bash -c 'locomo-bench reverify-042 --labels <042-collect-dir> \
-  --run-dir /root/autodl-tmp/045-runs/reverify --concurrency 32 > rv.log 2>&1; echo $? > rv.exit' & disown
+setsid bash -c 'locomo-bench --reverify-042 /root/autodl-tmp/045-runs/reverify \
+  --reverify-labels <042-collect-dir> --concurrency 32 > rv.log 2>&1; echo $? > rv.exit' & disown
 ```
 
 GO 判定:配对差 ≥0 且 McNemar 不显著为负 → 同一次开机接着 3-rep 正批 + LME(008 铁律);否则收尾关机。

@@ -23,9 +23,11 @@
 
 逐题配对锚(默认)/对照臂全局均值兜底。probe 与正批 MUST `paired`。
 
-### `--pack-aic-gate`(离线门 CLI,不进 eval 主命令)
+### `--aic-gate <dir>`(bool 触发 + 路径,离线门,不进 eval 主流程)
 
-`engram-locomo-aic --data <locomo.json> --store <032-store> --run-dir <out> [--slice conv0,conv1] [--top150-ref]`——独立子命令风格(与既有 diagnose CLI 族一致),产出:
+repo 旗标约定风格(同 `--abstain-probe`/`--adjudication-*` 族):置位即"offline: run ... and exit"。配套 `--aic-gate-slice 0,1`(默认全量)。
+
+**top150_full 参照口径(冻结)**:检索 top-k 150、chunk-quota 语义与 91.43% 锚配方一致,按现行装配(无装填)渲染。产出:
 
 ```json
 {
@@ -40,9 +42,9 @@
 }
 ```
 
-### `--reverify-042`(ride-along 子命令)
+### `--reverify-042 <dir>`(ride-along,置位即执行并退出)
 
-`engram-reverify-042 --data <locomo.json> --store <032-store> --labels <042-collect-dir> --run-dir <out> --concurrency N`——自包含(不 import counterfactual_utility*.go / confidence_deepen*.go);logprob 通道 `temperature=0` 显式;产出 ReverifyReport(schema 见 data-model.md)。
+配套 `--reverify-labels <042-collect-dir>`。自包含(不 import counterfactual_utility*.go / confidence_deepen*.go);logprob 通道 `temperature=0` 显式;遵守 `--concurrency` worker pool;产出 ReverifyReport(schema 见 data-model.md)。
 
 ## 工件契约(run-dir 内,gitignored)
 

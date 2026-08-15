@@ -17,7 +17,7 @@
 
 ## Phase 3 · US1 离线装填保真门(本地,US1)
 
-- [ ] T006 [US1] 实现 aic-gate 子命令 `cmd/locomo-bench/submodular_packing_cli.go`:三口径渲染(current-k30 / packed / top150-full)、逐题预算锚离线复算(对照渲染确定性)、门判定(packed.aic ≥ 0.95×top150 且 tokens ≤ 锚)、packing_gate.json + packing_audit.jsonl + manifest 冻结后 seal;`--slice`/`--full` 参数
+- [ ] T006 [US1] 实现 aic-gate 旗标路径 `cmd/locomo-bench/submodular_packing_cli.go`(`--aic-gate <dir>` 置位即离线执行并退出,repo 旗标约定):三口径渲染(current-k30 / packed / top150-full,参照口径见 contracts 冻结)、逐题预算锚离线复算(对照渲染确定性)、门判定(packed.aic ≥ 0.95×top150 且 tokens ≤ 锚)、packing_gate.json + packing_audit.jsonl + manifest 冻结后 seal;`--aic-gate-slice` 参数
 - [ ] T007 [US1] 本地执行:先 `--slice 0,1`(304 题)冒烟 → `--full`(1540)全量门;核验审计(unmatchable 单列、singleton 计数);产出 go/no-go 判定。**NO-GO 分支**:写关闭 verdict 文档,勾结 T016-T017 收尾,Phase 4-6 不执行
 
 ## Phase 4 · US2 机制接线 + 1-rep 配对 probe(box,US2)
@@ -36,7 +36,7 @@
 
 ## Phase 7 · 重验 ride-along + 收尾
 
-- [ ] T013 [P] reverify 子命令 CLI(`cmd/locomo-bench/reverify_042.go` 补齐):--labels 读 042 collect 工件、2-conv slice(conv 0/1,304 题,与 043 pilot2 可比)、worker pool 遵守 --concurrency、ReverifyReport 工件(AUC WMW tie-mean + bootstrap seed 43 + 双通道 flip);端点不可达 → inconclusive 不阻塞主批
+- [ ] T013 [P] reverify 旗标路径 CLI(`cmd/locomo-bench/reverify_042.go` 补齐,`--reverify-042 <dir>` + `--reverify-labels`):读 042 collect 工件、2-conv slice(conv 0/1,304 题,与 043 pilot2 可比)、worker pool 遵守 --concurrency、ReverifyReport 工件(AUC WMW tie-mean + bootstrap seed 43 + 双通道 flip);端点不可达 → inconclusive 不阻塞主批
 - [ ] T014 [P] 全量门复核:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go vet ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;新旗标出现在 `--help` 且默认值正确
 - [ ] T015 box 组合批第 2 段:执行 reverify(同批,answerer+judge env 走进程环境)→ ReverifyReport 判定(measurement-artifact-confirmed / signal-still-invalid / inconclusive);**只陈述测量事实,翻案权留维护者**
 - [ ] T016 verdict 文档 `docs/evaluation/reports/045-submodular-packing-verdict-<date>.md`(含门链全程:US1→probe→正批→LME→重验)+ result-matrix 同步 + tasks 勾结
