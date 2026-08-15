@@ -165,12 +165,13 @@ func TestUtilityThreeRepetitionMajority(t *testing.T) {
 	}
 }
 
-func TestUtilityHistorical561311453Fixture(t *testing.T) {
-	// A synthetic three-repetition fixture shaped like the historical audit
-	// must reproduce exactly 56 BENEFIT / 31 HARM / 1453 NEUTRAL.
+// utilityFixtureHistoricalRoots builds a three-repetition shallow/deep fixture
+// shaped like the historical audit: 56 BENEFIT + 31 HARM + 1453 NEUTRAL.
+func utilityFixtureHistoricalRoots(t *testing.T) (shallowRoot, deepRoot string) {
+	t.Helper()
 	root := t.TempDir()
-	shallowRoot := filepath.Join(root, "shallow")
-	deepRoot := filepath.Join(root, "deep")
+	shallowRoot = filepath.Join(root, "shallow")
+	deepRoot = filepath.Join(root, "deep")
 
 	type qSpec struct {
 		shallow, deep []bool
@@ -212,6 +213,13 @@ func TestUtilityHistorical561311453Fixture(t *testing.T) {
 			}
 		}
 	}
+	return shallowRoot, deepRoot
+}
+
+func TestUtilityHistorical561311453Fixture(t *testing.T) {
+	// A synthetic three-repetition fixture shaped like the historical audit
+	// must reproduce exactly 56 BENEFIT / 31 HARM / 1453 NEUTRAL.
+	shallowRoot, deepRoot := utilityFixtureHistoricalRoots(t)
 
 	labels, summary, err := utilityBuildHistoricalLabels(shallowRoot, deepRoot)
 	if err != nil {
@@ -222,6 +230,55 @@ func TestUtilityHistorical561311453Fixture(t *testing.T) {
 	}
 	if summary.Benefit != 56 || summary.Harm != 31 || summary.Neutral != 1453 {
 		t.Fatalf("counts = B%d H%d N%d, want B56 H31 N1453", summary.Benefit, summary.Harm, summary.Neutral)
+	}
+}
+
+// TestUtilityLabelStageEndToEnd runs the full zero-model label stage (manifest
+// digest + seal + report) on the 56/31/1453 fixture. Regression for the
+// manifest validate() gap where the label manifest omitted the frozen answerer
+// identity and could never produce a GO receipt.
+func TestUtilityLabelStageEndToEnd(t *testing.T) {
+	shallowRoot, deepRoot := utilityFixtureHistoricalRoots(t)
+	dir := t.TempDir()
+	opt := &options{
+		utilityShallowSource: shallowRoot,
+		utilityDeepSource:    deepRoot,
+		runDir:               dir,
+		maxTokens:            8000,
+	}
+	if err := runUtilityLabelStage(opt); err != nil {
+		t.Fatalf("label stage: %v", err)
+	}
+	// The report must be a sealed GO with the exact historical counts.
+	raw, err := os.ReadFile(filepath.Join(dir, "label-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Verdict string         `json:"verdict"`
+		Counts  map[string]int `json:"counts"`
+		Claim   string         `json:"claim"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Verdict != "GO" || report.Claim != "label_constructor_regression_only" {
+		t.Fatalf("verdict/claim = %s/%s, want GO/label_constructor_regression_only", report.Verdict, report.Claim)
+	}
+	if report.Counts["BENEFIT"] != 56 || report.Counts["HARM"] != 31 || report.Counts["NEUTRAL"] != 1453 {
+		t.Fatalf("counts = %v, want B56 H31 N1453", report.Counts)
+	}
+	// The manifest must validate (answerer identity frozen) and the seal must be
+	// readable as a COMPLETE label GO.
+	m, _, err := utilityManifestRead(dir)
+	if err != nil {
+		t.Fatalf("manifest read: %v", err)
+	}
+	if m.Answerer.MaxModelLen != utilityMaxModelLen || m.Answerer.TemperatureRequest != "omitted" {
+		t.Fatalf("manifest answerer = maxlen %d temp %q, want %d/omitted", m.Answerer.MaxModelLen, m.Answerer.TemperatureRequest, utilityMaxModelLen)
+	}
+	if err := utilityValidateManifestSeal(dir, utilityStageLabel); err != nil {
+		t.Fatalf("label seal invalid: %v", err)
 	}
 }
 

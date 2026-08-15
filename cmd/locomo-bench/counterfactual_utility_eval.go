@@ -262,11 +262,23 @@ func runUtilityLabelStage(opt *options) error {
 		Stage:      utilityStageLabel,
 		Benchmark:  utilityBenchmarkIdentity{Name: "locomo", Repetitions: utilityRepetitions},
 		Recipe:     utilityRecipeIdentity{ShallowK: utilityShallowK, DeepK: utilityDeepK},
+		// The label stage is zero model calls, but it still freezes the answerer
+		// identity from env so the manifest passes validate() and the seal records
+		// the frozen regime (SC-001). Empty env leaves the model field empty, which
+		// still validates; the env freeze in quickstart §2 populates it.
+		Answerer: utilityAnswererIdentity{
+			Provider: "openai-compatible-local", Model: os.Getenv("LOCOMO_MODEL"),
+			EndpointDigest:     utilityEndpointDigest(os.Getenv("LOCOMO_BASE_URL")),
+			TemperatureRequest: "omitted", MaxTokens: opt.maxTokens, MaxModelLen: utilityMaxModelLen,
+		},
 		CallPolicy: utilityCallPolicy{MaxAttempts: utilityMaxAttempts},
 		Build:      utilityBuildIdentity{SourceRevision: sourceRevisionDigest()},
 	}
 	md, err := utilityManifestDigest(&m)
 	if err != nil {
+		return err
+	}
+	if err := utilityManifestWrite(dir, m); err != nil {
 		return err
 	}
 	labelsPayload := make([]any, 0, len(labels))
