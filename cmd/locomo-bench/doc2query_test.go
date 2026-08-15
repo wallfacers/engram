@@ -251,9 +251,6 @@ func TestDoc2Query_ValidateRejectsConfoundedRuns(t *testing.T) {
 		{name: "unknown-enum", opt: func() options { o := base; o.doc2query = "maybe"; return o }()},
 		{name: "alias-conflict", opt: func() options { o := base; o.aliasShadow = aliasShadowTreatment; return o }()},
 		{name: "build-conflict", opt: func() options { o := base; o.doc2queryBuild = true; return o }()},
-		{name: "opinion-pass", opt: func() options { o := base; o.opinionPass = true; return o }()},
-		{name: "conflict-resolution", opt: func() options { o := base; o.conflictResolution = true; return o }()},
-		{name: "conflict-arm", opt: func() options { o := base; o.retrieval = "hybrid+conflict"; return o }()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

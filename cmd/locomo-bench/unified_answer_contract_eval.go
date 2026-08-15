@@ -199,7 +199,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		name    string
 	}{
 		{!opt.noIDKRetry, "missing --no-idk-retry"},
-		{opt.conflictResolution, "--conflict-resolution"},
 		{opt.forceAnswer, "--force-answer"},
 		{opt.abstainPrompt, "--abstain-prompt"},
 		{opt.abstainHard, "--abstain-hard"},
@@ -214,7 +213,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.pcic, "--pcic"},
 		{opt.oracle, "--oracle"},
 		{opt.multiQuery, "--multi-query"},
-		{opt.filterPool > 0, "--filter-pool"},
 		{opt.nav, "--nav"},
 		{opt.iris, "--iris"},
 		{opt.evidenceAssembly, "--evidence-assembly"},
@@ -222,7 +220,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.relationContext, "--relation-context"},
 		{opt.traceMediation, "--trace-mediation"},
 		{opt.counterRefine, "--counter-refine"},
-		{opt.opinionPass, "--opinion-pass"},
 		{opt.writeDedup, "--write-dedup"},
 		{opt.temporalResolution, "--temporal-resolution"},
 		{opt.neighborExtend, "--neighbor-extend"},

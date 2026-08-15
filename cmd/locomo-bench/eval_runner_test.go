@@ -187,7 +187,7 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	protocol.Store.SchemaVersion = 7
 	protocol.Store.IngestionRecipe = "ledger_lossless_chunks_v2"
 	protocol.Store.IngestionConfigDigest = evalJSONDigest(evalFreezeIngestion{
-		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions,
 	})
 	protocol.Store.ProjectionBuilderVersions = map[string]string{"atomic_fact": "entry_store_explicit_v1"}
 	protocol.Retrieval.CandidateRulesDigest = evalJSONDigest(evalFreezeCandidateRules{
@@ -220,12 +220,9 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 		"chunks":               func(opt *options) { opt.chunks = false },
 		"chunk quota":          func(opt *options) { opt.chunkQuota++ },
 		"image captions":       func(opt *options) { opt.imageCaptions = true },
-		"opinion pass":         func(opt *options) { opt.opinionPass = true },
 		"date scaffold":        func(opt *options) { opt.temporalDateScaffold = true },
 		"category top-k":       func(opt *options) { opt.catTopKSpec = "1=40" },
 		"output cap":           func(opt *options) { opt.maxTokens++ },
-		"filter pool":          func(opt *options) { opt.filterPool = 60 },
-		"conflict resolution":  func(opt *options) { opt.conflictResolution = true },
 		"iris":                 func(opt *options) { opt.iris = true },
 		"rerank":               func(opt *options) { opt.rerank = true },
 		"pcic":                 func(opt *options) { opt.pcic = true },

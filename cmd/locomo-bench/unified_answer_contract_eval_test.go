@@ -147,13 +147,11 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 		"trace mediation":     func(o *options) { o.traceMediation = true },
 		"rerank":              func(o *options) { o.rerank = true },
 		"multi query":         func(o *options) { o.multiQuery = true },
-		"filter":              func(o *options) { o.filterPool = 60 },
 		"navigation":          func(o *options) { o.nav = true },
 		"iris":                func(o *options) { o.iris = true },
 		"assembly":            func(o *options) { o.evidenceAssembly = true },
 		"consolidate":         func(o *options) { o.consolidate = true },
 		"relation context":    func(o *options) { o.relationContext = true },
-		"opinion pass":        func(o *options) { o.opinionPass = true },
 		"write dedup":         func(o *options) { o.writeDedup = true },
 		"temporal resolution": func(o *options) { o.temporalResolution = true },
 	} {

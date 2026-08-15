@@ -663,9 +663,6 @@ func validateRecallDiagnosticOptions(opt options, arms []string) error {
 			return fmt.Errorf("--recall-diagnostic requires category %d top-k to remain %d, got %d", category, multiQueryFinalTopK, topK)
 		}
 	}
-	if opt.filterPool > 0 {
-		return fmt.Errorf("--filter-pool is not allowed with --recall-diagnostic")
-	}
 	if opt.chunkQuota > multiQueryFinalTopK {
 		return fmt.Errorf("--recall-diagnostic requires --chunk-quota at most %d", multiQueryFinalTopK)
 	}

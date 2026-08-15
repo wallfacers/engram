@@ -577,9 +577,8 @@ func TestArmsFor(t *testing.T) {
 		"hybrid":              {"hybrid"},
 		"both":                {"fts", "hybrid"},
 		"hybrid,hybrid+rerank": {"hybrid", "hybrid+rerank"},
-		"hybrid+tplan":        {"hybrid+tplan"},
-		"hybrid+conflict":     {"hybrid+conflict"},
-		"hybrid+abstain":      {"hybrid+abstain"},
+		"hybrid+tplan":         {"hybrid+tplan"},
+		"hybrid+abstain":       {"hybrid+abstain"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -607,7 +606,7 @@ func TestArmsFor(t *testing.T) {
 
 func TestAllArmMechanismsSupported(t *testing.T) {
 	// Every three-strike mechanism now parses to a single-arm run.
-	for _, arm := range []string{"hybrid+tplan", "hybrid+conflict", "hybrid+abstain"} {
+	for _, arm := range []string{"hybrid+tplan", "hybrid+abstain"} {
 		if arms, err := armsFor(arm); err != nil || len(arms) != 1 || arms[0] != arm {
 			t.Fatalf("%s arm should be supported: arms=%v err=%v", arm, arms, err)
 		}
@@ -850,17 +849,17 @@ func TestQuestionWhitelistCoverageUsesPostMaxConvsCohort(t *testing.T) {
 }
 
 func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
-	global := options{conflictResolution: true, abstainPrompt: true}
+	global := options{abstainPrompt: true}
 	plain := optionsForArm(global, "hybrid")
-	if plain.conflictResolution || plain.abstainPrompt {
+	if plain.abstainPrompt {
 		t.Fatalf("plain arm should be zero mechanisms when parsed as baseline: %+v", plain)
 	}
 	single := optionsForRun(global, "hybrid", false)
-	if !single.conflictResolution || !single.abstainPrompt {
+	if !single.abstainPrompt {
 		t.Fatalf("single arm lost global mechanisms: %+v", single)
 	}
 	pairedBaseline := optionsForRun(global, "hybrid", true)
-	if pairedBaseline.conflictResolution || pairedBaseline.abstainPrompt {
+	if pairedBaseline.abstainPrompt {
 		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
 	}
 }
@@ -885,26 +884,6 @@ func TestRerankArmMechanismGatesReranker(t *testing.T) {
 	single := optionsForRun(options{rerank: true}, "hybrid", false)
 	if !single.rerank {
 		t.Fatalf("single arm lost global rerank flag: %+v", single)
-	}
-}
-
-func TestConflictArmEnablesSupersededPenalty(t *testing.T) {
-	// "conflict" is now a valid arm suffix (was rejected until US5).
-	arm := optionsForArm(options{supersededPenalty: 0.3}, "hybrid+conflict")
-	if !arm.conflictResolution {
-		t.Fatalf("hybrid+conflict did not enable conflict resolution: %+v", arm)
-	}
-	base := optionsForArm(options{supersededPenalty: 0.3}, "hybrid")
-	if base.conflictResolution {
-		t.Fatalf("paired baseline leaked conflict resolution: %+v", base)
-	}
-	// The retrieval penalty only reaches RetrieverOptions when conflict
-	// resolution is on; the baseline arm stays at zero for byte-for-byte parity.
-	if got := retrieverOptionsFor(arm).SupersededPenalty; got != 0.3 {
-		t.Fatalf("conflict arm SupersededPenalty = %v, want 0.3", got)
-	}
-	if got := retrieverOptionsFor(base).SupersededPenalty; got != 0 {
-		t.Fatalf("baseline arm SupersededPenalty = %v, want 0", got)
 	}
 }
 

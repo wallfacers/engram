@@ -455,9 +455,6 @@ func validateAttributionOptions(opt options, arms []string) error {
 	if len(arms) != 1 || (arms[0] != "fts" && arms[0] != "hybrid") {
 		return fmt.Errorf("--attribution-trace requires exactly one retrieval backend: fts or hybrid")
 	}
-	if opt.filterPool > 0 {
-		return fmt.Errorf("--filter-pool is not allowed with --attribution-trace because it initializes an LLM caller")
-	}
 	if opt.rerank {
 		return fmt.Errorf("--rerank is not allowed with --attribution-trace")
 	}

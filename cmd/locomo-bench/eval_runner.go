@@ -217,7 +217,7 @@ func validateB0ContinuityRunnerOptions(protocol evalProtocol, opt options, arms 
 		return fmt.Errorf("B0 continuity refuses category-specific candidate budgets")
 	}
 	ingestionDigest := evalJSONDigest(evalFreezeIngestion{
-		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions,
 	})
 	if protocol.Store.SchemaVersion != 7 ||
 		protocol.Store.IngestionRecipe != "ledger_lossless_chunks_v2" ||
@@ -275,7 +275,7 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 		return fmt.Errorf("formal --max-tokens %d differs from protocol output cap %d", opt.maxTokens, protocol.Budget.MaxOutputTokens)
 	}
 	ingestionDigest := evalJSONDigest(evalFreezeIngestion{
-		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass,
+		Chunks: opt.chunks, ImageCaptions: opt.imageCaptions,
 	})
 	if protocol.Store.SchemaVersion != 7 ||
 		protocol.Store.IngestionRecipe != "ledger_lossless_chunks_v2" ||
@@ -324,8 +324,7 @@ func validateFormalLegacyRecipe(recipe string) error {
 // are not represented in the B1 control contract. Answer and judge prompt
 // variants remain allowed because their exact digests are frozen separately.
 func validateFormalLegacyMechanismOptions(opt options) error {
-	if opt.multiQuery || opt.filterPool > 0 || opt.conflictResolution ||
-		opt.iris || opt.rerank || opt.pcic || opt.oracle ||
+	if opt.multiQuery || opt.iris || opt.rerank || opt.pcic || opt.oracle ||
 		opt.abstainHard || opt.abstainSoft ||
 		aliasShadowEnabled(opt) || doc2queryEnabled(opt) || opt.doc2queryBuild ||
 		opt.pcicAnnotate || opt.recallDiagnostic || opt.coverageOnly ||
@@ -1422,7 +1421,7 @@ func freezeFormalProtocol(opt options, convs []conversation, controlHash string)
 	protocol := evalProtocol{
 		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b1-%s", benchmarkName, opt.evalBudgetProfile), CreatedAt: time.Now().UTC(), Git: git,
 		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
-		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
+		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
 		Models: evalModelProvenance{
 			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), Provider: answerProvider, PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
 			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), Provider: answerProvider, PromptDigest: answerPromptDigest},
@@ -1509,7 +1508,7 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 	protocol := evalProtocol{
 		Schema: evalProtocolSchema, ProtocolID: fmt.Sprintf("%s-b0-continuity", benchmarkName), CreatedAt: time.Now().UTC(), Git: git,
 		Benchmark: evalBenchmarkProvenance{Name: benchmarkName, DatasetDigest: evalTextDigest(string(raw)), Split: split, QuestionCount: len(questionIDs), QuestionIDsDigest: evalJSONDigest(questionIDs)},
-		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions, OpinionPass: opt.opinionPass}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
+		Store:     evalStoreProvenance{SchemaVersion: 7, IngestionRecipe: "ledger_lossless_chunks_v2", IngestionConfigDigest: evalJSONDigest(evalFreezeIngestion{Chunks: opt.chunks, ImageCaptions: opt.imageCaptions}), ProjectionBuilderVersions: map[string]string{"atomic_fact": "entry_store_explicit_v1"}},
 		Models: evalModelProvenance{
 			Extractor: evalModelFingerprint{ID: extractModel, Revision: envOr("EXTRACT_MODEL_REVISION", extractModel), Provider: answerProvider, PromptDigest: evalTextDigest(prompt.MemoryExtractionSystemPrompt)},
 			Answerer:  evalModelFingerprint{ID: answerModel, Revision: envOr("LOCOMO_MODEL_REVISION", answerModel), Provider: answerProvider, PromptDigest: formalAnswerPromptDigest(opt)},
@@ -1586,7 +1585,6 @@ func formalAnswerPromptDigest(opt options) string {
 type evalFreezeIngestion struct {
 	Chunks        bool `json:"chunks"`
 	ImageCaptions bool `json:"image_captions"`
-	OpinionPass   bool `json:"opinion_pass"`
 }
 
 type evalFreezeCandidateRules struct {

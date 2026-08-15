@@ -113,7 +113,6 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 		adversarial:   1,
 		repeats:       3,
 		topK:          5,
-		filterPool:    10,
 	}
 	selected := selectQuestions(conv, opt)
 	if len(selected) != 2 || selected[0].QA.Question != "normal 1" || selected[1].QA.Question != "unknown" {
@@ -125,18 +124,13 @@ func TestSelectionAndEstimateShareQuestionAndCallPlan(t *testing.T) {
 	}
 	opt.retrieval = "hybrid,hybrid+rerank"
 	pairedPlan := buildCallPlan([]conversation{conv}, opt)
-	if pairedPlan.AnswerCalls != 12 || pairedPlan.JudgeCalls != 12 || pairedPlan.FilterCalls != 12 {
-		t.Fatalf("paired call plan = %+v, want answer/filter/judge=12", pairedPlan)
+	if pairedPlan.AnswerCalls != 12 || pairedPlan.JudgeCalls != 12 {
+		t.Fatalf("paired call plan = %+v, want answer/judge=12", pairedPlan)
 	}
 	if pairedPlan.AnswerInTokens != 12*estimateAnswerIn || pairedPlan.AnswerOutTokens != 12*estimateAnswerOut || pairedPlan.JudgeInTokens != 12*estimateJudgeIn {
 		t.Fatalf("paired calibrated tokens = %+v", pairedPlan)
 	}
 	opt.retrieval = ""
-	opt.opinionPass = true
-	if got := buildCallPlan([]conversation{conv}, opt).ExtractionCalls; got != 2 {
-		t.Fatalf("opinion call plan extraction calls = %d, want 2", got)
-	}
-	opt.opinionPass = false
 	report := estimateReport([]conversation{conv}, opt, priceTable{
 		"answer-model":  {In: 1, Out: 2},
 		"extract-model": {In: 3, Out: 4},

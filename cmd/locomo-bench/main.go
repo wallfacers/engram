@@ -130,9 +130,6 @@ type options struct {
 	concurrency                int
 	chunks                     bool
 	chunkQuota                 int
-	filterPool                 int
-	conflictResolution         bool
-	supersededPenalty          float64
 	abstainPrompt              bool
 	abstainHard                bool
 	abstainSoft                bool
@@ -166,7 +163,6 @@ type options struct {
 	abstainGateSpec            string
 	abstainGate                AbstainGate
 	selector                   chunkSelector
-	opinionPass                bool
 	adversarial                int
 	catTopKSpec                string
 	catQuotaSpec               string
@@ -465,9 +461,6 @@ func run() error {
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
 	flag.IntVar(&chunkTargetChars, "chunk-target-chars", 900, "soft target per verbatim chunk in code points (store-build time; lower = finer turn-granularity chunks; stores built with different values are NOT comparable)")
 	flag.IntVar(&chunkMaxChars, "chunk-max-chars", 1100, "hard cap per stored verbatim chunk in code points (store-build time; must exceed --chunk-target-chars)")
-	flag.IntVar(&opt.filterPool, "filter-pool", 0, "listwise LLM filter: retrieve this many candidates, one LLM call selects the relevant subset (0 = off; must exceed top-k to matter)")
-	flag.BoolVar(&opt.conflictResolution, "conflict-resolution", false, "resolve contradictory facts during store build (non-destructive supersede) and downweight superseded entries at retrieval")
-	flag.Float64Var(&opt.supersededPenalty, "superseded-penalty", 0.3, "retrieval score multiplier for superseded entries [0,1]; only applies when --conflict-resolution is on")
 	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
@@ -506,7 +499,6 @@ func run() error {
 	flag.StringVar(&opt.pcicFillTurns, "pcic-fill-turns", "", "with --pcic-annotate: re-annotate ONLY these conv-scoped turn keys (comma-separated, e.g. conv-0/D15:1,conv-0/D14:32) and merge into the existing sidecar — pays for exactly those turns")
 	flag.StringVar(&opt.catTopKSpec, "cat-top-k", "", `per-category top-k overrides, e.g. "1=150" — multi-hop enumeration questions need evidence from many sessions`)
 	flag.StringVar(&opt.catQuotaSpec, "cat-chunk-quota", "", `per-category chunk-quota overrides, e.g. "1=50,4=30"`)
-	flag.BoolVar(&opt.opinionPass, "opinion-pass", false, "run a supplementary extraction pass focused on opinions/preferences/traits (ADD-only; run once per store — resuming with this flag duplicates entries)")
 	flag.IntVar(&opt.adversarial, "adversarial", 0, "include category-5 adversarial questions, scored by refusal per the Mem0 convention (0 = skip, -1 = all, N = at most N per conversation)")
 	flag.StringVar(&opt.storeDir, "store-dir", "", "persist per-conversation stores here and reuse their extraction on re-runs (default in-memory)")
 	flag.StringVar(&opt.aliasShadow, "alias-shadow", aliasShadowOff, "alias shadow arm: off | baseline | treatment")
@@ -752,9 +744,6 @@ func run() error {
 			if topK != multiQueryFinalTopK {
 				return fmt.Errorf("--multi-query requires category %d top-k to remain %d, got %d", category, multiQueryFinalTopK, topK)
 			}
-		}
-		if opt.filterPool > 0 {
-			return fmt.Errorf("--filter-pool is not allowed with --multi-query because SearchMulti's final budget must remain %d", multiQueryFinalTopK)
 		}
 		if opt.chunkQuota > multiQueryFinalTopK {
 			return fmt.Errorf("--multi-query requires --chunk-quota at most %d", multiQueryFinalTopK)
@@ -1996,7 +1985,6 @@ type armSpec struct {
 
 var supportedArmMechanisms = map[string]struct{}{
 	"tplan":        {},
-	"conflict":     {},
 	"abstain":      {},
 	"abstain-hard": {},
 	"abstain-soft": {},
@@ -2045,7 +2033,6 @@ func optionsForArm(global options, name string) options {
 	}
 	if !spec.overrides {
 		arm := global
-		arm.conflictResolution = false
 		arm.abstainPrompt = false
 		arm.abstainHard = false
 		arm.abstainSoft = false
@@ -2056,7 +2043,6 @@ func optionsForArm(global options, name string) options {
 		return arm
 	}
 	arm := global
-	arm.conflictResolution = spec.mechanisms["conflict"]
 	arm.abstainPrompt = spec.mechanisms["abstain"] || spec.mechanisms["abstain-soft"]
 	arm.abstainHard = spec.mechanisms["abstain-hard"]
 	arm.abstainSoft = spec.mechanisms["abstain-soft"]
@@ -2210,31 +2196,6 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			}
 		}
 	}
-	if opt.opinionPass {
-		// Supplementary ADD-only extraction: opinions, preferences, and traits
-		// are systematically under-captured by the event-focused main pass and
-		// are what LoCoMo open-domain questions probe. The existing facts stay
-		// untouched; this only adds entries.
-		opinionPipe := pipeline.New(pipeline.Config{
-			Entries:  es,
-			Embedder: embedder,
-			Call: func(ctx context.Context, system, user string) (string, error) {
-				return extractCall(ctx, system+opinionExtractionAddendum, user)
-			},
-			Budgets: memory.DefaultBudgets(),
-		})
-		added := 0
-		for _, s := range conv.Sessions {
-			msgs := benchmarkSessionMessages(conv, s)
-			n, err := opinionPipe.Ingest(ctx, s.Date, fmt.Sprintf("conv%d-sess%d-op", conv.ID, s.Index), msgs)
-			if err != nil {
-				logger.Warn("opinion pass failed", "conversation", conv.ID, "session", s.Index, "err", err)
-				continue
-			}
-			added += n
-		}
-		logger.Info("opinion pass done", "conversation", conv.ID, "entries_added", added)
-	}
 	var chunkTurns map[string][]string
 	var turnEvidence map[string]string
 	// clusterConfigHash fingerprints the 025 clustering config so different
@@ -2252,17 +2213,6 @@ func buildConversationRuntime(ctx context.Context, opt options, conv conversatio
 			chunkTurns = turns
 			turnEvidence = evidence
 			logger.Info("verbatim chunks ingested", "conversation", conv.ID, "chunks", n)
-		}
-	}
-	if conflictMechanismEnabled(opt, arms) {
-		// One non-destructive supersede pass over the built store. Superseded
-		// markers are inert for arms that leave the penalty at zero, so a shared
-		// store stays valid for the paired baseline arm.
-		cw := curation.NewWorker(es, st.DB(), curation.ModelCaller(extractCall), curation.Config{
-			Budgets: memory.DefaultBudgets(),
-		}, logger)
-		if err := cw.ResolveConflictsPass(ctx); err != nil {
-			logger.Warn("conflict resolution pass failed", "conversation", conv.ID, "err", err)
 		}
 	}
 	// Drain embeddings synchronously before answering (only meaningful when a
@@ -2346,27 +2296,17 @@ func retrieverOptionsFor(opt options) memory.RetrieverOptions {
 }
 
 func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
-	// The superseded penalty only bites when conflict resolution has actually
-	// marked entries during the build; keeping it zero otherwise preserves
-	// byte-for-byte parity with the baseline arm.
-	supersededPenalty := 0.0
-	if opt.conflictResolution {
-		supersededPenalty = opt.supersededPenalty
-	}
-	// assoc/cluster-sweep/temporal 机制已随 044 清理移除(flag 删除),引擎
-	// RetrieverOptions 保持零值:Associative=false 下 AssocDepth 不生效,
-	// depth<=0 时引擎回退到 maxAssociativeDepth,默认路径行为逐字节不变。
+	// assoc/cluster-sweep/temporal/conflict-resolution 机制已随 044 清理移除,
+	// 引擎 RetrieverOptions 保持零值:Associative=false 下 AssocDepth 不生效
+	// (depth<=0 引擎回退 maxAssociativeDepth),SupersededPenalty=0,默认路径
+	// 行为逐字节不变。
 	return memory.RetrieverOptions{
-		SupersededPenalty: supersededPenalty,
-		Now:                now,
+		Now: now,
 	}
 }
 
 func retrievalFingerprint(opt options) string {
 	fingerprint := ""
-	if opt.conflictResolution {
-		fingerprint += fmt.Sprintf(";conflict_resolution=true;superseded_penalty=%.3f", opt.supersededPenalty)
-	}
 	if opt.multiQuery {
 		fingerprint += ";" + multiQueryRecipeFingerprint(opt)
 	}
@@ -2881,12 +2821,6 @@ func processConversation(ctx context.Context, opt options, conv conversation, ex
 	return answerConversation(ctx, opt, conv, runtime, answerCall, judgeCall, states, logger)
 }
 
-// opinionExtractionAddendum retargets the extraction prompt at the subjective
-// layer the event-focused main pass under-captures.
-const opinionExtractionAddendum = `
-
-IMPORTANT OVERRIDE FOR THIS PASS: extract ONLY subjective facts — opinions, preferences, likes and dislikes, values, personality traits, fears, aspirations, plans, and intentions. Attribute every fact to its speaker by name (e.g. "Melanie prefers…", "Caroline believes…"). Do NOT extract plain events, dates, or activities; those are already captured. If a message contains no subjective content, extract nothing from it.`
-
 // countExtracted reports how many non-chunk entries the store already holds,
 // which signals that a persisted store's extraction pass can be reused.
 func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
@@ -2901,15 +2835,6 @@ func countExtracted(ctx context.Context, es *memory.EntryStore) (int, error) {
 		}
 	}
 	return n, nil
-}
-
-func conflictMechanismEnabled(opt options, arms []string) bool {
-	for _, arm := range arms {
-		if optionsForRun(opt, arm, len(arms) > 1).conflictResolution {
-			return true
-		}
-	}
-	return false
 }
 
 func validateTemporalStore(ctx context.Context, db *sql.DB, facts int) error {
@@ -3313,10 +3238,7 @@ func retrieve(ctx context.Context, retriever *memory.Retriever, filterCall model
 	return hits, err
 }
 
-func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall modelCaller, query string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, error) {
-	if opt.filterPool > topK {
-		return retrieveFilteredDiagnostics(ctx, retriever, filterCall, query, topK, quota, opt.filterPool)
-	}
+func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, _ modelCaller, query string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, error) {
 	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota, opt.selector)
 }
 
@@ -3826,8 +3748,6 @@ const (
 	estimateExtractOut = 500
 	estimateAnswerIn   = 5_100
 	estimateAnswerOut  = 50
-	estimateFilterIn   = 1_000
-	estimateFilterOut  = 0
 	estimateJudgeIn    = 4_000
 	estimateJudgeOut   = 100
 )
@@ -3852,12 +3772,8 @@ func buildCallPlan(convs []conversation, opt options) callPlan {
 		repeats = 1
 	}
 	plan := callPlan{Questions: countSelectedQuestions(convs, opt)}
-	passes := 1
-	if opt.opinionPass {
-		passes++
-	}
 	for _, conv := range convs {
-		plan.ExtractionCalls += len(conv.Sessions) * passes
+		plan.ExtractionCalls += len(conv.Sessions)
 	}
 	armCount := 1
 	if arms, err := armsFor(opt.retrieval); err == nil && len(arms) > 0 {
@@ -3867,11 +3783,6 @@ func buildCallPlan(convs []conversation, opt options) callPlan {
 	plan.AnswerInTokens = plan.AnswerCalls * estimateAnswerIn
 	plan.AnswerOutTokens = plan.AnswerCalls * estimateAnswerOut
 	plan.FilterCalls = 0
-	if opt.filterPool > opt.topK {
-		plan.FilterCalls = plan.Questions * repeats * armCount
-		plan.FilterInTokens = plan.FilterCalls * estimateFilterIn
-		plan.FilterOutTokens = plan.FilterCalls * estimateFilterOut
-	}
 	plan.JudgeCalls = plan.Questions * repeats * armCount
 	plan.JudgeInTokens = plan.JudgeCalls * estimateJudgeIn
 	plan.JudgeOutTokens = plan.JudgeCalls * estimateJudgeOut

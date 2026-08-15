@@ -69,12 +69,6 @@ func validateDoc2QueryOptions(opt options) error {
 	if !doc2queryEnabled(opt) {
 		return nil
 	}
-	if opt.opinionPass {
-		return fmt.Errorf("--doc2query cannot be combined with --opinion-pass; gate arms must not call extraction")
-	}
-	if opt.conflictResolution {
-		return fmt.Errorf("--doc2query cannot be combined with --conflict-resolution; gate arms must not call extraction")
-	}
 	if strings.TrimSpace(opt.retrieval) != "" {
 		arms, err := armsFor(opt.retrieval)
 		if err != nil {
