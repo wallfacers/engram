@@ -229,17 +229,6 @@ type options struct {
 	notebookDir     string  // --notebook-dir: output dir for notebook.jsonl / mistakes-*.md / index.md (default ./eval-notebook)
 	notebookFactTau float64 // --notebook-fact-tau: notebook attribution fact-coverage threshold (lower than factCoverageTau: the notebook must flag "gold plausibly in context" rather than require strict lexical proof). Does NOT affect retrieval or the formal protocol.
 
-	// 042 counterfactual evidence utility gate — dedicated, default-off research
-	// mode. --utility-stage empty means every --utility-* flag is a usage error
-	// and the ordinary benchmark path is byte-identical.
-	utilityStageFlag     string // --utility-stage: label|pilot|collect|diagnose|confirm|transfer (empty=off)
-	utilitySource        string // --utility-source: diagnose←collect / confirm←diagnose / transfer←confirm dir
-	utilityLabelSource   string // --utility-label-source: label-GO dir (pilot/collect)
-	utilityPilotSource   string // --utility-pilot-source: pilot-GO dir (collect)
-	utilityShallowSource string // --utility-shallow-source: historical k30 root (label)
-	utilityDeepSource    string // --utility-deep-source: historical k150 root (label)
-	utilityShallowK      int    // --utility-shallow-k (v1 fixed 30)
-	utilityDeepK         int    // --utility-deep-k (v1 fixed 150)
 }
 
 func main() {
@@ -342,14 +331,6 @@ func run() error {
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.unifiedAnswerContract, "unified-answer-contract", false, "experimental dataset/category-independent evidence-grounded answer contract (default off; isolated scoring also requires --no-idk-retry)")
 	flag.BoolVar(&opt.unifiedTypedPrompts, "unified-typed-prompts", false, "combine the unified contract with the LoCoMo-validated typed contracts: category 1 uses multi-hop and category 3 uses open-domain, every other category (incl. all LongMemEval categories) keeps the unified bytes; requires --unified-answer-contract; default off, eval-config change")
-	flag.StringVar(&opt.utilityStageFlag, "utility-stage", "", "042 research mode: counterfactual-evidence utility gate stage label|pilot|collect|diagnose|confirm|transfer (empty = off, ordinary path byte-identical)")
-	flag.StringVar(&opt.utilitySource, "utility-source", "", "042 --utility-stage source dir: diagnose←collect, confirm←diagnose, transfer←confirm")
-	flag.StringVar(&opt.utilityLabelSource, "utility-label-source", "", "042 label-GO stage dir (required for pilot/collect)")
-	flag.StringVar(&opt.utilityPilotSource, "utility-pilot-source", "", "042 pilot-GO stage dir (required for collect)")
-	flag.StringVar(&opt.utilityShallowSource, "utility-shallow-source", "", "042 historical k30 run root (label only)")
-	flag.StringVar(&opt.utilityDeepSource, "utility-deep-source", "", "042 historical k150 run root (label only)")
-	flag.IntVar(&opt.utilityShallowK, "utility-shallow-k", 0, "042 shallow retrieval depth (v1 fixed 30)")
-	flag.IntVar(&opt.utilityDeepK, "utility-deep-k", 0, "042 deep retrieval depth (v1 fixed 150)")
 	flag.StringVar(&opt.unifiedProbeFixture, "unified-answer-probe", "", "run the dedicated paired generic-vs-unified behavior probe from this fixture JSON and exit")
 	flag.StringVar(&opt.unifiedProbeOut, "unified-answer-probe-out", "", "write the paired behavior-probe audit report to this JSON path")
 	flag.IntVar(&opt.unifiedProbeRepeats, "unified-answer-probe-repeats", 3, "paired behavior-probe repetitions (must be a positive odd number)")
@@ -448,15 +429,6 @@ func run() error {
 	}
 	if opt.tokenCounterCalibrate {
 		return runFormalTokenCalibrationCLI(opt)
-	}
-	// 042 utility gate: dedicated, default-off research mode. Dispatched before
-	// the --data gate so offline stages (label/diagnose) never need dataset or
-	// provider env. Empty --utility-stage keeps the ordinary path byte-identical.
-	if opt.utilityStageFlag != "" {
-		if err := validateUtilityCLIOptions(&opt); err != nil {
-			return err
-		}
-		return runUtilityCLI(&opt)
 	}
 	if opt.dataPath == "" {
 		flag.Usage()
