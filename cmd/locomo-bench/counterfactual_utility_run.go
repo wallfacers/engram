@@ -107,12 +107,28 @@ func utilityAnswerUnit(ctx context.Context, env *utilityModelEnv, retriever *mem
 // runUtilityCollectStage produces the fresh paired corpus: for every decision
 // unit a k30 shallow signal answer and a k150 paired_deep answer, both judged,
 // then the repetition-level utility labels and a COMPLETE seal.
-func runUtilityCollectStage(opt *options) error {
-	if err := utilityValidateManifestSeal(opt.utilityLabelSource, utilityStageLabel); err != nil {
+// utilityValidateCollectSources enforces the collect authorization gates:
+// the label constructor-audit GO seal and the pilot GO kill-gate (SC-012).
+func utilityValidateCollectSources(labelDir, pilotDir string) error {
+	if err := utilityValidateManifestSeal(labelDir, utilityStageLabel); err != nil {
 		return fmt.Errorf("label source: %w", err)
 	}
-	if err := utilityValidateManifestSeal(opt.utilityPilotSource, utilityStagePilot); err != nil {
+	if err := utilityValidateManifestSeal(pilotDir, utilityStagePilot); err != nil {
 		return fmt.Errorf("pilot source: %w", err)
+	}
+	pilotVerdict, err := utilityReadPilotVerdict(pilotDir)
+	if err != nil {
+		return fmt.Errorf("pilot verdict: %w", err)
+	}
+	if pilotVerdict != "GO" {
+		return fmt.Errorf("collect requires pilot GO, got %s (SC-012 kill-gate)", pilotVerdict)
+	}
+	return nil
+}
+
+func runUtilityCollectStage(opt *options) error {
+	if err := utilityValidateCollectSources(opt.utilityLabelSource, opt.utilityPilotSource); err != nil {
+		return err
 	}
 	ctx := context.Background()
 	env, err := utilityBuildModelEnv(opt)
@@ -274,6 +290,15 @@ func utilityReadDiagnoseVerdict(dir string) (string, error) {
 	}
 	v, _ := report["verdict"].(string)
 	return v, nil
+}
+
+// utilityReadPilotVerdict reads the sealed pilot report verdict (SC-012 gate).
+func utilityReadPilotVerdict(dir string) (string, error) {
+	var receipt utilityPilotReceipt
+	if err := readJSON(filepath.Join(dir, utilityPilotReportFile), &receipt); err != nil {
+		return "", err
+	}
+	return receipt.Verdict, nil
 }
 
 var _ provider.Usage // keep provider import for the caller seam

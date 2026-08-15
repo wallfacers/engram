@@ -15,6 +15,91 @@ import (
 	"testing"
 )
 
+// utilityWriteTestLabelSeal writes a minimal sealed label dir (SC-009 receipt).
+func utilityWriteTestLabelSeal(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "public"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := utilityTestManifest(utilityStageLabel)
+	md, err := utilityManifestDigest(&m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, utilityManifestFile), m); err != nil {
+		t.Fatal(err)
+	}
+	report := map[string]any{"schema": utilitySchemaVersion, "verdict": "GO", "claim": "label_constructor_regression_only"}
+	rd, err := utilityCanonicalDigest(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, utilityLabelReportFile), report); err != nil {
+		t.Fatal(err)
+	}
+	seal := utilityStageSeal{Schema: utilitySchemaVersion, Stage: utilityStageLabel, Status: utilitySealComplete, ManifestDigest: md, Verdict: "GO", ReportDigest: rd}
+	if err := utilitySealWrite(dir, seal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// utilityWriteTestPilotSeal writes a sealed pilot dir with the given verdict.
+func utilityWriteTestPilotSeal(t *testing.T, dir, verdict string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "public"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := utilityTestManifest(utilityStagePilot)
+	m.Benchmark.ConversationIDs = []int{0, 1}
+	md, err := utilityManifestDigest(&m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, utilityManifestFile), m); err != nil {
+		t.Fatal(err)
+	}
+	report := utilityPilotReceipt{Schema: utilitySchemaVersion, Verdict: verdict, Claim: "signal_existence_pilot_only", AUCGate: utilityPilotAUCGate, Counts: map[string]int{}, ProductionAuthorized: false}
+	rd, err := utilityCanonicalDigest(&report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, utilityPilotReportFile), &report); err != nil {
+		t.Fatal(err)
+	}
+	seal := utilityStageSeal{Schema: utilitySchemaVersion, Stage: utilityStagePilot, Status: utilitySealComplete, ManifestDigest: md, Verdict: verdict, ReportDigest: rd}
+	if err := utilitySealWrite(dir, seal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUtilityCollectRequiresPilotGO guards the SC-012 kill-gate: a COMPLETE
+// pilot seal with verdict NO-GO must not authorize full collect. Regression for
+// the gate gap where only seal status (COMPLETE) was checked, not the verdict.
+func TestUtilityCollectRequiresPilotGO(t *testing.T) {
+	labelDir := t.TempDir()
+	utilityWriteTestLabelSeal(t, labelDir)
+
+	// Pilot NO-GO -> collect must be refused despite a valid COMPLETE seal.
+	pilotNoGo := t.TempDir()
+	utilityWriteTestPilotSeal(t, pilotNoGo, "NO-GO")
+	if err := utilityValidateCollectSources(labelDir, pilotNoGo); err == nil {
+		t.Fatal("collect accepted a NO-GO pilot source")
+	}
+
+	// Pilot GO -> collect is authorized at the source gate.
+	pilotGo := t.TempDir()
+	utilityWriteTestPilotSeal(t, pilotGo, "GO")
+	if err := utilityValidateCollectSources(labelDir, pilotGo); err != nil {
+		t.Fatalf("collect rejected a GO pilot source: %v", err)
+	}
+}
+
 // --- collect: label derivation and coverage ---
 
 func TestUtilityCollectLabelDerivationAndCoverage(t *testing.T) {
@@ -30,7 +115,7 @@ func TestUtilityCollectLabelDerivationAndCoverage(t *testing.T) {
 	if err := utilityWriteTestCollect(dir, units, []int{0}); err != nil {
 		t.Fatalf("write collect: %v", err)
 	}
-	data, err := utilityLoadCollect(dir)
+	data, err := utilityLoadCollect(dir, utilityStageCollect)
 	if err != nil {
 		t.Fatalf("load collect: %v", err)
 	}
@@ -59,7 +144,7 @@ func TestUtilityCollectSealAndManifestValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A valid sealed collect loads.
-	if _, err := utilityLoadCollect(dir); err != nil {
+	if _, err := utilityLoadCollect(dir, utilityStageCollect); err != nil {
 		t.Fatalf("valid collect rejected: %v", err)
 	}
 	// Tampering with a label file invalidates the collect.
@@ -71,7 +156,7 @@ func TestUtilityCollectSealAndManifestValidation(t *testing.T) {
 	if err := os.WriteFile(labelsPath, append(raw[:len(raw)-2], []byte("}]}\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := utilityLoadCollect(dir); err == nil {
+	if _, err := utilityLoadCollect(dir, utilityStageCollect); err == nil {
 		t.Fatal("tampered collect must be rejected")
 	}
 }
@@ -153,7 +238,7 @@ func TestUtilityDiagnoseLeakageInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Conversation 2 exists in the manifest but has no units: coverage invalid.
-	data, err := utilityLoadCollect(dir)
+	data, err := utilityLoadCollect(dir, utilityStageCollect)
 	if err != nil {
 		t.Fatal(err)
 	}

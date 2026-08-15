@@ -8,6 +8,7 @@ package main
 //	US3 (Phase 5): runUtilityConfirmStage / runUtilityTransferStage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,13 +375,13 @@ func runUtilityDiagnoseStage(opt *options) error {
 
 // --- US2: collect artifact loading ---
 
-// utilityLoadCollect validates a sealed collect directory and joins the public
-// shallow/paired-deep answer receipts with the hidden utility labels into
-// decision units. Hidden labels are read only here (the score phase), never by
-// the public decision loaders.
-func utilityLoadCollect(dir string) (utilityCollectData, error) {
+// utilityLoadCollect validates a sealed collect (or pilot) directory and joins
+// the public shallow/paired-deep answer receipts with the hidden utility labels
+// into decision units. Hidden labels are read only here (the score phase),
+// never by the public decision loaders.
+func utilityLoadCollect(dir string, stage utilityStage) (utilityCollectData, error) {
 	var data utilityCollectData
-	if err := utilityValidateManifestSeal(dir, utilityStageCollect); err != nil {
+	if err := utilityValidateManifestSeal(dir, stage); err != nil {
 		return data, err
 	}
 	m, _, err := utilityManifestRead(dir)
@@ -757,7 +758,7 @@ func utilityDiagnose(collectDir, outDir string) (utilityEvaluationReceipt, error
 	report.ClaimBoundary = "cross_fitted_diagnostic_only"
 	report.ProductionAuthorized = false
 
-	data, err := utilityLoadCollect(collectDir)
+	data, err := utilityLoadCollect(collectDir, utilityStageCollect)
 	if err != nil {
 		return report, err
 	}
@@ -1076,15 +1077,146 @@ func runUtilityPilotStage(opt *options) error {
 	if opt.utilityLabelSource == "" {
 		return fmt.Errorf("pilot stage requires --utility-label-source (label GO)")
 	}
-	// The pilot collects the first two conversations with the fresh paired
-	// corpus, then evaluates the in-sample AUC gate. Collection is a model-side
-	// step; the gate receipt is written here so a NO-GO stops before full collect.
-	receipt, err := utilityPilotGate(nil)
+	if err := utilityValidateManifestSeal(opt.utilityLabelSource, utilityStageLabel); err != nil {
+		return fmt.Errorf("label source: %w", err)
+	}
+	ctx := context.Background()
+	env, err := utilityBuildModelEnv(opt)
 	if err != nil {
 		return err
 	}
-	_ = receipt
-	return fmt.Errorf("pilot stage collection requires the AutoDL sidecar path (not available offline)")
+	convs, err := loadDataset(opt.dataPath, false)
+	if err != nil {
+		return fmt.Errorf("load dataset: %w", err)
+	}
+	if len(convs) < 2 {
+		return fmt.Errorf("pilot requires at least two conversations, got %d", len(convs))
+	}
+	// SC-012: exactly the first two conversations in benchmark order.
+	pilotConvs := convs[:2]
+	convIDs := []int{pilotConvs[0].ID, pilotConvs[1].ID}
+	sort.Ints(convIDs)
+
+	dir := opt.runDir
+	for _, sub := range []string{"public", "hidden"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return err
+		}
+	}
+	m := utilityRunManifest{
+		Schema: utilitySchemaVersion,
+		RunID:  utilityRunID("pilot"),
+		Stage:  utilityStagePilot,
+		Source: []utilitySourceRef{
+			{Stage: "label", SealDigest: utilityEndpointDigest("label-seal")},
+		},
+		Benchmark: utilityBenchmarkIdentity{Name: "locomo", QuestionCount: 0, ConversationIDs: convIDs, Repetitions: utilityRepetitions},
+		Recipe:    utilityRecipeIdentity{Retrieval: "hybrid", ShallowK: utilityShallowK, DeepK: utilityDeepK, ForceAnswer: true},
+		Answerer: utilityAnswererIdentity{
+			Provider: "openai-compatible-local", Model: os.Getenv("LOCOMO_MODEL"),
+			EndpointDigest:     utilityEndpointDigest(os.Getenv("LOCOMO_BASE_URL")),
+			TemperatureRequest: "omitted", MaxTokens: opt.maxTokens, MaxModelLen: utilityMaxModelLen,
+		},
+		CallPolicy: utilityCallPolicy{MaxAttempts: utilityMaxAttempts, Retryable: []string{"timeout", "network_error", "http_429", "http_5xx"}, UnknownAnswerUsageCharge: "max_model_len"},
+	}
+	md, err := utilityManifestDigest(&m)
+	if err != nil {
+		return err
+	}
+	if err := utilityManifestWrite(dir, m); err != nil {
+		return err
+	}
+
+	var attempts []any
+	var labels []any
+	questionCount := 0
+	for ci := range pilotConvs {
+		conv := &pilotConvs[ci]
+		runtime, err := buildConversationRuntime(ctx, *opt, *conv, nil, nil, []string{"hybrid"}, nil)
+		if err != nil {
+			return fmt.Errorf("build runtime conv %d: %w", conv.ID, err)
+		}
+		defer runtime.Close() //nolint:errcheck
+		retriever := runtime.retrievers["hybrid"]
+		if retriever == nil {
+			return fmt.Errorf("conv %d has no hybrid retriever", conv.ID)
+		}
+		for qi := range conv.QA {
+			qa := &conv.QA[qi]
+			questionCount++
+			qid := qa.QuestionID
+			if qid == "" {
+				qid = fmt.Sprintf("conv-%d-q-%d", conv.ID, qi)
+			}
+			for rep := 1; rep <= utilityRepetitions; rep++ {
+				key := utilityDecisionKey{Benchmark: "locomo", ConversationID: conv.ID, QuestionID: qid, QuestionIndex: qi, Category: qa.CategoryName, Repetition: rep}
+				sh, shCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityShallowK, key, utilityArmShallow, true)
+				if err != nil {
+					return fmt.Errorf("shallow %s: %w", key, err)
+				}
+				attempts = append(attempts, sh)
+				de, deCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityDeepK, key, utilityArmPairedDeep, false)
+				if err != nil {
+					return fmt.Errorf("paired_deep %s: %w", key, err)
+				}
+				attempts = append(attempts, de)
+				u, label, err := utilityTruthTable(shCorrect, deCorrect)
+				if err != nil {
+					return fmt.Errorf("truth table %s: %w", key, err)
+				}
+				labels = append(labels, utilityUtilityLabel{
+					DecisionKey: key, ShallowAnswerDigest: sh.AnswerAttemptID, DeepAnswerDigest: de.AnswerAttemptID,
+					ShallowCorrect: shCorrect, DeepCorrect: deCorrect, Utility: u, Label: label,
+					SourceManifestDigest: md,
+				})
+			}
+		}
+	}
+	m.Benchmark.QuestionCount = questionCount
+	md2, err := utilityManifestDigest(&m)
+	if err != nil {
+		return err
+	}
+	if err := utilityWriteJSONL(filepath.Join(dir, utilityPublicAnswerAttemptsFile), attempts); err != nil {
+		return err
+	}
+	if err := utilityWriteJSONL(filepath.Join(dir, utilityHiddenLabelsFile), labels); err != nil {
+		return err
+	}
+
+	data, err := utilityLoadCollect(dir, utilityStagePilot)
+	if err != nil {
+		return fmt.Errorf("load pilot corpus: %w", err)
+	}
+	receipt, err := utilityPilotGate(data.Units)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(dir, utilityPilotReportFile), receipt); err != nil {
+		return err
+	}
+	reportDigest, err := utilityCanonicalDigest(receipt)
+	if err != nil {
+		return err
+	}
+	seal := utilityStageSeal{
+		Schema: utilitySchemaVersion, Stage: utilityStagePilot, Status: utilitySealComplete,
+		ManifestDigest: md2, ReportDigest: reportDigest, Verdict: receipt.Verdict,
+	}
+	if err := utilitySealWrite(dir, seal); err != nil {
+		return err
+	}
+	switch receipt.Verdict {
+	case "GO":
+		fmt.Printf("utility pilot: stage=pilot validity=valid verdict=GO auc=%s questions=%d units=%d\n",
+			receipt.GateObserved, receipt.Questions, receipt.DecisionUnits)
+	case "NO-GO":
+		fmt.Printf("utility pilot: stage=pilot validity=valid verdict=NO-GO auc=%s reason=%s questions=%d units=%d\n",
+			receipt.GateObserved, receipt.AUCNullReason, receipt.Questions, receipt.DecisionUnits)
+	default:
+		return fmt.Errorf("utility pilot: unexpected verdict %q", receipt.Verdict)
+	}
+	return nil
 }
 
 // --- US3: confirm / transfer gate evaluation (offline) ---
