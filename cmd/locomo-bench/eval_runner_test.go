@@ -34,10 +34,6 @@ func TestMechanismArmsRequireFormalProtocolContext(t *testing.T) {
 		"representation": func(opt *options) { opt.representationArm = ReprRawTurnWindow },
 		"compiler":       func(opt *options) { opt.compilerArm = "extractive" },
 		"compiler exact_token": func(opt *options) { opt.compilerArm = "exact_token" },
-		"event gap": func(opt *options) {
-			opt.eventProjection = "E1"
-			opt.gapRefetch = true
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			diagnostic := options{representationArm: ReprChunk900}
@@ -291,10 +287,6 @@ func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T
 	for name, mutate := range map[string]func(*options){
 		"compiler arm":   func(o *options) { o.compilerArm = "extractive" },
 		"representation": func(o *options) { o.representationArm = ReprRawTurnWindow },
-		"event + gap": func(o *options) {
-			o.eventProjection = "E1"
-			o.gapRefetch = true
-		},
 	} {
 		t.Run("unbound "+name, func(t *testing.T) {
 			drifted := opt
@@ -334,8 +326,7 @@ func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T
 		}
 		combined := opt
 		combined.representationArm = ReprRawTurnWindow
-		combined.eventProjection = "E1"
-		combined.gapRefetch = true
+		combined.compilerArm = "extractive"
 		if err := validateFormalRunnerOptions(treatment, combined, []string{"hybrid"}); err == nil {
 			t.Fatal("formal runner accepted multiple treatment mechanisms before T114")
 		}
@@ -343,7 +334,7 @@ func TestFormalRunnerOptionsRequireLegacyControlAndRejectTreatments(t *testing.T
 	t.Run("legacy manifest mechanism flag", func(t *testing.T) {
 		drifted := baseProtocol
 		drifted.Experiment.MechanismFlags = map[string]bool{
-			"idk_retry": false, "iris": false, "rerank": false, "gap_refetch": true,
+			"idk_retry": false, "iris": false, "rerank": true,
 		}
 		if err := validateFormalRunnerOptions(drifted, opt, []string{"hybrid"}); err == nil {
 			t.Fatal("formal runner accepted a treatment mechanism flag in the legacy manifest")
@@ -362,12 +353,6 @@ func TestFreezeFormalProtocolRejectsSuffixedRecipeAndAlternateModesBeforeIO(t *t
 		"suffixed recipe":  func(opt *options) { opt.retrieval = "hybrid+rerank" },
 		"diagnostic mode":  func(opt *options) { opt.coverageOnly = true },
 		"representation":   func(opt *options) { opt.representationArm = ReprRawTurnWindow },
-		"event projection": func(opt *options) { opt.eventProjection = "E1" },
-		"gap refetch":      func(opt *options) { opt.gapRefetch = true },
-		"event + gap": func(opt *options) {
-			opt.eventProjection = "E1"
-			opt.gapRefetch = true
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			opt := base

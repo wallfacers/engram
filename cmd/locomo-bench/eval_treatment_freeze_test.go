@@ -75,12 +75,7 @@ func TestFormalTreatmentForOptions(t *testing.T) {
 		{"compiler extractive", options{compilerArm: "extractive"}, "", "", nil, false},
 		{"compiler exact_token", options{compilerArm: "exact_token"}, "", "", nil, false},
 		{"representation", options{representationArm: "semantic_episode"}, "representation_navigation", "semantic_episode", map[string]bool{"representation": true}, false},
-		{"event projection", options{eventProjection: "E1"}, "event", "event_e1", map[string]bool{"event_projection": true}, false},
-		{"gap refetch with projection", options{eventProjection: "E1", gapRefetch: true}, "gap", "structured_gap_refetch", map[string]bool{"event_projection": true, "gap_refetch": true}, false},
-		{"gap without projection", options{gapRefetch: true}, "", "", nil, true},
-		{"two treatments", options{representationArm: "semantic_episode", eventProjection: "E1"}, "", "", nil, true},
 		{"bad compiler arm", options{compilerArm: "hybrid"}, "", "", nil, false},
-		{"bad event projection", options{eventProjection: "E9"}, "", "", nil, true},
 	}
 	for _, tc := range cases {
 		got, err := formalTreatmentForOptions(tc.opt)

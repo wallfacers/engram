@@ -220,8 +220,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.episodeCluster, "--episode-cluster"},
 		{strings.TrimSpace(opt.compilerArm) != "", "--compiler-arm"},
 		{opt.representationArm != "" && opt.representationArm != ReprChunk900, "--representation"},
-		{strings.TrimSpace(opt.eventProjection) != "", "--event-projection"},
-		{opt.gapRefetch, "--gap-refetch"},
 	} {
 		if conflict.enabled {
 			conflicts = append(conflicts, conflict.name)

@@ -411,14 +411,6 @@ func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
 	if opt.representationArm != "" && opt.representationArm != ReprChunk900 {
 		active = append(active, "representation")
 	}
-	switch {
-	case opt.eventProjection != "" && opt.gapRefetch:
-		active = append(active, "gap")
-	case opt.eventProjection != "":
-		active = append(active, "event")
-	case opt.gapRefetch:
-		active = append(active, "gap")
-	}
 	if len(active) > 1 {
 		return formalTreatmentFreeze{}, fmt.Errorf("formal treatment freeze allows exactly one mechanism, got %v", active)
 	}
@@ -435,19 +427,6 @@ func formalTreatmentForOptions(opt options) (formalTreatmentFreeze, error) {
 			flags["episode_cluster"] = true
 		}
 		return formalTreatmentFreeze{Stage: "representation_navigation", Arm: string(opt.representationArm), MechanismFlags: flags}, nil
-	case "event":
-		if !validEventProjection(opt.eventProjection) {
-			return formalTreatmentFreeze{}, fmt.Errorf("--event-projection must be E0 | E1 | E2 | E3, got %q", opt.eventProjection)
-		}
-		if opt.gapRefetch {
-			return formalTreatmentFreeze{Stage: "gap", Arm: "structured_gap_refetch", MechanismFlags: map[string]bool{"event_projection": true, "gap_refetch": true}}, nil
-		}
-		return formalTreatmentFreeze{Stage: "event", Arm: "event_" + strings.ToLower(opt.eventProjection), MechanismFlags: map[string]bool{"event_projection": true}}, nil
-	case "gap":
-		if !validEventProjection(opt.eventProjection) {
-			return formalTreatmentFreeze{}, fmt.Errorf("--gap-refetch requires --event-projection E0 | E1 | E2 | E3")
-		}
-		return formalTreatmentFreeze{Stage: "gap", Arm: "structured_gap_refetch", MechanismFlags: map[string]bool{"event_projection": true, "gap_refetch": true}}, nil
 	}
 	return formalTreatmentFreeze{}, nil
 }
@@ -576,8 +555,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 }
 
 func formalTreatmentMechanismRequested(opt options) bool {
-	return (opt.representationArm != "" && opt.representationArm != ReprChunk900) ||
-		opt.eventProjection != "" || opt.gapRefetch
+	return opt.representationArm != "" && opt.representationArm != ReprChunk900
 }
 
 // admitFormalQuestion limits in-flight retrieve→pack→answer pipelines. It is
@@ -685,18 +663,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		if opt.representationArm != ReprChunk900 {
 			var renderer RepresentationRenderer
 			var rendererErr error
-			if opt.representationArm == ReprEvent {
-				fullReader, ok := opt.formalEvidence.(evidenceReader)
-				if !ok {
-					rendererErr = fmt.Errorf("formal evidence reader does not satisfy evidenceReader")
-				} else if opt.eventProject == nil {
-					rendererErr = fmt.Errorf("event representation requires --event-project")
-				} else {
-					renderer = NewEventProjectionRenderer(opt.eventProject, fullReader)
-				}
-			} else {
-				renderer, rendererErr = formalRepresentationRendererWithEpisodes(opt.representationArm, projections, opt.formalEvidence, opt.formalEpisodes)
-			}
+			renderer, rendererErr = formalRepresentationRendererWithEpisodes(opt.representationArm, projections, opt.formalEvidence, opt.formalEpisodes)
 			if rendererErr == nil {
 				anchors := buildFormalRankedAnchors(expanded)
 				enriched, renderErr := renderer.Render(ctx, anchors)
