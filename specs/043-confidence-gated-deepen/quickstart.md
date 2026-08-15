@@ -20,6 +20,10 @@ CGO_ENABLED=0 go test -count=1 ./cmd/locomo-bench -run 'TestConfidenceDeepen' -v
 
 ```bash
 # env: LOCOMO_BASE_URL/MODEL/API_KEY(vllm 侧), JUDGE_* 照 042
+# 硬前置(87.9% 锚 = thinking on,2026-08-15 核实):
+#   LOCOMO_NO_THINKING=0   # 对照臂主通道开 thinking(代码默认 off,不设即双变量差)
+#   answer vllm --max-model-len 32768   # thinking-on SSE 卡死修复
+#   embed  --max-num-seqs 1             # 并发确定性(context parity 依赖)
 go run ./cmd/locomo-bench --data <locomo.json> --run-dir <dir> \
   --deepen-pilot signal \
   --retrieval hybrid --chunks --chunk-quota 12 --unified-answer-contract \
