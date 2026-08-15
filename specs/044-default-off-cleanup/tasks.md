@@ -64,3 +64,7 @@ T001(基线) → T002/T003(纯 flag 级)→ T004/T005(010/011/012)
 ## Implementation strategy
 
 按"低风险 → 高风险"推进:纯 flag 级(T002/T003)→ 有交叉的 010/011/012(T004/T005)→ 专属文件(T006-T011)→ 核心行为变更 trace(T012/T013)→ 大块协议 042(T014)→ 收尾(T015-T017)。每批独立 commit、独立验证,任何一批 build/test 失败立即停下修,不回滚已完成批次。trace 默认值移除单独 commit 并注明 Step A 依据。
+
+## Phase 2.5 · 043 代码清理(rebase 后新增)
+
+- [x] T018 043 已合并 master(e6625d8),整删 confidence_deepen.go/confidence_deepen_artifact.go/confidence_deepen_cli.go/confidence_deepen_pilot.go + 3 测试文件;删 main.go 的 `--confidence-deepen`/`--deepen-*` 字段与 flag、validateDeepenCLIOptions 调用、pilot dispatch、unified 冲突表条目;spec FR-003/US2 前提更新(master 现含 043 代码)

@@ -30,7 +30,7 @@
 
 ### User Story 2 - 移除 042 反事实效用协议与 043 深化机制(维护者决策项)(Priority: P1)
 
-维护者已决策:042 维持关闭并进清理(其 NO-GO 归因存疑但不重开重验);043 的 confidence-gated deepening pilot NO-GO(AUC 0.54 / flip 93.4%)无机制实现。移除 `--utility-stage` 族(042 协议代码)与 `--confidence-deepen` 族(043 深化)的全部接线与模型执行路径;043 的**纯函数层与 pilot 测量资产**保留(valuable,供未来复用)。
+维护者已决策:042 维持关闭并进清理(其 NO-GO 归因存疑但不重开重验);043 的 confidence-gated deepening pilot NO-GO(AUC 0.54 / flip 93.4%)。移除 `--utility-stage` 族(042 协议代码)与 `--confidence-deepen` 族(043 深化)的全部接线与模型执行路径。**043 代码已合并 master(2026-08-16,e6625d8),经维护者确认纳入 044 清理**:`confidence_deepen*.go` 6 文件 + main.go 接线(字段/flag/validate/dispatch/冲突表条目)全部移除。
 
 **Why this priority**: 两者都是"方向已关闭但代码仍在 master 的插拔式开关"(默认关闭不激活),维护者明确判定无需继续投入;与 US1 同属高风险最低的清理。
 
@@ -89,7 +89,7 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 
 - **FR-001**: 已证伪机制(经 verdict 判定 NO-GO / 零增量 / 被取代)的 flag、专属实现、arm 机制映射、冲突表条目、fingerprint 标记 MUST 被移除;移除后 `--help` 不再列出该 flag。**权威清理清单** = [默认关闭机制清理计划](../../../docs/evaluation/default-off-mechanism-cleanup-plan.md)「第一类:已证伪/零增量,建议清理」表(含 `--write-dedup`/`--neighbor-extend`/`--episode-cluster`/`--relation-context`/`--counter-refine`/`--temporal-answer-prompt`/`--lme-typed-prompts`/abstain 系/`--gap-refetch`/`--event-projection`/`--temporal-resolution`/`--nav` 系/`--iris` 系/`--temporal-score`/`--temporal-hard-filter`/`--assoc`/`--cluster-sweep`/`--conflict-resolution`/`--multi-query`/`--filter-pool`/`--opinion-pass`/`--trace-mediation`/`--consolidate`/`--evidence-assembly`/`--utility-stage` 族/`--confidence-deepen` 族)。
 - **FR-002**: 清理范围 MUST 包含 042(`--utility-stage` 族协议,13 个 counterfactual 文件)的接线与模型执行路径移除;042 方向结论不变(维持关闭)。
-- **FR-003**: 043 机制方向已 NO-GO(verdict 已出);master 不含 043 代码,故本 feature 仅在文档记录其结论,不执行代码清理;若 043 后续 merge 则另行处理。
+- **FR-003**: 043 机制方向已 NO-GO(verdict 已出);043 已合并 master(2026-08-16 e6625d8),本 feature 移除其 `confidence_deepen*.go` 6 文件与 main.go 接线(`--confidence-deepen`/`--deepen-*` flag、`validateDeepenCLIOptions`、pilot dispatch、冲突表条目);方向结论保留在 verdict 文档。
 - **FR-004**: `--trace-mediation` 默认开启组件 MUST 被移除,默认路径切换到 chunk 装配;unified 配方须在清理后与 87.9% 锚(同 store/judge/clean 口径)对齐,不引入回归。
 - **FR-005**: 已坐实能力(`--unified-answer-contract` / `--unified-typed-prompts` / `--chunks` / `--chunk-quota` / `--force-answer` / `--no-idk-retry`)MUST 保持不变(flag、默认值、行为均不因清理受影响)。
 - **FR-006**: 诊断与未定论工具(`--oracle` / `--rerank` / `--pcic` / `--compiler-arm` / `--representation` / `--temporal-date-scaffold` / `--abstain-probe` / `--recall-diagnostic` 及 `SearchMulti`/`classifyQueryMode`/`computeAbstainSignal`)MUST 不被误删;其去留在 plan 阶段逐个核查并给出理由。
@@ -122,7 +122,7 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 - **042 不重开**:维护者已定 042 维持关闭(归因存疑但不重开重验),042 协议代码进清理。
 - **043 已 NO-GO**:043 机制方向关闭,纯函数层 + pilot 测量保留为资产,机制接线移除。
 - **trace 移除默认收敛到已验证配方**:87.9% 锚(unified k30 hybrid trace-off)即 trace 移除后的目标配方,不是新配方。
-- **043 代码不在 master(已核实 2026-08-16)**:master 不含任何 043 deepen 文件或 `--confidence-deepen` flag(043 代码在独立 worktree 未 merge);故 044 **不清理 043 代码本身**,只记录其方向 NO-GO 结论。若 043 后续 merge,其清理另立变更,不在本 feature。
+- **043 代码已合并 master(2026-08-16 e6625d8)**:master 含 confidence_deepen*.go 6 文件与 main.go deepen 接线;维护者经 045 窗口转达确认纳入 044 清理(整删)。方向 NO-GO 结论保留在 verdict 文档。
 - **042 代码在 master(13 个 counterfactual 文件)**:044 实际清理的对象是 master 上的 042 协议 + 其余已证伪机制 + trace 默认值切换。
 - **引擎与产品契约零改动**:清理只动 `cmd/locomo-bench/`;MCP/CLI/SDK 产品适配面不受影响。
 - **文档同步是验收一部分**:result-matrix / 清理计划文档 / README 的同步不属于"锦上添花",而是 SC-006 的验收项。

@@ -25,6 +25,7 @@
 | `--trace-mediation` | 030 | **默认值切换,单独 commit** |
 | `--consolidate` / `--evidence-assembly` / `--assembly-*` / `--consolidate-*` | 030 | 030/031 整链 |
 | `--utility-stage` / `--utility-source` / `--utility-label-source` / `--utility-pilot-source` / `--utility-shallow-source` / `--utility-deep-source` / `--utility-shallow-k` / `--utility-deep-k` | 042 | 13 文件整删 |
+| `--confidence-deepen` / `--deepen-pilot` / `--deepen-threshold` / `--deepen-signal-feature` / `--deepen-k` / `--deepen-max-gaps` | 043 | 已合并 master(e6625d8),6 文件整删 |
 | `--multi-query` / `--mq-max-subqueries` | 010 | 保留 recallDiagnostic/SearchMulti |
 | `--alias-shadow` / `--doc2query` / `--doc2query-build` | 011/012 | 同步改引用测试 |
 
