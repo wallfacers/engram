@@ -88,8 +88,8 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 ### Functional Requirements
 
 - **FR-001**: 已证伪机制(经 verdict 判定 NO-GO / 零增量 / 被取代)的 flag、专属实现、arm 机制映射、冲突表条目、fingerprint 标记 MUST 被移除;移除后 `--help` 不再列出该 flag。**权威清理清单** = [默认关闭机制清理计划](../../../docs/evaluation/default-off-mechanism-cleanup-plan.md)「第一类:已证伪/零增量,建议清理」表(含 `--write-dedup`/`--neighbor-extend`/`--episode-cluster`/`--relation-context`/`--counter-refine`/`--temporal-answer-prompt`/`--lme-typed-prompts`/abstain 系/`--gap-refetch`/`--event-projection`/`--temporal-resolution`/`--nav` 系/`--iris` 系/`--temporal-score`/`--temporal-hard-filter`/`--assoc`/`--cluster-sweep`/`--conflict-resolution`/`--multi-query`/`--filter-pool`/`--opinion-pass`/`--trace-mediation`/`--consolidate`/`--evidence-assembly`/`--utility-stage` 族/`--confidence-deepen` 族)。
-- **FR-002**: 清理范围 MUST 包含 042(`--utility-stage` 族协议)与 043(`--confidence-deepen` 族机制)的接线与模型执行路径;042/043 方向结论不变(维持关闭)。
-- **FR-003**: 043 的纯函数层与 pilot 测量资产 MUST 保留(valuable,供未来复用);其依赖关系须在保留后仍可编译或迁移至非编译归档路径。
+- **FR-002**: 清理范围 MUST 包含 042(`--utility-stage` 族协议,13 个 counterfactual 文件)的接线与模型执行路径移除;042 方向结论不变(维持关闭)。
+- **FR-003**: 043 机制方向已 NO-GO(verdict 已出);master 不含 043 代码,故本 feature 仅在文档记录其结论,不执行代码清理;若 043 后续 merge 则另行处理。
 - **FR-004**: `--trace-mediation` 默认开启组件 MUST 被移除,默认路径切换到 chunk 装配;unified 配方须在清理后与 87.9% 锚(同 store/judge/clean 口径)对齐,不引入回归。
 - **FR-005**: 已坐实能力(`--unified-answer-contract` / `--unified-typed-prompts` / `--chunks` / `--chunk-quota` / `--force-answer` / `--no-idk-retry`)MUST 保持不变(flag、默认值、行为均不因清理受影响)。
 - **FR-006**: 诊断与未定论工具(`--oracle` / `--rerank` / `--pcic` / `--compiler-arm` / `--representation` / `--temporal-date-scaffold`)MUST 不被误删;其去留在 plan 阶段逐个核查并给出理由。
@@ -112,7 +112,7 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 - **SC-001**: 清理后 `CGO_ENABLED=0 go build ./...` 与 `CGO_ENABLED=0 go test -count=1 ./...` 100% 通过;默认路径输出与清理前逐字节一致(byte-parity 断言全绿)。
 - **SC-002**: 第一、二类清理机制(US1+US2)的 flag 100% 从 CLI 帮助与代码中消失;`--help` 中不再出现 `--episode-cluster`、`--utility-stage`、`--confidence-deepen` 等已清 flag。
 - **SC-003**: trace-mediation 移除后,默认 unified 配方与 87.9% 锚同口径绝对分一致(±系统噪声),无新增回归;该评估作为 Constitution IV 门的一部分被记录。
-- **SC-004**: 引擎五目录 `git diff --name-only -- memory embedding provider store internal` 为空;043 纯函数资产保留且(如保留在编译路径)全仓测试仍绿。
+- **SC-004**: 引擎五目录 `git diff --name-only -- memory embedding provider store internal` 为空;043 方向结论在 result-matrix/verdict 记录中保持 NO-GO 表述(master 无 043 代码需清理)。
 - **SC-005**: 已坐实机制(unified/chunk/force-answer 等)在清理后行为不变——相应已有测试全部保持绿色,无需修改它们的 flag/默认值。
 - **SC-006**: result-matrix「过时/已证伪」表与清理计划文档与实际代码状态一致;已清机制在文档中不再被描述为可用能力。
 
@@ -122,6 +122,7 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 - **042 不重开**:维护者已定 042 维持关闭(归因存疑但不重开重验),042 协议代码进清理。
 - **043 已 NO-GO**:043 机制方向关闭,纯函数层 + pilot 测量保留为资产,机制接线移除。
 - **trace 移除默认收敛到已验证配方**:87.9% 锚(unified k30 hybrid trace-off)即 trace 移除后的目标配方,不是新配方。
-- **依赖 043 worktree 的收口**:043 worktree 已有未 push 的 verdict commit(pilot NO-GO / Step A);044 清理基于 master(不含 043 未 merge 的 deepen 代码),故 043 代码清理以"044 清理时 master 实际包含的内容"为准——若 043 代码尚未 merge,则 044 仅清理 master 上的 042 与其它机制。
+- **043 代码不在 master(已核实 2026-08-16)**:master 不含任何 043 deepen 文件或 `--confidence-deepen` flag(043 代码在独立 worktree 未 merge);故 044 **不清理 043 代码本身**,只记录其方向 NO-GO 结论。若 043 后续 merge,其清理另立变更,不在本 feature。
+- **042 代码在 master(13 个 counterfactual 文件)**:044 实际清理的对象是 master 上的 042 协议 + 其余已证伪机制 + trace 默认值切换。
 - **引擎与产品契约零改动**:清理只动 `cmd/locomo-bench/`;MCP/CLI/SDK 产品适配面不受影响。
 - **文档同步是验收一部分**:result-matrix / 清理计划文档 / README 的同步不属于"锦上添花",而是 SC-006 的验收项。

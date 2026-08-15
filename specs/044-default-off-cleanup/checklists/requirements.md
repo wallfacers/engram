@@ -32,4 +32,5 @@
 ## Notes
 
 - 本 feature 是内部工程清理,spec 的用户故事以"维护者/评测运营者"视角编写,非终端用户——这是刻意的,已在上方 User Scenarios 开头注明。
-- 待 plan 阶段核查项已在 Assumptions 记录:043 代码是否已 merge 进 master(影响 044 清理 043 代码的范围)、043 纯函数资产归属(编译路径 vs 归档)。
+- **已核实(2026-08-16)**:master 不含 043 代码(deepen 文件/flag 均无),只有 042 的 13 个 counterfactual 文件 + trace-mediation 默认开启。044 实际清理对象 = master 上的 042 协议 + 其余已证伪机制 + trace 默认值切换;043 仅记录结论。
+- 待 plan 阶段核查项:042 清理时其 logprob caller/manifest-seal 协议是否被其他保留机制引用(已确认 043 不在 master,无此依赖);trace 移除后 `consolidate`/`evidence-assembly` 的去留(030 同族)。
