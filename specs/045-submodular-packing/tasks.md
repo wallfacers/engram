@@ -6,23 +6,25 @@
 
 ## Phase 1 · 基线确认
 
-- [ ] T001 在 045 worktree 确认基线:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;`git worktree list` 复核并行 sibling(044-default-off-cleanup)接触面无新增变化
+- [x] T001 在 045 worktree 确认基线:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;`git worktree list` 复核并行 sibling(044-default-off-cleanup)接触面无新增变化
 
 ## Phase 2 · 纯函数层(本地零模型,[P] 并行)
 
-- [ ] T002 [P] 实现 `cmd/locomo-bench/submodular_packing.go` 基础件:`packEstimateTokens`(rune/4,≥1,含与 agentic_nav.estimateTokens 等价性单测)、`buildPoolCandidate`(ID/Kind/FusedScore/NormScore 池内 min-max/Shingles 词级 5-shingle FNV-1a/CoverTerms)、`packSimilarityMatrix`(shingle-Jaccard,确定性)
-- [ ] T003 [P] 实现四项目标 + cost-scaled 贪心(同文件):权重 3:1:1:1 默认、增量维护、预算停、tie-break stable ID 升序、singleton fallback(仅此允许超预算,审计位);性质单测:预算硬上界、贪心单调性、确定性(同输入两跑逐字节一致)
-- [ ] T004 [P] 实现 `cmd/locomo-bench/aic.go`:冻结规范化(lower+collapse-ws+子串)、多别名 any-match、UnmatchableInPool 审计;单测覆盖中英混排/空白/别名/池内不可匹配
-- [ ] T005 [P] 实现 `cmd/locomo-bench/reverify_042.go` 核心件(与 T002-T004 并行):自包含 logprob 调用器(OpenAI 兼容 chat/completions + logprobs,`temperature=0` 显式体)、final-span 鲁棒映射(剥 `<|im_end|>` 等特殊 token → 最后关闭符后取 span → mean/p10/top1-top2 三特征,公式复刻 1eb9cdd,含等价性回归测试 fixtures);**不 import** counterfactual_utility*.go / confidence_deepen*.go
+- [x] T002 [P] 实现 `cmd/locomo-bench/submodular_packing.go` 基础件:`packEstimateTokens`(rune/4,≥1,表驱动单测)、`buildPackCandidates`(ID/Kind/FusedScore/NormScore 池内 min-max/Shingles 词级 5-shingle FNV-1a/CoverTerms)、相似度矩阵(shingle-Jaccard,确定性)
+- [x] T003 [P] 实现四项目标 + cost-scaled 贪心(同文件):权重 3:1:1:1 默认、增量维护、预算停、tie-break stable ID 升序、singleton fallback(仅此允许超预算,审计位);性质单测:预算硬上界、确定性、relevance 主导保头部、tie-break
+- [x] T004 [P] 实现 `cmd/locomo-bench/aic.go`:冻结规范化(lower+collapse-ws+子串)、多别名 any-match、UnmatchableInPool 审计;单测覆盖空白/别名/非连续不匹配/入分母
+- [x] T005 [P] 实现 `cmd/locomo-bench/reverify_042.go` 核心件:自包含 logprob 调用器(temperature=0 恒定、3 次重试)、rvFinalSpanSignal(复刻 1eb9cdd 公式,**等价性由 golden 承载**:一次性生成器断言 rv ≡ deepenFinalSpanSignal 后冻结 7 traces,永久测试只读 golden)、rank-mean WMW AUC + seed-43 bootstrap;**不 import** counterfactual_utility*.go / confidence_deepen*.go
 
 ## Phase 3 · US1 离线装填保真门(本地,US1)
 
-- [ ] T006 [US1] 实现 aic-gate 旗标路径 `cmd/locomo-bench/submodular_packing_cli.go`(`--aic-gate <dir>` 置位即离线执行并退出,repo 旗标约定):三口径渲染(current-k30 / packed / top150-full,参照口径见 contracts 冻结)、逐题预算锚离线复算(对照渲染确定性)、门判定(packed.aic ≥ 0.95×top150 且 tokens ≤ 锚)、packing_gate.json + packing_audit.jsonl + manifest 冻结后 seal;`--aic-gate-slice` 参数
+- [x] T006 [US1] 实现 aic-gate 旗标路径 `cmd/locomo-bench/submodular_packing_cli.go`(`--aic-gate <dir>` 置位即离线执行并退出,repo 旗标约定):三口径渲染(current-k30 / packed / top150-full,参照口径见 contracts 冻结)、逐题预算锚离线复算(对照渲染确定性)、门判定(packed.aic ≥ 0.95×top150 且 tokens ≤ 锚)、packing_gate.json + packing_audit.jsonl + 摘要(冻结后才算);`--aic-gate-slice` 参数;hybrid 臂 fail-closed embedding 探测
 - [ ] T007 [US1] 执行(位置:embedding sidecar 所在处——本地已配 EMBED_* 则本地;否则 box 组合批开机第一段,仅 bge 不动 vllm):先 `--aic-gate-slice 0,1`(304 题)冒烟 → 全量 1540 门跑;核验审计(unmatchable 单列、singleton 计数);产出 go/no-go 判定。**NO-GO 分支**:写关闭 verdict 文档,若在 box 即刻关机,勾结 T016-T017 收尾,Phase 4-6 不执行
 
 ## Phase 4 · US2 机制接线 + 1-rep 配对 probe(box,US2)
 
-- [ ] T008 [US2] **先写**默认关 golden 测试(旗标关 → 现行配方逐字节一致;TDD 红-绿);`cmd/locomo-bench/submodular_packing_test.go`
+> **排序决策(2026-08-16)**:T008/T009 刻意推迟到 044-default-off-cleanup 合并 master 之后——冲突表新行必然引用 044 将删除的旗标名(trace/consolidate/nav/iris/utility-stage),现在写会给 master 集成制造悬空引用。正确顺序:044 完成 → 本会话主导统一并线(用户已授权)→ 045 rebase 到清理后 master → 在干净树上写 T009 接线 + T008 golden。045 现有代码全部为纯增量文件 + main.go 旗标新段,与 044 删除目标零引用(已验证)。
+
+- [ ] T008 [US2] **先写**默认关 golden 测试(旗标关 → 现行配方逐字节一致;TDD 红-绿);`cmd/locomo-bench/submodular_packing_test.go`(044 合并后执行,见上方排序决策)
 - [ ] T009 [US2] 接线:main.go 旗标注册段(`--submodular-pack/--pack-pool-size/--pack-weights/--pack-budget-anchor`,contracts v1)+ unified_answer_contract_eval.go 冲突表新行(与 trace/consolidate/nav/iris/utility-stage 互斥 fail-closed)+ eval_runner.go 分派 + chunks.go 插点(旗标开 → packSelect 替代 applyChunkQuota)+ 逐题配对预算锚注入(anchor-run 读取);`CGO_ENABLED=0 go test -count=1 ./...` 绿
 - [ ] T010 [US2] box 组合批第 1 段:对照臂 1-rep(现行配方,收逐题 usage 锚)→ 机制臂 1-rep probe(--submodular-pack --pack-budget-anchor paired);worker pool 遵守 --concurrency;产出 probe_paired.json(配对差 + McNemar exact p + 真实 usage token parity + 装填审计);GO = 配对差≥0 且不显著负。**NO-GO 分支**:verdict 收尾,Phase 5-6 不执行
 
@@ -36,7 +38,7 @@
 
 ## Phase 7 · 重验 ride-along + 收尾
 
-- [ ] T013 [P] reverify 旗标路径 CLI(`cmd/locomo-bench/reverify_042.go` 补齐,`--reverify-042 <dir>` + `--reverify-labels`):读 042 collect 工件、2-conv slice(conv 0/1,304 题,与 043 pilot2 可比)、worker pool 遵守 --concurrency、ReverifyReport 工件(AUC WMW tie-mean + bootstrap seed 43 + 双通道 flip);端点不可达 → inconclusive 不阻塞主批
+- [x] T013 [P] reverify 旗标路径 CLI(`cmd/locomo-bench/reverify_042_cli.go`,`--reverify-042 <dir>` + `--reverify-labels`):读 042 collect 工件(结构化 decision_key/shallow_correct 解析,真实工件冒烟通过:5958 行→1986 题,slice=304)、2-conv slice(conv 0/1,与 043 pilot2 可比)、worker pool 遵守 --concurrency、双通道(logprob + SSE 流式)flip、ReverifyReport 工件(AUC rank-mean WMW + bootstrap seed 43);端点不可达即报错中止
 - [ ] T014 [P] 全量门复核:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go vet ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;新旗标出现在 `--help` 且默认值正确
 - [ ] T015 box 组合批第 2 段:执行 reverify(同批,answerer+judge env 走进程环境)→ ReverifyReport 判定(measurement-artifact-confirmed / signal-still-invalid / inconclusive);**只陈述测量事实,翻案权留维护者**
 - [ ] T016 verdict 文档 `docs/evaluation/reports/045-submodular-packing-verdict-<date>.md`(含门链全程:US1→probe→正批→LME→重验)+ result-matrix 同步 + tasks 勾结
