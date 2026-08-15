@@ -62,14 +62,17 @@ tags: [evaluation, locomo, longmemeval, result-matrix, rerun]
 |---|---|---|
 | LME entity-verify 融合 | 89.80% / 90.00% | 用测试集真实陷阱写进示例 = **in-sample tuning**；`--lme-entity-verify` 已随 038 移除 |
 | v4-pro + 融合 prompt | LME 91.1% | 付费 answerer + 已移除 prompt，post-hoc 诊断，非系统能力 |
-| `--lme-typed-prompts`（C 臂） | LME 87.00%（+0.8pp within-noise） | category 路由特调，被统一契约取代 |
-| `--abstain-prompt`（B 臂） | LME 85.80%（-0.4pp） | NO-GO，拒答杠杆耗尽 |
+| `--lme-typed-prompts`（C 臂） | LME 87.00%（+0.8pp within-noise） | category 路由特调，被统一契约取代；**已随 044 清理移除** |
+| `--abstain-prompt`（B 臂） | LME 85.80%（-0.4pp） | NO-GO，拒答杠杆耗尽；**已随 044 清理移除**（--abstain-probe 诊断保留） |
 | `--answer-focus-prompt` | LoCoMo 400 子集 -0.13pp | NO-GO，已 revert |
-| `--temporal-answer-prompt`（tplan） | 弱栈 +11.2pp；生产栈 within-noise | category 特调 + 强栈边际归零，default-off |
-| `--counter-refine` | LME 86.40% vs 86.80%（-0.4pp） | 组合配方无正向信号；独立效应未识别 |
+| `--temporal-answer-prompt`（tplan） | 弱栈 +11.2pp；生产栈 within-noise | category 特调 + 强栈边际归零，**保留**（default-off opt-in） |
+| `--counter-refine` | LME 86.40% vs 86.80%（-0.4pp） | 组合配方无正向信号；**已随 044 清理移除** |
+| `--trace-mediation`（030） | unified×trace −3.44pp（McNemar p=1.4e-04） | Step A 证伪读侧中介；**已随 044 清理移除**，默认路径切 chunk 装配（=87.9% 锚配方） |
+| 043 confidence-gated deepen | pilot AUC 0.54 / flip 93.4% | NO-GO，**已随 044 清理移除**（confidence_deepen 6 文件） |
+| 042 counterfactual utility | 5/5958 NO-GO（归因存疑） | 维持关闭；**已随 044 清理移除**（utility 协议 13 文件） |
 | 037 记忆专用 reranker | LoCoMo -1.1pp | NO-GO（cross-encoder 永进本地栈，死亡规则） |
 | 034 裁决协议（候选+裁决） | 89.48% | 旧协议，非当前主路径 |
-| 写侧/检索侧证伪线（027/028/029/031/033） | — | 已证伪，无分数 |
+| 写侧/检索侧证伪线（027/028/029/031/033） | — | 已证伪，无分数；027/029/031 代码已随 044 清理移除 |
 
 ## 什么样的分数需要重跑（判定规则）
 

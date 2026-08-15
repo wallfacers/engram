@@ -11,6 +11,8 @@ tags: [evaluation, verdicts, evidence]
 
 # 实验裁决索引
 
+> **2026-08-16 清理注记**:044 default-off cleanup 已移除下述机制的**代码**(flag 从 CLI 消失)。本页保留其历史 verdict 与当时状态,不代表机制仍可用。已移除:assoc/cluster-sweep/temporal-score/hard-filter(013/025)、conflict-resolution/filter-pool/opinion-pass、multi-query(010 作答)、alias-shadow(011)/doc2query(012)、abstain 作答(006,`--abstain-probe` 诊断保留)、nav(029)、iris(021)、event-projection/gap-refetch/temporal-resolution(027,`classifyQueryMode` 保留)、counter-refine(L2)/lme-typed-prompts(038)、trace-mediation/consolidate/evidence-assembly/relation-context(030/031)、utility-stage(042)、confidence-deepen(043)。详见 [default-off-mechanism-cleanup-plan](default-off-mechanism-cleanup-plan.md) 与 [result-matrix](result-matrix.md)。
+
 本文是已收口实验的唯一裁决入口；完整当前分数见[当前评测结果](results.md)，逐次过程、旧基线和原始数字见[LoCoMo 历史实验台账](../archive/evaluation/locomo-experiment-ledger-2026-07.md)。本页不把覆盖率、代理指标或单次差值写成默认能力。
 
 ## Feature 003–033 的交付与实验裁决
