@@ -209,7 +209,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.rerank, "--rerank"},
 		{opt.pcic, "--pcic"},
 		{opt.oracle, "--oracle"},
-		{opt.iris, "--iris"},
 		{opt.evidenceAssembly, "--evidence-assembly"},
 		{opt.consolidate, "--consolidate"},
 		{opt.relationContext, "--relation-context"},

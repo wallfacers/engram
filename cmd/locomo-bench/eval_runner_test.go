@@ -15,17 +15,14 @@ import (
 	"github.com/wallfacers/engram/store"
 )
 
-func TestPrepareFrozenEvalOptionsRejectsIRISAndForcesOneAnswerPath(t *testing.T) {
+func TestPrepareFrozenEvalOptionsForcesOneAnswerPath(t *testing.T) {
 	protocol := testEvalProtocol()
 	prepared, err := prepareFrozenEvalOptions(protocol, options{noIDKRetry: false})
 	if err != nil {
 		t.Fatalf("prepare formal options: %v", err)
 	}
-	if !prepared.noIDKRetry || prepared.iris {
-		t.Fatalf("formal options = %+v, want legacy retry off and IRIS off", prepared)
-	}
-	if _, err := prepareFrozenEvalOptions(protocol, options{iris: true, noIDKRetry: true}); err == nil {
-		t.Fatal("formal protocol unexpectedly accepted IRIS")
+	if !prepared.noIDKRetry {
+		t.Fatalf("formal options = %+v, want legacy retry off", prepared)
 	}
 	if _, err := prepareFrozenEvalOptions(protocol, options{rerank: true, noIDKRetry: true}); err == nil {
 		t.Fatal("formal protocol unexpectedly accepted reranker")
@@ -218,7 +215,6 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 		"date scaffold":        func(opt *options) { opt.temporalDateScaffold = true },
 		"category top-k":       func(opt *options) { opt.catTopKSpec = "1=40" },
 		"output cap":           func(opt *options) { opt.maxTokens++ },
-		"iris":                 func(opt *options) { opt.iris = true },
 		"rerank":               func(opt *options) { opt.rerank = true },
 		"pcic":                 func(opt *options) { opt.pcic = true },
 		"oracle selector":      func(opt *options) { opt.oracle = true },

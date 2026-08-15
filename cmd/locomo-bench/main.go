@@ -137,8 +137,6 @@ type options struct {
 	unifiedProbeOut            string
 	unifiedProbeRepeats        int
 	explicitFlags              map[string]bool // runtime-only: used to reject ignored flags in dedicated modes
-	iris                       bool
-	irisDepth                  int
 	judgeMem0Aligned           bool
 	answerModel                string
 	judgeModel                 string
@@ -429,8 +427,6 @@ func run() error {
 	flag.StringVar(&opt.unifiedProbeOut, "unified-answer-probe-out", "", "write the paired behavior-probe audit report to this JSON path")
 	flag.IntVar(&opt.unifiedProbeRepeats, "unified-answer-probe-repeats", 3, "paired behavior-probe repetitions (must be a positive odd number)")
 	flag.BoolVar(&opt.temporalDateScaffold, "temporal-date-scaffold", false, "prepend a deterministic TIMELINE block (sorted dates + computed span) to category-2 answer context; the dates are computed in code rather than left to the model")
-	flag.BoolVar(&opt.iris, "iris", false, "enable IRIS evidence-gap iterative retrieval for category-2 temporal questions (sufficiency-driven query refinement; fixed MemOS-aligned budget; harness-only, engine untouched)")
-	flag.IntVar(&opt.irisDepth, "iris-depth", 3, "maximum IRIS sufficiency-driven retrieval rounds (including the initial retrieval)")
 	flag.BoolVar(&opt.judgeMem0Aligned, "judge-mem0-aligned", false, "use the Mem0-aligned lenient judge rules")
 	flag.BoolVar(&opt.rerank, "rerank", false, "apply the cross-encoder rerank stage (needs EMBED_RERANK_MODEL); for paired runs use the hybrid+rerank arm suffix instead")
 	flag.BoolVar(&opt.pcic, "pcic", false, "apply the PCIC-lite chunk selector; for paired runs use the +pcic arm suffix instead")
@@ -2655,24 +2651,11 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	var hits []memory.Result
 	var searchDiagnostics memory.SearchDiagnostics
 	retrievalMeta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
-	if opt.iris && qa.Category == 2 {
-		// Feature 021 US1: IRIS evidence-gap loop for temporal questions. The
-		// loop retrieves, evaluates accumulated sufficiency, diagnoses the gap,
-		// and refines the query — at a fixed topK budget (slot-merged) so the
-		// answerer's context stays aligned with the flat-hybrid baseline.
-		irisHits, irisErr := irisRetrieve(ctx, retriever, filterCall, rewriteCall, answerCall, qa.Question, topK, quota, opt, qa.Category)
-		if irisErr != nil {
-			logger.Warn("iris retrieve failed; question scored wrong", "err", irisErr)
-			return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
-		}
-		hits = irisHits
-	} else {
-		var err error
-		hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
-		if err != nil {
-			logger.Warn("retrieve failed; question scored wrong", "err", err)
-			return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
-		}
+	var err error
+	hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
+	if err != nil {
+		logger.Warn("retrieve failed; question scored wrong", "err", err)
+		return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
 	}
 	// 027 event representation (research-subset): replace the retrieved hits
 	// with the query-relevant event projection so the answer context carries

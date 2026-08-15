@@ -94,15 +94,10 @@ func prepareFrozenEvalOptions(protocol evalProtocol, requested options) (options
 	if err := validateEvalProtocol(protocol, evalRunFormal); err != nil {
 		return options{}, fmt.Errorf("invalid formal evaluation protocol: %w", err)
 	}
-	if requested.iris {
-		return options{}, fmt.Errorf("formal 022 evaluation refuses --iris")
-	}
 	if requested.rerank {
 		return options{}, fmt.Errorf("formal 022 evaluation refuses --rerank")
 	}
 
-	requested.iris = false
-	requested.irisDepth = 0
 	requested.rerank = false
 	requested.noIDKRetry = true
 	return requested, nil
@@ -324,7 +319,7 @@ func validateFormalLegacyRecipe(recipe string) error {
 // are not represented in the B1 control contract. Answer and judge prompt
 // variants remain allowed because their exact digests are frozen separately.
 func validateFormalLegacyMechanismOptions(opt options) error {
-	if opt.iris || opt.rerank || opt.pcic || opt.oracle ||
+	if opt.rerank || opt.pcic || opt.oracle ||
 		opt.pcicAnnotate || opt.recallDiagnostic || opt.coverageOnly ||
 		opt.temporalDiagnostic || opt.attributionTrace || opt.abstainProbe ||
 		opt.estimate {

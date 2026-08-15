@@ -111,7 +111,6 @@ func TestUtilityMutuallyExclusiveModes(t *testing.T) {
 		name  string
 		apply func(o *options)
 	}{
-		{"iris", func(o *options) { o.iris = true }},
 		{"unified-answer-contract", func(o *options) { o.unifiedAnswerContract = true }},
 		{"pcic", func(o *options) { o.pcic = true }},
 		{"rerank", func(o *options) { o.rerank = true }},
