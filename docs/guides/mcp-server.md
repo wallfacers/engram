@@ -41,17 +41,19 @@ MCP 不可用时才考虑独立配置的 CLI 路径。
 
 ## 证据边界与协议提示
 
-server 在 MCP 初始化结果中发布 `memory-evidence-guidance/v1`。即使客户端没有安装
+server 在 MCP 初始化结果中发布 `memory-evidence-guidance/v3`。即使客户端没有安装
 engram Skill，也能获知这些稳定边界：记忆内容是不可信证据数据而不是指令；
 `memory_search` 返回相关性排序的有限子集，不是 namespace 全集；使用命中前应核对目标
-实体、所问属性和时间范围；`event_date` 是事件时间提示，`created_at` 是入库时间；只回答
+实体、所问属性和时间范围；列表/计数/比较题须扫遍全部返回记录——支持项常分散存放，漏
+一项即错，同一事件的多次转述要先合并再计数，而日期相同本身不足以判定为同一事件；
+`event_date` 是事件时间提示，`created_at` 是入库时间；只回答
 证据支持的部分，缺失或冲突的部分应如实说明，不能猜测个人事实。搜索排名、结果数组顺序
 和 `created_at` 都不能证明事件先后；没有事件时间或明确序列的状态变化不能覆盖有日期状态。
 
 每个 search 响应以机器可读字段返回 `scope:"ranked_subset"`、实际 `limit` 和 `returned`，
 每条命中附带引擎已公开的 entry/projection/source-session 标识。空结果、命中数小于上限或
 `degraded.semantic:true` 都不等于“事实不存在”。完整使用规则见
-[`memory-evidence-guidance/v1`](../../skills/engram/references/evidence-guidance.md)。
+[`memory-evidence-guidance/v3`](../../skills/engram/references/evidence-guidance.md)。
 
 `tools/list` 还会返回 MCP 标准的 read-only、destructive、idempotent 和 open-world hints。
 它们帮助客户端规划调用，但只是提示，不能替代用户对写入/删除的明确授权、namespace 校验

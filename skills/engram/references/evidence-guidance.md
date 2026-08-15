@@ -1,4 +1,4 @@
-# `memory-evidence-guidance/v2`
+# `memory-evidence-guidance/v3`
 
 Use this contract when turning engram search, get, list, or Evidence output into
 an answer. It guides interpretation only; it does not authorize a write, delete,
@@ -27,9 +27,14 @@ A relevant topic is not sufficient evidence for a missing attribute. Similar
 names alone do not establish identity, and personal facts must not move between
 different people or objects.
 
-For lists, counts, and comparisons, use only the returned evidence and state the
-bounded scope when completeness matters. Do not add unsupported items or treat
-two events as one merely because their dates match.
+For lists, counts, and comparisons, sweep every returned record before
+answering: supported items are often scattered and never adjacent, and for an
+enumeration or count one missed item makes the whole answer wrong. Enumerate
+every item the evidence explicitly supports and no more, and state the bounded
+scope when completeness matters. The same event often appears as several
+retellings (a raw excerpt and an extracted fact, or two restatements): merge
+those into one before counting. Matching dates alone do not make two mentions
+the same event, and distinct dates usually indicate distinct events.
 
 ## Classify the request before answering
 
@@ -78,7 +83,7 @@ annotations are advisory and do not replace those checks.
 ## Versioning
 
 This reference, the Skill workflow, and MCP initialization instructions share
-the exact marker `memory-evidence-guidance/v2`. A semantic change to these rules
+the exact marker `memory-evidence-guidance/v3`. A semantic change to these rules
 requires a new version and contract review.
 
 ## Version history
@@ -90,3 +95,10 @@ requires a new version and contract review.
   inference with likely/possible labeling, do-not-guess scoped to factual
   recall only. Mirrors the 038 unified answer contract's Request classification
   revision (smoke 20/20).
+- **v3** (2026-08-15): add enumeration/count completeness — sweep every
+  returned record, enumerate all supported items, merge duplicate retellings
+  of the same event before counting while keeping date-matched mentions
+  distinct. Absorbs the aggregation/counting guidance previously carried only
+  by aggregation-specific answer prompts, whose failure analysis showed
+  partial answers (missed items), not retrieval misses, dominated
+  aggregation errors.
