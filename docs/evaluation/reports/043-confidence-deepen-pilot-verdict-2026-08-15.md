@@ -45,9 +45,24 @@ tags: [evaluation, verdict, 043, confidence-gated, no-go]
 ## 对 k30→90pp+ 目标的影响
 
 主杠杆(P1 confidence-gated deepen)关闭。剩余开放项:
-- **Step A(unified × trace-mediation)**:与 040 前提同源(trace 时代犹豫可观测)——探针对(1-rep × trace off/on)已于同日 box 批次启动,结果另行报告;
+- **Step A(unified × trace-mediation)**:见下方附录——**NO(−3.44pp, p=1.4e-04)**;
 - P2 次模装填(reader>7B 优势消失的 scope 警告仍在,期望压低);
 - P3 TAA-k(只省预算,非得分杠杆)。
+
+## 附录 · Step A 探针对结果(2026-08-16 收口,同一次 box 批次)
+
+unified k30 × trace off/on 各 1-rep,同 store(032-store)、同 judge(deepseek-v4-flash)、同批顺序执行:
+
+| 臂 | OVERALL(J) | 答案上下文 token |
+|---|---:|---:|
+| trace **off**(unified 现行配方) | 75.71%(1166/1540) | ~3,600(chunk 装配) |
+| trace **on**(030 中介复活) | 72.27%(1113/1540) | 1,112(7.7× 压缩保持) |
+| **配对差** | **−3.44pp** | — |
+
+- 配对 McNemar(1540 全配对,A-only-right 121 / B-only-right 68):**exact p = 1.42e-04,显著负**。
+- **结论**:030 的读侧中介在 unified 契约下是**负收益**——unified 时代配方关掉 trace 的既有决策被独立验证。token 压缩优势仍在,但作为得分杠杆 NO。
+- **口径警示**:本探针绝对值(75.7%)与 87.9% 锚**不可比**——1-rep 单次 + 在线 raw 判题 vs 锚的 3-rep clean majority(单次噪声 ≈8.6pp + raw/clean 差 + 多数票差);唯一有效结论是同批配对差值。
+- 工件:本地 `.locomo-run/043-20260815/stepA-*`(results/stats/cost/regime/parity 全)。
 
 ## 门后处置(按 spec US1 NO-GO 路径)
 
