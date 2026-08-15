@@ -99,6 +99,12 @@ Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extr
 ### Evaluation Regression Gate (Constitution IV — hard)
 - Touching retrieval/extraction/curation/storage/embedding → run `cmd/locomo-bench` on a comparable slice and confirm no regression vs the current baseline before merge. A pure adapter that only calls unchanged engine paths is invariant *by construction* — prove it via parity (`memory_search` == direct `Retriever.Search`) + green engine tests instead of a full re-run, and say so.
 
+### Eval model-side stages MUST parallelize (hard rule)
+New model-calling paths in `cmd/locomo-bench` MUST use a worker pool honoring `--concurrency`, never a sequential loop — the 042 pilot/collect shipped sequential: ~4 req/min vs ~55 parallel (~14x). Box health = request rate (~55/min), not GPU util: GPU 99% + `num_requests_running=1` + `waiting=0` = client serialized, sidecar idle with 32 free slots.
+
+### Manifest freeze-before-digest (hard rule)
+Populate EVERY `utilityRunManifest` field (incl. `QuestionCount`) before computing the digest + writing — mutating it later makes the seal's `ManifestDigest` mismatch the on-disk manifest and `utilityValidateManifestSeal` fails at load. Don't call seal-requiring loaders before the seal exists; join units in memory.
+
 ### Long-Running Commands on WSL2 — MUST Detach (hard rule)
 This machine is WSL2. The Bash tool detects completion by stdout EOF, not process exit; long children (locomo-bench, `ollama serve`, big test runs) inherit the pipe and appear to "hang" after finishing — `>log 2>&1` alone is NOT enough. Detach with `setsid`, poll with a single instant check (never a foreground `sleep` loop). Logs → session scratchpad.
 ```bash
@@ -116,6 +122,7 @@ c.connect(host, username=user, password=pw)  # pw from env, never hardcoded
 _, out, err = c.exec_command("df -h")
 print(out.read().decode())
 ```
+**Kill by PID, not `pkill -f`**: `pkill -f "<pattern>"` also matches your own exec shell's command line and kills the SSH session — use `pgrep -x locomo-bench` + `kill`.
 
 ### Parallel-Feature Isolation (SDD, hard)
 Spec-kit's single global active-feature pointer (`.specify/feature.json`) is silently stolen by a newer feature. Isolate: one git worktree per parallel feature (`.claude/worktrees/<feature>`), one working copy = one active feature. Pin within a shell via `export SPECIFY_FEATURE_DIRECTORY=specs/<NNN-feature>` (NOT `SPECIFY_FEATURE`). Before start / at plan / before merge: `git worktree list` + read each active sibling `specs/*/spec.md` and the surface it touches; reconcile overlap first.
