@@ -222,8 +222,6 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 		"rerank":               func(opt *options) { opt.rerank = true },
 		"pcic":                 func(opt *options) { opt.pcic = true },
 		"oracle selector":      func(opt *options) { opt.oracle = true },
-		"abstain hard":         func(opt *options) { opt.abstainHard = true },
-		"abstain soft":         func(opt *options) { opt.abstainSoft = true },
 		"pcic annotate":        func(opt *options) { opt.pcicAnnotate = true },
 		"recall diagnostic":    func(opt *options) { opt.recallDiagnostic = true },
 		"coverage diagnostic":  func(opt *options) { opt.coverageOnly = true },
@@ -548,7 +546,7 @@ func TestAnswerFrozenFormalB1QuestionReplaysExactBytesAndDoesNotMutateFreeze(t *
 	protocol := testEvalProtocol()
 	protocol.ProtocolHash = "sha256:protocol"
 	qa := locomoQA{QuestionID: "locomo:1:2", Question: "When did Alice move?", Category: 2}
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false, false, false), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false, false), qa.QuestionDate)
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, qa.QuestionID, candidate)
 	bundle := testFormalBundle(

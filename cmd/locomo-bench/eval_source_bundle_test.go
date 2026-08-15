@@ -303,7 +303,7 @@ func TestFormalEvidenceExpansionRejectsNonMessageEvidence(t *testing.T) {
 func TestFormalB1PackerAndValidatorRequireCompleteRankedAnchorPrefix(t *testing.T) {
 	ctx := context.Background()
 	protocol := sourceTestProtocol()
-	system := answerPromptForRegime(4, false, false, false, false)
+	system := answerPromptForRegime(4, false, false, false)
 	qa := locomoQA{QuestionID: "locomo:0:prefix", Question: "What was said?", Category: 4}
 	reader := formalEvidenceMap{}
 
@@ -515,7 +515,7 @@ func formalSourceTestIDs(sources []formalExpandedSource) []string {
 func TestFormalSemanticEpisodeMixedGenuineAndFallbackPrefixValidates(t *testing.T) {
 	ctx := context.Background()
 	protocol := sourceTestProtocol()
-	system := answerPromptForRegime(4, false, false, false, false)
+	system := answerPromptForRegime(4, false, false, false)
 	qa := locomoQA{QuestionID: "locomo:0:mixed", Question: "What was said?", Category: 4}
 	reader := formalEvidenceMap{}
 
@@ -632,7 +632,7 @@ func TestFormalSemanticEpisodeMixedGenuineAndFallbackPrefixValidates(t *testing.
 func TestFormalB1CompilerBundleAllowsReorderedNonPrefix(t *testing.T) {
 	ctx := context.Background()
 	protocol := sourceTestProtocol()
-	system := answerPromptForRegime(4, false, false, false, false)
+	system := answerPromptForRegime(4, false, false, false)
 	qa := locomoQA{QuestionID: "locomo:0:compiler", Question: "What was said?", Category: 4}
 	reader := formalEvidenceMap{}
 
@@ -686,7 +686,7 @@ func TestFormalB1CompilerBundleAllowsReorderedNonPrefix(t *testing.T) {
 func TestFormalChunkVerbatimFoldPacksProjectionText(t *testing.T) {
 	ctx := context.Background()
 	protocol := sourceTestProtocol()
-	system := answerPromptForRegime(4, false, false, false, false)
+	system := answerPromptForRegime(4, false, false, false)
 	qa := locomoQA{QuestionID: "locomo:0:chunkverbatim", Question: "What was said?", Category: 4}
 	reader := formalEvidenceMap{}
 

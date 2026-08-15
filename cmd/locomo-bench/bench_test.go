@@ -112,31 +112,6 @@ func TestTemporalAnswerPromptPlanAndForceVariant(t *testing.T) {
 	}
 }
 
-func TestAbstainAnswerPromptRegime(t *testing.T) {
-	base := answerPromptForRegime(2, false, false, false, false)
-	if base != answerSystemPrompt {
-		t.Fatalf("non-abstain regime changed baseline prompt")
-	}
-	abstain := answerPromptForRegime(2, false, false, true, false)
-	if abstain == base {
-		t.Fatalf("abstain regime did not change the answer prompt")
-	}
-	// The abstention contract: refuse ONLY when unsupported, and name the
-	// missing information (1:4 ICL examples teach both answering and refusing).
-	low := strings.ToLower(abstain)
-	for _, phrase := range []string{"missing", "example"} {
-		if !strings.Contains(low, phrase) {
-			t.Fatalf("abstain prompt missing %q instruction: %s", phrase, abstain)
-		}
-	}
-	if !strings.Contains(low, "i don't know") {
-		t.Fatalf("abstain prompt must keep a refusal outlet: %s", abstain)
-	}
-	// Abstain takes precedence over the category-specific answerable prompts.
-	if answerPromptForRegime(1, false, false, true, false) != abstain || answerPromptForRegime(2, false, true, true, false) != abstain {
-		t.Fatalf("abstain regime must override category and temporal prompts")
-	}
-}
 
 func TestTemporalAnswerPromptIsOptIn(t *testing.T) {
 	if answerPromptFor(2) != answerSystemPrompt {
@@ -243,7 +218,7 @@ func TestUnifiedAnswerContractDefaultOffPreservesLegacyPrompts(t *testing.T) {
 		for _, typed := range []bool{false, true} {
 			opt := options{forceAnswer: force, lmeTypedPrompts: typed}
 			for category := 1; category <= 12; category++ {
-				want := answerPromptForRegime(category, force, false, false, typed)
+				want := answerPromptForRegime(category, force, false, typed)
 				if got := answerPromptForEval(category, opt); got != want {
 					t.Fatalf("flag-off category=%d force=%t typed=%t changed legacy prompt", category, force, typed)
 				}
@@ -388,12 +363,9 @@ func TestPostRetrievalAnswerModesAreFingerprintBound(t *testing.T) {
 func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
 	for name, opt := range map[string]options{
 		"force answer":     {unifiedAnswerContract: true, forceAnswer: true},
-		"abstain prompt":   {unifiedAnswerContract: true, abstainPrompt: true},
 		"temporal prompt":  {unifiedAnswerContract: true, temporalAnswerPrompt: true},
 		"LME typed prompt": {unifiedAnswerContract: true, lmeTypedPrompts: true},
 		"counter refine":   {unifiedAnswerContract: true, counterRefine: true},
-		"hard abstain":     {unifiedAnswerContract: true, abstainHard: true},
-		"soft abstain":     {unifiedAnswerContract: true, abstainSoft: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validatePromptModes(opt); err == nil {
@@ -578,7 +550,6 @@ func TestArmsFor(t *testing.T) {
 		"both":                {"fts", "hybrid"},
 		"hybrid,hybrid+rerank": {"hybrid", "hybrid+rerank"},
 		"hybrid+tplan":         {"hybrid+tplan"},
-		"hybrid+abstain":       {"hybrid+abstain"},
 	}
 	for in, want := range cases {
 		got, err := armsFor(in)
@@ -606,7 +577,7 @@ func TestArmsFor(t *testing.T) {
 
 func TestAllArmMechanismsSupported(t *testing.T) {
 	// Every three-strike mechanism now parses to a single-arm run.
-	for _, arm := range []string{"hybrid+tplan", "hybrid+abstain"} {
+	for _, arm := range []string{"hybrid+tplan"} {
 		if arms, err := armsFor(arm); err != nil || len(arms) != 1 || arms[0] != arm {
 			t.Fatalf("%s arm should be supported: arms=%v err=%v", arm, arms, err)
 		}
@@ -628,7 +599,7 @@ func TestThreeArmPairingEmitsLimitWarning(t *testing.T) {
 
 func TestAnswerRegimeFingerprintIsTraceable(t *testing.T) {
 	got := answerRegimeFingerprint(options{forceAnswer: true})
-	if !strings.Contains(got, "force_answer=true") || !strings.Contains(got, "abstain_prompt=false") {
+	if !strings.Contains(got, "force_answer=true") {
 		t.Fatalf("answer regime fingerprint = %q", got)
 	}
 }
@@ -849,17 +820,17 @@ func TestQuestionWhitelistCoverageUsesPostMaxConvsCohort(t *testing.T) {
 }
 
 func TestArmSuffixOverridesGlobalMechanisms(t *testing.T) {
-	global := options{abstainPrompt: true}
+	global := options{pcic: true}
 	plain := optionsForArm(global, "hybrid")
-	if plain.abstainPrompt {
+	if plain.pcic {
 		t.Fatalf("plain arm should be zero mechanisms when parsed as baseline: %+v", plain)
 	}
 	single := optionsForRun(global, "hybrid", false)
-	if !single.abstainPrompt {
+	if !single.pcic {
 		t.Fatalf("single arm lost global mechanisms: %+v", single)
 	}
 	pairedBaseline := optionsForRun(global, "hybrid", true)
-	if pairedBaseline.abstainPrompt {
+	if pairedBaseline.pcic {
 		t.Fatalf("paired baseline leaked global mechanisms: %+v", pairedBaseline)
 	}
 }
@@ -953,8 +924,8 @@ func TestTPlanArmsWriteDistinctAnswerRegimes(t *testing.T) {
 	for _, tc := range []struct {
 		arm, want string
 	}{
-		{"fts", "force_answer=true;abstain_prompt=false;no_idk_retry=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true})},
-		{"fts+tplan", "force_answer=true;abstain_prompt=false;no_idk_retry=true;temporal_answer_prompt=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true, temporalAnswerPrompt: true})},
+		{"fts", "force_answer=true;no_idk_retry=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true})},
+		{"fts+tplan", "force_answer=true;no_idk_retry=true;temporal_answer_prompt=true;answer_prompt_digest=" + formalAnswerPromptDigest(options{forceAnswer: true, noIDKRetry: true, temporalAnswerPrompt: true})},
 	} {
 		items, err := readResultsJSONL(filepath.Join(runDir, "results-"+tc.arm+".jsonl"))
 		if err != nil || len(items) != 1 {
@@ -1035,18 +1006,9 @@ func TestForceAnswerPromptsRequireBestGuess(t *testing.T) {
 	}
 }
 
-func TestForceAnswerAndAbstainPromptAreMutuallyExclusive(t *testing.T) {
-	if err := validatePromptModes(options{forceAnswer: true, abstainPrompt: true}); err == nil {
-		t.Fatal("expected force-answer and abstain-prompt conflict")
-	}
-	if err := validatePromptModes(options{forceAnswer: true}); err != nil {
-		t.Fatalf("force-answer alone rejected: %v", err)
-	}
-}
-
 func TestArmJournalsKeepSuffixSpecificResultFiles(t *testing.T) {
 	dir := t.TempDir()
-	for _, arm := range []string{"hybrid", "hybrid+assoc"} {
+	for _, arm := range []string{"hybrid", "hybrid+rerank"} {
 		j, err := openJournal(dir, arm)
 		if err != nil {
 			t.Fatalf("open %s: %v", arm, err)
@@ -1054,7 +1016,7 @@ func TestArmJournalsKeepSuffixSpecificResultFiles(t *testing.T) {
 		j.write(result{Conv: 0, Q: 0, QuestionID: arm, Correct: true})
 		j.Close()
 	}
-	for _, arm := range []string{"hybrid", "hybrid+assoc"} {
+	for _, arm := range []string{"hybrid", "hybrid+rerank"} {
 		path := filepath.Join(dir, "results-"+arm+".jsonl")
 		items, err := readResultsJSONL(path)
 		if err != nil || len(items) != 1 || items[0].QuestionID != arm {
@@ -1384,7 +1346,7 @@ func TestSweepAnswerPromptInjectsCurrentDate(t *testing.T) {
 // today's date" rule (written for LoCoMo's absolute "when" questions) must
 // stand unmodified.
 func TestRelativeTimeRuleOnlyWhenDated(t *testing.T) {
-	base := answerPromptForRegime(2, true, false, false, false)
+	base := answerPromptForRegime(2, true, false, false)
 
 	if withCurrentDateRule(base, "") != base {
 		t.Fatal("undated system prompt must be unchanged")

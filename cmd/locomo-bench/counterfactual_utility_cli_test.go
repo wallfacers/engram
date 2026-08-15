@@ -114,7 +114,6 @@ func TestUtilityMutuallyExclusiveModes(t *testing.T) {
 		{"nav", func(o *options) { o.nav = true }},
 		{"iris", func(o *options) { o.iris = true }},
 		{"unified-answer-contract", func(o *options) { o.unifiedAnswerContract = true }},
-		{"abstain", func(o *options) { o.abstainPrompt = true }},
 		{"pcic", func(o *options) { o.pcic = true }},
 		{"rerank", func(o *options) { o.rerank = true }},
 	}

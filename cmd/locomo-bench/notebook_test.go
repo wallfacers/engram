@@ -46,7 +46,7 @@ func TestNotebookAttributionInlineCapture(t *testing.T) {
 
 	correct, _, _, _, _, _, att := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
 		context.Background(), r, answerCall, noop, noop, judgeCall, opt, qa,
-		chunkTurns, turnText, nil, slog.Default(),
+		chunkTurns, turnText, slog.Default(),
 	)
 	if !correct {
 		t.Fatalf("stub judge returns correct=true; got correct=%t", correct)
@@ -70,7 +70,7 @@ func TestNotebookAttributionInlineCapture(t *testing.T) {
 	opt.notebook = false
 	_, _, _, _, _, _, off := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
 		context.Background(), r, answerCall, noop, noop, judgeCall, opt, qa,
-		chunkTurns, turnText, nil, slog.Default(),
+		chunkTurns, turnText, slog.Default(),
 	)
 	if off != nil {
 		t.Fatalf("--notebook off must return nil attribution, got %+v", off)

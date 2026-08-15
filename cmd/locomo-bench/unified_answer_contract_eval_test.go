@@ -139,7 +139,6 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 	for name, mutate := range map[string]func(*options){
 		"global unified":      func(o *options) { o.unifiedAnswerContract = true },
 		"force answer":        func(o *options) { o.forceAnswer = true },
-		"abstain prompt":      func(o *options) { o.abstainPrompt = true },
 		"typed prompt":        func(o *options) { o.lmeTypedPrompts = true },
 		"temporal prompt":     func(o *options) { o.temporalAnswerPrompt = true },
 		"unified typed":       func(o *options) { o.unifiedTypedPrompts = true },

@@ -325,7 +325,6 @@ func validateFormalLegacyRecipe(recipe string) error {
 // variants remain allowed because their exact digests are frozen separately.
 func validateFormalLegacyMechanismOptions(opt options) error {
 	if opt.iris || opt.rerank || opt.pcic || opt.oracle ||
-		opt.abstainHard || opt.abstainSoft ||
 		opt.pcicAnnotate || opt.recallDiagnostic || opt.coverageOnly ||
 		opt.temporalDiagnostic || opt.attributionTrace || opt.abstainProbe ||
 		opt.estimate {
@@ -1560,10 +1559,10 @@ func formalAnswerPromptDigest(opt options) string {
 		return evalJSONDigest(prompts)
 	}
 	prompts := []string{
-		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
-		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
-		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
-		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, false),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, false),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, false),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, false),
 		currentDateRule,
 		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
 	}

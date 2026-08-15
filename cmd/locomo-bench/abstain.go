@@ -35,18 +35,6 @@ type AbstainSignal struct {
 	ClaimSignalPresent bool             `json:"claim_signal_present"`
 }
 
-type AbstainThresholdConfig struct {
-	UseClaim            bool
-	ClaimThreshold      float64
-	UseConfidence       bool
-	ConfidenceThreshold float64
-}
-
-type AbstainDecision struct {
-	Abstain bool   `json:"abstain"`
-	Rule    string `json:"rule"`
-}
-
 type abstainSignalInput struct {
 	QuestionID        string
 	Category          int
@@ -151,24 +139,6 @@ func clamp01(value float64) float64 {
 		return 1
 	}
 	return value
-}
-
-// decideAbstention applies thresholds to already-computed evidence. Confidence
-// is converted to an abstention score (1-confidence), so the inclusive >= rule
-// has the same direction for every threshold used by the probe.
-func decideAbstention(signal AbstainSignal, config AbstainThresholdConfig) AbstainDecision {
-	claimFired := config.UseClaim && signal.ClaimSignalPresent && claimAbstentionScore(signal.ClaimMatch) >= config.ClaimThreshold
-	confidenceFired := config.UseConfidence && 1-signal.Confidence >= config.ConfidenceThreshold
-	switch {
-	case claimFired && confidenceFired:
-		return AbstainDecision{Abstain: true, Rule: "combined"}
-	case claimFired:
-		return AbstainDecision{Abstain: true, Rule: "claim=no-match"}
-	case confidenceFired:
-		return AbstainDecision{Abstain: true, Rule: "confidence<tau"}
-	default:
-		return AbstainDecision{}
-	}
 }
 
 func claimAbstentionScore(match ClaimMatch) float64 {

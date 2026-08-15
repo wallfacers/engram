@@ -38,7 +38,7 @@ func TestRunFixedGoldOracleQuestionUsesOnlyAllActiveGoldEvidence(t *testing.T) {
 	answerCalls, judgeCalls := 0, 0
 	answer := func(_ context.Context, system, user string) (string, provider.Usage, error) {
 		answerCalls++
-		wantSystem := answerPromptForRegime(qa.Category, false, false, false, false)
+		wantSystem := answerPromptForRegime(qa.Category, false, false, false)
 		if system != wantSystem {
 			t.Fatalf("oracle answer system prompt drifted")
 		}
@@ -277,7 +277,7 @@ func TestRunFixedGoldOracleQuestionAllowsOnlyLongMemEvalAbstentionEmptyGold(t *t
 	protocol.Benchmark.Name = "longmemeval_s"
 	protocol.Benchmark.Split = "cleaned_full_500"
 	protocol.Benchmark.QuestionCount = 500
-	protocol.Models.Answerer.PromptDigest = formalAnswerPromptDigest(options{abstainPrompt: true})
+	protocol.Models.Answerer.PromptDigest = formalAnswerPromptDigest(options{})
 	fixedGoldSealProtocol(&protocol)
 	qa := locomoQA{
 		QuestionID:   "lme-abstention-1",
@@ -291,14 +291,14 @@ func TestRunFixedGoldOracleQuestionAllowsOnlyLongMemEvalAbstentionEmptyGold(t *t
 	counter := &fixedGoldTestCounter{count: 91, fingerprint: protocol.Budget.CounterFingerprint}
 	answerCalls, judgeCalls := 0, 0
 	got := runFixedGoldOracleQuestion(
-		context.Background(), protocol, options{formalCounter: counter, abstainPrompt: true},
+		context.Background(), protocol, options{formalCounter: counter},
 		reader, nil, qa,
 		func(_ context.Context, _, user string) (string, provider.Usage, error) {
 			answerCalls++
 			if !strings.Contains(user, "RETRIEVED MEMORIES:\n(none)") {
 				t.Fatalf("empty abstention did not render the same empty context: %q", user)
 			}
-			return canonicalAbstainDecline, provider.Usage{InputTokens: 91}, nil
+			return "I don't know", provider.Usage{InputTokens: 91}, nil
 		},
 		func(context.Context, string, string) (string, provider.Usage, error) {
 			judgeCalls++
@@ -317,7 +317,7 @@ func TestRunFixedGoldOracleQuestionAllowsOnlyLongMemEvalAbstentionEmptyGold(t *t
 	protocol.Benchmark.QuestionCount = 1540
 	fixedGoldSealProtocol(&protocol)
 	got = runFixedGoldOracleQuestion(
-		context.Background(), protocol, options{formalCounter: counter, abstainPrompt: true},
+		context.Background(), protocol, options{formalCounter: counter},
 		reader, nil, qa,
 		func(context.Context, string, string) (string, provider.Usage, error) {
 			t.Fatal("LoCoMo empty gold reached answer model")

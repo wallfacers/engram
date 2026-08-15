@@ -24,24 +24,6 @@ type modelCaller func(ctx context.Context, system, user string) (string, error)
 
 type usageModelCaller func(ctx context.Context, system, user string) (string, provider.Usage, error)
 
-const canonicalAbstainDecline = "I don't know; this information is not mentioned in the conversation."
-
-const abstainLowConfidenceHint = "LOW-CONFIDENCE RETRIEVAL HINT: Verify that the retrieved memories support the premise before answering."
-
-// answerWithAbstentionDecision owns the one place an operating point can skip
-// an answer-model call. The judge call remains in the normal runner path so
-// the hard-gate result is graded by the existing adversarial-gold convention.
-func answerWithAbstentionDecision(ctx context.Context, decision AbstainDecision, opt options, systemPrompt, userPrompt string, answerCall usageModelCaller) (string, provider.Usage, bool, error) {
-	if opt.abstainHard && decision.Abstain {
-		return canonicalAbstainDecline, provider.Usage{}, true, nil
-	}
-	if opt.abstainSoft && decision.Abstain {
-		systemPrompt += "\n\n" + abstainLowConfidenceHint
-	}
-	predicted, usage, err := answerCall(ctx, systemPrompt, userPrompt)
-	return predicted, usage, false, err
-}
-
 func modelCallerFromUsage(c usageModelCaller) modelCaller {
 	return func(ctx context.Context, system, user string) (string, error) {
 		text, _, err := c(ctx, system, user)
@@ -268,22 +250,6 @@ const forceOpenDomainAnswerPrompt = `You answer a question about a person based 
 - Answer with a short, direct phrase or sentence. No explanation, no restating the question.
 - This is an answerable evaluation: always provide your best guess based on the memories and reasonable inference; never decline with an uncertainty response.`
 
-// abstainAnswerPrompt is the Abstain-R1 answer regime (feature 003 US5, a
-// scoring-convention change committed separately from the algorithm work). It
-// teaches abstention with a 1:4 in-context ratio — one refusal example among
-// four answerable ones — so the model refuses ONLY when the memories cannot
-// support any answer, and when it refuses it names the missing information
-// instead of a bare bail-out. It is mutually exclusive with --force-answer.
-const abstainAnswerPrompt = `You answer a question about a long conversation using ONLY the retrieved memories provided. Rules:
-- If the memories support an answer, reply with the shortest phrase that fully answers it — a name, a date, a place, a list. No explanation, no restating the question.
-- For "when" questions, read the time from the memory's [event: YYYY-MM-DD] marker; write dates naturally like "21 July 2023", never ISO format.
-- If — and ONLY if — NO retrieved memory contains the information the question asks for, reply "I don't know" and then, in the same line, name the specific fact that is missing (e.g. "I don't know — no memory records where the trip took place"). Do NOT guess or invent facts the memories never state; a confident fabrication is worse than an honest refusal.
-Examples:
-Q: Where does the user work? Memories mention the user's job at Acme. A: Acme
-Q: When did the user visit Oslo? A memory marks [event: 2023-05-07] for the Oslo trip. A: 7 May 2023
-Q: What pets does the user have? A memory says the user adopted a cat named Mittens. A: a cat (Mittens)
-Q: How many siblings does the user have? A memory says the user has two brothers. A: two
-Q: What is the user's blood type? No memory mentions blood type. A: I don't know — no memory records the user's blood type.`
 
 // unifiedAnswerContractPrompt is a dataset- and category-independent answer
 // policy for a real memory assistant. It deliberately contains no benchmark
@@ -332,7 +298,7 @@ func answerPromptForOptions(category int, forceAnswer bool) string {
 }
 
 func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswer bool) string {
-	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false, false)
+	return answerPromptForRegime(category, forceAnswer, temporalAnswer, false)
 }
 
 // answerPromptForRegime selects the answer system prompt. The abstention regime
@@ -342,10 +308,7 @@ func answerPromptForOptionsWithTemporal(category int, forceAnswer, temporalAnswe
 // 9=temporal-reasoning, 10=knowledge-update, 12=single-session-preference) into
 // the LoCoMo-validated category contracts they match, instead of the generic
 // force/default prompt. Default off; eval-config change, declared separately.
-func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, lmeTyped bool) string {
-	if abstain {
-		return abstainAnswerPrompt
-	}
+func answerPromptForRegime(category int, forceAnswer, temporalAnswer, lmeTyped bool) string {
 	if lmeTyped {
 		switch category {
 		case 8: // LME multi-session（聚合/计数/比较）→ multi-hop 契约
@@ -409,7 +372,7 @@ func answerPromptForEval(category int, opt options) string {
 	if opt.unifiedAnswerContract && unifiedContractApplies(category, opt) {
 		return unifiedAnswerContractPrompt
 	}
-	return answerPromptForRegime(category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts)
+	return answerPromptForRegime(category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.lmeTypedPrompts)
 }
 
 // answerSystemPromptForEval is the single answer-path prompt hook. Keep every

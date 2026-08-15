@@ -56,7 +56,7 @@ func TestNavAnswerEndToEnd(t *testing.T) {
 	qa := locomoQA{Question: "What area was hit by the flood?", Category: 2, QuestionID: "conv-0-q-1"}
 
 	correct, predicted, _, _, _, meta, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
-		ctx, r, answerCall, noopCall, noopCall, judgeCall, opt, qa, nil, nil, nil, nil,
+		ctx, r, answerCall, noopCall, noopCall, judgeCall, opt, qa, nil, nil, nil,
 	)
 	if !correct {
 		t.Fatalf("stub judge returns correct=true; got correct=%t", correct)
@@ -127,7 +127,7 @@ func TestNavAnswerFallsBackOnNavModelFailure(t *testing.T) {
 	}
 	qa := locomoQA{Question: "What area was hit by the flood?", Category: 2, QuestionID: "conv-0-q-2"}
 	correct, _, _, _, _, _, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
-		ctx, r, answerCall, noopCall, noopCall, judgeCall, opt, qa, nil, nil, nil, nil,
+		ctx, r, answerCall, noopCall, noopCall, judgeCall, opt, qa, nil, nil, nil,
 	)
 	if !correct {
 		t.Fatalf("fail-closed single-shot path must still answer + judge; got correct=%t", correct)

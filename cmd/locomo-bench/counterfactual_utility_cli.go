@@ -21,8 +21,6 @@ func utilityExperimentalFlags(opt *options) string {
 		return "--iris"
 	case opt.unifiedAnswerContract:
 		return "--unified-answer-contract"
-	case opt.abstainPrompt:
-		return "--abstain-prompt"
 	case opt.pcic:
 		return "--pcic"
 	case opt.rerank:

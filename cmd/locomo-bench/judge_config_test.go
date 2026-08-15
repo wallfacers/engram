@@ -96,7 +96,7 @@ func TestAnswerRegimeFingerprintSeparatesJudgeModel(t *testing.T) {
 		answerModel: answerModel,
 		judgeModel:  "deepseek-v4-flash",
 	})
-	wantDifferent := "force_answer=false;abstain_prompt=false;no_idk_retry=false;answer_prompt_digest=" +
+	wantDifferent := "force_answer=false;no_idk_retry=false;answer_prompt_digest=" +
 		formalAnswerPromptDigest(options{}) + ";judge_model=deepseek-v4-flash"
 	if withDifferentJudge != wantDifferent {
 		t.Fatalf("different judge model fingerprint = %q, want %q", withDifferentJudge, wantDifferent)

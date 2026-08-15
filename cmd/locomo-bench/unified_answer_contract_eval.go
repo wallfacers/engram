@@ -200,9 +200,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 	}{
 		{!opt.noIDKRetry, "missing --no-idk-retry"},
 		{opt.forceAnswer, "--force-answer"},
-		{opt.abstainPrompt, "--abstain-prompt"},
-		{opt.abstainHard, "--abstain-hard"},
-		{opt.abstainSoft, "--abstain-soft"},
 		{opt.temporalAnswerPrompt, "--temporal-answer-prompt"},
 		{opt.unifiedTypedPrompts, "--unified-typed-prompts"},
 		{opt.temporalDateScaffold, "--temporal-date-scaffold"},

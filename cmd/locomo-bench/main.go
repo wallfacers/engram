@@ -124,9 +124,6 @@ type options struct {
 	concurrency                int
 	chunks                     bool
 	chunkQuota                 int
-	abstainPrompt              bool
-	abstainHard                bool
-	abstainSoft                bool
 	forceAnswer                bool
 	imageCaptions              bool
 	temporalAnswerPrompt       bool
@@ -444,7 +441,6 @@ func run() error {
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
 	flag.IntVar(&chunkTargetChars, "chunk-target-chars", 900, "soft target per verbatim chunk in code points (store-build time; lower = finer turn-granularity chunks; stores built with different values are NOT comparable)")
 	flag.IntVar(&chunkMaxChars, "chunk-max-chars", 1100, "hard cap per stored verbatim chunk in code points (store-build time; must exceed --chunk-target-chars)")
-	flag.BoolVar(&opt.abstainPrompt, "abstain-prompt", false, "use the abstention-oriented answer prompt")
 	flag.BoolVar(&opt.forceAnswer, "force-answer", false, "require a best guess instead of an I don't know answer")
 	flag.BoolVar(&opt.imageCaptions, "image-captions", false, "fold each turn's blip_caption into its text at ingestion (image-borne facts become retrievable); changes extraction input, so stores built with/without it are not comparable")
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
@@ -1472,13 +1468,6 @@ func run() error {
 		}
 		printStatsSummary(arm, stats)
 	}
-	if frontier, complete, err := frontierFromRuns(arms, runsByArm); err != nil {
-		return fmt.Errorf("build frontier: %w", err)
-	} else if complete {
-		if err := writeFrontier(filepath.Join(opt.runDir, "frontier.json"), frontier); err != nil {
-			return fmt.Errorf("write frontier.json: %w", err)
-		}
-	}
 	fmt.Printf("cost: actual_usd=%.6f %s\n", ledger.ActualUSD(), formatBudgetSummary(ledger.AnswerContextTokensMean(), opt.budgetBaseline))
 	if opt.notebook {
 		if err := mountNotebook(ctx, opt, prov, model, logger); err != nil {
@@ -1896,9 +1885,6 @@ type armSpec struct {
 
 var supportedArmMechanisms = map[string]struct{}{
 	"tplan":        {},
-	"abstain":      {},
-	"abstain-hard": {},
-	"abstain-soft": {},
 	"rerank":       {},
 	"pcic":         {},
 	"oracle":       {},
@@ -1944,9 +1930,6 @@ func optionsForArm(global options, name string) options {
 	}
 	if !spec.overrides {
 		arm := global
-		arm.abstainPrompt = false
-		arm.abstainHard = false
-		arm.abstainSoft = false
 		arm.rerank = false
 		arm.pcic = false
 		arm.oracle = false
@@ -1954,9 +1937,6 @@ func optionsForArm(global options, name string) options {
 		return arm
 	}
 	arm := global
-	arm.abstainPrompt = spec.mechanisms["abstain"] || spec.mechanisms["abstain-soft"]
-	arm.abstainHard = spec.mechanisms["abstain-hard"]
-	arm.abstainSoft = spec.mechanisms["abstain-soft"]
 	arm.temporalAnswerPrompt = global.temporalAnswerPrompt || spec.mechanisms["tplan"]
 	arm.unifiedAnswerContract = global.unifiedAnswerContract || spec.mechanisms["unified"]
 	arm.rerank = spec.mechanisms["rerank"]
@@ -1968,7 +1948,7 @@ func optionsForArm(global options, name string) options {
 func pcicEnabledForRun(global options, arms []string) bool {
 	for _, arm := range arms {
 		armOpt := optionsForRun(global, arm, len(arms) > 1)
-		if armOpt.pcic || armOpt.abstainHard || armOpt.abstainSoft {
+		if armOpt.pcic {
 			return true
 		}
 	}
@@ -2248,7 +2228,7 @@ func checkRunDirRegime(opt options) error {
 }
 
 func answerRegimeFingerprint(opt options) string {
-	fingerprint := fmt.Sprintf("force_answer=%t;abstain_prompt=%t;no_idk_retry=%t", opt.forceAnswer, opt.abstainPrompt, opt.noIDKRetry)
+	fingerprint := fmt.Sprintf("force_answer=%t;no_idk_retry=%t", opt.forceAnswer, opt.noIDKRetry)
 	if opt.evidenceAssembly {
 		entityOrder := "kind_layered"
 		if opt.assemblyLegacyEntityOrder {
@@ -2403,9 +2383,6 @@ func validateRepresentationArm(arm RepresentationKind) error {
 }
 
 func validatePromptModes(opt options) error {
-	if opt.forceAnswer && opt.abstainPrompt {
-		return fmt.Errorf("--force-answer and --abstain-prompt are mutually exclusive")
-	}
 	if opt.lmeTypedPrompts && opt.datasetFormat != "longmemeval" {
 		return fmt.Errorf("--lme-typed-prompts requires --dataset-format=longmemeval")
 	}
@@ -2419,12 +2396,9 @@ func validatePromptModes(opt options) error {
 			name    string
 		}{
 			{opt.forceAnswer, "--force-answer"},
-			{opt.abstainPrompt, "--abstain-prompt"},
 			{opt.temporalAnswerPrompt, "--temporal-answer-prompt"},
 			{opt.lmeTypedPrompts, "--lme-typed-prompts"},
 			{opt.counterRefine, "--counter-refine"},
-			{opt.abstainHard, "--abstain-hard"},
-			{opt.abstainSoft, "--abstain-soft"},
 		} {
 			if conflict.enabled {
 				conflicts = append(conflicts, conflict.name)
@@ -2512,7 +2486,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					countedJudge := recorder.wrapJudge(judgeCall)
 					correct, predicted, usage, sweepUsed, evidence, retrievalMeta, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(
 						ctx, runtime.retrievers[s.name], countedAnswer, filterCall, countedRewrite,
-						countedJudge, armOpt, qa, runtime.chunkTurns, nil, nil, logger,
+						countedJudge, armOpt, qa, runtime.chunkTurns, nil, logger,
 					)
 					receipt := recorder.snapshot()
 					item := result{
@@ -2602,10 +2576,6 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					return
 				}
 				armOpt.selector, _ = selectorForArm(runtime, conv.ID, s.name, armOpt, nil, false)
-				var abstainRuntime *abstainRuntimeContext
-				if armOpt.abstainHard || armOpt.abstainSoft {
-					abstainRuntime = &abstainRuntimeContext{runtime: runtime, convID: conv.ID, arm: s.name, meta: armOpt.pcicMeta}
-				}
 				effectiveAnswerCall, effectiveJudgeCall := answerCall, judgeCall
 				var pairObserver *unifiedPromptPairObserver
 				if armOpt.unifiedPairAudit {
@@ -2613,7 +2583,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					effectiveAnswerCall = pairObserver.wrapAnswer(answerCall)
 					effectiveJudgeCall = pairObserver.wrapJudge(judgeCall)
 				}
-				correct, predicted, usage, sweepUsed, evidence, retrievalMeta, notebookAttribution := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], effectiveAnswerCall, filterCall, rewriteCall, effectiveJudgeCall, armOpt, qa, runtime.chunkTurns, turnTextIndex(conv), abstainRuntime, logger)
+				correct, predicted, usage, sweepUsed, evidence, retrievalMeta, notebookAttribution := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, runtime.retrievers[s.name], effectiveAnswerCall, filterCall, rewriteCall, effectiveJudgeCall, armOpt, qa, runtime.chunkTurns, turnTextIndex(conv), logger)
 				if writeParity && armOpt.contextParity != nil {
 					record := contextParityRecord{
 						Conv:                key.Conv,
@@ -2641,7 +2611,7 @@ func answerConversationWithUsage(ctx context.Context, opt options, conv conversa
 					Question:            qa.Question,
 					Gold:                goldFor(qa),
 					Predicted:           predicted,
-					HardGated:           abstainRuntime != nil && abstainRuntime.hardGated,
+					HardGated:           false,
 					RetrievalFlags:      retrievalFingerprint(armOpt),
 					AnswerRegime:        answerRegimeFingerprint(armOpt),
 					InputTokens:         usage.InputTokens,
@@ -2742,52 +2712,15 @@ func answerAndJudgeWithUsage(ctx context.Context, retriever *memory.Retriever, a
 }
 
 func answerAndJudgeWithEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
-	return answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, nil, nil, logger)
+	return answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, nil, logger)
 }
 
-type abstainRuntimeContext struct {
-	runtime   *conversationRuntime
-	convID    int
-	arm       string
-	meta      *PCICMeta
-	hardGated bool
-}
-
-func defaultFrontierAbstainThresholds() AbstainThresholdConfig {
-	return AbstainThresholdConfig{
-		UseClaim:            true,
-		ClaimThreshold:      1,
-		UseConfidence:       true,
-		ConfidenceThreshold: 0.5,
-	}
-}
-
-func abstainDecisionForHits(ctx context.Context, abstain *abstainRuntimeContext, qa locomoQA, hits []memory.Result) (AbstainDecision, error) {
-	if abstain == nil || abstain.runtime == nil {
-		return AbstainDecision{}, nil
-	}
-	signal, err := computeAbstainSignal(ctx, abstain.runtime.entries, qa.Question, abstainSignalInput{
-		QuestionID:        qa.QuestionID,
-		Category:          qa.Category,
-		Candidates:        hits,
-		Meta:              abstain.meta,
-		ChunkTurns:        abstain.runtime.chunkTurns,
-		SpanKey:           func(turnID string) string { return pcicSpanKey(abstain.convID, turnID) },
-		Reranked:          abstain.runtime.reranked[abstain.arm],
-		CosineByCandidate: probeCandidateCosines(ctx, abstain.runtime, qa.Question, hits),
-	})
-	if err != nil {
-		return AbstainDecision{}, err
-	}
-	return decideAbstention(signal, defaultFrontierAbstainThresholds()), nil
-}
-
-func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
-	correct, predicted, usage, sweepUsed, evidence, _, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, turnText, abstain, logger)
+func answerAndJudgeWithAbstentionEvidenceDiagnostics(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics) {
+	correct, predicted, usage, sweepUsed, evidence, _, _ := answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx, retriever, answerCall, filterCall, rewriteCall, judgeCall, opt, qa, chunkTurns, turnText, logger)
 	return correct, predicted, usage, sweepUsed, evidence
 }
 
-func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, abstain *abstainRuntimeContext, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta, *evalNotebookAttribution) {
+func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, retriever *memory.Retriever, answerCall usageModelCaller, filterCall, rewriteCall modelCaller, judgeCall usageModelCaller, opt options, qa locomoQA, chunkTurns map[string][]string, turnText map[string]string, logger *slog.Logger) (bool, string, provider.Usage, bool, *sweepEvidenceDiagnostics, queryRetrievalMeta, *evalNotebookAttribution) {
 	topK, quota := opt.retrievalFor(qa.Category)
 	var hits []memory.Result
 	var searchDiagnostics memory.SearchDiagnostics
@@ -2863,10 +2796,6 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	// hit set; assembly/trace override it below.
 	contextEvidence := hits
 	prompt := answerSystemPromptForEval(qa, opt)
-	decision, err := abstainDecisionForHits(ctx, abstain, qa, hits)
-	if err != nil {
-		logger.Warn("abstain signal failed; answering normally", "err", err)
-	}
 	userPrompt := buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold)
 	if opt.evidenceAssembly {
 		// 030 US1 read-side assembly (specs/030): reorder evidence (chunk-first +
@@ -2981,10 +2910,8 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 			}
 		}
 	}
-	predicted, usage, hardGated, err := answerWithAbstentionDecision(ctx, decision, opt, prompt, userPrompt, answerCall)
-	if abstain != nil {
-		abstain.hardGated = hardGated
-	}
+	predicted, usage, err := answerCall(ctx, prompt, userPrompt)
+	hardGated := false
 	if err != nil {
 		logger.Warn("answer call failed; question scored wrong", "err", err)
 		return false, "", usage, sweepUsed, newSweepEvidenceDiagnostics(qa, answerHits, answerDiagnostics, usage.InputTokens, chunkTurns), retrievalMeta, nil
