@@ -6,8 +6,13 @@ package main
 // behavior here only with a spec contract bump.
 
 import (
+	"context"
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wallfacers/engram/memory"
@@ -250,5 +255,167 @@ func TestPackSelectSelectedOrderFused(t *testing.T) {
 	}
 	if sel.Selected[0].Name != "high" || sel.Selected[0].Score < sel.Selected[1].Score {
 		t.Errorf("Selected not in fused order: %+v", sel.Selected)
+	}
+}
+
+// --- T008: default-off byte-parity golden (spec FR-005) ---
+
+// TestSubmodularPackDefaultsOff asserts the zero-value options disable
+// packing entirely (the golden that keeps the shipped path untouched).
+func TestSubmodularPackDefaultsOff(t *testing.T) {
+	var opt options
+	if opt.submodularPack {
+		t.Fatal("zero-value options must have submodularPack=false")
+	}
+	cfg, err := packConfigForRun(opt)
+	if err != nil {
+		t.Fatalf("zero options must configure cleanly: %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatal("zero options must produce a disabled pack config")
+	}
+	if cfg.Weights.Rel != 3 || cfg.Weights.Cover != 1 || cfg.Weights.Fac != 1 || cfg.Weights.Div != 1 {
+		t.Errorf("default weights = %+v, want 3:1:1:1", cfg.Weights)
+	}
+}
+
+// TestRetrieveCandidatesPassthroughParity locks FR-005 byte-parity at the
+// hits level: with the flag off, the dispatch must return exactly what the
+// original quota path returns (identical hits ⇒ identical prompts, tokens,
+// and answers downstream).
+func TestRetrieveCandidatesPassthroughParity(t *testing.T) {
+	entries := map[string]string{
+		"chunk-c0-001": "the quick brown fox jumps over the lazy dog near the river bank at dawn",
+		"chunk-c0-002": "marie visited paris in spring and photographed the eiffel tower extensively",
+		"fact-a":       "the eiffel tower is located in paris france and was built in 1889",
+		"fact-b":       "marie works as a photographer and travels every spring",
+		"fact-c":       "the river bank is a popular spot at dawn for fishermen and birds",
+	}
+	r, _ := newTestNavRetriever(t, entries)
+	var opt options
+	for _, query := range []string{"where is the eiffel tower", "what does marie do", "quick brown fox"} {
+		viaDispatch, _, err := retrieveCandidates(context.Background(), r, query, 30, 12, opt, "c0q0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct, _, err := retrieveWithQuotaDiagnostics(context.Background(), r, query, 30, 12, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(viaDispatch, direct) {
+			t.Errorf("flag-off dispatch diverged for %q:\n%+v\nvs\n%+v", query, viaDispatch, direct)
+		}
+	}
+}
+
+// TestEvalFreezeCandidateRulesDigestDefaultOffUnchanged pins the sealed
+// manifest compatibility: adding pack fields with omitempty must not change
+// the digest for default-off runs.
+func TestEvalFreezeCandidateRulesDigestDefaultOffUnchanged(t *testing.T) {
+	legacy := evalJSONDigest(evalFreezeCandidateRules{TopK: 30, ChunkQuota: 12, Chunks: true, Retrieval: "hybrid"})
+	withNewFields := evalJSONDigest(evalFreezeCandidateRules{
+		TopK: 30, ChunkQuota: 12, Chunks: true, Retrieval: "hybrid",
+		SubmodularPack: false, PackWeights: "", PackPoolSize: 0,
+	})
+	if legacy != withNewFields {
+		t.Errorf("default-off digest drifted: %s vs %s — sealed manifests would break", legacy, withNewFields)
+	}
+	enabled := evalJSONDigest(evalFreezeCandidateRules{
+		TopK: 30, ChunkQuota: 12, Chunks: true, Retrieval: "hybrid",
+		SubmodularPack: true, PackWeights: "3:1:1:1", PackPoolSize: 0,
+	})
+	if enabled == legacy {
+		t.Error("packing-enabled digest must differ from legacy (arms must be distinguishable)")
+	}
+}
+
+// TestPackConfigForRunValidation covers the fail-closed startup gates.
+func TestPackConfigForRunValidation(t *testing.T) {
+	var opt options
+	opt.submodularPack = true
+	if _, err := packConfigForRun(opt); err == nil {
+		t.Error("missing --anchor-run must fail")
+	}
+	opt.anchorRun = t.TempDir()
+	if _, err := packConfigForRun(opt); err == nil {
+		t.Error("anchor dir without results-*.jsonl must fail")
+	}
+	opt.packWeights = "9:9"
+	if _, err := packConfigForRun(opt); err == nil {
+		t.Error("malformed weights must fail")
+	}
+	opt.packWeights = "3:1:1:1"
+	opt.packBudgetAnchor = "bogus"
+	if _, err := packConfigForRun(opt); err == nil {
+		t.Error("bogus anchor mode must fail")
+	}
+	opt.packBudgetAnchor = "mean"
+	// Write a minimal anchor run and expect success.
+	anchorDir := t.TempDir()
+	row := map[string]any{"question_id": "c0q1", "conv": 0, "q": 1, "answer_context_tokens": 3600}
+	blob, _ := json.Marshal(row)
+	if err := os.WriteFile(filepath.Join(anchorDir, "results-hybrid+unified.jsonl"), append(blob, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt.anchorRun = anchorDir
+	cfg, err := packConfigForRun(opt)
+	if err != nil {
+		t.Fatalf("valid anchor run must configure: %v", err)
+	}
+	if !cfg.Enabled || cfg.budgetFor("c0q1") != 3600 || cfg.budgetFor("c0q-missing") != 3600 {
+		t.Errorf("mean-mode budget resolution wrong: %+v (budgetFor c0q1=%d)", cfg, cfg.budgetFor("c0q1"))
+	}
+	// Paired mode: exact per-question, missing falls back to mean.
+	opt.packBudgetAnchor = "paired"
+	cfg, err = packConfigForRun(opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.budgetFor("c0q1") != 3600 || cfg.budgetFor("c9q9") != 3600 {
+		t.Errorf("paired budget resolution wrong: c0q1=%d c9q9=%d", cfg.budgetFor("c0q1"), cfg.budgetFor("c9q9"))
+	}
+}
+
+// TestRetrieveCandidatesPackedPath exercises the enabled path end-to-end on
+// a small store: selection under the paired budget + audit row on disk.
+func TestRetrieveCandidatesPackedPath(t *testing.T) {
+	entries := map[string]string{
+		"chunk-c0-001": "the quick brown fox jumps over the lazy dog near the river bank at dawn",
+		"chunk-c0-002": "marie visited paris in spring and photographed the eiffel tower extensively",
+		"fact-a":       "the eiffel tower is located in paris france and was built in 1889",
+		"fact-b":       "marie works as a photographer and travels every spring",
+	}
+	r, _ := newTestNavRetriever(t, entries)
+	anchorDir := t.TempDir()
+	row := map[string]any{"question_id": "c0q0", "conv": 0, "q": 0, "answer_context_tokens": 40}
+	blob, _ := json.Marshal(row)
+	if err := os.WriteFile(filepath.Join(anchorDir, "results-x.jsonl"), append(blob, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDir := t.TempDir()
+	var opt options
+	opt.submodularPack = true
+	opt.anchorRun = anchorDir
+	opt.runDir = runDir
+	hits, _, err := retrieveCandidates(context.Background(), r, "eiffel tower paris", 30, 12, opt, "c0q0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("packed path returned no hits")
+	}
+	used := 0
+	for _, h := range hits {
+		used += packEstimateTokens(h.Content)
+	}
+	if used > 40 {
+		t.Errorf("packed hits use %d tokens > budget 40 (singleton impossible with these short entries)", used)
+	}
+	auditBytes, err := os.ReadFile(filepath.Join(runDir, "packing_audit.jsonl"))
+	if err != nil {
+		t.Fatalf("audit row not written: %v", err)
+	}
+	if !strings.Contains(string(auditBytes), `"question_id":"c0q0"`) {
+		t.Errorf("audit row missing question id: %s", auditBytes)
 	}
 }

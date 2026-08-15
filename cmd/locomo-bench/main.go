@@ -150,9 +150,14 @@ type options struct {
 	abstainGateSpec            string
 	abstainGate                AbstainGate
 	// 045: submodular packing — US1 offline gate flags (contracts/cli-flags.md
-	// v1); the mechanism flags land with T009.
+	// v1) + T009 mechanism flags.
 	aicGateDir                 string
 	aicGateSlice               string
+	submodularPack             bool
+	packPoolSize               int
+	packWeights                string
+	packBudgetAnchor           string
+	anchorRun                  string
 	// 045: 042 signal re-verification ride-along.
 	reverifyDir                string
 	reverifyLabels             string
@@ -351,6 +356,12 @@ func run() error {
 	// 045: submodular packing — US1 offline packing-fidelity gate.
 	flag.StringVar(&opt.aicGateDir, "aic-gate", "", "045 offline: run the packing-fidelity AIC gate into this directory and exit")
 	flag.StringVar(&opt.aicGateSlice, "aic-gate-slice", "", "comma-separated conversation ids for --aic-gate (default: all)")
+	// 045 T009: submodular packing mechanism (default off; byte-parity when off).
+	flag.BoolVar(&opt.submodularPack, "submodular-pack", false, "045: budgeted submodular selection replaces quota truncation (requires --anchor-run)")
+	flag.IntVar(&opt.packPoolSize, "pack-pool-size", 0, "045: packing pool size (0 = current wide pool max(6×topK,300); probe/batch must use default)")
+	flag.StringVar(&opt.packWeights, "pack-weights", "3:1:1:1", "045: rel:cover:fac:div weights (probe/batch/LME must use the frozen default)")
+	flag.StringVar(&opt.packBudgetAnchor, "pack-budget-anchor", "paired", "045: paired | mean — budget anchor read from --anchor-run (probe/batch must use paired)")
+	flag.StringVar(&opt.anchorRun, "anchor-run", "", "045: same-batch control run dir whose results-*.jsonl anchors the packing budget")
 	// 045: 042 signal re-verification ride-along (self-contained; box stage).
 	flag.StringVar(&opt.reverifyDir, "reverify-042", "", "045 ride-along: re-collect the 042 signal with fixed measurement into this directory and exit")
 	flag.StringVar(&opt.reverifyLabels, "reverify-labels", "", "042 collect dir containing hidden/utility-labels.jsonl for --reverify-042")
@@ -726,6 +737,13 @@ func run() error {
 			return fmt.Errorf("--aic-gate cannot be combined with --abstain-probe")
 		}
 		return runAicGateCLI(context.Background(), opt, convs, arms, logger)
+	}
+	if opt.submodularPack {
+		// Fail fast at startup: weights parse, anchor mode, and the anchor
+		// run's per-question budgets must all be readable before any spend.
+		if _, err := packConfigForRun(opt); err != nil {
+			return err
+		}
 	}
 	if opt.reverifyDir != "" {
 		if opt.abstainProbe || opt.aicGateDir != "" {
