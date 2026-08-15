@@ -92,7 +92,7 @@ Step A 配对验证 unified 契约下 trace-mediation 显著负(−3.44pp, McNem
 - **FR-003**: 043 机制方向已 NO-GO(verdict 已出);master 不含 043 代码,故本 feature 仅在文档记录其结论,不执行代码清理;若 043 后续 merge 则另行处理。
 - **FR-004**: `--trace-mediation` 默认开启组件 MUST 被移除,默认路径切换到 chunk 装配;unified 配方须在清理后与 87.9% 锚(同 store/judge/clean 口径)对齐,不引入回归。
 - **FR-005**: 已坐实能力(`--unified-answer-contract` / `--unified-typed-prompts` / `--chunks` / `--chunk-quota` / `--force-answer` / `--no-idk-retry`)MUST 保持不变(flag、默认值、行为均不因清理受影响)。
-- **FR-006**: 诊断与未定论工具(`--oracle` / `--rerank` / `--pcic` / `--compiler-arm` / `--representation` / `--temporal-date-scaffold`)MUST 不被误删;其去留在 plan 阶段逐个核查并给出理由。
+- **FR-006**: 诊断与未定论工具(`--oracle` / `--rerank` / `--pcic` / `--compiler-arm` / `--representation` / `--temporal-date-scaffold` / `--abstain-probe` / `--recall-diagnostic` 及 `SearchMulti`/`classifyQueryMode`/`computeAbstainSignal`)MUST 不被误删;其去留在 plan 阶段逐个核查并给出理由。
 - **FR-007**: 清理 MUST 保持引擎五目录(`memory/ embedding/ provider/ store/ internal/`)零改动;`git diff --name-only -- memory embedding provider store internal` 必须为空。
 - **FR-008**: 清理后默认路径 MUST 逐字节不变(byte-parity 断言保持绿色);`CGO_ENABLED=0 go build ./...` 与 `CGO_ENABLED=0 go test -count=1 ./...` 全绿。
 - **FR-009**: eval-config 变更(如 trace 默认值移除)与算法/代码清理 MUST 分开 commit(宪法 IV attribution)。
