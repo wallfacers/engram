@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wallfacers/engram/embedding"
@@ -35,6 +36,115 @@ func utilityRuntimeSeam() (*slog.Logger, embedding.Client, pipeline.ModelCaller)
 		return "", fmt.Errorf("042 stage must not call extraction (store must be pre-built)")
 	}
 	return logger, embClient, extractNever
+}
+
+// utilityRunPairedUnits answers every (conversation, question, repetition) unit
+// through a worker pool sized to opt.concurrency, returning the public shallow/
+// paired-deep answer attempts and the hidden utility labels. The engine
+// retriever is concurrency-safe (vecMu guards the vector memo) and the logprob
+// answerer / judge are stateless HTTP callers, so per-question parallelism is
+// safe and uses the answer sidecar's batch slots fully. The first error is
+// returned and the remaining in-flight calls are cancelled via the derived
+// context.
+func utilityRunPairedUnits(ctx context.Context, env *utilityModelEnv, opt *options, runtimes map[int]*conversationRuntime, convs []conversation, sourceMD string) (attempts []utilityAnswerAttempt, labels []utilityUtilityLabel, err error) {
+	type job struct {
+		convID int
+		qi     int
+		qid    string
+		qa     locomoQA
+		rep    int
+	}
+	var jobs []job
+	for ci := range convs {
+		conv := &convs[ci]
+		for qi := range conv.QA {
+			qa := conv.QA[qi]
+			qid := qa.QuestionID
+			if qid == "" {
+				qid = fmt.Sprintf("conv-%d-q-%d", conv.ID, qi)
+			}
+			for rep := 1; rep <= utilityRepetitions; rep++ {
+				jobs = append(jobs, job{convID: conv.ID, qi: qi, qid: qid, qa: qa, rep: rep})
+			}
+		}
+	}
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	n := opt.concurrency
+	if n < 1 {
+		n = 1
+	}
+	if n > len(jobs) {
+		n = len(jobs)
+	}
+	sem := make(chan struct{}, n)
+	var mu sync.Mutex
+	var firstErr error
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		go func(j job) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-workCtx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			retriever := runtimes[j.convID].retrievers["hybrid"]
+			if retriever == nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("conv %d has no hybrid retriever", j.convID)
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			key := utilityDecisionKey{Benchmark: "locomo", ConversationID: j.convID, QuestionID: j.qid, QuestionIndex: j.qi, Category: j.qa.CategoryName, Repetition: j.rep}
+			sh, shCorrect, err := utilityAnswerUnit(workCtx, env, retriever, opt, j.qa, utilityShallowK, key, utilityArmShallow, true)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("shallow %s: %w", key, err)
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			de, deCorrect, err := utilityAnswerUnit(workCtx, env, retriever, opt, j.qa, utilityDeepK, key, utilityArmPairedDeep, false)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("paired_deep %s: %w", key, err)
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			u, label, err := utilityTruthTable(shCorrect, deCorrect)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("truth table %s: %w", key, err)
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			attempts = append(attempts, sh, de)
+			labels = append(labels, utilityUtilityLabel{
+				DecisionKey: key, ShallowAnswerDigest: sh.AnswerAttemptID, DeepAnswerDigest: de.AnswerAttemptID,
+				ShallowCorrect: shCorrect, DeepCorrect: deCorrect, Utility: u, Label: label,
+				SourceManifestDigest: sourceMD,
+			})
+			mu.Unlock()
+		}(j)
+	}
+	wg.Wait()
+	return attempts, labels, firstErr
 }
 
 // utilityModelEnv holds the answerer/judge/retriever seams for a model stage.
@@ -156,8 +266,10 @@ func runUtilityCollectStage(opt *options) error {
 		return fmt.Errorf("load dataset: %w", err)
 	}
 	convIDs := make([]int, 0, len(convs))
+	questionCount := 0
 	for i := range convs {
 		convIDs = append(convIDs, convs[i].ID)
+		questionCount += len(convs[i].QA)
 	}
 	sort.Ints(convIDs)
 
@@ -175,7 +287,7 @@ func runUtilityCollectStage(opt *options) error {
 			{Stage: "label", SealDigest: utilityEndpointDigest("label-seal")},
 			{Stage: "pilot", SealDigest: utilityEndpointDigest("pilot-seal")},
 		},
-		Benchmark: utilityBenchmarkIdentity{Name: "locomo", QuestionCount: 0, ConversationIDs: convIDs, Repetitions: utilityRepetitions},
+		Benchmark: utilityBenchmarkIdentity{Name: "locomo", QuestionCount: questionCount, ConversationIDs: convIDs, Repetitions: utilityRepetitions},
 		Recipe:    utilityRecipeIdentity{Retrieval: "hybrid", ShallowK: utilityShallowK, DeepK: utilityDeepK, ForceAnswer: true},
 		Answerer: utilityAnswererIdentity{
 			Provider: "openai-compatible-local", Model: os.Getenv("LOCOMO_MODEL"),
@@ -192,54 +304,28 @@ func runUtilityCollectStage(opt *options) error {
 		return err
 	}
 
+	// Build every conversation runtime up front so the answer worker pool can
+	// use them concurrently; the manifest digest already covers the full
+	// question count, so the seal stays consistent with the on-disk manifest.
 	logger, embClient, extractNever := utilityRuntimeSeam()
-	var attempts []any
-	var labels []any
-	questionCount := 0
+	runtimes := make([]*conversationRuntime, 0, len(convs))
+	rtMap := map[int]*conversationRuntime{}
 	for ci := range convs {
 		conv := &convs[ci]
 		runtime, err := buildConversationRuntime(ctx, *opt, *conv, extractNever, embClient, []string{"hybrid"}, logger)
 		if err != nil {
 			return fmt.Errorf("build runtime conv %d: %w", conv.ID, err)
 		}
-		defer runtime.Close() //nolint:errcheck
-		retriever := runtime.retrievers["hybrid"]
-		if retriever == nil {
-			return fmt.Errorf("conv %d has no hybrid retriever", conv.ID)
-		}
-		for qi := range conv.QA {
-			qa := &conv.QA[qi]
-			questionCount++
-			qid := qa.QuestionID
-			if qid == "" {
-				qid = fmt.Sprintf("conv-%d-q-%d", conv.ID, qi)
-			}
-			for rep := 1; rep <= utilityRepetitions; rep++ {
-				key := utilityDecisionKey{Benchmark: "locomo", ConversationID: conv.ID, QuestionID: qid, QuestionIndex: qi, Category: qa.CategoryName, Repetition: rep}
-				sh, shCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityShallowK, key, utilityArmShallow, true)
-				if err != nil {
-					return fmt.Errorf("shallow %s: %w", key, err)
-				}
-				attempts = append(attempts, sh)
-				de, deCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityDeepK, key, utilityArmPairedDeep, false)
-				if err != nil {
-					return fmt.Errorf("paired_deep %s: %w", key, err)
-				}
-				attempts = append(attempts, de)
-				u, label, err := utilityTruthTable(shCorrect, deCorrect)
-				if err != nil {
-					return fmt.Errorf("truth table %s: %w", key, err)
-				}
-				labels = append(labels, utilityUtilityLabel{
-					DecisionKey: key, ShallowAnswerDigest: sh.AnswerAttemptID, DeepAnswerDigest: de.AnswerAttemptID,
-					ShallowCorrect: shCorrect, DeepCorrect: deCorrect, Utility: u, Label: label,
-					SourceManifestDigest: md,
-				})
-			}
-		}
+		runtimes = append(runtimes, runtime)
+		rtMap[conv.ID] = runtime
 	}
-	m.Benchmark.QuestionCount = questionCount
-	md2, err := utilityManifestDigest(&m)
+	defer func() {
+		for _, rt := range runtimes {
+			rt.Close()
+		}
+	}()
+
+	attempts, labels, err := utilityRunPairedUnits(ctx, env, opt, rtMap, convs, md)
 	if err != nil {
 		return err
 	}
@@ -259,7 +345,7 @@ func runUtilityCollectStage(opt *options) error {
 	}
 	seal := utilityStageSeal{
 		Schema: utilitySchemaVersion, Stage: utilityStageCollect, Status: utilitySealComplete,
-		ManifestDigest: md2, ReportDigest: reportDigest, Verdict: "GO",
+		ManifestDigest: md, ReportDigest: reportDigest, Verdict: "GO",
 	}
 	return utilitySealWrite(dir, seal)
 }

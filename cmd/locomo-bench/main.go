@@ -455,7 +455,7 @@ func run() error {
 	flag.StringVar(&opt.onlyQuestionsFile, "only-questions", "", "run only these question IDs (one `conv-N-q-M` per line, # = comment; research-subset mode — formal B0/B1 allowed, terminal coverage validation reports an error on subsets)")
 	flag.IntVar(&opt.topK, "top-k", 30, "retrieval budget per question")
 	flag.IntVar(&opt.maxTokens, "max-tokens", 8000, "max output tokens (reasoning models need headroom for thinking + answer)")
-	flag.IntVar(&opt.concurrency, "concurrency", 24, "max concurrent in-flight LLM calls")
+	flag.IntVar(&opt.concurrency, "concurrency", 32, "max concurrent in-flight LLM calls")
 	flag.BoolVar(&opt.chunks, "chunks", false, "union store: index verbatim session chunks alongside extracted facts (applies to every arm)")
 	flag.IntVar(&opt.chunkQuota, "chunk-quota", 0, "reserve this many top-k slots for verbatim chunks (0 = pure fused order)")
 	flag.IntVar(&chunkTargetChars, "chunk-target-chars", 900, "soft target per verbatim chunk in code points (store-build time; lower = finer turn-granularity chunks; stores built with different values are NOT comparable)")

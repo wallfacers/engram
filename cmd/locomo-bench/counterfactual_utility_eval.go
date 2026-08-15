@@ -375,6 +375,60 @@ func runUtilityDiagnoseStage(opt *options) error {
 
 // --- US2: collect artifact loading ---
 
+// utilityJoinUnits joins answer attempts with their utility labels into
+// decision units, deriving the logprob signal availability. It is the shared
+// score-phase join used by the pilot gate (in-memory, before the seal exists)
+// and the offline collect loader.
+func utilityJoinUnits(attempts []utilityAnswerAttempt, labels []utilityUtilityLabel) (units []utilityCollectUnit, signalAvail, signalUnavail int, err error) {
+	shallow := map[utilityDecisionKey]utilityAnswerAttempt{}
+	deep := map[utilityDecisionKey]utilityAnswerAttempt{}
+	for _, a := range attempts {
+		switch a.Arm {
+		case utilityArmShallow:
+			if _, dup := shallow[a.DecisionKey]; dup {
+				return nil, 0, 0, fmt.Errorf("duplicate shallow attempt for %s", a.DecisionKey)
+			}
+			shallow[a.DecisionKey] = a
+		case utilityArmPairedDeep:
+			if _, dup := deep[a.DecisionKey]; dup {
+				return nil, 0, 0, fmt.Errorf("duplicate paired_deep attempt for %s", a.DecisionKey)
+			}
+			deep[a.DecisionKey] = a
+		}
+	}
+	for _, l := range labels {
+		sh, ok := shallow[l.DecisionKey]
+		if !ok {
+			return nil, 0, 0, fmt.Errorf("label %s has no shallow answer attempt", l.DecisionKey)
+		}
+		de, ok := deep[l.DecisionKey]
+		if !ok {
+			return nil, 0, 0, fmt.Errorf("label %s has no paired_deep answer attempt", l.DecisionKey)
+		}
+		unit := utilityCollectUnit{
+			Key:              l.DecisionKey,
+			ShallowCorrect:   l.ShallowCorrect,
+			DeepCorrect:      l.DeepCorrect,
+			Label:            l.Label,
+			ShallowTokens:    sh.Usage.InputTokens + sh.Usage.OutputTokens,
+			DeepTokens:       de.Usage.InputTokens + de.Usage.OutputTokens,
+			ShallowAttemptID: sh.AnswerAttemptID,
+			DeepAttemptID:    de.AnswerAttemptID,
+		}
+		if sh.Signal != nil && sh.Signal.Status == "available" && len(sh.Signal.Features) == 3 {
+			unit.Features = sh.Signal.Features
+			unit.SignalAvailable = true
+		}
+		if unit.SignalAvailable {
+			signalAvail++
+		} else {
+			signalUnavail++
+		}
+		units = append(units, unit)
+	}
+	return units, signalAvail, signalUnavail, nil
+}
+
 // utilityLoadCollect validates a sealed collect (or pilot) directory and joins
 // the public shallow/paired-deep answer receipts with the hidden utility labels
 // into decision units. Hidden labels are read only here (the score phase),
@@ -395,57 +449,21 @@ func utilityLoadCollect(dir string, stage utilityStage) (utilityCollectData, err
 	if err != nil {
 		return data, err
 	}
-	shallow := map[utilityDecisionKey]utilityAnswerAttempt{}
-	deep := map[utilityDecisionKey]utilityAnswerAttempt{}
-	for _, a := range attempts {
-		switch a.Arm {
-		case utilityArmShallow:
-			if _, dup := shallow[a.DecisionKey]; dup {
-				return data, fmt.Errorf("duplicate shallow attempt for %s", a.DecisionKey)
-			}
-			shallow[a.DecisionKey] = a
-		case utilityArmPairedDeep:
-			if _, dup := deep[a.DecisionKey]; dup {
-				return data, fmt.Errorf("duplicate paired_deep attempt for %s", a.DecisionKey)
-			}
-			deep[a.DecisionKey] = a
-		}
-	}
 	labels, err := utilityReadJSONL[utilityUtilityLabel](filepath.Join(dir, utilityHiddenLabelsFile))
 	if err != nil {
 		return data, err
 	}
+	units, sa, su, err := utilityJoinUnits(attempts, labels)
+	if err != nil {
+		return data, err
+	}
+	data.Units = units
+	data.SignalAvailable = sa
+	data.SignalUnavailable = su
 	data.ByConversation = map[int][]utilityCollectUnit{}
-	for _, l := range labels {
-		sh, ok := shallow[l.DecisionKey]
-		if !ok {
-			return data, fmt.Errorf("label %s has no shallow answer attempt", l.DecisionKey)
-		}
-		de, ok := deep[l.DecisionKey]
-		if !ok {
-			return data, fmt.Errorf("label %s has no paired_deep answer attempt", l.DecisionKey)
-		}
-		unit := utilityCollectUnit{
-			Key:              l.DecisionKey,
-			ShallowCorrect:   l.ShallowCorrect,
-			DeepCorrect:      l.DeepCorrect,
-			Label:            l.Label,
-			ShallowTokens:    sh.Usage.InputTokens + sh.Usage.OutputTokens,
-			DeepTokens:       de.Usage.InputTokens + de.Usage.OutputTokens,
-			ShallowAttemptID: sh.AnswerAttemptID,
-			DeepAttemptID:    de.AnswerAttemptID,
-		}
-		if sh.Signal != nil && sh.Signal.Status == "available" && len(sh.Signal.Features) == 3 {
-			unit.Features = sh.Signal.Features
-			unit.SignalAvailable = true
-		}
-		if unit.SignalAvailable {
-			data.SignalAvailable++
-		} else {
-			data.SignalUnavailable++
-		}
-		data.Units = append(data.Units, unit)
-		data.ByConversation[l.DecisionKey.ConversationID] = append(data.ByConversation[l.DecisionKey.ConversationID], unit)
+	for i := range units {
+		cid := units[i].Key.ConversationID
+		data.ByConversation[cid] = append(data.ByConversation[cid], units[i])
 	}
 	return data, nil
 }
@@ -1103,6 +1121,10 @@ func runUtilityPilotStage(opt *options) error {
 			return err
 		}
 	}
+	questionCount := 0
+	for ci := range pilotConvs {
+		questionCount += len(pilotConvs[ci].QA)
+	}
 	m := utilityRunManifest{
 		Schema: utilitySchemaVersion,
 		RunID:  utilityRunID("pilot"),
@@ -1110,7 +1132,7 @@ func runUtilityPilotStage(opt *options) error {
 		Source: []utilitySourceRef{
 			{Stage: "label", SealDigest: utilityEndpointDigest("label-seal")},
 		},
-		Benchmark: utilityBenchmarkIdentity{Name: "locomo", QuestionCount: 0, ConversationIDs: convIDs, Repetitions: utilityRepetitions},
+		Benchmark: utilityBenchmarkIdentity{Name: "locomo", QuestionCount: questionCount, ConversationIDs: convIDs, Repetitions: utilityRepetitions},
 		Recipe:    utilityRecipeIdentity{Retrieval: "hybrid", ShallowK: utilityShallowK, DeepK: utilityDeepK, ForceAnswer: true},
 		Answerer: utilityAnswererIdentity{
 			Provider: "openai-compatible-local", Model: os.Getenv("LOCOMO_MODEL"),
@@ -1127,54 +1149,28 @@ func runUtilityPilotStage(opt *options) error {
 		return err
 	}
 
+	// Build both conversation runtimes up front so the answer worker pool can
+	// use them concurrently; the manifest digest already covers the full pilot
+	// question count, keeping the seal consistent with the on-disk manifest.
 	logger, embClient, extractNever := utilityRuntimeSeam()
-	var attempts []any
-	var labels []any
-	questionCount := 0
+	runtimes := make([]*conversationRuntime, 0, len(pilotConvs))
+	rtMap := map[int]*conversationRuntime{}
 	for ci := range pilotConvs {
 		conv := &pilotConvs[ci]
 		runtime, err := buildConversationRuntime(ctx, *opt, *conv, extractNever, embClient, []string{"hybrid"}, logger)
 		if err != nil {
 			return fmt.Errorf("build runtime conv %d: %w", conv.ID, err)
 		}
-		defer runtime.Close() //nolint:errcheck
-		retriever := runtime.retrievers["hybrid"]
-		if retriever == nil {
-			return fmt.Errorf("conv %d has no hybrid retriever", conv.ID)
-		}
-		for qi := range conv.QA {
-			qa := &conv.QA[qi]
-			questionCount++
-			qid := qa.QuestionID
-			if qid == "" {
-				qid = fmt.Sprintf("conv-%d-q-%d", conv.ID, qi)
-			}
-			for rep := 1; rep <= utilityRepetitions; rep++ {
-				key := utilityDecisionKey{Benchmark: "locomo", ConversationID: conv.ID, QuestionID: qid, QuestionIndex: qi, Category: qa.CategoryName, Repetition: rep}
-				sh, shCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityShallowK, key, utilityArmShallow, true)
-				if err != nil {
-					return fmt.Errorf("shallow %s: %w", key, err)
-				}
-				attempts = append(attempts, sh)
-				de, deCorrect, err := utilityAnswerUnit(ctx, env, retriever, opt, *qa, utilityDeepK, key, utilityArmPairedDeep, false)
-				if err != nil {
-					return fmt.Errorf("paired_deep %s: %w", key, err)
-				}
-				attempts = append(attempts, de)
-				u, label, err := utilityTruthTable(shCorrect, deCorrect)
-				if err != nil {
-					return fmt.Errorf("truth table %s: %w", key, err)
-				}
-				labels = append(labels, utilityUtilityLabel{
-					DecisionKey: key, ShallowAnswerDigest: sh.AnswerAttemptID, DeepAnswerDigest: de.AnswerAttemptID,
-					ShallowCorrect: shCorrect, DeepCorrect: deCorrect, Utility: u, Label: label,
-					SourceManifestDigest: md,
-				})
-			}
-		}
+		runtimes = append(runtimes, runtime)
+		rtMap[conv.ID] = runtime
 	}
-	m.Benchmark.QuestionCount = questionCount
-	md2, err := utilityManifestDigest(&m)
+	defer func() {
+		for _, rt := range runtimes {
+			rt.Close()
+		}
+	}()
+
+	attempts, labels, err := utilityRunPairedUnits(ctx, env, opt, rtMap, pilotConvs, md)
 	if err != nil {
 		return err
 	}
@@ -1185,14 +1181,18 @@ func runUtilityPilotStage(opt *options) error {
 		return err
 	}
 
-	data, err := utilityLoadCollect(dir, utilityStagePilot)
+	// Join the just-collected units in memory (no seal exists yet; the gate
+	// verdict and seal are written after the AUC kill-gate).
+	units, sa, su, err := utilityJoinUnits(attempts, labels)
 	if err != nil {
-		return fmt.Errorf("load pilot corpus: %w", err)
+		return fmt.Errorf("join pilot corpus: %w", err)
 	}
-	receipt, err := utilityPilotGate(data.Units)
+	receipt, err := utilityPilotGate(units)
 	if err != nil {
 		return err
 	}
+	receipt.SignalAvailable = sa
+	receipt.SignalUnavailable = su
 	if err := writeJSON(filepath.Join(dir, utilityPilotReportFile), receipt); err != nil {
 		return err
 	}
@@ -1202,7 +1202,7 @@ func runUtilityPilotStage(opt *options) error {
 	}
 	seal := utilityStageSeal{
 		Schema: utilitySchemaVersion, Stage: utilityStagePilot, Status: utilitySealComplete,
-		ManifestDigest: md2, ReportDigest: reportDigest, Verdict: receipt.Verdict,
+		ManifestDigest: md, ReportDigest: reportDigest, Verdict: receipt.Verdict,
 	}
 	if err := utilitySealWrite(dir, seal); err != nil {
 		return err

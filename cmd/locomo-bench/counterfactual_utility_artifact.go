@@ -148,7 +148,7 @@ func utilityLoadPublicRecords(path string) ([]utilityAnswerAttempt, error) {
 }
 
 // utilityWriteJSONL appends one JSONL line atomically per record (crash-safe).
-func utilityWriteJSONL(path string, records []any) error {
+func utilityWriteJSONL[T any](path string, records []T) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
