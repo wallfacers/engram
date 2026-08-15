@@ -38,7 +38,7 @@ func TestRunFixedGoldOracleQuestionUsesOnlyAllActiveGoldEvidence(t *testing.T) {
 	answerCalls, judgeCalls := 0, 0
 	answer := func(_ context.Context, system, user string) (string, provider.Usage, error) {
 		answerCalls++
-		wantSystem := answerPromptForRegime(qa.Category, false, false, false)
+		wantSystem := answerPromptForRegime(qa.Category, false, false)
 		if system != wantSystem {
 			t.Fatalf("oracle answer system prompt drifted")
 		}

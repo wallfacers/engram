@@ -527,7 +527,7 @@ func TestAnswerFrozenFormalB1QuestionReplaysExactBytesAndDoesNotMutateFreeze(t *
 	protocol := testEvalProtocol()
 	protocol.ProtocolHash = "sha256:protocol"
 	qa := locomoQA{QuestionID: "locomo:1:2", Question: "When did Alice move?", Category: 2}
-	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false, false), qa.QuestionDate)
+	system := withCurrentDateRule(answerPromptForRegime(qa.Category, false, false), qa.QuestionDate)
 	candidate := testCandidateArtifact()
 	trace := buildFormalTrace(protocol, qa.QuestionID, candidate)
 	bundle := testFormalBundle(

@@ -215,13 +215,11 @@ func TestUnifiedTypedPromptsRequireUnifiedContract(t *testing.T) {
 
 func TestUnifiedAnswerContractDefaultOffPreservesLegacyPrompts(t *testing.T) {
 	for _, force := range []bool{false, true} {
-		for _, typed := range []bool{false, true} {
-			opt := options{forceAnswer: force, lmeTypedPrompts: typed}
-			for category := 1; category <= 12; category++ {
-				want := answerPromptForRegime(category, force, false, typed)
-				if got := answerPromptForEval(category, opt); got != want {
-					t.Fatalf("flag-off category=%d force=%t typed=%t changed legacy prompt", category, force, typed)
-				}
+		opt := options{forceAnswer: force}
+		for category := 1; category <= 12; category++ {
+			want := answerPromptForRegime(category, force, false)
+			if got := answerPromptForEval(category, opt); got != want {
+				t.Fatalf("flag-off category=%d force=%t changed legacy prompt", category, force)
 			}
 		}
 	}
@@ -304,18 +302,15 @@ func TestUnifiedAnswerContractArmSelection(t *testing.T) {
 
 func TestAnswerPromptBytesAreFingerprintBound(t *testing.T) {
 	baseOpt := options{forceAnswer: true}
-	typedOpt := options{forceAnswer: true, lmeTypedPrompts: true}
 	unifiedOpt := options{unifiedAnswerContract: true}
 
 	base := answerRegimeFingerprint(baseOpt)
-	typed := answerRegimeFingerprint(typedOpt)
 	unified := answerRegimeFingerprint(unifiedOpt)
 	for name, tc := range map[string]struct {
 		opt options
 		got string
 	}{
 		"base":    {opt: baseOpt, got: base},
-		"typed":   {opt: typedOpt, got: typed},
 		"unified": {opt: unifiedOpt, got: unified},
 	} {
 		want := ";answer_prompt_digest=" + formalAnswerPromptDigest(tc.opt)
@@ -323,15 +318,14 @@ func TestAnswerPromptBytesAreFingerprintBound(t *testing.T) {
 			t.Errorf("%s prompt bytes are not journal-bound: fingerprint=%q want=%q", name, tc.got, want)
 		}
 	}
-	if base == typed || base == unified || typed == unified {
-		t.Fatalf("prompt regimes share a journal fingerprint: base=%q typed=%q unified=%q", base, typed, unified)
+	if base == unified {
+		t.Fatalf("prompt regimes share a journal fingerprint: base=%q unified=%q", base, unified)
 	}
 
 	formalBase := formalAnswerPromptDigest(baseOpt)
-	formalTyped := formalAnswerPromptDigest(typedOpt)
 	formalUnified := formalAnswerPromptDigest(unifiedOpt)
-	if formalBase == formalTyped || formalBase == formalUnified || formalTyped == formalUnified {
-		t.Fatalf("prompt regimes share a formal digest: base=%q typed=%q unified=%q", formalBase, formalTyped, formalUnified)
+	if formalBase == formalUnified {
+		t.Fatalf("prompt regimes share a formal digest: base=%q unified=%q", formalBase, formalUnified)
 	}
 }
 
@@ -344,7 +338,6 @@ func TestPostRetrievalAnswerModesAreFingerprintBound(t *testing.T) {
 		"trace":          {opt: options{traceMediation: true}, want: ";trace_mediation=true"},
 		"relation":       {opt: options{relationContext: true}, want: ";relation_context=true"},
 		"consolidate":    {opt: options{consolidate: true}, want: ";consolidate=true"},
-		"counter-refine": {opt: options{counterRefine: true}, want: ";counter_refine=true"},
 		"trace breadth": {opt: options{
 			traceMultiEvidence: true,
 			traceEvidenceCap:   6,
@@ -364,8 +357,6 @@ func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
 	for name, opt := range map[string]options{
 		"force answer":     {unifiedAnswerContract: true, forceAnswer: true},
 		"temporal prompt":  {unifiedAnswerContract: true, temporalAnswerPrompt: true},
-		"LME typed prompt": {unifiedAnswerContract: true, lmeTypedPrompts: true},
-		"counter refine":   {unifiedAnswerContract: true, counterRefine: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validatePromptModes(opt); err == nil {
@@ -392,12 +383,6 @@ func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
 				t.Fatal("paired isolation conflict was accepted")
 			}
 		})
-	}
-}
-
-func TestLMEPromptModesRequireLongMemEval(t *testing.T) {
-	if err := validatePromptModes(options{datasetFormat: "locomo", forceAnswer: true, lmeTypedPrompts: true}); err == nil {
-		t.Fatal("LME-only typed prompt accepted for LoCoMo")
 	}
 }
 
@@ -1346,7 +1331,7 @@ func TestSweepAnswerPromptInjectsCurrentDate(t *testing.T) {
 // today's date" rule (written for LoCoMo's absolute "when" questions) must
 // stand unmodified.
 func TestRelativeTimeRuleOnlyWhenDated(t *testing.T) {
-	base := answerPromptForRegime(2, true, false, false)
+	base := answerPromptForRegime(2, true, false)
 
 	if withCurrentDateRule(base, "") != base {
 		t.Fatal("undated system prompt must be unchanged")

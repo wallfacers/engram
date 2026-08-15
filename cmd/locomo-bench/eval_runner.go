@@ -361,9 +361,6 @@ func densityMechanismFlagsForOptions(opt options) map[string]bool {
 	if opt.compilerArm != "" {
 		flags["compiler"] = true
 	}
-	if opt.counterRefine {
-		flags["counter_refine"] = true
-	}
 	return flags
 }
 
@@ -1499,23 +1496,12 @@ func formalAnswerPromptDigest(opt options) string {
 		return evalJSONDigest(prompts)
 	}
 	prompts := []string{
-		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, false),
-		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt, false),
-		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt, false),
-		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt, false),
+		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt),
+		answerPromptForRegime(2, opt.forceAnswer, opt.temporalAnswerPrompt),
+		answerPromptForRegime(3, opt.forceAnswer, opt.temporalAnswerPrompt),
+		answerPromptForRegime(4, opt.forceAnswer, opt.temporalAnswerPrompt),
 		currentDateRule,
 		fmt.Sprintf("temporal_date_scaffold=%t", opt.temporalDateScaffold),
-	}
-	// Preserve the historical LoCoMo digest byte-for-byte when the LME typed
-	// mode is off. When enabled, bind every LongMemEval category prompt and the
-	// switch so replay cannot cross regimes.
-	if opt.lmeTypedPrompts {
-		for _, category := range []int{6, 7, 8, 9, 10, 11, 12} {
-			prompts = append(prompts, answerPromptForEval(category, opt))
-		}
-		prompts = append(prompts,
-			fmt.Sprintf("lme_typed_prompts=%t", opt.lmeTypedPrompts),
-		)
 	}
 	return evalJSONDigest(prompts)
 }
