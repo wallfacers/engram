@@ -208,6 +208,21 @@ for the contract itself, not a replacement for paired verification where a
 delta claim is required. (2026-08-15 config flexibility iteration; outside the
 frozen 038 paired scope.)
 
+## Combining the unified contract with LoCoMo typed prompts (opt-in)
+
+`--unified-typed-prompts` (requires `--unified-answer-contract`, default off)
+combines the unified contract with the two LoCoMo-validated typed contracts:
+category 1 (multi-hop) and category 3 (open-domain) fall back to their legacy
+typed prompt bytes — including the current-date rule, byte-identical to the
+historical control arm for those categories — while every other category keeps
+the frozen unified bytes. LongMemEval pseudo-categories are 6-12 and never
+collide with 1/3, so LongMemEval runs (top-k 30 / top-k 150 baselines) are
+unchanged by construction; `TestUnifiedTypedPromptsCombineLocomoContractsOnly`
+asserts this byte-for-byte. The flag is rejected inside the frozen paired
+protocol (it would contaminate the single-variable prompt isolation) and is
+journal/formal-digest bound when enabled. (2026-08-15 eval-config change; new
+prompt combinations still require their own fresh run + verdict.)
+
 ## Result interpretation
 
 Verify the validation receipts, prompt digest, model/store/data provenance,

@@ -216,6 +216,77 @@ func TestUnifiedAnswerContractIsCategoryAndDatasetIndependent(t *testing.T) {
 	}
 }
 
+// TestUnifiedTypedPromptsCombineLocomoContractsOnly guards the opt-in
+// combination mode: with --unified-typed-prompts the two LoCoMo-validated
+// typed contracts (category 1 multi-hop, category 3 open-domain) replace the
+// unified contract for exactly those categories — byte-identical to the legacy
+// control arm including the current-date rule. Every other category, notably
+// all LongMemEval pseudo-categories (6-12), must keep the frozen unified bytes
+// so LongMemEval scores cannot move under this flag.
+func TestUnifiedTypedPromptsCombineLocomoContractsOnly(t *testing.T) {
+	opt := options{unifiedAnswerContract: true, unifiedTypedPrompts: true}
+	typed := map[int]string{
+		1: multiHopAnswerPrompt,
+		3: openDomainAnswerPrompt,
+	}
+	for category := 1; category <= 12; category++ {
+		for _, currentDate := range []string{"", "2026-08-13"} {
+			qa := locomoQA{Category: category, QuestionDate: currentDate}
+			got := answerSystemPromptForEval(qa, opt)
+			if want, ok := typed[category]; ok {
+				if got != withCurrentDateRule(want, currentDate) {
+					t.Fatalf("category=%d date=%q did not use the LoCoMo typed contract bytes", category, currentDate)
+				}
+				continue
+			}
+			if got != unifiedAnswerContractPrompt {
+				t.Fatalf("category=%d date=%q left the unified contract: LoCoMo categories other than 1/3 and all LongMemEval categories (6-12) must stay unified", category, currentDate)
+			}
+		}
+	}
+	// The combination must also be visible through the plain selector used by
+	// offline replay paths.
+	if got := answerPromptForEval(1, opt); got != multiHopAnswerPrompt {
+		t.Fatalf("plain selector category 1 got %q, want multi-hop contract", got)
+	}
+	if got := answerPromptForEval(9, opt); got != unifiedAnswerContractPrompt {
+		t.Fatalf("plain selector LongMemEval temporal category left the unified contract")
+	}
+	// Flag off must preserve the current all-unified behavior byte-for-byte.
+	off := options{unifiedAnswerContract: true}
+	for category := 1; category <= 12; category++ {
+		qa := locomoQA{Category: category, QuestionDate: "2026-08-13"}
+		if got := answerSystemPromptForEval(qa, off); got != unifiedAnswerContractPrompt {
+			t.Fatalf("flag off changed category=%d away from the unified contract", category)
+		}
+	}
+}
+
+func TestUnifiedTypedPromptsAreFingerprintBound(t *testing.T) {
+	base := options{unifiedAnswerContract: true}
+	combined := options{unifiedAnswerContract: true, unifiedTypedPrompts: true}
+	if answerRegimeFingerprint(base) == answerRegimeFingerprint(combined) {
+		t.Fatal("unified typed combination shares a journal fingerprint with pure unified mode")
+	}
+	if formalAnswerPromptDigest(base) == formalAnswerPromptDigest(combined) {
+		t.Fatal("unified typed combination shares a formal digest with pure unified mode")
+	}
+	if !strings.Contains(answerRegimeFingerprint(combined), ";unified_typed_prompts=true") {
+		t.Fatal("unified typed combination is not journal-bound by an explicit flag fragment")
+	}
+}
+
+func TestUnifiedTypedPromptsRequireUnifiedContract(t *testing.T) {
+	if err := validatePromptModes(options{unifiedTypedPrompts: true}); err == nil {
+		t.Fatal("--unified-typed-prompts without --unified-answer-contract was accepted")
+	}
+	for _, format := range []string{"locomo", "longmemeval"} {
+		if err := validatePromptModes(options{datasetFormat: format, unifiedAnswerContract: true, unifiedTypedPrompts: true}); err != nil {
+			t.Fatalf("unified typed combination rejected for %s: %v", format, err)
+		}
+	}
+}
+
 func TestUnifiedAnswerContractDefaultOffPreservesLegacyPrompts(t *testing.T) {
 	for _, force := range []bool{false, true} {
 		for _, typed := range []bool{false, true} {

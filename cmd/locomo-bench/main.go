@@ -147,6 +147,7 @@ type options struct {
 	temporalDateScaffold       bool
 	lmeTypedPrompts            bool
 	unifiedAnswerContract      bool
+	unifiedTypedPrompts        bool
 	unifiedPairAudit           bool // runtime-only: exact hybrid vs hybrid+unified fail-closed call/context audit
 	unifiedPairDatasetDigest   string
 	unifiedProbeFixture        string
@@ -473,6 +474,7 @@ func run() error {
 	flag.BoolVar(&opt.temporalAnswerPrompt, "temporal-answer-prompt", false, "use the temporal reasoning answer prompt for category 2")
 	flag.BoolVar(&opt.lmeTypedPrompts, "lme-typed-prompts", false, "LongMemEval: map question_type to the matching LoCoMo contract (multi-session→multi-hop, temporal-reasoning→temporal); default off, eval-config change")
 	flag.BoolVar(&opt.unifiedAnswerContract, "unified-answer-contract", false, "experimental dataset/category-independent evidence-grounded answer contract (default off; isolated scoring also requires --no-idk-retry and --trace-mediation=false)")
+	flag.BoolVar(&opt.unifiedTypedPrompts, "unified-typed-prompts", false, "combine the unified contract with the LoCoMo-validated typed contracts: category 1 uses multi-hop and category 3 uses open-domain, every other category (incl. all LongMemEval categories) keeps the unified bytes; requires --unified-answer-contract; default off, eval-config change")
 	flag.StringVar(&opt.utilityStageFlag, "utility-stage", "", "042 research mode: counterfactual-evidence utility gate stage label|pilot|collect|diagnose|confirm|transfer (empty = off, ordinary path byte-identical)")
 	flag.StringVar(&opt.utilitySource, "utility-source", "", "042 --utility-stage source dir: diagnose←collect, confirm←diagnose, transfer←confirm")
 	flag.StringVar(&opt.utilityLabelSource, "utility-label-source", "", "042 label-GO stage dir (required for pilot/collect)")
@@ -2460,6 +2462,9 @@ func answerRegimeFingerprint(opt options) string {
 	if opt.unifiedAnswerContract {
 		fingerprint += ";unified_answer_contract=true"
 	}
+	if opt.unifiedTypedPrompts {
+		fingerprint += ";unified_typed_prompts=true"
+	}
 	if opt.unifiedPairAudit {
 		fingerprint += ";unified_pair_audit=true;provider_attempts=1"
 	}
@@ -2607,6 +2612,9 @@ func validatePromptModes(opt options) error {
 	}
 	if opt.lmeTypedPrompts && opt.datasetFormat != "longmemeval" {
 		return fmt.Errorf("--lme-typed-prompts requires --dataset-format=longmemeval")
+	}
+	if opt.unifiedTypedPrompts && !opt.unifiedAnswerContract {
+		return fmt.Errorf("--unified-typed-prompts requires --unified-answer-contract")
 	}
 	if opt.unifiedAnswerContract {
 		var conflicts []string

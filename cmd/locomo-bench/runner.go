@@ -386,12 +386,27 @@ func answerPromptForRegime(category int, forceAnswer, temporalAnswer, abstain, l
 	}
 }
 
+// unifiedContractApplies reports whether the unified answer contract covers
+// this category. Under --unified-typed-prompts the two LoCoMo-validated typed
+// contracts (category 1 multi-hop, category 3 open-domain) replace the unified
+// contract for exactly those categories, byte-identical to the legacy control
+// arm. Every other category — including all LongMemEval pseudo-categories
+// (6-12), which never collide with 1/3 — keeps the frozen unified bytes, so
+// LongMemEval runs are unchanged by construction under this flag.
+func unifiedContractApplies(category int, opt options) bool {
+	if opt.unifiedTypedPrompts && (category == 1 || category == 3) {
+		return false
+	}
+	return true
+}
+
 // answerPromptForEval is the only prompt selector used by evaluation answer
 // paths. Unified mode wins before the legacy selector and intentionally ignores
-// the category. With unified mode off, the historical prompt stack remains
+// the category (except the opt-in --unified-typed-prompts LoCoMo combination
+// above). With unified mode off, the historical prompt stack remains
 // byte-identical as the experiment's control.
 func answerPromptForEval(category int, opt options) string {
-	if opt.unifiedAnswerContract {
+	if opt.unifiedAnswerContract && unifiedContractApplies(category, opt) {
 		return unifiedAnswerContractPrompt
 	}
 	return answerPromptForRegime(category, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, opt.lmeTypedPrompts)
@@ -402,7 +417,7 @@ func answerPromptForEval(category int, opt options) string {
 // routed through it so an opt-in prompt mode cannot silently work in only one
 // evaluator.
 func answerSystemPromptForEval(qa locomoQA, opt options) string {
-	if opt.unifiedAnswerContract {
+	if opt.unifiedAnswerContract && unifiedContractApplies(qa.Category, opt) {
 		return unifiedAnswerContractPrompt
 	}
 	return withCurrentDateRule(answerPromptForEval(qa.Category, opt), qa.QuestionDate)

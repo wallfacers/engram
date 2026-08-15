@@ -142,6 +142,7 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 		"abstain prompt":      func(o *options) { o.abstainPrompt = true },
 		"typed prompt":        func(o *options) { o.lmeTypedPrompts = true },
 		"temporal prompt":     func(o *options) { o.temporalAnswerPrompt = true },
+		"unified typed":       func(o *options) { o.unifiedTypedPrompts = true },
 		"counter refine":      func(o *options) { o.counterRefine = true },
 		"trace mediation":     func(o *options) { o.traceMediation = true },
 		"rerank":              func(o *options) { o.rerank = true },

@@ -209,6 +209,7 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.abstainHard, "--abstain-hard"},
 		{opt.abstainSoft, "--abstain-soft"},
 		{opt.temporalAnswerPrompt, "--temporal-answer-prompt"},
+		{opt.unifiedTypedPrompts, "--unified-typed-prompts"},
 		{opt.temporalDateScaffold, "--temporal-date-scaffold"},
 		{opt.lmeTypedPrompts, "--lme-typed-prompts"},
 		{strings.TrimSpace(opt.catTopKSpec) != "", "--cat-top-k"},

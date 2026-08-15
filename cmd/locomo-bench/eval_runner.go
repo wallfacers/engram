@@ -1543,11 +1543,24 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 
 func formalAnswerPromptDigest(opt options) string {
 	if opt.unifiedAnswerContract {
-		return evalJSONDigest([]string{
+		// Preserve the pure-unified digest byte-for-byte when the typed
+		// combination is off. When enabled, bind the two LoCoMo typed
+		// contracts (and the current-date rule they carry) so replay cannot
+		// cross regimes.
+		prompts := []string{
 			unifiedAnswerContractPrompt,
 			"unified_answer_contract=true",
 			"runtime_current_date=user_context_only",
-		})
+		}
+		if opt.unifiedTypedPrompts {
+			prompts = append(prompts,
+				multiHopAnswerPrompt,
+				openDomainAnswerPrompt,
+				currentDateRule,
+				"unified_typed_prompts=true",
+			)
+		}
+		return evalJSONDigest(prompts)
 	}
 	prompts := []string{
 		answerPromptForRegime(1, opt.forceAnswer, opt.temporalAnswerPrompt, opt.abstainPrompt, false),
