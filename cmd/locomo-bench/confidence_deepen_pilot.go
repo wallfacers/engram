@@ -105,13 +105,34 @@ func runDeepenSignalPilotStage(opt *options) error {
 		return fmt.Errorf("deepen pilot requires --unified-answer-contract (the pilot measures the anchor unified recipe)")
 	}
 	ctx := context.Background()
-	env, err := utilityBuildModelEnv(opt)
-	if err != nil {
-		return fmt.Errorf("deepen pilot model env: %w", err)
-	}
+	// Deepen pilot env: the logprob answerer pins temperature=0 (matching the
+	// streaming bench channel) — the 042 builder omits temperature, which
+	// measured as a 95% channel flip rate in pilot run 1 (probe 2026-08-15).
 	maxTokens := opt.maxTokens
 	if maxTokens <= 0 {
 		maxTokens = 8000
+	}
+	zeroTemp := 0.0
+	answerer, err := utilityNewLogprobCaller(utilityLogprobCallerConfig{
+		BaseURL:     os.Getenv("LOCOMO_BASE_URL"),
+		APIKey:      os.Getenv("LOCOMO_API_KEY"),
+		Model:       os.Getenv("LOCOMO_MODEL"),
+		MaxTokens:   maxTokens,
+		MaxModelLen: utilityMaxModelLen,
+		Temperature: &zeroTemp,
+	})
+	if err != nil {
+		return fmt.Errorf("deepen pilot logprob answerer: %w", err)
+	}
+	jc := resolveJudgeConfig(func(k string) string { return os.Getenv(k) })
+	judgeProvider, err := buildBenchProvider(jc.Provider, jc.APIKey, jc.BaseURL, maxTokens, "JUDGE_PROVIDER")
+	if err != nil {
+		return fmt.Errorf("deepen pilot judge provider: %w", err)
+	}
+	env := &utilityModelEnv{
+		opt:      opt,
+		answerer: answerer,
+		judge:    newUsageModelCallerWithUsage(judgeProvider, jc.Model, maxTokens, "judge", nil),
 	}
 	streamProvider, err := buildBenchProvider("openai", os.Getenv("LOCOMO_API_KEY"), os.Getenv("LOCOMO_BASE_URL"), maxTokens, "LOCOMO")
 	if err != nil {
@@ -308,14 +329,15 @@ func deepenPilotUnit(ctx context.Context, env *utilityModelEnv, streamCall usage
 	attempt.FinalLogprob = extractFinalAnswer(completion.Content)
 	attempt.UsageIn += completion.Usage.InputTokens
 	attempt.UsageOut += completion.Usage.OutputTokens
-	sig, mapErr := utilityMapFinalSignal(completion.Content, completion.Tokens)
-	if mapErr != nil {
-		return deepenPilotAttempt{}, fmt.Errorf("signal map: %w", mapErr)
-	}
-	attempt.LogprobStatus = sig.Status
-	attempt.LogprobReason = sig.Reason
-	if sig.Status == "available" {
-		attempt.Features = sig.Features
+	// Robust final-span mapping (043 fix): inline thinking + trailing special
+	// tokens break the 042 strict content-suffix precondition on this stack.
+	feats, available, reason := deepenFinalSpanSignal(completion.Tokens)
+	if available {
+		attempt.LogprobStatus = "available"
+		attempt.Features = feats
+	} else {
+		attempt.LogprobStatus = "unavailable"
+		attempt.LogprobReason = reason
 	}
 
 	// Streaming channel (bench caller, same prompt bytes).

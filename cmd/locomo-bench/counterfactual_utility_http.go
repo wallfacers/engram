@@ -51,15 +51,20 @@ type utilityLogprobCallerConfig struct {
 	MaxTokens   int
 	MaxModelLen int
 	HTTPClient  *http.Client
+	// Temperature optionally pins the request temperature. nil keeps the 042
+	// frozen behavior (temperature omitted). 043 sets 0 to match the streaming
+	// bench channel so the dual-channel pilot compares like-for-like decoding.
+	Temperature *float64
 }
 
 type utilityLogprobCaller struct {
-	endpoint    string
-	apiKey      string
-	model       string
-	maxTokens   int
-	maxModelLen int
-	client      *http.Client
+	endpoint     string
+	apiKey       string
+	model        string
+	maxTokens    int
+	maxModelLen  int
+	client       *http.Client
+	temperature  *float64
 }
 
 func utilityNewLogprobCaller(cfg utilityLogprobCallerConfig) (*utilityLogprobCaller, error) {
@@ -84,6 +89,7 @@ func utilityNewLogprobCaller(cfg utilityLogprobCallerConfig) (*utilityLogprobCal
 		maxTokens:   maxTokens,
 		maxModelLen: maxModelLen,
 		client:      cfg.HTTPClient,
+		temperature: cfg.Temperature,
 	}, nil
 }
 
@@ -157,7 +163,11 @@ func (c *utilityLogprobCaller) attempt(ctx context.Context, system, user string)
 		"stream":       false,
 		"logprobs":     true,
 		"top_logprobs": 2,
-		// `temperature` intentionally omitted (temperature_request_mode=omitted).
+		// `temperature` intentionally omitted by default
+		// (temperature_request_mode=omitted); a non-nil c.temperature pins it.
+	}
+	if c.temperature != nil {
+		body["temperature"] = *c.temperature
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

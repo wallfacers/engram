@@ -339,6 +339,99 @@ func deepenROCThreshold(posScores, negScores []float64) (float64, error) {
 	return best, nil
 }
 
+// --- Robust final-span logprob signal (043 fix for the 042 suffix failure) ---
+
+// deepenSpecialTokens are vllm generation-end special tokens. They appear in
+// the logprob token trace but never in message content, which is why the 042
+// strict "content is an exact suffix of the reconstructed bytes" precondition
+// fails structurally on this stack (probe 2026-08-15: 304/304
+// content_not_generated_suffix with a trailing <|im_end|> token).
+var deepenSpecialTokens = map[string]bool{
+	"<|im_end|>":     true,
+	"<|endoftext|>":  true,
+	"<|im_start|>":   true,
+}
+
+// deepenFinalSpanSignal maps the three frozen features
+// (utilityRoutingFeatureNames) from a token trace whose content carries INLINE
+// thinking (vllm without a reasoning parser) and trailing special tokens. The
+// final answer span is everything after the LAST thinking closing delimiter in
+// the visible (special-stripped) reconstruction — the same region
+// extractFinalAnswer returns — and the aggregation formulas replicate the 042
+// frozen mapper exactly (mean logprob, ceil-index p10 logprob, mean
+// top1−top2 margin over final-span tokens).
+func deepenFinalSpanSignal(tokens []utilityLogprobToken) (features []float64, available bool, reason string) {
+	unavail := func(r string) ([]float64, bool, string) { return nil, false, r }
+	var visIdx []int
+	var starts []int
+	var recon []byte
+	for i := range tokens {
+		if deepenSpecialTokens[tokens[i].Token] {
+			continue
+		}
+		visIdx = append(visIdx, i)
+		starts = append(starts, len(recon))
+		recon = append(recon, tokens[i].Bytes...)
+	}
+	visible := string(recon)
+	finalStart := 0
+	for _, d := range thinkingCloseDelims {
+		if idx := strings.LastIndex(visible, d); idx >= 0 && idx+len(d) > finalStart {
+			finalStart = idx + len(d)
+		}
+	}
+	// First visible token starting at/after finalStart (a delimiter straddling
+	// a token boundary falls back to the next whole token).
+	lo, hi := 0, len(visIdx)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if starts[mid] < finalStart {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(visIdx) {
+		return unavail("empty_final_span")
+	}
+	var sampled []float64
+	marginSum := 0.0
+	for v := lo; v < len(visIdx); v++ {
+		tok := tokens[visIdx[v]]
+		if math.IsNaN(tok.Logprob) || math.IsInf(tok.Logprob, 0) ||
+			math.IsNaN(tok.Top1) || math.IsInf(tok.Top1, 0) ||
+			math.IsNaN(tok.Top2) || math.IsInf(tok.Top2, 0) {
+			return unavail("non_finite")
+		}
+		if tok.Top2 == 0.0 {
+			return unavail("missing_top2")
+		}
+		sampled = append(sampled, tok.Logprob)
+		marginSum += tok.Top1 - tok.Top2
+	}
+	if len(sampled) == 0 {
+		return unavail("empty_final_span")
+	}
+	mean := 0.0
+	for _, v := range sampled {
+		mean += v
+	}
+	mean /= float64(len(sampled))
+	sorted := append([]float64(nil), sampled...)
+	sort.Float64s(sorted)
+	p10Idx := int(math.Ceil(0.10*float64(len(sorted)))) - 1
+	if p10Idx < 0 {
+		p10Idx = 0
+	}
+	feats := []float64{mean, sorted[p10Idx], marginSum / float64(len(sampled))}
+	for _, f := range feats {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return unavail("non_finite")
+		}
+	}
+	return feats, true, ""
+}
+
 // --- Textual hesitation lexicon (runner.go isIDK companion, T007) ---
 
 // deepenHesitationLexicon lists canonical hesitation phrasings the answerer
