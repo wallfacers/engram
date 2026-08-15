@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/store"
 )
 
 // TestNotebookAttributionInlineCapture verifies the --notebook inline capture end
@@ -385,4 +386,35 @@ func TestTruncateRunes(t *testing.T) {
 	if got != want {
 		t.Fatalf("truncated = %q, want %q", got, want)
 	}
+}
+
+// newTestNavRetriever builds an in-memory chunk store with the given
+// name→content entries and returns the hybrid retriever plus the persisted
+// name→entry-ID map. Inlined from the removed 029 nav adapter tests (044 T007).
+func newTestNavRetriever(t *testing.T, entries map[string]string) (*memory.Retriever, map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	es := memory.NewEntryStore(st.DB())
+	nameToID := make(map[string]string, len(entries))
+	for name, content := range entries {
+		e := &memory.Entry{Name: name, Content: content}
+		if err := es.Upsert(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		nameToID[name] = e.ID
+	}
+	vs := memory.NewVectorStore(st.DB())
+	r := memory.NewRetriever(es, vs, nil)
+	return r, nameToID
+}
+
+// navCallFromStub wraps a stub planner provider as a usage-model caller.
+// Inlined from the removed 029 nav adapter tests (044 T007).
+func navCallFromStub(stub *stubPlannerProvider) usageModelCaller {
+	return newUsageModelCaller(stub, "stub-model", 512, 0, "nav", nil)
 }

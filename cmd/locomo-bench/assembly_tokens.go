@@ -46,3 +46,24 @@ func (c *assemblyTokenCounter) countPrompt(ctx context.Context, system, user str
 	}
 	return tokenCount.InputTokens, true, nil
 }
+
+// estimateTokens is a local, offline approximation used for answer-context
+// budget bookkeeping (008 discipline). It intentionally under-counts vs a
+// tokenizer; the budget cap is validated per-run and over-cap bundles truncate.
+// Moved here from agentic_nav.go (044 T007); removed with 030/031 (044 T012).
+func estimateTokens(text string) int {
+	n := len([]rune(text))
+	if n <= 0 {
+		return 0
+	}
+	t := n / 4
+	if t < 1 {
+		return 1
+	}
+	return t
+}
+
+// defaultAnswerContextCap bounds the assembled answer context in tokens.
+// Moved here from the removed 029 nav adapter (044 T007); used by the 030/031
+// assembly/relation paths (removed with them, 044 T012).
+const defaultAnswerContextCap = 3600

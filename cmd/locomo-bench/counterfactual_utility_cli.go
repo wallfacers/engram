@@ -15,8 +15,6 @@ import (
 // exclusive with modes that would change the answer path.
 func utilityExperimentalFlags(opt *options) string {
 	switch {
-	case opt.nav:
-		return "--nav"
 	case opt.iris:
 		return "--iris"
 	case opt.unifiedAnswerContract:

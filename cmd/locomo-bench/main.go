@@ -234,32 +234,6 @@ type options struct {
 	clusterMinKeywordJaccard float64
 	clusterEmbedThresh       float64
 	clusterMaxEvidence       int
-	// nav enables 029 agentic multi-step memory navigation: a reasoning loop
-	// over search / expand_query / follow_entity / stop tools whose final
-	// evidence bundle feeds the answerer instead of the single-shot top-k list.
-	// Harness-only (specs/029); engine untouched. Off by default.
-	nav bool
-	// navMaxSteps bounds the navigation loop (default 4). Exceeding it without
-	// stop triggers the fail-closed single-shot fallback (contracts
-	// navigation-tools.md hard constraint).
-	navMaxSteps int
-	// navK is the per-tool retrieval depth inside the navigation loop (default
-	// 8). Distinct from the outer --top-k single-shot budget.
-	navK int
-	// navDiagnose enables 029 US1 zero-cost rescue-space diagnostic: emits
-	// per-question retrieval diagnosis (in_pool / single top-k gold rank / wide
-	// pool / deterministic rewrite + follow_entity rescue simulation) to
-	// run-dir/nav-diagnose.jsonl for nav_diagnose.py. Retrieval-only; no
-	// answer/judge/extraction LLM call.
-	navDiagnose bool
-	// navTraj is the runtime-only, concurrency-safe writer for the navigation
-	// arm's run-dir/nav-trajectories.jsonl. Created per repeat run when --nav is
-	// on; never serialized.
-	navTraj *navTrajectoryJournal
-	// navDecideCall is the runtime-only navigation decide caller (direct vLLM
-	// HTTP with thinking disabled — fast pure-JSON tool calls). Nil falls back
-	// to answerCall. Never serialized.
-	navDecideCall usageModelCaller
 	// 030 read-side evidence assembly (specs/030). Only --trace-mediation is
 	// default-on (030 full-set verification: 85.91% @ 468 tok — budget-efficient
 	// read-side mediation); it needs a configured answerer LLM as sidecar and
@@ -418,10 +392,6 @@ func run() error {
 	flag.Float64Var(&opt.clusterMinKeywordJaccard, "cluster-min-keyword-jaccard", 0.25, "025 offline clustering shared-keyword Jaccard threshold (used with --episode-cluster)")
 	flag.Float64Var(&opt.clusterEmbedThresh, "cluster-embed-thresh", 0.9, "025 clustering embedding-cosine overlay threshold (used with --episode-cluster; needs EMBED endpoint)")
 	flag.IntVar(&opt.clusterMaxEvidence, "cluster-max-evidence", 8, "025 per-episode evidence cap (used with --episode-cluster)")
-	flag.BoolVar(&opt.nav, "nav", false, "029 agentic multi-step navigation: reasoning loop over search/expand_query/follow_entity/stop tools; final evidence bundle feeds the answerer (harness-only, engine untouched; off by default)")
-	flag.IntVar(&opt.navMaxSteps, "nav-max-steps", 4, "029 navigation loop step cap; exceeding it without stop triggers the fail-closed single-shot fallback")
-	flag.IntVar(&opt.navK, "nav-k", 8, "029 per-tool retrieval depth inside the navigation loop (distinct from --top-k)")
-	flag.BoolVar(&opt.navDiagnose, "nav-diagnose", false, "029 US1 zero-cost rescue-space diagnostic: write per-question retrieval diagnosis to run-dir/nav-diagnose.jsonl for nav_diagnose.py (retrieval-only, needs --store-dir + --run-dir + --chunks)")
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
@@ -596,11 +566,6 @@ func run() error {
 			return fmt.Errorf("--recall-diagnostic cannot be combined with estimate, attribution, coverage-only, abstain-probe, or pcic-annotate modes")
 		}
 	}
-	if opt.navDiagnose {
-		if opt.recallDiagnostic || opt.temporalDiagnostic || opt.attributionTrace || opt.coverageOnly || opt.abstainProbe || opt.pcicAnnotate {
-			return fmt.Errorf("--nav-diagnose cannot be combined with other retrieval-only diagnostic modes (recall-diagnostic, temporal-diagnostic, attribution, coverage-only, abstain-probe, pcic-annotate)")
-		}
-	}
 	if opt.datasetFormat != "locomo" && opt.datasetFormat != "longmemeval" {
 		return fmt.Errorf("--dataset-format must be locomo or longmemeval, got %q", opt.datasetFormat)
 	}
@@ -769,19 +734,6 @@ func run() error {
 			embClient = buildBenchEmbeddingClient(logger, nil)
 		}
 		return runTemporalDiagnostic(context.Background(), opt, convs, embClient, logger)
-	}
-	if opt.navDiagnose {
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-		if sampledConversations > 0 {
-			logger.Info("sampling conversations", "limit", sampledConversations)
-		}
-		// Retrieval-only: build only the embedding client (never an
-		// answer/judge/extraction caller).
-		var embClient embedding.Client
-		if hasArm(arms, "hybrid") {
-			embClient = buildBenchEmbeddingClient(logger, nil)
-		}
-		return runNavDiagnoseCLI(context.Background(), opt, convs, arms, embClient, logger)
 	}
 	if opt.assemblyDiagnose {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -975,20 +927,6 @@ func run() error {
 		// a transient first failure cannot be hidden by gateUsage's retry.
 		answerUsageCall = gateUsageOnce(sem, answerProviderCall)
 		judgeUsageCall = gateUsageOnce(sem, judgeProviderCall)
-	}
-	if opt.nav {
-		// 029 navigation decide caller: direct vLLM HTTP with thinking disabled
-		// for fast, pure-JSON tool calls (Qwen3.6 reasoning model otherwise
-		// emits chain-of-thought and runs ~20x slower per step). Same endpoint
-		// and model as the answerer; harness-side only.
-		navDecide, navErr := newNavDecideCaller(navDecideConfig{
-			BaseURL: baseURL, APIKey: apiKey, Model: model,
-		})
-		if navErr != nil {
-			logger.Warn("nav decide caller unavailable; navigation falls back to answerCall", "err", navErr)
-		} else {
-			opt.navDecideCall = navDecide
-		}
 	}
 	if opt.evidenceAssembly || opt.assemblyDiagnose {
 		// 030 US1 exact tokenizer for evidence assembly (specs/030, research
@@ -1221,14 +1159,6 @@ func run() error {
 		}
 		if err := os.MkdirAll(repeatOpt.runDir, 0o755); err != nil {
 			return fmt.Errorf("create repeat run dir: %w", err)
-		}
-		if opt.nav {
-			traj, err := openNavTrajectoryJournal(filepath.Join(repeatOpt.runDir, "nav-trajectories.jsonl"))
-			if err != nil {
-				return fmt.Errorf("open nav-trajectories.jsonl: %w", err)
-			}
-			repeatOpt.navTraj = traj
-			defer func() { _ = traj.Close() }()
 		}
 		if opt.assemblyAudit {
 			j, err := openAssemblyJournal(filepath.Join(repeatOpt.runDir, "assembly-audit.jsonl"))
@@ -2725,44 +2655,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	var hits []memory.Result
 	var searchDiagnostics memory.SearchDiagnostics
 	retrievalMeta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
-	if opt.nav && opt.navTraj != nil {
-		// 029 agentic multi-step navigation (specs/029 US2): the reasoning loop
-		// decides the retrieval actions; its final evidence bundle (or the
-		// fail-closed accumulated evidence) becomes the answer context. The
-		// trajectory is audited to run-dir/nav-trajectories.jsonl. If navigation
-		// itself fails (e.g. caller cancellation), fall back to the existing
-		// single-shot retrieval so a question is never answered empty.
-		navCall := opt.navDecideCall
-		if navCall == nil {
-			navCall = answerCall // no dedicated caller: navigate via the answerer
-		}
-		navCfg := navConfig{
-			NavK:             opt.navK,
-			MaxSteps:         opt.navMaxSteps,
-			FallbackTopK:     topK,
-			AnswerContextCap: defaultAnswerContextCap,
-			Call:             navCall,
-		}
-		traj, navErr := runNavigation(ctx, qa.QuestionID, qa.Question, retriever, navCfg)
-		if navErr != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
-			}
-			logger.Warn("navigation failed; falling back to single-shot retrieval", "err", navErr)
-			var err error
-			hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
-			if err != nil {
-				logger.Warn("retrieve failed; question scored wrong", "err", err)
-				return false, "", provider.Usage{}, false, nil, retrievalMeta, nil
-			}
-		} else {
-			if err := opt.navTraj.Write(*traj); err != nil {
-				logger.Warn("write nav trajectory failed", "err", err)
-			}
-			hits = navEvidenceToResults(traj.FinalEvidence.Evidence)
-			retrievalMeta = queryRetrievalMeta{finalTopK: len(hits), subqueryCount: 1}
-		}
-	} else if opt.iris && qa.Category == 2 {
+	if opt.iris && qa.Category == 2 {
 		// Feature 021 US1: IRIS evidence-gap loop for temporal questions. The
 		// loop retrieves, evaluates accumulated sufficiency, diagnoses the gap,
 		// and refines the query — at a fixed topK budget (slot-merged) so the

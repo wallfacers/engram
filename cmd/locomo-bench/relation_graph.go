@@ -80,6 +80,10 @@ var causalIndicatorWords = []string{
 var (
 	speakerRe    = regexp.MustCompile(`(?:^|\n)[ \t]*([A-Z][A-Za-z]+):[ \t]`)
 	upperTokenRe = regexp.MustCompile(`\b[A-Z][a-z]{4,}\b`)
+	// quotedRe / titleRe extract quoted spans and capitalized title phrases for
+	// relation/entity grouping (moved from the removed 029 nav adapter).
+	quotedRe = regexp.MustCompile(`"([^"]{2,})"`)
+	titleRe  = regexp.MustCompile(`[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+`)
 )
 
 // relationStopWords filters sentence-initial filler / dialogue-register words
