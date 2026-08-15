@@ -183,6 +183,31 @@ The `+unified` arm is the only treatment. Never omit the frozen pilot whitelist
 or replace it with an error-mined cohort: doing so turns this command into an
 expensive full run and invalidates the predeclared pilot.
 
+## Standalone unified runs (configurable, non-contrast)
+
+The unified contract is independently runnable without a paired control arm.
+A single `hybrid+unified` arm runs the contract standalone; the frozen
+paired-protocol validations (exact two-arm layout, odd repeats, isolation) do
+not apply because there is no control to contrast:
+
+```bash
+setsid bash -c '
+  locomo-bench --dataset-format longmemeval --data "$LME" --store-dir "$STORE" \
+    --run-dir "$RUN" --chunks --retrieval "hybrid+unified" \
+    --top-k 150 --chunk-quota 12 \
+    --judge-mem0-aligned --no-idk-retry --concurrency 32 --repeats 3 \
+    --trace-mediation=false > run.log 2>&1
+' </dev/null >/dev/null 2>&1 & disown
+```
+
+Equivalently, `--unified-answer-contract` with a single arm selects the same
+standalone path. The paired mode (`--retrieval "hybrid,hybrid+unified"`, odd
+repeats, context-parity fail-closed) remains the only score-bearing contrast
+protocol and is unchanged. Standalone unified runs are development evidence
+for the contract itself, not a replacement for paired verification where a
+delta claim is required. (2026-08-15 config flexibility iteration; outside the
+frozen 038 paired scope.)
+
 ## Result interpretation
 
 Verify the validation receipts, prompt digest, model/store/data provenance,

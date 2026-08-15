@@ -90,6 +90,7 @@ func TestUnifiedPromptPairObserverRejectsHiddenFailures(t *testing.T) {
 func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 	base := options{retrieval: "hybrid,hybrid+unified", noIDKRetry: true, repeats: 3}
 	arms := []string{"hybrid", "hybrid+unified"}
+	singleUnifiedArm := []string{"hybrid+unified"}
 	if !isExactUnifiedPromptPair(base, arms) {
 		t.Fatal("expected exact unified prompt pair")
 	}
@@ -121,11 +122,18 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 	if err := validateUnifiedPromptPairExperiment(global, arms); err == nil {
 		t.Fatal("global unified mode accepted as a prompt-only control/treatment pair")
 	}
-	if unifiedPromptPairExperimentRequested(global, []string{"hybrid"}) {
-		t.Fatal("standalone global treatment was mistaken for paired syntax")
+	// Standalone unified runs must not be mistaken for paired syntax, whether
+	// via a global flag with one arm or via a single +unified arm.
+	for _, single := range [][]string{{"hybrid"}, {"hybrid+unified"}, {"fts+unified"}} {
+		if unifiedPromptPairExperimentRequested(global, single) {
+			t.Fatalf("standalone unified run was mistaken for paired syntax: %v", single)
+		}
 	}
-	if !unifiedPromptPairExperimentRequested(global, arms) || !unifiedPromptPairExperimentRequested(base, []string{"hybrid+unified"}) {
-		t.Fatal("ambiguous or suffix-based paired syntax was not detected")
+	if unifiedPromptPairExperimentRequested(base, singleUnifiedArm) {
+		t.Fatal("single +unified arm was treated as a paired experiment")
+	}
+	if !unifiedPromptPairExperimentRequested(global, arms) {
+		t.Fatal("ambiguous global-unified multi-arm syntax was not detected")
 	}
 
 	for name, mutate := range map[string]func(*options){
@@ -156,6 +164,33 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 				t.Fatal("expected isolation error")
 			}
 		})
+	}
+}
+
+// TestStandaloneUnifiedArmAppliesContract guards the configurable standalone
+// mode: a single hybrid+unified arm (or a global unified flag with one arm) must
+// run the unified contract without requiring the paired control arm. This is the
+// flexible, non-contrast configuration — the pair protocol remains available via
+// the exact hybrid,hybrid+unified syntax.
+func TestStandaloneUnifiedArmAppliesContract(t *testing.T) {
+	base := options{retrieval: "hybrid+unified", noIDKRetry: true, repeats: 2}
+	armOpt := optionsForRun(base, "hybrid+unified", false)
+	if !armOpt.unifiedAnswerContract {
+		t.Fatal("standalone hybrid+unified arm did not apply the unified contract")
+	}
+	if unifiedPromptPairExperimentRequested(base, []string{"hybrid+unified"}) {
+		t.Fatal("standalone unified arm was routed into the paired protocol")
+	}
+	if unifiedPromptPairExperimentRequested(base, []string{"hybrid"}) {
+		t.Fatal("plain hybrid standalone was routed into the paired protocol")
+	}
+
+	// Even repeats are fine outside the paired protocol; the odd-repeats rule is
+	// a pair-experiment isolation rule, not a standalone constraint.
+	even := base
+	even.repeats = 4
+	if unifiedPromptPairExperimentRequested(even, []string{"hybrid+unified"}) {
+		t.Fatal("standalone unified arm with even repeats was rejected by pair rules")
 	}
 }
 

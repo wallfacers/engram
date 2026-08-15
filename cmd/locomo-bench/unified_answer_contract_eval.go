@@ -164,21 +164,22 @@ func hasUnifiedPromptArm(opt options, arms []string) bool {
 	return false
 }
 
-// unifiedPromptPairExperimentRequested distinguishes the dedicated paired-arm
-// syntax from a standalone global treatment run. Any +unified arm requests the
-// paired protocol; a global unified flag with multiple arms is ambiguous and is
-// routed into validation so it fails instead of silently treating every arm.
+// unifiedPromptPairExperimentRequested reports whether the run uses the frozen
+// paired-arm syntax (exactly two arms: hybrid control + hybrid+unified
+// treatment). A single +unified arm, or a global --unified-answer-contract flag
+// with a single arm, is a standalone unified run and intentionally does not
+// request the paired protocol: the unified contract is independently runnable.
+// A global unified flag with multiple arms is ambiguous — every arm would
+// become treatment — and is routed into validation so it fails instead of
+// silently treating each arm as treatment.
 func unifiedPromptPairExperimentRequested(opt options, arms []string) bool {
 	if opt.unifiedAnswerContract && len(arms) > 1 {
 		return true
 	}
-	for _, arm := range arms {
-		spec, err := parseArm(arm)
-		if err == nil && spec.mechanisms["unified"] {
-			return true
-		}
+	if len(arms) != 2 {
+		return false
 	}
-	return false
+	return hasUnifiedPromptArm(opt, arms)
 }
 
 // validateUnifiedPromptPairExperiment excludes answer- or evidence-changing
