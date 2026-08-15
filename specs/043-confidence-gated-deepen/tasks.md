@@ -23,7 +23,7 @@
 
 - [ ] T010 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot.go:--deepen-pilot signal stage(照抄 runUtilityPilotStage 骨架:manifest → buildConversationRuntime 预建 → worker pool(--concurrency,硬规则并行)→ 前 2 conv 逐题 k30 答题)
 - [ ] T011 [US1] pilot 内双信号采集:logprob 三特征走 utilityLogprobCaller + utilityMapFinalSignal 复用;文本犹豫走 T007 lexicon;每题记 answer-attempts.jsonl(含双信号值与解析状态)
-- [ ] T012 [US1] pilot 对照构造(R8):与既有 042 k150 配对 run 的 judge 结果离线对齐,「k30 错 k150 对」=正类;**输入前置:042 run 数据已从 box 拉取到位(`.locomo-run/042-20260815/` 或 `/root/autodl-tmp/042-runs/` 备份),pilot stage 开跑前校验 judge 结果文件存在,缺则先完成拉取**;输出双信号 AUC + 解析覆盖率到 pilot-report.json
+- [ ] T012 [US1] pilot 对照构造(R8):与既有 042 k150 配对 run 的 judge 结果离线对齐,「k30 错 k150 对」=正类;**输入已到位(2026-08-15 确认):本地 `.locomo-run/042-20260815/`(stats.json + 全部 report/seal/manifest + labels,28M;box 备份在数据盘 eval-backup-20260815/042-runs 但 box 已断电,以本地为准);pilot stage 开跑前校验本地 judge/labels 文件存在**;输出双信号 AUC + 解析覆盖率到 pilot-report.json
 - [ ] T013 [US1] 通道一致性对照:**先核实 87.9% 锚 run 的 thinking 配置并写入 manifest(analyze F1)**,两臂(含 logprob 通道)统一到锚配置(锚若为 thinking-off 则 logprob 通道透传 ThinkingDisabled);同题双通道(streaming vs logprob 非流式,prompt 字节一致、thinking 一致)答案比对,flip_rate 入 pilot-report;kill-gate = AUC≥0.65 且 flip_rate 在噪声带内,产 GO/NO-GO seal(照抄 utilityPilotGate 模式)
 - [ ] T014 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot_test.go:pilot 纯逻辑测试(kill-gate 边界、对照构造、report schema);本地全绿后 box 执行 pilot,NO-GO 则写 verdict 报告并停止后续所有 phase
 
