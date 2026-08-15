@@ -24,8 +24,8 @@
 
 > **排序决策(2026-08-16)**:T008/T009 刻意推迟到 044-default-off-cleanup 合并 master 之后——冲突表新行必然引用 044 将删除的旗标名(trace/consolidate/nav/iris/utility-stage),现在写会给 master 集成制造悬空引用。正确顺序:044 完成 → 本会话主导统一并线(用户已授权)→ 045 rebase 到清理后 master → 在干净树上写 T009 接线 + T008 golden。045 现有代码全部为纯增量文件 + main.go 旗标新段,与 044 删除目标零引用(已验证)。
 
-- [ ] T008 [US2] **先写**默认关 golden 测试(旗标关 → 现行配方逐字节一致;TDD 红-绿);`cmd/locomo-bench/submodular_packing_test.go`(044 合并后执行,见上方排序决策)
-- [ ] T009 [US2] 接线:main.go 旗标注册段(`--submodular-pack/--pack-pool-size/--pack-weights/--pack-budget-anchor`,contracts v1)+ unified_answer_contract_eval.go 冲突表新行(与 trace/consolidate/nav/iris/utility-stage 互斥 fail-closed)+ eval_runner.go 分派 + chunks.go 插点(旗标开 → packSelect 替代 applyChunkQuota)+ 逐题配对预算锚注入(anchor-run 读取);`CGO_ENABLED=0 go test -count=1 ./...` 绿
+- [x] T008 [US2] 默认关 golden 五测(044 合并后在清理树上实施,commit 3f30059):零值默认关 / retrieveCandidates 直通字节等价(小 store DeepEqual 实测)/ evalFreezeCandidateRules 摘要默认关与旧密封 manifest 字节一致且开臂可辨 / fail-closed 校验 / 装填路径+审计端到端
+- [x] T009 [US2] 接线(commit 3f30059,清理后树上):main.go 五旗标(`--submodular-pack/--pack-pool-size/--pack-weights/--pack-budget-anchor/--anchor-run`)+ 启动 fail-fast;eval_runner 两检索点换 retrieveCandidates 分派(旗标关=原样直通);逐题配对预算锚(anchor-run 的 results-*.jsonl per-question answer_context_tokens,缺失回退均值);指纹 +pack 三字段(omitempty 保旧摘要);**冲突表新行不再需要**——044 清理后互斥对象(trace/nav/iris/utility-stage)已不存在,机制唯一性由删除保证
 - [ ] T010 [US2] box 组合批第 1 段:对照臂 1-rep(现行配方,收逐题 usage 锚)→ 机制臂 1-rep probe(--submodular-pack --pack-budget-anchor paired);worker pool 遵守 --concurrency;产出 probe_paired.json(配对差 + McNemar exact p + 真实 usage token parity + 装填审计);GO = 配对差≥0 且不显著负。**NO-GO 分支**:verdict 收尾,Phase 5-6 不执行
 
 ## Phase 5 · US3 正批(条件:T010 GO,US3)
