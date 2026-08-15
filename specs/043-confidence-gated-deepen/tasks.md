@@ -19,15 +19,15 @@
 - [x] T008 [P] 新建 cmd/locomo-bench/confidence_deepen_test.go:TDD——先写失败测试再实现 T004-T007(schema 拒绝枚举外/超条数、映射确定性锁定表驱动用例、union 去重且 round-0 序不变、AUC 已知小样本手算值、lexicon 命中)
 - [x] T009 在 cmd/locomo-bench 加默认旗标关 golden 测试(--confidence-deepen=false 主路径逐字节一致:aux flag 拒绝/无 artifact 产出/fingerprint 不变/digest 1d8a8d0f 锁锚);CGO_ENABLED=0 go build ./... && go test -count=1 ./... 全绿
 
-## Phase 3 · User Story 1(犹豫信号 pilot,box 第 1 段)
+## Phase 3 · User Story 1(犹豫信号 pilot,box 第 1 段)— **NO-GO 关闭(2026-08-15,详见 [verdict](../../docs/evaluation/reports/043-confidence-deepen-pilot-verdict-2026-08-15.md))**
 
-- [ ] T010 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot.go:--deepen-pilot signal stage(照抄 runUtilityPilotStage 骨架:manifest → buildConversationRuntime 预建 → worker pool(--concurrency,硬规则并行)→ 前 2 conv 逐题 k30 答题)
-- [ ] T011 [US1] pilot 内双信号采集:logprob 三特征走 utilityLogprobCaller + utilityMapFinalSignal 复用;文本犹豫走 T007 lexicon;每题记 answer-attempts.jsonl(含双信号值与解析状态)
-- [ ] T012 [US1] pilot 对照构造(R8):与既有 042 k150 配对 run 的 judge 结果离线对齐,「k30 错 k150 对」=正类;**输入已到位(2026-08-15 确认):本地 `.locomo-run/042-20260815/`(stats.json + 全部 report/seal/manifest + labels,28M;box 备份在数据盘 eval-backup-20260815/042-runs 但 box 已断电,以本地为准);pilot stage 开跑前校验本地 judge/labels 文件存在**;输出双信号 AUC + 解析覆盖率到 pilot-report.json
-- [ ] T013 [US1] 通道一致性对照:**锚配置已核实(2026-08-15):87.9% 锚 = answerer thinking ON**(038 verdict 配方段明写 + SSE 卡死事故佐证)。两臂统一 thinking-on:logprob 通道原生 on;**对照臂主通道必须设 `LOCOMO_NO_THINKING=0`**(代码默认 off,runner.go benchNoThinking,不设即引入双变量差)。box 环境硬前置:answer vllm `--max-model-len 32768`(thinking-on SSE 修复)、embed `--max-num-seqs 1`(确定性)。同题双通道(streaming vs logprob 非流式,prompt 字节一致、thinking 一致)答案比对,flip_rate 入 pilot-report;kill-gate = AUC≥0.65 且 flip_rate 在噪声带内,产 GO/NO-GO seal(照抄 utilityPilotGate 模式);锚 thinking 配置写入 manifest
-- [ ] T014 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot_test.go:pilot 纯逻辑测试(kill-gate 边界、对照构造、report schema);本地全绿后 box 执行 pilot,NO-GO 则写 verdict 报告并停止后续所有 phase
+- [x] T010 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot.go:--deepen-pilot signal stage(照抄 runUtilityPilotStage 骨架:manifest → buildConversationRuntime 预建 → worker pool(--concurrency,硬规则并行)→ 前 2 conv 逐题 k30 答题)
+- [x] T011 [US1] pilot 内双信号采集:logprob 三特征走 utilityLogprobCaller + utilityMapFinalSignal 复用;文本犹豫走 T007 lexicon;每题记 answer-attempts.jsonl(含双信号值与解析状态)
+- [x] T012 [US1] pilot 对照构造(R8):与既有 042 k150 配对 run 的 judge 结果离线对齐,「k30 错 k150 对」=正类;**输入已到位(2026-08-15 确认):本地 `.locomo-run/042-20260815/`(stats.json + 全部 report/seal/manifest + labels,28M;box 备份在数据盘 eval-backup-20260815/042-runs 但 box 已断电,以本地为准);pilot stage 开跑前校验本地 judge/labels 文件存在**;输出双信号 AUC + 解析覆盖率到 pilot-report.json
+- [x] T013 [US1] 通道一致性对照:**锚配置已核实(2026-08-15):87.9% 锚 = answerer thinking ON**(038 verdict 配方段明写 + SSE 卡死事故佐证)。两臂统一 thinking-on:logprob 通道原生 on;**对照臂主通道必须设 `LOCOMO_NO_THINKING=0`**(代码默认 off,runner.go benchNoThinking,不设即引入双变量差)。box 环境硬前置:answer vllm `--max-model-len 32768`(thinking-on SSE 修复)、embed `--max-num-seqs 1`(确定性)。同题双通道(streaming vs logprob 非流式,prompt 字节一致、thinking 一致)答案比对,flip_rate 入 pilot-report;kill-gate = AUC≥0.65 且 flip_rate 在噪声带内,产 GO/NO-GO seal(照抄 utilityPilotGate 模式);锚 thinking 配置写入 manifest
+- [x] T014 [US1] 新建 cmd/locomo-bench/confidence_deepen_pilot_test.go:pilot 纯逻辑测试(kill-gate 边界、对照构造、report schema);本地全绿后 box 执行 pilot,NO-GO 则写 verdict 报告并停止后续所有 phase
 
-## Phase 4 · User Story 2(机制配对批,box 第 2 段)
+## Phase 4 · User Story 2(机制配对批,box 第 2 段)— 不执行(gate NO-GO)
 
 - [ ] T015 [US2] 在 cmd/locomo-bench/main.go answerAndJudgeWithAbstainEvidenceDiagnosticsQuery 加 deepen 钩子:round-0 答题(契约字节不动)→ 读 pilot seal 的 threshold/featureName(命令行显式传非定稿值报错)→ 触发时经 <DEEPEN_META> 解析 gap → gapQueryFor → retriever.Search(ctx, q, --deepen-k) → appendDedup → 重答一次
 - [ ] T016 [US2] 降级路径:outcome_kind 全枚举覆盖(信号不可得/gap 解析失败/查询空回退原问题/检索错误或空→回退 round-0 答案,不重试不报错);judge 输入剥离 <DEEPEN_META> 块(clean 口径不受污染)
@@ -36,7 +36,7 @@
 - [ ] T019 [US2] box 执行 LoCoMo 全量配对批:--retrieval hybrid,hybrid+unified+deepen --repeats 3 --store-dir 复用,worker pool 并行;跑后 clean 重判(box 脚本,042/LME 先例)
 - [ ] T020 [US2] 判定:clean 3-rep majority ≥90.0% 且 above-noise(McNemar vs 对照臂)且 avg_retrieved_items ≤60;任一不达 ⇒ verdict NO-GO 收尾;达成 ⇒ 进 Phase 5
 
-## Phase 5 · User Story 3(LME 零重调迁移,box 第 3 段)
+## Phase 5 · User Story 3(LME 零重调迁移,box 第 3 段)— 不执行(gate NO-GO)
 
 - [ ] T021 [US3] box 执行 LME 同配方(阈值/特征/k 零改动),机制臂 vs 对照臂 3-rep 配对 + clean 重判
 - [ ] T022 [US3] 迁移门判定:机制臂不显著低于 90.2% 锚;若回退,不得回改参数(FR-010)——回退即 verdict 记迁移失败
