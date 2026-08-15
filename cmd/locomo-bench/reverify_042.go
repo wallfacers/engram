@@ -20,6 +20,7 @@ package main
 // omission was one of the two measurement bugs).
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -38,6 +39,7 @@ const (
 	rvDefaultMaxTok  = 8000
 	rvBootstrapIters = 2000
 	rvBootstrapSeed  = 43
+	rvStreamBufCap   = 1 << 20 // SSE line buffer
 )
 
 // rvSpecialTokens are vllm generation-end specials (copy of the 043 set).
@@ -213,6 +215,100 @@ func (c *rvCaller) complete(ctx context.Context, system, user string) (rvComplet
 		return completion, nil
 	}
 	return rvCompletion{}, lastErr
+}
+
+// rvStreamer is a minimal OpenAI-compatible SSE streaming client (the second
+// channel of the dual-channel flip measurement; same wire contract as the
+// bench answering path: stream=true, temperature=0).
+type rvStreamer struct {
+	endpoint  string
+	apiKey    string
+	model     string
+	maxTokens int
+	client    *http.Client
+}
+
+func rvNewStreamer(baseURL, apiKey, model string, maxTokens int) *rvStreamer {
+	if maxTokens <= 0 {
+		maxTokens = rvDefaultMaxTok
+	}
+	return &rvStreamer{
+		endpoint:  strings.TrimRight(baseURL, "/") + "/chat/completions",
+		apiKey:    apiKey,
+		model:     model,
+		maxTokens: maxTokens,
+		client:    http.DefaultClient,
+	}
+}
+
+type rvStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
+}
+
+func (s *rvStreamer) complete(ctx context.Context, system, user string) (string, error) {
+	body := map[string]any{
+		"model": s.model,
+		"messages": []map[string]string{
+			{"role": "system", "content": system},
+			{"role": "user", "content": user},
+		},
+		"max_tokens":  s.maxTokens,
+		"stream":      true,
+		"temperature": 0,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("reverify stream encode: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("reverify stream request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if s.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("reverify stream network error")
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.CopyN(io.Discard, resp.Body, 4*1024)
+		return "", fmt.Errorf("reverify stream status %d", resp.StatusCode)
+	}
+	var sb strings.Builder
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, rvResponseLimit+1))
+	sc.Buffer(make([]byte, rvStreamBufCap), rvStreamBufCap)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var chunk rvStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue // skip keep-alives/malformed frames
+		}
+		for _, c := range chunk.Choices {
+			sb.WriteString(c.Delta.Content)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("reverify stream read: %w", err)
+	}
+	if sb.Len() == 0 {
+		return "", fmt.Errorf("reverify stream empty content")
+	}
+	return sb.String(), nil
 }
 
 // rvFinalSpanSignal replicates deepenFinalSpanSignal (1eb9cdd) exactly: strip
