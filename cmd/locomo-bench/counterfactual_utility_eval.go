@@ -1127,12 +1127,13 @@ func runUtilityPilotStage(opt *options) error {
 		return err
 	}
 
+	logger, embClient, extractNever := utilityRuntimeSeam()
 	var attempts []any
 	var labels []any
 	questionCount := 0
 	for ci := range pilotConvs {
 		conv := &pilotConvs[ci]
-		runtime, err := buildConversationRuntime(ctx, *opt, *conv, nil, nil, []string{"hybrid"}, nil)
+		runtime, err := buildConversationRuntime(ctx, *opt, *conv, extractNever, embClient, []string{"hybrid"}, logger)
 		if err != nil {
 			return fmt.Errorf("build runtime conv %d: %w", conv.ID, err)
 		}

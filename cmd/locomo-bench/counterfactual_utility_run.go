@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,9 +18,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/memory"
+	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/provider"
 )
+
+// utilityRuntimeSeam builds the logger, hybrid embedding client, and a
+// fail-closed extraction guard shared by the 042 model-side stages. The frozen
+// recipe reuses a pre-built store, so extraction must never be re-paid; an
+// empty store (missing facts) must fail closed rather than extract ad-hoc.
+func utilityRuntimeSeam() (*slog.Logger, embedding.Client, pipeline.ModelCaller) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	embClient := buildBenchEmbeddingClient(logger, nil)
+	extractNever := func(context.Context, string, string) (string, error) {
+		return "", fmt.Errorf("042 stage must not call extraction (store must be pre-built)")
+	}
+	return logger, embClient, extractNever
+}
 
 // utilityModelEnv holds the answerer/judge/retriever seams for a model stage.
 type utilityModelEnv struct {
@@ -176,12 +192,13 @@ func runUtilityCollectStage(opt *options) error {
 		return err
 	}
 
+	logger, embClient, extractNever := utilityRuntimeSeam()
 	var attempts []any
 	var labels []any
 	questionCount := 0
 	for ci := range convs {
 		conv := &convs[ci]
-		runtime, err := buildConversationRuntime(ctx, *opt, *conv, nil, nil, []string{"hybrid"}, nil)
+		runtime, err := buildConversationRuntime(ctx, *opt, *conv, extractNever, embClient, []string{"hybrid"}, logger)
 		if err != nil {
 			return fmt.Errorf("build runtime conv %d: %w", conv.ID, err)
 		}
