@@ -149,7 +149,6 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 		"consolidate":         func(o *options) { o.consolidate = true },
 		"relation context":    func(o *options) { o.relationContext = true },
 		"write dedup":         func(o *options) { o.writeDedup = true },
-		"temporal resolution": func(o *options) { o.temporalResolution = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := base

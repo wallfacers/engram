@@ -215,7 +215,6 @@ func validateUnifiedPromptPairExperiment(opt options, arms []string) error {
 		{opt.traceMediation, "--trace-mediation"},
 		{opt.counterRefine, "--counter-refine"},
 		{opt.writeDedup, "--write-dedup"},
-		{opt.temporalResolution, "--temporal-resolution"},
 		{opt.neighborExtend, "--neighbor-extend"},
 		{opt.episodeCluster, "--episode-cluster"},
 		{strings.TrimSpace(opt.compilerArm) != "", "--compiler-arm"},

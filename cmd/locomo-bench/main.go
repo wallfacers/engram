@@ -181,12 +181,6 @@ type options struct {
 	// B1 pipeline. "" means legacy ranked-prefix packer; "extractive" and
 	// "planner" use the evidencecompiler engine (planner Nil →extractive fallback).
 	compilerArm string
-	// temporalResolution enables 027 query-time temporal validity resolution:
-	// within the fixed candidate pool, deterministically organize the time
-	// structure of hit evidence (current-value / evolution-chain / temporal-window)
-	// before bundle assembly. Additive mechanism flag; default false. Mutual
-	// exclusion with --compiler-arm keeps the packer dispatch unambiguous.
-	temporalResolution bool
 	// plannerBaseURL/plannerModel configure the local Planner sidecar
 	// (vllm/ollama, OpenAI-compatible). They are only consumed when
 	// --compiler-arm planner; if empty the planner stays nil and the compiler
@@ -354,7 +348,6 @@ func run() error {
 		}
 	})
 	flag.StringVar(&opt.compilerArm, "compiler-arm", "", "evidence compilation strategy: extractive | planner | exact_token (unset = legacy ranked-prefix packer)")
-	flag.BoolVar(&opt.temporalResolution, "temporal-resolution", false, "027 query-time temporal validity resolution: organize hit evidence time structure in fixed candidate pool (additive mechanism flag; formal context required, mutually exclusive with --compiler-arm)")
 	flag.StringVar(&opt.plannerBaseURL, "planner-base-url", "", "local planner sidecar base URL (OpenAI-compatible; enables --compiler-arm planner; empty = extractive fallback)")
 	flag.StringVar(&opt.plannerModel, "planner-model", "", "planner model served by the sidecar (e.g. Qwen2.5-7B-Instruct)")
 	flag.DurationVar(&opt.plannerTimeout, "planner-timeout", 0, "planner proposal timeout (0 = default 6s)")
@@ -2212,12 +2205,7 @@ func validateMechanismArms(opt options) error {
 			return fmt.Errorf("--compiler-arm requires --eval-protocol or --eval-freeze-protocol")
 		case opt.writeDedup || opt.neighborExtend:
 			return fmt.Errorf("--write-dedup/--neighbor-extend require --eval-protocol or --eval-freeze-protocol (024 density mechanisms fail closed outside a formal context)")
-		case opt.temporalResolution:
-			return fmt.Errorf("--temporal-resolution requires --eval-protocol or --eval-freeze-protocol (027 additive mechanism fails closed outside a formal context)")
 		}
-	}
-	if opt.temporalResolution && opt.compilerArm != "" {
-		return fmt.Errorf("--temporal-resolution and --compiler-arm are mutually exclusive (both replace the packer in the formal B1 bundle-assembly dispatch; keep attribution single-mechanism)")
 	}
 	switch opt.compilerArm {
 	case "", "extractive", "planner", "exact_token":
