@@ -18,7 +18,7 @@
 ## Phase 3 · US1 离线装填保真门(本地,US1)
 
 - [ ] T006 [US1] 实现 aic-gate 旗标路径 `cmd/locomo-bench/submodular_packing_cli.go`(`--aic-gate <dir>` 置位即离线执行并退出,repo 旗标约定):三口径渲染(current-k30 / packed / top150-full,参照口径见 contracts 冻结)、逐题预算锚离线复算(对照渲染确定性)、门判定(packed.aic ≥ 0.95×top150 且 tokens ≤ 锚)、packing_gate.json + packing_audit.jsonl + manifest 冻结后 seal;`--aic-gate-slice` 参数
-- [ ] T007 [US1] 本地执行:先 `--slice 0,1`(304 题)冒烟 → `--full`(1540)全量门;核验审计(unmatchable 单列、singleton 计数);产出 go/no-go 判定。**NO-GO 分支**:写关闭 verdict 文档,勾结 T016-T017 收尾,Phase 4-6 不执行
+- [ ] T007 [US1] 执行(位置:embedding sidecar 所在处——本地已配 EMBED_* 则本地;否则 box 组合批开机第一段,仅 bge 不动 vllm):先 `--aic-gate-slice 0,1`(304 题)冒烟 → 全量 1540 门跑;核验审计(unmatchable 单列、singleton 计数);产出 go/no-go 判定。**NO-GO 分支**:写关闭 verdict 文档,若在 box 即刻关机,勾结 T016-T017 收尾,Phase 4-6 不执行
 
 ## Phase 4 · US2 机制接线 + 1-rep 配对 probe(box,US2)
 

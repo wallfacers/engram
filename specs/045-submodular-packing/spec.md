@@ -12,11 +12,11 @@
 
 ### User Story 1 - 离线装填保真门(止损,P1)
 
-维护者先花**零模型成本、零 box 成本**验证机制的理论前提:从 top-150 检索池内、在 k30 等效 token 预算下做次模装填,装填后上下文的 **answer-in-context**(gold 答案作为连续 span 出现在最终上下文)能否逼近 top-150 全量装配。门不过(装填 AIC < top-150 装配的 95%,或 token 超预算)→ 整个 feature NO-GO 关闭,不上 box。
+维护者先花**零 LLM/judge 成本**验证机制的理论前提:从 top-150 检索池内、在 k30 等效 token 预算下做次模装填,装填后上下文的 **answer-in-context**(gold 答案作为连续 span 出现在最终上下文)能否逼近 top-150 全量装配。门不过(装填 AIC < top-150 装配的 95%,或 token 超预算)→ 整个 feature NO-GO 关闭。执行位置:本地已配 embedding sidecar 则完全本地;否则作为组合批**同一开机的第一段**在 box 跑(仅 embedding sidecar,不动 vllm),NO-GO 即刻关机。
 
-**Why this priority**: P2 期望本就压低(文献 scope 警告:reader>7B 时装填优势消失)。"k30 体量装下 k150 信息密度"这一前提有一半风险(信息论层面)可以完全离线测掉——测不过就不必为剩下的一半(reader 吸收)花 box 钱。这也是 survey 的直接建议:answer-in-context 是比 gold_in_pool 更强的离线诊断(ΔR²=+0.17,经干预实验证实因果)。
+**Why this priority**: P2 期望本就压低(文献 scope 警告:reader>7B 时装填优势消失)。"k30 体量装下 k150 信息密度"这一前提有一半风险(信息论层面)可以不花 LLM 成本测掉——测不过就不必为剩下的一半(reader 吸收)花 probe+正批的 box 钱(NO-GO 最坏成本 ≈ 1 小时机时)。这也是 survey 的直接建议:answer-in-context 是比 gold_in_pool 更强的离线诊断(ΔR²=+0.17,经干预实验证实因果)。
 
-**Independent Test**: 纯离线(已存 store + 已存 embedding + dataset gold 答案,不调用任何模型端点),产出三口径 AIC 对照表(现行 k30 装配 / 次模装填 / top-150 全量)+ go/no-go 判定,不含任何 e2e 机制代码。
+**Independent Test**: 已存 store + 已存 embedding + dataset gold 答案 + hybrid 检索的 query embedding sidecar(唯一模型侧依赖),零 LLM/answerer/judge 调用,产出三口径 AIC 对照表(现行 k30 装配 / 次模装填 / top-150 全量)+ go/no-go 判定,不含任何 e2e 机制代码。
 
 **Acceptance Scenarios**:
 
@@ -98,7 +98,7 @@ probe GO 后按 008 铁律正批:同批配对、repeats≥3、store 复用、cle
 - **FR-003**: token 预算 MUST 锚定同批对照臂(现行 k30 chunk-quota-12 装配)的实际体量(测量锚定,不用硬编码常数);两臂 answer-context tokens 均值 MUST 随每份 e2e 结果报告(体量 parity)。
 - **FR-004**: 机制 MUST 复用现行装配已存在的宽检索池(harness 现状 ≥300 条;如确需加宽,只调现有引擎检索接口的 k 参数,在 harness 层实现),引擎五目录(memory/ embedding/ provider/ store/ internal/)MUST 零改动(宪法 II);若需引擎新入口,显式提出契约增量,不得绕过。
 - **FR-005**: 机制 MUST 以默认关闭的旗标提供;旗标关闭时评测路径 MUST 与现行 k30 unified 配方逐字节一致(golden 测试锁定)。
-- **FR-006**: 离线保真门(US1)MUST 在调用任何模型端点之前可完整执行;门判据 = 装填 AIC ≥ 同池 top-150 装配的 95% 且装填 token ≤ 预算;不过即 NO-GO 关闭整个 feature。
+- **FR-006**: 离线保真门(US1)MUST 零 LLM/answerer/judge 调用;唯一模型侧依赖是 hybrid 检索的 query embedding(与锚配方同一 sidecar)。本地已配 embedding sidecar 时 MUST 可完全本地执行;未配时 US1 作为组合批**同一开机的第一段**在 box 执行(仅 embedding sidecar,不动 vllm),NO-GO 即刻关机。门判据 = 装填 AIC ≥ 同池 top-150 装配的 95% 且装填 token ≤ 预算;不过即 NO-GO 关闭整个 feature。
 - **FR-007**: answer-in-context 的匹配规范化规则(大小写/空白/分词归一)MUST 在门计算前冻结;gold 匹配审计(含池内全不可匹配题目清单)MUST 随门报告;AIC 是止损必要条件与诊断指标,MUST NOT 单独作为 e2e 出货依据(008 教训:coverage 不可单独作为出货依据)。
 - **FR-008**: 1-rep probe(US2)GO 门 = 机制臂配对差 ≥0 且 McNemar 不显著为负;显著为负 MUST NO-GO 关闭。probe 协议 MUST 同批、同 store(032-store 复用)、同 judge、同批顺序执行。
 - **FR-009**: 3-rep 正批(US3)MUST 遵守 008 铁律:同批配对、repeats≥3、store 复用、clean 判题口径;结果行 MUST 含 p 值、context parity、逐题翻转清单,入 result-matrix。

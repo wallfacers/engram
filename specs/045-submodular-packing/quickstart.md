@@ -2,23 +2,24 @@
 
 ## 前置
 
-- 本地 032-store(LoCoMo)与 `testdata/locomo/` 数据集(已 gitignored 在仓)。
-- US1/AIC 门:**零模型端点、零网络**。box 阶段(US2+)才需要 vllm answerer + judge env。
+- 032-store(LoCoMo)与 `testdata/locomo/` 数据集(box 侧 `/root/autodl-tmp/`,本地 `.locomo-run/`,gitignored)。
+- **hybrid 检索的 query embedding sidecar**(唯一模型侧依赖,锚配方同款 bge):本地已配 `EMBED_*` env 则 US1 完全本地;本地未配(2026-08-16 实测如此)则 US1 在 box 组合批开机第一段执行,仅启 bge、不动 vllm。
+- US2+ 才需要 vllm answerer + judge env。
 
-## US1 · 离线装填保真门(本地,分钟级)
+## US1 · 离线装填保真门(分钟级,NO-GO 即关机)
 
 ```bash
-cd <engram>
+# 在 embedding sidecar 可达处(本地或 box):
 CGO_ENABLED=0 go build ./...
-go run ./cmd/locomo-bench \
-  --data testdata/locomo/locomo.json \
+locomo-bench \
+  --data <locomo.json> \
   --store <032-store-dir> \
-  --aic-gate .locomo-run/045-offline \
+  --aic-gate <run-dir>/045-gate \
   --aic-gate-slice 0,1        # 先 304 题冒烟;去掉即 1540 全量
-cat .locomo-run/045-offline/packing_gate.json   # gate.verdict = GO | NO-GO
+cat <run-dir>/045-gate/packing_gate.json   # gate.verdict = GO | NO-GO
 ```
 
-判定:`packed.aic ≥ 0.95 × top150_full.aic` 且 `packed.tokens_mean ≤ 锚`。NO-GO → 写 verdict 关闭 feature,不上 box。
+判定:`packed.aic ≥ 0.95 × top150_full.aic` 且 `packed.tokens_mean ≤ 锚`。NO-GO → 写 verdict 关闭 feature,即刻关 box(若在 box)。
 
 ## US2 · 1-rep 同批配对 probe(box,组合批一次开机)
 

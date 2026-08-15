@@ -87,7 +87,7 @@ cmd/locomo-bench/
 ## Phases
 
 - **Phase A(纯函数层,本地零模型)**: submodular_packing.go + aic.go + 全部单测 + golden 默认关等价。验收:`go test ./cmd/locomo-bench` 绿;默认路径 byte-parity 测试通过。
-- **Phase B(US1 离线门,本地)**: submodular_packing_cli.go 驱动全量 1540 三口径 AIC + 审计 → go/no-go 判定工件。验收:门报告可复算、AIC 规范化冻结声明、NO-GO 则 feature 关闭收尾(verdict 文档)。
+- **Phase B(US1 离线门)**: submodular_packing_cli.go 驱动全量 1540 三口径 AIC + 审计 → go/no-go 判定工件。执行位置:本地已配 embedding sidecar(EMBED_* env)则完全本地;本地未配(2026-08-16 实测:无 env、无 Ollama)则作为组合批**同一开机第一段**在 box 执行——仅启 embedding sidecar(bge,数据盘缓存),不动 vllm;NO-GO 即刻关机(最坏 ~1 小时机时)。验收:门报告可复算、AIC 规范化冻结声明、NO-GO 则 feature 关闭收尾(verdict 文档)。
 - **Phase C(机制接线 + probe,box)**: main.go/eval_runner.go/chunks.go 接线;box 组合批一次开机:对照臂 1-rep(收锚)→ 机制臂 1-rep probe → 判 GO → (GO) 3-rep 正批 → LME 迁移;ride-along reverify_042 同批。验收:配对差 + McNemar + token parity + 装填审计工件齐。
 - **Phase D(收尾)**: verdict 文档 + result-matrix 行 + tasks 勾结;box 备份关机(必做)。
 
