@@ -6,18 +6,18 @@
 
 ## Phase 1 · Setup
 
-- [ ] T001 在 cmd/locomo-bench/main.go flag 区新增 --confidence-deepen(false)/--deepen-pilot("")/--deepen-threshold(0)/--deepen-signal-feature("")/--deepen-k(30)/--deepen-max-gaps(3),options struct 加对应字段;--deepen-pilot 走 --utility-stage 同款早期分派模式(main.go:612 附近)
-- [ ] T002 在 cmd/locomo-bench/unified_answer_contract_eval.go validateUnifiedPromptPairExperiment 冲突表加 --confidence-deepen 与 --gap-refetch/--agentic-nav/--iris/multi-query 的互斥;并校验 --confidence-deepen 必须与 --unified-answer-contract 同开
-- [ ] T003 新建 cmd/locomo-bench/confidence_deepen_artifact.go:DeepenDecision/pilot-report/manifest+seal 工件函数(照抄 counterfactual_utility_artifact.go 的 digest/Write/Read/ValidateSeal 模式);manifest 全字段(含 QuestionCount/threshold/featureName/contract_digest)填满后才算 digest
+- [x] T001 在 cmd/locomo-bench/main.go flag 区新增 --confidence-deepen(false)/--deepen-pilot("")/--deepen-threshold(0)/--deepen-signal-feature("")/--deepen-k(30)/--deepen-max-gaps(3),options struct 加对应字段;--deepen-pilot 走 --utility-stage 同款早期分派模式(main.go:612 附近)
+- [x] T002 在 cmd/locomo-bench/unified_answer_contract_eval.go validateUnifiedPromptPairExperiment 冲突表加 --confidence-deepen 与 --gap-refetch/--agentic-nav/--iris/multi-query 的互斥;并校验 --confidence-deepen 必须与 --unified-answer-contract 同开
+- [x] T003 新建 cmd/locomo-bench/confidence_deepen_artifact.go:DeepenDecision/pilot-report/manifest+seal 工件函数(照抄 counterfactual_utility_artifact.go 的 digest/Write/Read/ValidateSeal 模式);manifest 全字段(含 QuestionCount/threshold/featureName/contract_digest)填满后才算 digest
 
 ## Phase 2 · Foundational(纯函数层,本地零模型)
 
-- [ ] T004 [P] 新建 cmd/locomo-bench/confidence_deepen.go:GapItem 类型 + schema 校验(category 枚举、长度上限、每题 ≤3 条)+ <DEEPEN_META> 块解析(失败=按自信,记 failure_kind)
-- [ ] T005 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现 gapQueryFor(gaps, question) 确定性映射(target+slot → description → target → 原问题),纯字符串操作
-- [ ] T006 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现追加式 union appendDedup(round0 []memory.Result, extra []memory.Result)——按 id 去重、只追加、不改 round-0 顺序(参考 stableGapCandidateUnion 形态;禁止任何配额拆分)
-- [ ] T007 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现 AUC 计算(排序法 + CI bootstrap,固定种子)与阈值选择(ROC 最优点);在 runner.go isIDK 旁实现文本犹豫 lexicon 检测(与 logprob 信号并列的 HesitationSignal kind=textual)
-- [ ] T008 [P] 新建 cmd/locomo-bench/confidence_deepen_test.go:TDD——先写失败测试再实现 T004-T007(schema 拒绝枚举外/超条数、映射确定性锁定表驱动用例、union 去重且 round-0 序不变、AUC 已知小样本手算值、lexicon 命中)
-- [ ] T009 在 cmd/locomo-bench 加默认旗标关 golden 测试:--confidence-deepen=false 时主路径 prompt/上下文/检索逐字节与现行一致(可对照现有 journal golden 或新增最小 golden);CGO_ENABLED=0 go build ./... && go test -count=1 ./cmd/locomo-bench 全绿
+- [x] T004 [P] 新建 cmd/locomo-bench/confidence_deepen.go:GapItem 类型 + schema 校验(category 枚举、长度上限、每题 ≤3 条)+ <DEEPEN_META> 块解析(失败=按自信,记 outcome_kind=gap_parse_failed;T004-T007 全部纯函数已落地于此文件)
+- [x] T005 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现 gapQueryFor(gaps, question) 确定性映射(契约 cli-flags.md:40-48,取 gaps[0] 四分支回退),纯字符串操作
+- [x] T006 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现追加式 union appendDedup(round0 []memory.Result, extra []memory.Result)——按 id 去重、只追加、不改 round-0 顺序(参考 stableGapCandidateUnion 形态;禁止任何配额拆分)
+- [x] T007 [P] 在 cmd/locomo-bench/confidence_deepen.go 实现 AUC 计算(rank 法 + tie 平均 rank + bootstrap CI 固定种子)与阈值选择(ROC 最优点 Youden's J);文本犹豫 lexicon 检测放 confidence_deepen.go(isIDK 旁,与 logprob 并列 HesitationSignal kind=textual)
+- [x] T008 [P] 新建 cmd/locomo-bench/confidence_deepen_test.go:TDD——先写失败测试再实现 T004-T007(schema 拒绝枚举外/超条数、映射确定性锁定表驱动用例、union 去重且 round-0 序不变、AUC 已知小样本手算值、lexicon 命中)
+- [x] T009 在 cmd/locomo-bench 加默认旗标关 golden 测试(--confidence-deepen=false 主路径逐字节一致:aux flag 拒绝/无 artifact 产出/fingerprint 不变/digest 1d8a8d0f 锁锚);CGO_ENABLED=0 go build ./... && go test -count=1 ./... 全绿
 
 ## Phase 3 · User Story 1(犹豫信号 pilot,box 第 1 段)
 
