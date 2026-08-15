@@ -141,11 +141,7 @@ func TestValidateUnifiedPromptPairExperiment(t *testing.T) {
 		"force answer":        func(o *options) { o.forceAnswer = true },
 		"temporal prompt":     func(o *options) { o.temporalAnswerPrompt = true },
 		"unified typed":       func(o *options) { o.unifiedTypedPrompts = true },
-		"trace mediation":     func(o *options) { o.traceMediation = true },
 		"rerank":              func(o *options) { o.rerank = true },
-		"assembly":            func(o *options) { o.evidenceAssembly = true },
-		"consolidate":         func(o *options) { o.consolidate = true },
-		"relation context":    func(o *options) { o.relationContext = true },
 		"write dedup":         func(o *options) { o.writeDedup = true },
 	} {
 		t.Run(name, func(t *testing.T) {

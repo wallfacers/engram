@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -288,7 +287,7 @@ func TestUnifiedAnswerContractArmSelection(t *testing.T) {
 	if got := optionsForArm(options{}, "hybrid"); got.unifiedAnswerContract {
 		t.Fatal("bare control arm unexpectedly enabled the unified answer contract")
 	}
-	global := options{unifiedAnswerContract: true, traceMediation: false}
+	global := options{unifiedAnswerContract: true}
 	if got := optionsForRun(global, "hybrid", false); !got.unifiedAnswerContract {
 		t.Fatal("single-arm global unified mode was not preserved")
 	}
@@ -329,30 +328,6 @@ func TestAnswerPromptBytesAreFingerprintBound(t *testing.T) {
 	}
 }
 
-func TestPostRetrievalAnswerModesAreFingerprintBound(t *testing.T) {
-	base := answerRegimeFingerprint(options{})
-	for name, tc := range map[string]struct {
-		opt  options
-		want string
-	}{
-		"trace":          {opt: options{traceMediation: true}, want: ";trace_mediation=true"},
-		"relation":       {opt: options{relationContext: true}, want: ";relation_context=true"},
-		"consolidate":    {opt: options{consolidate: true}, want: ";consolidate=true"},
-		"trace breadth": {opt: options{
-			traceMultiEvidence: true,
-			traceEvidenceCap:   6,
-			traceFallbackTopk:  12,
-		}, want: ";trace_multi_evidence=true;trace_evidence_cap=6;trace_fallback_topk=12"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got := answerRegimeFingerprint(tc.opt)
-			if got == base || !strings.Contains(got, tc.want) {
-				t.Fatalf("answer mode is not journal-bound: base=%q got=%q want fragment=%q", base, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
 	for name, opt := range map[string]options{
 		"force answer":     {unifiedAnswerContract: true, forceAnswer: true},
@@ -365,16 +340,15 @@ func TestUnifiedAnswerContractRejectsAmbiguousPromptComposition(t *testing.T) {
 		})
 	}
 	for _, format := range []string{"locomo", "longmemeval"} {
-		if err := validatePromptModes(options{datasetFormat: format, unifiedAnswerContract: true, traceMediation: true}); err != nil {
+		if err := validatePromptModes(options{datasetFormat: format, unifiedAnswerContract: true}); err != nil {
 			t.Fatalf("standalone unified mode rejected for %s: %v", format, err)
 		}
 	}
-	if err := validatePromptModes(options{unifiedAnswerContract: true, unifiedPairAudit: true, traceMediation: false}); err == nil || !strings.Contains(err.Error(), "--no-idk-retry") {
+	if err := validatePromptModes(options{unifiedAnswerContract: true, unifiedPairAudit: true}); err == nil || !strings.Contains(err.Error(), "--no-idk-retry") {
 		t.Fatalf("unified experiment accepted prompt-dependent retrieval retries: %v", err)
 	}
 	for name, opt := range map[string]options{
 		"temporal scaffold":  {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, temporalDateScaffold: true},
-		"trace mediation":    {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, traceMediation: true},
 		"category top-k":     {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, catTopKSpec: "1=30"},
 		"category chunk cap": {unifiedAnswerContract: true, unifiedPairAudit: true, noIDKRetry: true, catQuotaSpec: "1=12"},
 	} {
@@ -589,153 +563,12 @@ func TestAnswerRegimeFingerprintIsTraceable(t *testing.T) {
 	}
 }
 
-func TestAssemblyLegacyEntityOrderValidationAndDefault(t *testing.T) {
-	if (options{}).assemblyLegacyEntityOrder {
-		t.Fatal("legacy entity order must default off")
-	}
-	if err := validateAssemblyOptions(options{assemblyLegacyEntityOrder: true}); err == nil {
-		t.Fatal("legacy entity order without evidence assembly should fail")
-	}
-	if err := validateAssemblyOptions(options{
-		evidenceAssembly: true, assemblyLegacyEntityOrder: true,
-	}); err != nil {
-		t.Fatalf("explicit legacy assembly rejected: %v", err)
-	}
-}
-
-func TestAssemblyAuditValidationAndFingerprintNeutrality(t *testing.T) {
-	if (options{}).assemblyAudit {
-		t.Fatal("runtime assembly audit must default off")
-	}
-	if err := validateAssemblyOptions(options{assemblyAudit: true}); err == nil {
-		t.Fatal("assembly audit without evidence assembly should fail")
-	}
-	if err := validateAssemblyOptions(options{
-		evidenceAssembly: true, assemblyAudit: true,
-	}); err != nil {
-		t.Fatalf("runtime assembly audit rejected: %v", err)
-	}
-	if err := validateAssemblyOptions(options{
-		evidenceAssembly: true, assemblyAudit: true, assemblyDiagnose: true,
-	}); err == nil {
-		t.Fatal("runtime audit and retrieval-only diagnose should conflict")
-	}
-	withoutAudit := answerRegimeFingerprint(options{evidenceAssembly: true})
-	withAudit := answerRegimeFingerprint(options{evidenceAssembly: true, assemblyAudit: true})
-	if withoutAudit != withAudit {
-		t.Fatalf("write-only audit changed answer regime: without=%q with=%q", withoutAudit, withAudit)
-	}
-}
-
-func TestAnswerPathWritesRuntimeAssemblyAudit(t *testing.T) {
-	ctx := context.Background()
-	st, err := store.Open(ctx, store.Options{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer st.Close()
-	es := memory.NewEntryStore(st.DB())
-	vs := memory.NewVectorStore(st.DB())
-	if err := es.Upsert(ctx, &memory.Entry{Name: "chunk-c0-s1-000", Content: "Melanie saw a warning sign.", SourceSessionID: "conv0-sess1"}); err != nil {
-		t.Fatalf("seed chunk: %v", err)
-	}
-	if err := es.PutEntities(ctx, "chunk-c0-s1-000", []string{"Melanie", "warning sign"}); err != nil {
-		t.Fatalf("seed chunk entities: %v", err)
-	}
-	retriever := memory.NewRetriever(es, vs, nil)
-	auditPath := filepath.Join(t.TempDir(), "assembly-audit.jsonl")
-	audit, err := openAssemblyJournal(auditPath)
-	if err != nil {
-		t.Fatalf("open assembly audit: %v", err)
-	}
-	answer := func(context.Context, string, string) (string, provider.Usage, error) {
-		return "a warning sign", provider.Usage{InputTokens: 123, OutputTokens: 4}, nil
-	}
-	judge := func(context.Context, string, string) (string, provider.Usage, error) {
-		return `{"correct":true}`, provider.Usage{}, nil
-	}
-	noRetry := func(context.Context, string, string) (string, error) { return "", nil }
-	opt := options{
-		evidenceAssembly: true,
-		assemblyAudit:    true,
-		assemblyJournal:  audit,
-		noIDKRetry:       true,
-		topK:             1,
-	}
-	qa := locomoQA{QuestionID: "conv-0-q-0", Question: "What warning sign did Melanie see?", Answer: []byte(`"a warning sign"`), Category: 1}
-	correct, _, usage, _ := answerAndJudgeWithUsage(ctx, retriever, answer, noRetry, noRetry, judge, opt, qa, slog.Default())
-	if !correct || usage.InputTokens != 123 {
-		t.Fatalf("answer result correct=%t input_tokens=%d", correct, usage.InputTokens)
-	}
-	if err := audit.Close(); err != nil {
-		t.Fatalf("close assembly audit: %v", err)
-	}
-	records := loadAssemblyAuditForTest(t, auditPath)
-	if len(records) != 1 || records[0].QuestionID != qa.QuestionID {
-		t.Fatalf("assembly audit records = %+v", records)
-	}
-	if records[0].InputCandidateCount != 1 || len(records[0].Units) != 1 {
-		t.Fatalf("assembly audit closure/admission = %+v", records[0])
-	}
-}
-
-func loadAssemblyAuditForTest(t *testing.T, path string) []EvidenceAssembly {
-	t.Helper()
-	f, err := os.Open(path) //nolint:gosec // test-owned path
-	if err != nil {
-		t.Fatalf("open audit: %v", err)
-	}
-	defer f.Close()
-	var records []EvidenceAssembly
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		var record EvidenceAssembly
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			t.Fatalf("decode audit: %v", err)
-		}
-		records = append(records, record)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan audit: %v", err)
-	}
-	return records
-}
-
-func TestAnswerRegimeFingerprintSeparatesAssemblyEntityOrder(t *testing.T) {
-	baseline := answerRegimeFingerprint(options{})
-	normal := answerRegimeFingerprint(options{evidenceAssembly: true})
-	legacy := answerRegimeFingerprint(options{
-		evidenceAssembly: true, assemblyLegacyEntityOrder: true,
-	})
-	if baseline == normal || normal == legacy || baseline == legacy {
-		t.Fatalf("assembly regimes collided: baseline=%q normal=%q legacy=%q", baseline, normal, legacy)
-	}
-	if !strings.Contains(normal, "evidence_assembly=true;assembly_entity_order=kind_layered") {
-		t.Fatalf("normal fingerprint = %q", normal)
-	}
-	if !strings.Contains(legacy, "evidence_assembly=true;assembly_entity_order=legacy_grouped") {
-		t.Fatalf("legacy fingerprint = %q", legacy)
-	}
-}
-
-func TestRunDirRejectsAssemblyEntityOrderResumeMix(t *testing.T) {
-	runDir := t.TempDir()
-	normal := options{runDir: runDir, retrieval: "hybrid", evidenceAssembly: true}
-	if err := checkRunDirRegime(normal); err != nil {
-		t.Fatalf("pin normal regime: %v", err)
-	}
-	legacy := normal
-	legacy.assemblyLegacyEntityOrder = true
-	if err := checkRunDirRegime(legacy); err == nil || !strings.Contains(err.Error(), "fresh --run-dir") {
-		t.Fatalf("legacy resume should be rejected, got %v", err)
-	}
-}
 
 func TestRunDirRegimeBindsPerArmPromptDigests(t *testing.T) {
 	runDir := t.TempDir()
 	opt := options{
 		runDir: runDir, retrieval: "hybrid,hybrid+unified",
-		noIDKRetry: true, traceMediation: false,
+		noIDKRetry: true,
 	}
 	if err := checkRunDirRegime(opt); err != nil {
 		t.Fatalf("pin paired unified regime: %v", err)
@@ -745,8 +578,8 @@ func TestRunDirRegimeBindsPerArmPromptDigests(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	baseDigest := formalAnswerPromptDigest(options{noIDKRetry: true, traceMediation: false})
-	unifiedDigest := formalAnswerPromptDigest(options{noIDKRetry: true, traceMediation: false, unifiedAnswerContract: true})
+	baseDigest := formalAnswerPromptDigest(options{noIDKRetry: true})
+	unifiedDigest := formalAnswerPromptDigest(options{noIDKRetry: true, unifiedAnswerContract: true})
 	for _, want := range []string{
 		"hybrid={", "hybrid+unified={",
 		"answer_prompt_digest=" + baseDigest,
