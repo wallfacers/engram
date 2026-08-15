@@ -155,7 +155,6 @@ func TestAliasShadow_ValidateRejectsConfoundedRuns(t *testing.T) {
 		name string
 		opt  options
 	}{
-		{name: "multi-query", opt: func() options { o := base; o.multiQuery = true; return o }()},
 		{name: "top-k", opt: func() options { o := base; o.topK = aliasShadowTopK - 1; return o }()},
 		{name: "missing-store", opt: func() options { o := base; o.storeDir = ""; return o }()},
 		{name: "unknown-enum", opt: func() options { o := base; o.aliasShadow = "maybe"; return o }()},

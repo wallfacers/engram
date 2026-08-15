@@ -245,7 +245,6 @@ func TestDoc2Query_ValidateRejectsConfoundedRuns(t *testing.T) {
 		opt  options
 	}{
 		{name: "top-k", opt: func() options { o := base; o.topK = 40; return o }()},
-		{name: "multi-query", opt: func() options { o := base; o.multiQuery = true; return o }()},
 		{name: "missing-store", opt: func() options { o := base; o.storeDir = ""; return o }()},
 		{name: "missing-run-dir", opt: func() options { o := base; o.runDir = ""; return o }()},
 		{name: "unknown-enum", opt: func() options { o := base; o.doc2query = "maybe"; return o }()},

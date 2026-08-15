@@ -27,8 +27,6 @@ func utilityExperimentalFlags(opt *options) string {
 		return "--pcic"
 	case opt.rerank:
 		return "--rerank"
-	case opt.multiQuery:
-		return "--multi-query"
 	case opt.recallDiagnostic:
 		return "--recall-diagnostic"
 	}

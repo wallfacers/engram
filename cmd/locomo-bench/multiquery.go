@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/wallfacers/engram/embedding"
@@ -22,41 +21,6 @@ const multiQueryFinalTopK = 30
 type queryRetrievalMeta struct {
 	finalTopK     int
 	subqueryCount int
-}
-
-func multiQueryArm(enabled bool) string {
-	if enabled {
-		return "multi"
-	}
-	return "single"
-}
-
-func multiQueryRecipeFingerprint(opt options) string {
-	return fmt.Sprintf(
-		"multi_query=true;mq_max_subqueries=%d;top_k=%d;chunks=%t;chunk_quota=%d;cat_top_k=%s;cat_chunk_quota=%s",
-		opt.mqMaxSubqueries,
-		opt.topK,
-		opt.chunks,
-		opt.chunkQuota,
-		formatCategoryOverrides(opt.catTopK),
-		formatCategoryOverrides(opt.catQuota),
-	)
-}
-
-func formatCategoryOverrides(overrides map[int]int) string {
-	if len(overrides) == 0 {
-		return "-"
-	}
-	categories := make([]int, 0, len(overrides))
-	for category := range overrides {
-		categories = append(categories, category)
-	}
-	sort.Ints(categories)
-	parts := make([]string, 0, len(categories))
-	for _, category := range categories {
-		parts = append(parts, fmt.Sprintf("%d=%d", category, overrides[category]))
-	}
-	return strings.Join(parts, ",")
 }
 
 // unionRetryResults preserves the legacy append-only union when limit is zero.
@@ -125,95 +89,14 @@ func unionRetryResults(first, more []memory.Result, limit int) ([]memory.Result,
 	return union, fresh
 }
 
-func unionMultiRetryResults(first, more []memory.Result, topK, quota int) ([]memory.Result, int) {
-	if quota <= 0 {
-		return unionRetryResults(first, more, topK)
-	}
-	partition := func(hits []memory.Result, chunks bool) []memory.Result {
-		out := make([]memory.Result, 0, len(hits))
-		for _, hit := range hits {
-			if strings.HasPrefix(hit.Name, "chunk-") == chunks {
-				out = append(out, hit)
-			}
-		}
-		return out
-	}
-
-	factSlots := topK - quota
-	selectedFacts, _ := unionRetryResults(partition(first, false), partition(more, false), factSlots)
-	selectedChunks, _ := unionRetryResults(partition(first, true), partition(more, true), quota)
-	selected := make(map[string]struct{}, len(selectedFacts)+len(selectedChunks))
-	for _, hit := range selectedFacts {
-		selected[hit.Name] = struct{}{}
-	}
-	for _, hit := range selectedChunks {
-		selected[hit.Name] = struct{}{}
-	}
-
-	firstNames := make(map[string]struct{}, len(first))
-	for _, hit := range first {
-		firstNames[hit.Name] = struct{}{}
-	}
-	union := make([]memory.Result, 0, topK)
-	seen := make(map[string]struct{}, topK)
-	appendSelected := func(hits []memory.Result, selectedOnly bool) {
-		for _, hit := range hits {
-			if len(union) >= topK {
-				return
-			}
-			if selectedOnly {
-				if _, ok := selected[hit.Name]; !ok {
-					continue
-				}
-			}
-			if _, duplicate := seen[hit.Name]; duplicate {
-				continue
-			}
-			seen[hit.Name] = struct{}{}
-			union = append(union, hit)
-		}
-	}
-	appendSelected(first, true)
-	appendSelected(more, true)
-	if len(union) < topK {
-		// Backfill when the store does not contain enough facts or chunks.
-		appendSelected(first, false)
-		appendSelected(more, false)
-	}
-	fresh := 0
-	for _, hit := range union {
-		if _, existed := firstNames[hit.Name]; !existed {
-			fresh++
-		}
-	}
-	return union, fresh
-}
-
-// retrieveQuestionWithDiagnostics is the initial per-question retrieval seam.
-// The disabled branch deliberately delegates to the historical front door
-// unchanged; the enabled branch keeps SearchMulti's final budget at topK.
-func retrieveQuestionWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall, decomposeCall modelCaller, question string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, queryRetrievalMeta, error) {
+// retrieveQuestionWithDiagnostics is the per-question retrieval front door.
+// Multi-query decomposition moved to the --recall-diagnostic path (SearchMulti
+// there); answer/judge runs always retrieve the single question.
+func retrieveQuestionWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall, _ modelCaller, question string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, queryRetrievalMeta, error) {
 	meta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
-	if !opt.multiQuery {
-		hits, diagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, question, topK, quota, opt)
-		meta.finalTopK = len(hits)
-		return hits, diagnostics, meta, err
-	}
-
-	subqueries := decomposeQuery(ctx, decomposeCall, question, opt.mqMaxSubqueries)
-	if len(subqueries) == 0 || len(subqueries) > opt.mqMaxSubqueries {
-		subqueries = []string{question}
-	}
-	meta.subqueryCount = len(subqueries)
-	searchK := questionSearchK(topK, quota)
-	hits, err := retriever.SearchMulti(ctx, subqueries, searchK)
-	if err != nil {
-		meta.finalTopK = 0
-		return nil, memory.SearchDiagnostics{}, meta, err
-	}
-	hits = finalizeQuestionHits(ctx, question, hits, topK, quota, opt)
+	hits, diagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, question, topK, quota, opt)
 	meta.finalTopK = len(hits)
-	return hits, memory.SearchDiagnostics{}, meta, nil
+	return hits, diagnostics, meta, err
 }
 
 func questionSearchK(topK, quota int) int {

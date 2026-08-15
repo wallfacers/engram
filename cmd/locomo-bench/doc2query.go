@@ -92,9 +92,6 @@ func validateDoc2QueryOptions(opt options) error {
 			return fmt.Errorf("--doc2query requires category %d top-k to remain %d, got %d", category, doc2queryTopK, topK)
 		}
 	}
-	if opt.multiQuery {
-		return fmt.Errorf("--doc2query and --multi-query are mutually exclusive")
-	}
 	if aliasShadowEnabled(opt) {
 		return fmt.Errorf("--doc2query and --alias-shadow are mutually exclusive")
 	}

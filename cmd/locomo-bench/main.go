@@ -116,7 +116,6 @@ type options struct {
 	noIDKRetry                 bool
 	budgetBaseline             float64
 	retrieval                  string
-	multiQuery                 bool
 	mqMaxSubqueries            int
 	recallDiagnostic           bool
 	maxConvs                   int
@@ -446,8 +445,7 @@ func run() error {
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
 	flag.Float64Var(&opt.budgetBaseline, "budget-baseline", 0, "calibrated answer context token baseline for the 1.5x budget gate")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
-	flag.BoolVar(&opt.multiQuery, "multi-query", false, "decompose each question and retrieve with SearchMulti")
-	flag.IntVar(&opt.mqMaxSubqueries, "mq-max-subqueries", 4, "maximum subqueries produced for multi-query retrieval")
+	flag.IntVar(&opt.mqMaxSubqueries, "mq-max-subqueries", 4, "maximum subqueries produced for --recall-diagnostic multi retrieval")
 	flag.BoolVar(&opt.recallDiagnostic, "recall-diagnostic", false, "retrieval-only single-vs-multi gold-rank and coverage@30 diagnostic")
 	flag.IntVar(&opt.maxConvs, "conversations", 0, "limit number of conversations (0 = all)")
 	flag.IntVar(&opt.maxQuestions, "questions", 0, "limit questions per conversation (0 = all)")
@@ -630,7 +628,7 @@ func run() error {
 	if opt.repeats < 1 {
 		return fmt.Errorf("--repeats must be at least 1")
 	}
-	if (opt.multiQuery || (opt.recallDiagnostic && !aliasShadowEnabled(opt) && !doc2queryEnabled(opt))) && opt.mqMaxSubqueries < 1 {
+	if opt.recallDiagnostic && !aliasShadowEnabled(opt) && !doc2queryEnabled(opt) && opt.mqMaxSubqueries < 1 {
 		return fmt.Errorf("--mq-max-subqueries must be at least 1")
 	}
 	if opt.recallDiagnostic {
@@ -642,9 +640,6 @@ func run() error {
 		if opt.recallDiagnostic || opt.temporalDiagnostic || opt.attributionTrace || opt.coverageOnly || opt.abstainProbe || opt.pcicAnnotate {
 			return fmt.Errorf("--nav-diagnose cannot be combined with other retrieval-only diagnostic modes (recall-diagnostic, temporal-diagnostic, attribution, coverage-only, abstain-probe, pcic-annotate)")
 		}
-	}
-	if opt.multiQuery && !opt.recallDiagnostic && (opt.estimate || opt.attributionTrace || opt.coverageOnly || opt.abstainProbe || opt.pcicAnnotate) {
-		return fmt.Errorf("--multi-query is supported only by answer/judge runs; use --recall-diagnostic for retrieval-only comparison")
 	}
 	if opt.datasetFormat != "locomo" && opt.datasetFormat != "longmemeval" {
 		return fmt.Errorf("--dataset-format must be locomo or longmemeval, got %q", opt.datasetFormat)
@@ -709,9 +704,6 @@ func run() error {
 	if opt.fixedGoldOracle && opt.formalProtocol == nil {
 		return fmt.Errorf("--fixed-gold-oracle requires --eval-protocol")
 	}
-	if opt.multiQuery && !opt.recallDiagnostic && len(arms) != 1 {
-		return fmt.Errorf("--multi-query requires exactly one retrieval backend so context_parity.jsonl has one row per question")
-	}
 	for _, arm := range arms {
 		if err := validatePromptModes(optionsForRun(opt, arm, len(arms) > 1)); err != nil {
 			return fmt.Errorf("arm %s: %w", arm, err)
@@ -735,24 +727,6 @@ func run() error {
 	}
 	if err := validateDoc2QueryOptions(opt); err != nil {
 		return err
-	}
-	if opt.multiQuery {
-		if opt.topK != multiQueryFinalTopK {
-			return fmt.Errorf("--multi-query requires --top-k %d to preserve context parity", multiQueryFinalTopK)
-		}
-		for category, topK := range opt.catTopK {
-			if topK != multiQueryFinalTopK {
-				return fmt.Errorf("--multi-query requires category %d top-k to remain %d, got %d", category, multiQueryFinalTopK, topK)
-			}
-		}
-		if opt.chunkQuota > multiQueryFinalTopK {
-			return fmt.Errorf("--multi-query requires --chunk-quota at most %d", multiQueryFinalTopK)
-		}
-		for category, quota := range opt.catQuota {
-			if quota > multiQueryFinalTopK {
-				return fmt.Errorf("--multi-query requires category %d chunk quota at most %d, got %d", category, multiQueryFinalTopK, quota)
-			}
-		}
 	}
 	if opt.abstainGate, err = parseAbstainGate(opt.abstainGateSpec); err != nil {
 		return err
@@ -2305,12 +2279,11 @@ func retrieverOptionsForAt(opt options, now time.Time) memory.RetrieverOptions {
 	}
 }
 
-func retrievalFingerprint(opt options) string {
-	fingerprint := ""
-	if opt.multiQuery {
-		fingerprint += ";" + multiQueryRecipeFingerprint(opt)
-	}
-	return fingerprint
+// retrievalFingerprint tags a run's retrieval-mode identity for journal resume
+// binding. All flagged mechanisms (assoc/temporal/cluster-sweep/conflict/
+// multi-query) have been removed by 044; the fingerprint is empty.
+func retrievalFingerprint(_ options) string {
+	return ""
 }
 
 func temporalNowForConversation(conv conversation) time.Time {
@@ -2342,9 +2315,6 @@ func checkRunDirRegime(opt options) error {
 		armRegimes = append(armRegimes, arm+"={"+answerRegimeFingerprint(armOpt)+"}")
 	}
 	regime := "retrieval=" + opt.retrieval + ";arms=" + strings.Join(armRegimes, ",")
-	if opt.multiQuery {
-		regime += ";" + retrievalFingerprint(opt)
-	}
 	path := filepath.Join(opt.runDir, "regime.json")
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -3264,11 +3234,7 @@ func retryWithRewriteLegacy(ctx context.Context, retriever *memory.Retriever, an
 	}
 	var union []memory.Result
 	var fresh int
-	if opt.multiQuery {
-		union, fresh = unionMultiRetryResults(first, more, topK, quota)
-	} else {
-		union, fresh = unionRetryResults(first, more, 0)
-	}
+	union, fresh = unionRetryResults(first, more, 0)
 	if fresh == 0 {
 		return "", false
 	}
@@ -3300,11 +3266,7 @@ func retryWithRewriteUsageDiagnostics(ctx context.Context, retriever *memory.Ret
 	}
 	var union []memory.Result
 	var fresh int
-	if opt.multiQuery {
-		union, fresh = unionMultiRetryResults(first, more, topK, quota)
-	} else {
-		union, fresh = unionRetryResults(first, more, 0)
-	}
+	union, fresh = unionRetryResults(first, more, 0)
 	if fresh == 0 {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}
@@ -3335,13 +3297,6 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, opt.selector)
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, nil, diagnostics, false
-	}
-	if opt.multiQuery {
-		if quota > 0 {
-			hits = applyChunkQuota(hits, topK, quota)
-		} else {
-			hits = hits[:topK]
-		}
 	}
 	retry, usage, err := call(ctx, prompt, buildAnswerContextPrompt(qa.Question, hits, qa.QuestionDate, qa.Category, opt.temporalDateScaffold))
 	if err != nil || isIDK(retry) {

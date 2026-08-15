@@ -117,7 +117,6 @@ func TestUtilityMutuallyExclusiveModes(t *testing.T) {
 		{"abstain", func(o *options) { o.abstainPrompt = true }},
 		{"pcic", func(o *options) { o.pcic = true }},
 		{"rerank", func(o *options) { o.rerank = true }},
-		{"multi-query", func(o *options) { o.multiQuery = true }},
 	}
 	for _, c := range conflicting {
 		opt := baseUtilityOpt()

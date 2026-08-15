@@ -196,11 +196,6 @@ func TestFormalRunnerOptionsAndDatasetFingerprintFailClosed(t *testing.T) {
 	if err := validateFormalRunnerOptions(protocol, opt, []string{"hybrid"}); err != nil {
 		t.Fatalf("valid formal options rejected: %v", err)
 	}
-	adaptive := opt
-	adaptive.multiQuery = true
-	if err := validateFormalRunnerOptions(protocol, adaptive, []string{"hybrid"}); err == nil {
-		t.Fatal("formal options unexpectedly accepted multi-query")
-	}
 	if err := validateFormalRunnerOptions(protocol, opt, []string{"fts", "hybrid"}); err == nil {
 		t.Fatal("formal options unexpectedly accepted multiple arms")
 	}

@@ -48,9 +48,6 @@ func validateAliasShadowOptions(opt options) error {
 			return fmt.Errorf("--alias-shadow requires category %d top-k to remain %d, got %d", category, aliasShadowTopK, topK)
 		}
 	}
-	if opt.multiQuery {
-		return fmt.Errorf("--alias-shadow and --multi-query are mutually exclusive")
-	}
 	if strings.TrimSpace(opt.storeDir) == "" {
 		return fmt.Errorf("--alias-shadow requires --store-dir; in-memory stores cannot protect the canonical artifact")
 	}
@@ -383,7 +380,7 @@ func contextParityArm(opt options) string {
 	if doc2queryEnabled(opt) {
 		return opt.doc2query
 	}
-	return multiQueryArm(opt.multiQuery)
+	return ""
 }
 
 func validateAliasShadowContextParity(opt options, record contextParityRecord) error {
