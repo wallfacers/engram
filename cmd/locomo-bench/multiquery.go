@@ -92,9 +92,21 @@ func unionRetryResults(first, more []memory.Result, limit int) ([]memory.Result,
 // retrieveQuestionWithDiagnostics is the per-question retrieval front door.
 // Multi-query decomposition moved to the --recall-diagnostic path (SearchMulti
 // there); answer/judge runs always retrieve the single question.
-func retrieveQuestionWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall, _ modelCaller, question string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, queryRetrievalMeta, error) {
+func retrieveQuestionWithDiagnostics(ctx context.Context, retriever *memory.Retriever, filterCall, _ modelCaller, question string, topK, quota int, opt options, questionID string) ([]memory.Result, memory.SearchDiagnostics, queryRetrievalMeta, error) {
 	meta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
-	hits, diagnostics, err := retrieveWithDiagnostics(ctx, retriever, filterCall, question, topK, quota, opt)
+	var hits []memory.Result
+	var diagnostics memory.SearchDiagnostics
+	var err error
+	if opt.submodularPack {
+		// 045 T009 fix: the answer path's per-question front door must route
+		// through retrieveCandidates so --submodular-pack actually replaces
+		// quota truncation. Previously the dispatch existed only on the formal
+		// B1 path, so a plain e2e run never packed — the probe regression
+		// caught it (mechanism arm input tokens byte-identical to control).
+		hits, diagnostics, err = retrieveCandidates(ctx, retriever, question, topK, quota, opt, questionID)
+	} else {
+		hits, diagnostics, err = retrieveWithDiagnostics(ctx, retriever, filterCall, question, topK, quota, opt)
+	}
 	meta.finalTopK = len(hits)
 	return hits, diagnostics, meta, err
 }

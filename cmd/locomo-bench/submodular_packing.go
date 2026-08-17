@@ -37,6 +37,14 @@ const (
 	packTieEps = 1e-12
 	// packDroppedCap bounds the per-question drop audit list.
 	packDroppedCap = 50
+	// packItemTemplateTokens is the per-item overhead buildAnswerContextPrompt
+	// adds on top of each hit's raw content (event/recorded labels, structural
+	// markers, numbering, timeline grouping). packEstimateTokens is content-only
+	// and otherwise accurate (probe-pack2: est content 4364 ≈ real content 4347);
+	// without this the budget control picked ~192 items but the real prompt
+	// shipped 2.5× the anchor budget. Calibrated from probe-pack2 real−est
+	// (10875−4364) / ~192 selected ≈ 34/项.
+	packItemTemplateTokens = 34
 )
 
 // packEstimateTokens replicates estimateTokens (agentic_nav.go: runes/4,
@@ -139,7 +147,7 @@ func buildPackCandidates(hits []memory.Result, queryWordSet map[string]struct{})
 			FusedScore: h.Score,
 			NormScore:  norm,
 			Shingles:   packShingles(words, packShingleK),
-			EstTokens:  packEstimateTokens(h.Content),
+			EstTokens:  packEstimateTokens(h.Content) + packItemTemplateTokens,
 			CoverTerms: cover,
 		}
 	}

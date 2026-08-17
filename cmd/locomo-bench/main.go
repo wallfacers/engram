@@ -2397,7 +2397,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	var searchDiagnostics memory.SearchDiagnostics
 	retrievalMeta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
 	var err error
-	hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
+	hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt, qa.QuestionID)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
 		return false, "", provider.Usage{}, false, nil, retrievalMeta, nil

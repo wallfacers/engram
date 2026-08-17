@@ -225,6 +225,7 @@ func runAicGateCLI(ctx context.Context, opt options, convs []conversation, arms 
 						topRow.MatchedAlias, topRow.InContext = m, true
 					}
 					topTokens[row.QuestionID] = float64(packEstimateTokens(topPrompt))
+					cur.AICTop150 = topRow.InContext
 					// Unmatchable-in-pool audit over the WIDEST pool we saw.
 					found := false
 					for _, h := range wide150 {
