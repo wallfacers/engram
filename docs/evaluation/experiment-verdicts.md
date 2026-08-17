@@ -55,7 +55,7 @@ tags: [evaluation, verdicts, evidence]
 
 | Feature / 文档 | 状态 | 范围及结论 | 出货影响 | 证据 |
 |---|---|---|---|---|
-| 023 | draft | 训练式本地 Evidence Planner：消费 022 冻结 contract，只输出 Need/actions proposal，fail-closed 退回确定性 Compiler。评估认为其价值在沉淀合同/候选/合规基建，**涨点收益受 compiler-eligible residual 规模限制**，最可能 HOLD/STOP/NOT_NEEDED；启动前提是 022 US3 收口并量化 residual（当前 022=`PARTIAL`）。**95%+ 是 SaaS 层目标，非本地口径能力**：本地基线 85.19%，强 answerer 探针 89.03%，离 95 差 ~6pp，且「agent 多步推理 + 预算放大」两块无固定口径证据，须开独立 SaaS spec 用同一套预注册纪律验证。 | 不改变默认路径；SaaS 方向为独立 opt-in 产品线，分数单独口径声明，不得回填为本地涨点（死亡规则不变）。 | [spec 023](../../specs/023-local-trained-evidence-compiler/spec.md) · [可行性 + SaaS 缺口评估](reports/planner-023-saas-direction.md) |
+| 023 | closed-stop | **训练式 Evidence Planner — STOP（2026-08-17，文档级收口，e2e 不再验证）**：r5 训练/人审达标交付（合同验证 + 人审 99.5%，199/200；产物归档 HF `wallfacers/engram-planner-lora`），但三臂评测（T018-T020）被三重独立证据否证：①同型判例——028 US2 训练中间指标 96.9%/100% e2e −1.2pp 未转化、037 US2 自训 reranker −1.1pp（训练线三连未转化）；②同族判例——装配层六连 NO-GO（008/014/037/040/041/045）+ 026 查询时编译器 −4.5/−3.6pp；③2026-08-17 归因——152 错题 90% gold 已在上下文，装配层无错可纠。预注册预测（本行 draft 版"最可能 HOLD/STOP/NOT_NEEDED"）应验。不报任何分数；恢复点=先零成本 CPU 分诊 r5 proposal 救分潜力再谈三臂；生产接线随 STOP 搁置。 | 训练线与装配层同日收口；022 evidencecompiler 引擎合同价值独立保留；SaaS 方向仍为独立 opt-in 线（[planner-023-saas-direction](reports/planner-023-saas-direction.md)）。 | [spec 023](../../specs/023-local-trained-evidence-compiler/spec.md) · [STOP verdict](reports/023-planner-stop-verdict-2026-08-17.md) |
 
 ## 判定规则
 

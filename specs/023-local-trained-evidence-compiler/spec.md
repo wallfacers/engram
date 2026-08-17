@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-30
 
-**Status**: Draft
+**Status**: Closed (2026-08-17 — STOP, e2e 不再验证;训练/人审达标交付(99.5%),三臂评测被三重判例否证。见 [STOP verdict](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md))
 
 **Input**: User description: "新开一个用于涨点的 spec，但必须先评估并避免与 022
 冲突。新特性应消费 022 冻结的固定候选与 Evidence Compiler 合同，训练可自托管的

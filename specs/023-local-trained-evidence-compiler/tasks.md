@@ -45,7 +45,7 @@
 - [X] T010 双独立标签 + 独立裁决：两判不一致 → 裁决唯一，否则排除（FR-009）。
   **[X] 2026-08-03 机制落地：label.py `labeler_a/b`（独立停用词/cap）+ `adjudicate`（并集/保守
   裁决），差异样本裁决或排除；正式双标签统计待数据构建运行**
-- [ ] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。
+- [x] T011 人审：≥200 分层随机样本（不足 200 全量），语义充分率 ≥95%、95% CI 下界 ≥90%。**已完成（2026-08-05，勾结补记 2026-08-17）**：audit/review-r5 200 样本 199 pass = **99.5%**（1 fail）。
   **[X] 2026-08-03 工具落地：`review.py`（分层随机抽样人审表 + Wilson 95% CI 充分率门）；测试绿。
   **[BLOCKED] 2026-08-04：r1 审查流程无效且门失败；13 个确认 false-gap，另 6 个部分回答样本的
   `gap` 合理。宽松重计 187/200=93.5%，Wilson 下界 89.20%，两门均失败；且审查表缺
@@ -87,26 +87,33 @@
   `train_summary.json` 冻结摘要（FR-015）。train_lora.py 用 transformers.Trainer（无 trl）；
   修 max_steps None→-1（transformers 5.x _validate_args）。runbook：
   docs/023-planner-r5-train-runbook.md。HF 模型 wallfacers/engram-planner-lora（private）。**
-- [ ] T016 prompt-only 对照：同底模零训练，仅 prompt 模板；与 supervised 除训练状态外全同。
-- [ ] T017 合并 LoRA → 冻结推理产物（含权重/adapter 摘要、tokenizer 摘要、合同版本、许可）。
+- [x] T016 prompt-only 对照：同底模零训练，仅 prompt 模板；与 supervised 除训练状态外全同。**CLOSED — not executed（2026-08-17）**：随 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md) 关闭，Phase 4 后续不执行。
+- [x] T017 合并 LoRA → 冻结推理产物（含权重/adapter 摘要、tokenizer 摘要、合同版本、许可）。**CLOSED — not executed（2026-08-17）**：adapter 已归档 HF `wallfacers/engram-planner-lora`，合并产物不制作；随 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md) 关闭。
 
 ## Phase 4 — 集成 + 三臂配对评测
 
-- [ ] T018 `cmd/locomo-bench/planner_eval_bridge.go`：supervised/prompt-only 臂产物 → 022
+- [x] T018 `cmd/locomo-bench/planner_eval_bridge.go`：supervised/prompt-only 臂产物 → 022
+  validator → formal replay；候选逐字节一致校验（FR-025/SC-007）。**CLOSED — not executed（2026-08-17）**：随 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md) 关闭。
   validator → formal replay；候选逐字节一致校验（FR-025/SC-007）。
-- [ ] T019 三臂配对评测：LoCoMo B1 协议、同 store；validity 全绿（candidate/source/span/
+- [x] T019 三臂配对评测：LoCoMo B1 协议、同 store；validity 全绿（candidate/source/span/
+  citation/within-cap、answerer=1、retrieval=0、无 IDK retry）。**CLOSED — not executed（2026-08-17）**：GO 门被三重判例否证，不再花 box+API 验证；恢复点=先零成本 CPU 分诊（见 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md)）。
   citation/within-cap、answerer=1、retrieval=0、无 IDK retry）。
-- [ ] T020 统计 + verdict：Primary Cohort majority Δ（≥+2.0pp）、exact McNemar（多重校正
+- [x] T020 统计 + verdict：Primary Cohort majority Δ（≥+2.0pp）、exact McNemar（多重校正
+  p<0.05）、Guard overall（≥−0.5pp）、类别 non-regression、validity 阻塞项 → GO/HOLD/STOP/
+  INVALID（FR-029 闭包、FR-030 每阶段独立 verdict）。**CLOSED — not executed（2026-08-17）**：以 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md) 文档级 STOP 收口替代。
   p<0.05）、Guard overall（≥−0.5pp）、类别 non-regression、validity 阻塞项 → GO/HOLD/STOP/
   INVALID（FR-029 闭包、FR-030 每阶段独立 verdict）。
 
 ## Phase 5 — Promotion verdict + 资产
 
-- [ ] T021 产品推荐门（FR-031）：全量正确题严格 > deterministic control、双基准/保护类别
+- [x] T021 产品推荐门（FR-031）：全量正确题严格 > deterministic control、双基准/保护类别
+  non-regression；不满足 → 研究产物，不进推荐。**CLOSED — not executed（2026-08-17）**：planner 归研究产物，不进推荐（[STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md)）。
   non-regression；不满足 → 研究产物，不进推荐。
-- [ ] T022 写 `model-card.md` + data card（FR-022/032/034）：合同版本、权重/adapter 摘要、
+- [x] T022 写 `model-card.md` + data card（FR-022/032/034）：合同版本、权重/adapter 摘要、
+  tokenizer、底模许可（Apache-2.0）、数据版本、24 GiB/24 GPU-hours/p95 实测、诚实边界。**CLOSED — not executed（2026-08-17）**：产物以 HF 归档 + verdict 诚实边界替代；随 [STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md) 关闭。
   tokenizer、底模许可（Apache-2.0）、数据版本、24 GiB/24 GPU-hours/p95 实测、诚实边界。
-- [ ] T023 结果登记：GO → `docs/evaluation/results.md` + `experiment-verdicts.md`（023 从
+- [x] T023 结果登记：GO → `docs/evaluation/results.md` + `experiment-verdicts.md`（023 从
+  未裁决区移入裁决表）；非 GO → 归档为研究产物并如实记录。**已完成（2026-08-17）**：非 GO 分支——STOP 登记 experiment-verdicts（023 行更新），归档研究产物，[STOP verdict 2026-08-17](../../docs/evaluation/reports/023-planner-stop-verdict-2026-08-17.md)。
   未裁决区移入裁决表）；非 GO → 归档为研究产物并如实记录。
 
 ## 硬门（贯穿）
