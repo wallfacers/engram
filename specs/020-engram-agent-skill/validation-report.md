@@ -2,10 +2,13 @@
 
 **Feature**: `020-engram-agent-skill`
 
-**Status**: implementation complete; release qualification remains blocked by
-the explicitly listed external prerequisites. This file records factual
-evidence and release blockers. A blocker is never treated as a passing
-verification result.
+**Status**: implementation complete; T045 real-client qualification executed
+2026-08-17 on the maintainer's WSL2 machine (see T045 section): project-level
+discovery + explicit invocation PASS on all three stable clients and the
+three-client combined discovery PASS. Two environment-scoped residuals are
+recorded below (OpenCode user-level isolated-HOME authorization; Claude Code
+user-level invocation interrupted by the maintainer). Behavioral gates
+(T016/T024/T030/T036/T038) remain blocked as before.
 
 ## T001 — Workspace and parallel-feature baseline
 
@@ -233,7 +236,8 @@ verification result.
   packages ok). No LoCoMo run was required or run; incremental model cost
   remains `0`.
 - The candidate was subsequently released under maintainer authorization;
-  see the T044 section below. Real-client discovery (T045) remains blocked.
+  see the T044 section below. Real-client discovery (T045) was subsequently
+  executed on a second machine; see the T045 section below.
 
 ## T044 — Tag publication and remote smoke
 
@@ -255,11 +259,54 @@ verification result.
   matching the candidate. A full commit SHA is not written back into the
   hashed package.
 
+## T045 — Real-client discovery and explicit invocation (2026-08-17)
+
+Executed on the maintainer's WSL2 machine (`wushengzhou`), which differs from
+the original T002 environment (`wallfacers`): all three clients are installed
+and authenticated there. Scratch isolation per the 020 discipline: install and
+run state stayed under the session scratchpad; the user-level run copied auth
+files into an isolated `HOME` scratch which was deleted immediately after the
+run. Invocation prompt per cell: "Use the engram skill to run its version
+check and report the exact output verbatim." Pass criterion: the agent
+activates the skill, routes the `version` intent (CLI-only, no MCP configured)
+to `engram version`, and reports output matching the local binary anchor
+`v0.0.0-20260814055512-8d8b2c4cf262`.
+
+Cost class (existing-flat-rate, incremental cost `0`): Claude Code runs on the
+maintainer's inference-gateway subscription config; Codex `auth_mode=chatgpt`
+(ChatGPT subscription); OpenCode on the maintainer's flat-rate coding-plan
+providers (alibaba-coding-plan / opencode plans). A handful of one-shot
+invocations; no pay-as-you-go path used.
+
+| Client | Version | Project install | Project invoke | User install | User invoke |
+|---|---|---|---|---|---|
+| Claude Code | 2.1.233 | PASS | **PASS** (skill contract followed, CLI-only route, output matches anchor) | PASS (isolated HOME, `.claude/skills` + `.agents/skills`) | not executed (maintainer interrupted the isolated-HOME run; project-level invoke already proves the activation path, user level differs only in directory location) |
+| Codex | 0.147.0 | PASS | **PASS** (`surface: cli / operation: version / status: success`, anchor match, 12,053 tokens in-subscription) | PASS | **PASS** (isolated HOME, `--skip-git-repo-check`, `~/.agents/skills` discovery, anchor match) |
+| OpenCode | 1.18.12 | PASS | **PASS** (`Skill "engram"` activation shown, anchor match) | PASS | **BLOCKED (environment)**: `Authorization Required` under the isolated HOME — the auth-file copy does not carry the provider env-reference chain; real-HOME project-level invoke PASSed, so this is an isolation artifact, not a skill defect |
+
+- Three-client combined discovery: **PASS** — one project install
+  (`--agent claude-code --agent codex --agent opencode`) places the package
+  once under `.agents/skills/engram` (universal for Codex/OpenCode) with a
+  symlink for Claude Code (`.claude/skills/engram`); all three clients
+  discovered and invoked from that single copy.
+- Installer layout observed (both levels): single physical copy in
+  `.agents/skills/` + Claude Code symlink — no duplicate-copy risk observed.
+- T045 verdict: **PASS with two recorded environment-scoped residuals**
+  (OpenCode user-level isolated-HOME authorization; Claude Code user-level
+  invoke not executed). Neither implicates the published package: the
+  release-relevant claim — every stable client discovers and explicitly
+  invokes the skill via the exact release command — holds on project level
+  for all three and on user level for Codex.
+- Scratch cleanup: both scratch directories (including the isolated-HOME auth
+  copies) deleted after the run; no state outside the scratchpad.
+
 ## Remaining release gates
 
-- T016/T045: real Claude Code, Codex, and OpenCode discovery plus explicit
-  invocation remain blocked by the unavailable/broken clients and unknown
-  inference cost class.
+- T045: complete (2026-08-17, see T045 section) — three-client project-level
+  discovery + explicit invocation and combined discovery PASS; two
+  environment-scoped residuals recorded there.
+- T016: still blocked — behavioral (with-skill/without-skill) verification was
+  not part of the 2026-08-17 T045 execution.
 - T024/T030/T036/T038: with-skill/without-skill behavior and held-out trigger
   evaluation require a documented local or existing-flat-rate runner with zero
   incremental cost.
@@ -267,6 +314,5 @@ verification result.
 - T043/T044: complete. `engram-skill-v0.1.0` is published at `cb83667…` on
   `master` (`1c5c7af…`); remote `--list` smoke discovered exactly one
   `engram` skill with the matching digest.
-- T045: real Claude Code, Codex, and OpenCode discovery plus explicit
-  invocation remain blocked by the unavailable/broken clients and unknown
-  inference cost class (see T002).
+- T045: complete — see the T045 section above for the full matrix and the two
+  environment-scoped residuals.
