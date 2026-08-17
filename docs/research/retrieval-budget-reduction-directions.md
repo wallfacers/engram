@@ -1,10 +1,10 @@
 ---
 title: 缩减 top-k 的方向调研（预算下提质，非加量）
-summary: 针对 top-k150 加量型涨点不被认可的问题，经 alphaXiv 深入 6 篇 + 补充检索，把「缩减 top-k」的正解拆为四个未探索方向：自适应截断（TAA-k，纯 Go 确定性）、冗余感知子集选择（AdaGReS 次模，纯 Go embedding）、本地 listwise reranker（jina-reranker-v3.5，opt-in）、generator-aligned 信息增益剪枝（IGP，需 logits）。核心洞察：固定 top-k 在 query-dependent/heavy-tail 分布下失败；relevance≠utility。
-status: active
+summary: 针对 top-k150 加量型涨点不被认可的问题，经 alphaXiv 深入 6 篇 + 补充检索，把「缩减 top-k」的正解拆为四个方向：自适应截断（TAA-k）、冗余感知子集选择（AdaGReS 次模）、本地 listwise reranker、信息增益剪枝（IGP）。2026-08-17 总判定：四方向全部被既有 verdict 实质覆盖或证伪（040 完美信号上限账封死分数曲线→k 一族；045 证伪次模装填；008+037 两代通用 reranker e2e 证伪），调研关闭——剩余未测仅 open-domain 池外召回。
+status: closed
 audience: [maintainers, agents]
 owner: engram-maintainers
-last_reviewed: 2026-08-13
+last_reviewed: 2026-08-17
 canonical_for: [retrieval-budget-reduction]
 tags: [research, retrieval, top-k, budget, rag, adaptive]
 ---
@@ -97,10 +97,15 @@ Qwen 栈已贴候选天花板（oracle 91.62%，差距仅 ~0.52pp），剩余空
 
 | 方向 | 是否新 | 与已有 verdict 的关系 |
 |---|---|---|
-| TAA-k 自适应截断 | **新** | ≠ 固定 top-k 全局 sweep（topk150 是固定 k，从未做 per-query k） |
-| AdaGReS 冗余去重 | **新** | ≠ 026 的 LLM need-剪枝（这是确定性 embedding 去冗余） |
-| jina-reranker-v3.5 | 半新 | ≠ 008 pointwise / 037 自训（现成开源 listwise）；仍需 008 端到端配对纪律 |
-| IGP 信息增益 | 新 | 需 answerer logits，与多数票聚合重叠，后备 |
+| TAA-k 自适应截断 | ~~新~~ **已覆盖** | ≠ 固定 top-k 全局 sweep（topk150 是固定 k，从未做 per-query k）——但 **2026-08-17 覆盖判定（[046 closure](../../specs/046-budget-compression-gains/closure.md)）**：040 的完美信号上限账（89.2% < 90.13%）封死一切"分数曲线→k"方法——42 体量题（79%）的体量需求对 RRF 曲线/EVT/rerank 分数等一切相关性信号隐形，与拐点检测精度无关 |
+| AdaGReS 冗余去重 | ~~新~~ **已证伪** | ≠ 026 的 LLM need-剪枝（这是确定性 embedding 去冗余）——**045 次模装填 probe 预算内 −14.22pp（p<0.0001）NO-GO（2026-08-17）** |
+| jina-reranker-v3.5 | ~~半新~~ **已覆盖** | ≠ 008 pointwise / 037 自训（现成开源 listwise）——但 **2026-08-17 覆盖判定（[046 closure](../../specs/046-budget-compression-gains/closure.md)）**：008 的 bge-reranker-v2-m3 已是 87% recovery 档（e2e −0.06pp），037 机制归因"语义相似度排序破坏多跳推理链"是机制性结论非模型强度问题；mxbai-large-v1 档位差（recovery +3.5pp ≈ e2e +1.3pp，SmartSearch 表 8）不足以构成未测缝；SmartSearch +7.2pp 前提是乱序 grep 基线（gold rank 195），engram RRF 基线 gold rank 71-90（009），不同量级 |
+| IGP 信息增益 | 新（依赖未建） | 需 answerer logits，与多数票聚合重叠，后备——041 已证伪 thinking 犹豫信号（人工判读高估，recall 上限 50-63%），运行时不确定信号路线整体走弱 |
+
+**2026-08-17 总判定：四方向全部被既有 verdict 实质覆盖或证伪，本调研关闭**（对账正本：
+[046 closure](../../specs/046-budget-compression-gains/closure.md)）。剩余真正未测的
+只剩 open-domain **池外召回**（gold 不在 top-150 宽池，池内重排/截断无效；但查询改写
+010-012 三证伪、写侧 027/028 三证伪，杠杆待新证据）。
 
 ## 建议的探索顺序
 
