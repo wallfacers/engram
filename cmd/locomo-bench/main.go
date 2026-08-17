@@ -149,18 +149,6 @@ type options struct {
 	abstainProbeOut            string
 	abstainGateSpec            string
 	abstainGate                AbstainGate
-	// 045: submodular packing — US1 offline gate flags (contracts/cli-flags.md
-	// v1) + T009 mechanism flags.
-	aicGateDir                 string
-	aicGateSlice               string
-	submodularPack             bool
-	packPoolSize               int
-	packWeights                string
-	packBudgetAnchor           string
-	anchorRun                  string
-	// 045: 042 signal re-verification ride-along.
-	reverifyDir                string
-	reverifyLabels             string
 	selector                   chunkSelector
 	adversarial                int
 	catTopKSpec                string
@@ -353,18 +341,6 @@ func run() error {
 	flag.StringVar(&opt.pcicMetaPath, "pcic-meta", "", "path to the read-only PCIC metadata sidecar (default: <store-dir>/pcic_meta.json or <run-dir>/pcic_meta.json)")
 	flag.BoolVar(&opt.abstainProbe, "abstain-probe", false, "run the zero-cost offline abstention probe and exit")
 	flag.StringVar(&opt.abstainProbeOut, "abstain-probe-out", "", "path for abstain-probe.json (default: <store-dir|run-dir>/abstain-probe.json)")
-	// 045: submodular packing — US1 offline packing-fidelity gate.
-	flag.StringVar(&opt.aicGateDir, "aic-gate", "", "045 offline: run the packing-fidelity AIC gate into this directory and exit")
-	flag.StringVar(&opt.aicGateSlice, "aic-gate-slice", "", "comma-separated conversation ids for --aic-gate (default: all)")
-	// 045 T009: submodular packing mechanism (default off; byte-parity when off).
-	flag.BoolVar(&opt.submodularPack, "submodular-pack", false, "045: budgeted submodular selection replaces quota truncation (requires --anchor-run)")
-	flag.IntVar(&opt.packPoolSize, "pack-pool-size", 0, "045: packing pool size (0 = current wide pool max(6×topK,300); probe/batch must use default)")
-	flag.StringVar(&opt.packWeights, "pack-weights", "3:1:1:1", "045: rel:cover:fac:div weights (probe/batch/LME must use the frozen default)")
-	flag.StringVar(&opt.packBudgetAnchor, "pack-budget-anchor", "paired", "045: paired | mean — budget anchor read from --anchor-run (probe/batch must use paired)")
-	flag.StringVar(&opt.anchorRun, "anchor-run", "", "045: same-batch control run dir whose results-*.jsonl anchors the packing budget")
-	// 045: 042 signal re-verification ride-along (self-contained; box stage).
-	flag.StringVar(&opt.reverifyDir, "reverify-042", "", "045 ride-along: re-collect the 042 signal with fixed measurement into this directory and exit")
-	flag.StringVar(&opt.reverifyLabels, "reverify-labels", "", "042 collect dir containing hidden/utility-labels.jsonl for --reverify-042")
 	flag.StringVar(&opt.abstainGateSpec, "abstain-gate", "advrecall=0.40,falseabstain=0.05,net=100", "abstention probe gate override: advrecall=FLOAT,falseabstain=FLOAT,net=INT")
 	flag.BoolVar(&opt.pcicAnnotate, "pcic-annotate", false, "one-time offline pass: extract per-turn typed claims via the annotation model and write the pcic_meta sidecar, then exit (idempotent: skips when a matching sidecar already exists)")
 	flag.StringVar(&opt.pcicFillTurns, "pcic-fill-turns", "", "with --pcic-annotate: re-annotate ONLY these conv-scoped turn keys (comma-separated, e.g. conv-0/D15:1,conv-0/D14:32) and merge into the existing sidecar — pays for exactly those turns")
@@ -697,10 +673,10 @@ func run() error {
 		}
 		return runPCICAnnotate(opt, convs, apiKey, envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic"), logger)
 	}
-	if opt.runDir == "" && !opt.abstainProbe && opt.aicGateDir == "" && opt.reverifyDir == "" {
+	if opt.runDir == "" && !opt.abstainProbe {
 		return fmt.Errorf("--run-dir is required unless --estimate or --compare is used")
 	}
-	if opt.runDir != "" && !opt.abstainProbe && opt.aicGateDir == "" && opt.reverifyDir == "" {
+	if opt.runDir != "" && !opt.abstainProbe {
 		if err := os.MkdirAll(opt.runDir, 0o755); err != nil {
 			return fmt.Errorf("create run dir: %w", err)
 		}
@@ -731,25 +707,6 @@ func run() error {
 	}
 	if opt.abstainProbe {
 		return runAbstainProbeCLI(context.Background(), opt, convs, arms, logger)
-	}
-	if opt.aicGateDir != "" {
-		if opt.abstainProbe {
-			return fmt.Errorf("--aic-gate cannot be combined with --abstain-probe")
-		}
-		return runAicGateCLI(context.Background(), opt, convs, arms, logger)
-	}
-	if opt.submodularPack {
-		// Fail fast at startup: weights parse, anchor mode, and the anchor
-		// run's per-question budgets must all be readable before any spend.
-		if _, err := packConfigForRun(opt); err != nil {
-			return err
-		}
-	}
-	if opt.reverifyDir != "" {
-		if opt.abstainProbe || opt.aicGateDir != "" {
-			return fmt.Errorf("--reverify-042 cannot be combined with --abstain-probe or --aic-gate")
-		}
-		return runReverify042CLI(context.Background(), opt, convs, arms, logger)
 	}
 	apiKey := os.Getenv("LOCOMO_API_KEY")
 	if apiKey == "" {
@@ -2397,7 +2354,7 @@ func answerAndJudgeWithAbstentionEvidenceDiagnosticsQuery(ctx context.Context, r
 	var searchDiagnostics memory.SearchDiagnostics
 	retrievalMeta := queryRetrievalMeta{finalTopK: topK, subqueryCount: 1}
 	var err error
-	hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt, qa.QuestionID)
+	hits, searchDiagnostics, retrievalMeta, err = retrieveQuestionWithDiagnostics(ctx, retriever, filterCall, rewriteCall, qa.Question, topK, quota, opt)
 	if err != nil {
 		logger.Warn("retrieve failed; question scored wrong", "err", err)
 		return false, "", provider.Usage{}, false, nil, retrievalMeta, nil

@@ -224,7 +224,6 @@ func validateB0ContinuityRunnerOptions(protocol evalProtocol, opt options, arms 
 	}
 	candidateRulesDigest := evalJSONDigest(evalFreezeCandidateRules{
 		TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0],
-		SubmodularPack: opt.submodularPack, PackWeights: packWeightsForDigest(opt), PackPoolSize: opt.packPoolSize,
 	})
 	if protocol.Retrieval.CandidateRulesDigest != candidateRulesDigest ||
 		protocol.Retrieval.EmbeddingFingerprint != evalEmbeddingFingerprint() {
@@ -282,13 +281,10 @@ func validateFormalRunnerOptions(protocol evalProtocol, opt options, arms []stri
 		return fmt.Errorf("formal store or ingestion options differ from frozen protocol")
 	}
 	candidateRulesDigest := evalJSONDigest(evalFreezeCandidateRules{
-		TopK:           opt.topK,
-		ChunkQuota:     opt.chunkQuota,
-		Chunks:         opt.chunks,
-		Retrieval:      arms[0],
-		SubmodularPack: opt.submodularPack,
-		PackWeights:    packWeightsForDigest(opt),
-		PackPoolSize:   opt.packPoolSize,
+		TopK:       opt.topK,
+		ChunkQuota: opt.chunkQuota,
+		Chunks:     opt.chunks,
+		Retrieval:  arms[0],
 	})
 	if protocol.Retrieval.CandidateRulesDigest != candidateRulesDigest {
 		return fmt.Errorf("formal candidate rules differ from frozen protocol")
@@ -594,7 +590,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		if replayErr == nil {
 			hits = replay.Hits
 		} else if os.IsNotExist(replayErr) {
-			hits, _, retrieveErr = retrieveCandidates(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, opt, qa.QuestionID)
+			hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
 			if retrieveErr != nil {
 				frozen.InvalidReasons = []string{"retrieval_failed"}
 				return frozen
@@ -608,7 +604,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 			return frozen
 		}
 	} else {
-		hits, _, retrieveErr = retrieveCandidates(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, opt, qa.QuestionID)
+		hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
 		if retrieveErr != nil {
 			frozen.InvalidReasons = []string{"retrieval_failed"}
 			return frozen
@@ -1367,7 +1363,7 @@ func freezeFormalProtocol(opt options, convs []conversation, controlHash string)
 			Judge:     evalModelFingerprint{ID: judge.Model, Revision: envOr("JUDGE_MODEL_REVISION", judge.Model), Provider: judge.Provider, PromptDigest: evalTextDigest(judgeSystemPromptFor(opt.judgeAlignmentMode()))},
 			Planner:   evalPlannerFingerprint{Enabled: false},
 		},
-		Retrieval:      evalRetrievalProvenance{Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled", CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0], SubmodularPack: opt.submodularPack, PackWeights: packWeightsForDigest(opt), PackPoolSize: opt.packPoolSize})},
+		Retrieval:      evalRetrievalProvenance{Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled", CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]})},
 		Budget:         evalBudgetProtocol{Profile: opt.evalBudgetProfile, AnswerInputTokenCap: opt.answerInputTokenCap, MaxOutputTokens: opt.maxTokens, CandidateLimit: opt.topK, RetrievalCallLimit: 1, AnswerCallLimit: 1, CounterFingerprint: opt.counterFingerprint},
 		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
 		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:concordant-stratified-plan:freeze-before-treatment"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
@@ -1456,7 +1452,7 @@ func freezeB0ContinuityProtocol(opt options, convs []conversation) error {
 		},
 		Retrieval: evalRetrievalProvenance{
 			Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled",
-			CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0], SubmodularPack: opt.submodularPack, PackWeights: packWeightsForDigest(opt), PackPoolSize: opt.packPoolSize}),
+			CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]}),
 		},
 		Budget: evalBudgetProtocol{
 			Profile: "continuity", MaxOutputTokens: opt.maxTokens, CandidateLimit: opt.topK,
@@ -1520,11 +1516,6 @@ type evalFreezeCandidateRules struct {
 	ChunkQuota int    `json:"chunk_quota"`
 	Chunks     bool   `json:"chunks"`
 	Retrieval  string `json:"retrieval"`
-	// 045 packing markers — omitempty keeps the digest byte-identical for
-	// default-off runs (T008 parity: old sealed manifests must not drift).
-	SubmodularPack bool   `json:"submodular_pack,omitempty"`
-	PackWeights    string `json:"pack_weights,omitempty"`
-	PackPoolSize   int    `json:"pack_pool_size,omitempty"`
 }
 
 func evalEmbeddingFingerprint() string {
