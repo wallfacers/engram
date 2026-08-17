@@ -69,7 +69,7 @@ function makeScratchDirectory(t) {
 }
 
 function canonicalQuickCommand(tag = "<ENGRAM_SKILL_TAG>") {
-  return `npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/${tag}/skills/engram --global --agent claude-code --agent codex --agent opencode`;
+  return `npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/${tag}/skills/engram --global`;
 }
 
 function validManifest() {

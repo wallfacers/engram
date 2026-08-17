@@ -46,12 +46,15 @@ fact extraction, or memory curation.
 
 Prerequisites: Node.js >=22.20.0, npx/npm, Git, and network access. The command
 installs only the skill; install the CLI and configure the MCP server
-separately. With `--global`, `skills@1.5.20` writes `~/.claude/skills/engram`
-(Claude Code) and `~/.agents/skills/engram` (Codex/OpenCode); Codex and OpenCode
-scan `~/.agents/skills/`, so the package is discovered as-is with no extra step.
+separately. The default command keeps **one shared copy** in the universal
+skills directory `~/.agents/skills/engram`; every other client — including
+Claude Code, which only reads its own `~/.claude/skills/` — gets a symlink to
+it. Codex and OpenCode scan `~/.agents/skills/` natively, so the package is
+discovered as-is; scoping flags like `--agent <id>` are only for explicitly
+restricting an install to one client's own directory.
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global
 ```
 
 Keep the installer's write confirmation; choose `Symlink` (default) or `Copy`

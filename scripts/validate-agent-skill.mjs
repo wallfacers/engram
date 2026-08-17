@@ -550,8 +550,11 @@ function validateDocumentation(repositoryRoot, packageRoot, manifest, mode, erro
     addError(errors, "quick command must pin skills@1.5.20");
   }
   for (const agent of ["claude-code", "codex", "opencode"]) {
-    if (!canonical.includes(`--agent ${agent}`)) {
-      addError(errors, `quick command is missing --agent ${agent}`);
+    if (new RegExp(`(?:^|\\s)--agent ${agent}(?:\\s|$)`).test(canonical)) {
+      addError(
+        errors,
+        `quick command must not scope to --agent ${agent}: the default install targets the shared universal .agents/skills directory`
+      );
     }
   }
   if (!canonical.includes("--global")) {

@@ -16,18 +16,20 @@ Remote installation needs Node.js `>=22.20.0`, `npx`/npm, Git, and network
 access. It pins the downloader to `skills@1.5.20`. Normal use after installation
 does not require Node, npm, or network access.
 
-## Quick install: all three clients, user scope
+## Quick install: user scope, shared universal directory
 
-Before confirming, review the possible replacement targets. With `--global` and
-all three agents selected, the installer writes one target per client:
-`${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram`,
-`${CODEX_HOME:-~/.codex}/skills/engram`, and
-`${XDG_CONFIG_HOME:-~/.config}/opencode/skills/engram`. The default command
-deliberately keeps the installer's write confirmation; `npx --yes` authorizes
-fetching the pinned installer, not a silent target overwrite.
+Before confirming, review the possible replacement targets. The default command
+keeps **one shared copy** in the standards-based universal skills directory
+`~/.agents/skills/engram`; every other client — including Claude Code, which
+only reads its own `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/` — gets a symlink
+to that single copy. Prefer this shape: a shared universal directory avoids
+installing the package multiple times, and per-client `--agent` scoping is only
+for explicitly targeting one client's own directory (see below). The default
+command deliberately keeps the installer's write confirmation; `npx --yes`
+authorizes fetching the pinned installer, not a silent target overwrite.
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global
 ```
 
 Choose `Symlink` when the filesystem permits it, or `Copy` on Windows and
@@ -38,16 +40,19 @@ tag above is `engram-skill-v0.1.0`.
 
 ## Other scopes and targets
 
-For the current project, omit `--global`. Review
-`<repo>/.claude/skills/engram` and `<repo>/.agents/skills/engram` before
-confirming:
+For the current project, omit `--global`. The shared copy lands in
+`<repo>/.agents/skills/engram` with per-client symlinks (for example
+`<repo>/.claude/skills/engram`); review them before confirming:
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --agent claude-code --agent codex --agent opencode
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram
 ```
 
-For one client, keep exactly one of `--agent claude-code`, `--agent codex`, or
-`--agent opencode`. Add `--global` for a user installation and omit it for a
+Add exactly one of `--agent claude-code`, `--agent codex`, or `--agent opencode`
+only when you explicitly want to scope the install to that client's own
+directories instead of the shared universal directory. This is not needed for
+discovery: Codex and OpenCode read `.agents/skills/` natively and Claude Code
+follows its symlink. Add `--global` for a user installation and omit it for a
 project installation. Add `--copy` to choose copying up front while retaining
 the final target confirmation.
 
@@ -60,15 +65,15 @@ may be user-maintained or of unknown provenance.
 | Client | Project path | User path | Explicit use | Reload |
 |---|---|---|---|---|
 | Claude Code | `.claude/skills/engram` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` | `/engram` | Restart if the top-level skills directory was newly created; otherwise invoke it again or open a new session. |
-| Codex | `.agents/skills/engram` | `${CODEX_HOME:-~/.codex}/skills/engram` | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
-| OpenCode | `.agents/skills/engram` | `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/engram` | Ask it to load and use the `engram` skill | Restart and open a new session. |
+| Codex | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; `${CODEX_HOME:-~/.codex}/skills/` is also scanned) | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
+| OpenCode | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/` is also scanned) | Ask it to load and use the `engram` skill | Restart and open a new session. |
 
-At project scope Codex and OpenCode share `.agents/skills/engram`, while Claude
-Code reads `.claude/skills/engram`. At user scope, `skills@1.5.20` writes Claude
-Code to `~/.claude/skills/engram` and both Codex and OpenCode to
-`~/.agents/skills/engram`. Codex and OpenCode scan `~/.agents/skills/` (in
-addition to their own `~/.codex/skills/` and `~/.config/opencode/skills/`), so
-the installed package is discovered as-is — no post-install copy is needed.
+At both scopes the package exists once, in `.agents/skills/engram`
+(`~/.agents/skills/engram` at user scope); Claude Code reads
+`.claude/skills/engram`, which is a symlink into that shared copy, and
+Codex/OpenCode scan the shared directory natively (in addition to their own
+`~/.codex/skills/` and `~/.config/opencode/skills/`). The installed package is
+discovered as-is — never copy it into additional client directories by hand.
 A discovered skill is not proof that MCP or CLI tooling is configured. If
 neither is available, it must report that condition rather than pretending an
 operation ran.
@@ -97,15 +102,15 @@ not reconstruct files from snippets. Copy or symlink it into each target
 client's discovery path for the chosen scope:
 
 ```text
-project: <repo>/.claude/skills/engram, and <repo>/.agents/skills/engram (shared by Codex and OpenCode)
-user:    ~/.claude/skills/engram, ~/.codex/skills/engram, and ~/.config/opencode/skills/engram
+project: <repo>/.agents/skills/engram (single shared copy), plus <repo>/.claude/skills/engram symlink for Claude Code
+user:    ~/.agents/skills/engram (single shared copy), plus ~/.claude/skills/engram symlink for Claude Code
 ```
 
 When `skills@1.5.20` is already cached, a local package can also be installed
 without network access:
 
 ```bash
-npx --offline skills@1.5.20 add ./skills/engram --global --agent claude-code --agent codex --agent opencode
+npx --offline skills@1.5.20 add ./skills/engram --global
 ```
 
 First-time remote installation is not offline. Regardless of installation
