@@ -38,7 +38,7 @@
 
 ## Phase 7 · 收尾
 
-- [ ] T015 result-matrix「过时/已证伪」表同步:标记已清机制为"已移除";[default-off-mechanism-cleanup-plan.md](../../../docs/evaluation/default-off-mechanism-cleanup-plan.md)同步删除已清项;README 机制说明同步
+- [ ] T015 result-matrix「过时/已证伪」表同步:标记已清机制为"已移除";[default-off-mechanism-cleanup-plan.md](../../docs/evaluation/default-off-mechanism-cleanup-plan.md)同步删除已清项;README 机制说明同步
 - [ ] T016 保留项核查:`--temporal-answer-prompt`(032)/`--temporal-date-scaffold`(017)/`--abstain-probe`/`--oracle`/`--rerank`/`--pcic`/`--pcic-meta`/`--compiler-arm`/`--representation`/`--recall-diagnostic`/`SearchMulti`/`classifyQueryMode`/`computeAbstainSignal` 均未被误删且行为不变
 - [ ] T017 全量门:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go vet ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;确认已删 flag 不再出现在 `--help`;记录净删行数
 

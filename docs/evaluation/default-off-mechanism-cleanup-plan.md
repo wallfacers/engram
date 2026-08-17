@@ -1,3 +1,15 @@
+---
+title: 默认关闭机制清理计划(Default-Off Mechanism Cleanup)
+summary: 044-default-off-cleanup 的默认关闭机制清理计划与完成记录——删除已证伪机制的默认关旗标与专属代码,保留 verdict 文档。
+status: archived
+outcome: 清理已完成(2026-08-16)——已证伪机制的 flag 与专属代码已删,verdict 文档保留
+audience: [maintainers, agents]
+owner: engram-maintainers
+last_reviewed: 2026-08-16
+canonical_for: [default-off-mechanism-cleanup]
+tags: [cleanup, default-off, 044]
+---
+
 # 默认关闭机制清理计划(Default-Off Mechanism Cleanup)
 
 **Feature**: 044-default-off-cleanup | **状态**: ✅ 已清理完成(2026-08-16)
