@@ -67,11 +67,13 @@ reranker)被 **008 + 037 两代通用 reranker e2e 证伪**判死(bge-v2-m3 档 
 报告**逐行对账**(尤其"理论上限账"类结论),alphaXiv 新文献只提供机制假设,不提供
 翻案证据——除非新证据直接攻击旧 verdict 的归因机制(本次 SmartSearch/TAA-k 均未做到)。
 
-## 剩余未测方向(本 spec 范围外,仅记录)
+## 剩余未测方向(本 spec 范围外,仅记录;2026-08-17 归因收口更新)
 
-- LoCoMo open-domain(68.8%)的**池外召回**:gold 不在 top-150 宽池内,任何池内重排/截断
-  无效;需要召回侧(查询扩展/写侧表示)新杠杆,但 010-012 已三证伪查询改写,027/028
-  三证伪写侧 event。
-- 032 遗留:temporal-answer 契约在**生产栈**(Qwen hybrid)的确认(现只在 fts+flash 栈 GO)。
+- ~~open-domain 池外召回~~ **已判死**:后续零成本归因(见
+  [locomo-error-retrieval-attribution-2026-08-17](../../docs/evaluation/reports/locomo-error-retrieval-attribution-2026-08-17.md))
+  实测全量池外仅 14/1540(0.9%)、152 错题池外仅 4 题——本 closure 起草时"gold 不在宽池"
+  的假设是误读,90% 错题是 gold 已在上下文答错(answerer 侧)。
+- **temporal 锚定契约 × Qwen thinking 栈确认**(032 遗留):唯一未测的点名机制杠杆,
+  temporal 39 错里 20 题稳定 ±1 月确定性偏移。
 - LME 侧:剩余差距归因为 Qwen 能力天花板(entity-verify verdict,+0.7pp 后 88.5%),
   无快速杠杆。
