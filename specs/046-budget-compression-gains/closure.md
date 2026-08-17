@@ -73,7 +73,8 @@ reranker)被 **008 + 037 两代通用 reranker e2e 证伪**判死(bge-v2-m3 档 
   [locomo-error-retrieval-attribution-2026-08-17](../../docs/evaluation/reports/locomo-error-retrieval-attribution-2026-08-17.md))
   实测全量池外仅 14/1540(0.9%)、152 错题池外仅 4 题——本 closure 起草时"gold 不在宽池"
   的假设是误读,90% 错题是 gold 已在上下文答错(answerer 侧)。
-- **temporal 锚定契约 × Qwen thinking 栈确认**(032 遗留):唯一未测的点名机制杠杆,
-  temporal 39 错里 20 题稳定 ±1 月确定性偏移。
+- **temporal 锚定契约 × Qwen thinking 栈确认**(032 遗留):2026-08-17 维护者否决——载体
+  `--temporal-answer-prompt` 是 LoCoMo 类别特化提示词,特化 prompt 不作方案手段(红线);
+  temporal 偏移题归入 answerer 能力带,LoCoMo 杠杆线收线(见归因 doc)。
 - LME 侧:剩余差距归因为 Qwen 能力天花板(entity-verify verdict,+0.7pp 后 88.5%),
   无快速杠杆。

@@ -1,6 +1,6 @@
 ---
 title: LoCoMo 错题检索归因 — 池外召回判死,90% 错题是 answerer 侧
-summary: 用 009 attribution trace(1540 题逐题 gold_rank_pool)+ tk150-full3 3-rep 152 错题清单 join,零模型成本完成检索 vs 回答归因:全量池外仅 14/1540(0.9%),152 错题池外仅 4 题、gold rank≤150 的 137 题(90%)——"open-domain 池外召回"假设判死;错题主体是 gold 已在上下文答错(temporal 20 题稳定±1月偏移最实),唯一未测的机制杠杆 = 032 temporal 锚定契约 × Qwen thinking 栈确认(错题画像方向 B 点名遗留)。
+summary: 用 009 attribution trace(1540 题逐题 gold_rank_pool)+ tk150-full3 3-rep 152 错题清单 join,零模型成本完成检索 vs 回答归因:全量池外仅 14/1540(0.9%),152 错题池外仅 4 题、gold rank≤150 的 137 题(90%)——"open-domain 池外召回"假设判死;temporal 契约 × Qwen thinking 一度是唯一未测机制杠杆,但载体 --temporal-answer-prompt 是类别特化提示词,2026-08-17 维护者裁决不作方案手段——LoCoMo 杠杆线整体收线,诚实锚 91.10%(tk150 clean)/87.9%(生产配方)。
 status: verdict
 audience: [maintainers, agents]
 owner: engram-maintainers
@@ -48,23 +48,26 @@ tags: [evaluation, locomo, attribution, retrieval, recall, error-analysis]
   是 force 下 answerer 仍写出不确定式回答——"开 force-answer"零成本杠杆**已用掉**
   ([[force-answer-regime-gap]] 的遗留问句在思考栈已闭合)。
 
-## 剩余机制空间(按先验 × 成本排序)
+## 剩余机制空间(2026-08-17 维护者裁决后收线)
 
-1. **temporal 锚定契约 × Qwen thinking answerer(032 生产栈确认,唯一未测的点名遗留)**:
-   temporal 39 错里 20 题 3-rep 稳定 ±1 月确定性偏移(系统性精度错,非能力缺失)。032 tplan
-   契约在 flash 栈 temporal +15.8pp(GO),v4-pro 裁决栈证伪(契约干扰强模型),**Qwen thinking
-   栈从未测过**([[locomo-error-patterns-2026-08-12]] 方向 B 原文点名)。现实上限:20 偏移题
-   救一半 ≈ +0.65pp;probe 成本一次配对。
+1. ~~temporal 锚定契约 × Qwen thinking 栈确认~~ **维护者否决(2026-08-17)**:该机制的载体
+   `--temporal-answer-prompt` 是 LoCoMo temporal 类别**特化提示词**(category-conditional
+   prompt)——数据集/类别特化 prompt 不作为方案手段(与 046 spec "MUST NOT 引入数据集/
+   问题级特化"红线同源)。032 的 flash 栈 GO 结论保留为历史事实,"生产栈确认"后续不做。
+   temporal 20 题稳定 ±1 月偏移归入 answerer 能力带。
 2. single-hop 显著记忆压制(~50 题):prompt 契约已第 3 次证伪([[answer-focus-prompt-verdict]]);
-   "上下文构造非 prompt"([[030-evidence-mediation-impl]] GO 先例)侧的呈现顺序/结构未系统
-   试过,但 022/026/030/031/033-035 证据装配线已密集探索,新先验不明。
+   上下文构造侧(030 GO 先例)的呈现顺序/结构未系统试过,但 022/026/030/031/033-035 证据
+   装配线已密集探索,新先验不明。
 3. open-domain 31 错:错因分散(翻转/模糊化/judge 粒度),[[90pp-direction-exploration]] §五
    已判"无单点杠杆,不建议主攻"。
 4. judge 噪声带 ±1pp(1375-1390):90pp 探索已证 judge 杠杆用尽。
 
-**总体判定:LoCoMo 检索侧归因收口**——除 temporal 契约 × Qwen thinking 外,剩余错题主体
-(压制/翻转/拒答)多次归因为 Qwen answerer 能力带([[thinking-curve-and-qwen-ceiling]]
-oracle 91.62% 贴顶),无检索侧杠杆。
+**总体判定:LoCoMo 杠杆线收线(2026-08-17)**——检索侧归因归零(池外 0.9%、错题主体
+gold 在上下文答错),回答侧剩余错题(±1 月偏移/显著记忆压制/推断翻转/force 下拒答)
+多次归因为 Qwen answerer 能力带([[thinking-curve-and-qwen-ceiling]] oracle 91.62% 贴顶),
+类别特化 prompt 手段被红线排除。诚实锚:tk150 思考栈 clean 3-rep majority **91.10%**
+([[locomo-9110-repro-verdict]]),生产配方(k30 unified)**87.9%**;新杠杆需等新证据
+(更强 answerer / 架构性上下文构造),不在当前数据集上继续挖。
 
 ## 诚实边界
 
