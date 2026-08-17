@@ -26,23 +26,23 @@
 
 - [x] T008 [US2] 默认关 golden 五测(044 合并后在清理树上实施,commit 3f30059):零值默认关 / retrieveCandidates 直通字节等价(小 store DeepEqual 实测)/ evalFreezeCandidateRules 摘要默认关与旧密封 manifest 字节一致且开臂可辨 / fail-closed 校验 / 装填路径+审计端到端
 - [x] T009 [US2] 接线(commit 3f30059,清理后树上):main.go 五旗标(`--submodular-pack/--pack-pool-size/--pack-weights/--pack-budget-anchor/--anchor-run`)+ 启动 fail-fast;eval_runner 两检索点换 retrieveCandidates 分派(旗标关=原样直通);逐题配对预算锚(anchor-run 的 results-*.jsonl per-question answer_context_tokens,缺失回退均值);指纹 +pack 三字段(omitempty 保旧摘要);**冲突表新行不再需要**——044 清理后互斥对象(trace/nav/iris/utility-stage)已不存在,机制唯一性由删除保证
-- [ ] T010 [US2] box 组合批第 1 段:对照臂 1-rep(现行配方,收逐题 usage 锚)→ 机制臂 1-rep probe(--submodular-pack --pack-budget-anchor paired);worker pool 遵守 --concurrency;产出 probe_paired.json(配对差 + McNemar exact p + 真实 usage token parity + 装填审计);GO = 配对差≥0 且不显著负。**NO-GO 分支**:verdict 收尾,Phase 5-6 不执行
+- [x] T010 [US2] box 组合批第 1 段:对照臂 1-rep(现行配方,收逐题 usage 锚)→ 机制臂 1-rep probe(--submodular-pack --pack-budget-anchor paired);worker pool 遵守 --concurrency;产出 probe_paired.json(配对差 + McNemar exact p + 真实 usage token parity + 装填审计);GO = 配对差≥0 且不显著负。**NO-GO 分支**:verdict 收尾,Phase 5-6 不执行。**执行结论(2026-08-17)**:三次 probe 揭示两个实现缺陷(T009 接线漏普通路径 → pack 未生效;packEstimateTokens 模板低估 2.5×),修复后预算内 probe = **−14.22pp (p<0.0001) 显著 NO-GO**,同预算提质证伪;超预算 2.5× 仅 +0.65pp 不显著。详见 verdict
 
 ## Phase 5 · US3 正批(条件:T010 GO,US3)
 
-- [ ] T011 [US3] 同一次开机顺序执行 3-rep clean 正批(机制臂 vs 对照臂同批配对、store 复用、clean 判题);产出 result-matrix 行(净差、p 值、context parity、逐题翻转清单、平均检索条数);SC-003 判定(≥90.0% 或诚实关闭)
+- [ ] T011 [US3] 同一次开机顺序执行 3-rep clean 正批(机制臂 vs 对照臂同批配对、store 复用、clean 判题);产出 result-matrix 行(净差、p 值、context parity、逐题翻转清单、平均检索条数);SC-003 判定(≥90.0% 或诚实关闭)。**未执行**(T010 预算内 NO-GO −14.22pp 显著负,Phase 5 条件不满足)
 
 ## Phase 6 · US4 LME 零重调迁移(条件:T011 完成且未关闭,US4)
 
-- [ ] T012 [US4] LME(k30 unified clean 3-rep)零重调迁移批:LoCoMo 定稿参数原样上 LME;非回退 90.2% 锚即过;产出迁移门判定 + 双数据集汇总行
+- [ ] T012 [US4] LME(k30 unified clean 3-rep)零重调迁移批:LoCoMo 定稿参数原样上 LME;非回退 90.2% 锚即过;产出迁移门判定 + 双数据集汇总行。**未执行**(依赖 T011)
 
 ## Phase 7 · 重验 ride-along + 收尾
 
 - [x] T013 [P] reverify 旗标路径 CLI(`cmd/locomo-bench/reverify_042_cli.go`,`--reverify-042 <dir>` + `--reverify-labels`):读 042 collect 工件(结构化 decision_key/shallow_correct 解析,真实工件冒烟通过:5958 行→1986 题,slice=304)、2-conv slice(conv 0/1,与 043 pilot2 可比)、worker pool 遵守 --concurrency、双通道(logprob + SSE 流式)flip、ReverifyReport 工件(AUC rank-mean WMW + bootstrap seed 43);端点不可达即报错中止
 - [ ] T014 [P] 全量门复核:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go vet ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;新旗标出现在 `--help` 且默认值正确
-- [ ] T015 box 组合批第 2 段:执行 reverify(同批,answerer+judge env 走进程环境)→ ReverifyReport 判定(measurement-artifact-confirmed / signal-still-invalid / inconclusive);**只陈述测量事实,翻案权留维护者**
-- [ ] T016 verdict 文档 `docs/evaluation/reports/045-submodular-packing-verdict-<date>.md`(含门链全程:US1→probe→正批→LME→重验)+ result-matrix 同步 + tasks 勾结
-- [ ] T017 box 收尾:小文件备份 `/root/autodl-tmp/eval-backup-<ts>/` → vllm 按 PID 停 → `shutdown now`(必做,省钱铁律)
+- [ ] T015 box 组合批第 2 段:执行 reverify(同批,answerer+judge env 走进程环境)→ ReverifyReport 判定(measurement-artifact-confirmed / signal-still-invalid / inconclusive);**只陈述测量事实,翻案权留维护者**。**执行(2026-08-17)**:box 上卡住无产出(reverify.log 0 字节,answerer 满载但请求不推进,疑似 stream SSE 阻塞),已终止;卡住原因留 042 侧诊断,建议降 concurrency 或禁用 stream 通道复测 logprob 通道
+- [x] T016 verdict 文档 `docs/evaluation/reports/045-submodular-packing-verdict-<date>.md`(含门链全程:US1→probe→正批→LME→重验)+ result-matrix 同步 + tasks 勾结。**verdict 2026-08-17 已写**:门链 = US1 门 NO-GO(口径过严,非装填失效)→ 维护者决策 probe 裁判 → 三次 probe(NO-GO,两实现缺陷已修)→ 正批/LME 未执行;reverify 卡住留 042 侧
+- [ ] T017 box 收尾:小文件备份 `/root/autodl-tmp/eval-backup-<ts>/` → vllm 按 PID 停 → `shutdown now`(必做,省钱铁律)。**执行中**(verdict + tasks 勾结后关机)
 
 ## Dependencies
 
