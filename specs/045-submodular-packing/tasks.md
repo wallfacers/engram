@@ -42,7 +42,8 @@
 - [ ] T014 [P] 全量门复核:`CGO_ENABLED=0 go build ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、`CGO_ENABLED=0 go vet ./...` 全绿;`git diff --name-only -- memory embedding provider store internal` 为空;新旗标出现在 `--help` 且默认值正确
 - [ ] T015 box 组合批第 2 段:执行 reverify(同批,answerer+judge env 走进程环境)→ ReverifyReport 判定(measurement-artifact-confirmed / signal-still-invalid / inconclusive);**只陈述测量事实,翻案权留维护者**。**执行(2026-08-17)**:box 上卡住无产出(reverify.log 0 字节,answerer 满载但请求不推进,疑似 stream SSE 阻塞),已终止;卡住原因留 042 侧诊断,建议降 concurrency 或禁用 stream 通道复测 logprob 通道
 - [x] T016 verdict 文档 `docs/evaluation/reports/045-submodular-packing-verdict-<date>.md`(含门链全程:US1→probe→正批→LME→重验)+ result-matrix 同步 + tasks 勾结。**verdict 2026-08-17 已写**:门链 = US1 门 NO-GO(口径过严,非装填失效)→ 维护者决策 probe 裁判 → 三次 probe(NO-GO,两实现缺陷已修)→ 正批/LME 未执行;reverify 卡住留 042 侧
-- [ ] T017 box 收尾:小文件备份 `/root/autodl-tmp/eval-backup-<ts>/` → vllm 按 PID 停 → `shutdown now`(必做,省钱铁律)。**执行中**(verdict + tasks 勾结后关机)
+- [x] T017 box 收尾:小文件备份 `/root/autodl-tmp/eval-backup-<ts>/` → vllm 按 PID 停 → `shutdown now`(必做,省钱铁律)。**已完成(2026-08-17)**:备份 `eval-backup-2026-08-17-045/`(33M)→ vllm 按 PID 停 → shutdown
+- [x] T018 代码清理(2026-08-17,commit 84bd6e0):045 NO-GO 定案后删除核心机制代码——`submodular_packing.go/_cli/_runtime/_test`、`aic.go/_test`、`reverify_042.go/_cli/_test` 共 9 文件,还原 `main.go`/`multiquery.go`/`eval_runner.go` 到 045 前基线 eb4d143(staged vs 基线 diff=0);保留 verdict 文档 + 本 spec 目录;build + 全量 test 绿;引擎五目录零改动
 
 ## Dependencies
 
