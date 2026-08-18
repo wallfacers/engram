@@ -108,10 +108,83 @@ paid rerank DEATH RULE 不变。
 wide-dump sweep 方法论);US2 重建店后 e2e 用 box 单变量配对 3-rep clean 口径
 (--judge-mem0-aligned 必带),对照锚 89.74%(quota28)。
 
-## 结论
+## docs/ 既有 verdict 全量对账(2026-08-18 补,走 spec 前的踩坑复审)
 
-文献对"结构化元信息缩 token 涨点"的回答高度收敛:**类型化+维度化的记忆表示是主导
-因子,verbatim 细节内容保持一等公民(加元数据而非压缩),检索侧维度路由是次要增量,
-按需展开只能用结构判据触发**。与 engram 已证伪地图无硬冲突(冲突的家族:训练、图、
-agentic、置信度门控——文献里同样不是这些组件拿分)。建议进入 SDD:spec 047 以 US2
-(写侧类型化 schema)为主轴、US1 为零成本前置、US3 为第二阶段。
+对账来源:experiment-verdicts、structured-content-directions(active, 2026-08-06)、
+retrieval-budget-reduction-directions(closed)、low-topk-recall-context-survey、
+033/026/045/027/040 verdicts、default-off-mechanism-cleanup-plan(044)。
+
+### 坑 1 —「reader 强度」推翻文献压缩结论(最重)
+
+**DimMem/LeanMem/xMemory 的"压缩+涨点"全部来自弱 reader 栈(GPT-4.1-mini / Qwen3-8B)。
+engram 的 answerer 是 Qwen3.8-27B thinking——强 reader 下"证据密度是瓶颈"的前提不成立**
+(What Survives Into Context 条件 iv 自证:3B 赢、7B 被吸收、14B 反转)。engram 自身的
+四重实证同向:
+
+| verdict | 机制 | 结果 |
+|---|---|---|
+| 026 exact-token | 按 need 剪枝,token −33% | −4.5pp/−3.6pp,simple 类目回归(依赖精确逐证据) |
+| 045 次模装填 | 预算内贪心装填 | **−14.22pp(p<0.0001)**,短碎片项主导,single-hop −22.6pp |
+| 030 T013 | trace 默认值移除 | 当前栈 **−3.44pp**(030 的 85.91%@468tok 是旧 fts 弱栈成绩) |
+| 040 归因 | 30→150 增量分解 | **79% 是"上下文量"**——强 reader 要吃更多原文,压缩方向结构性反向 |
+
+**修正:原方案 US3(紧凑骨架+按需展开)在当前栈上是被证伪家族,撤销。US2 的
+token 压缩预期(6957→4000)同步撤销——压 token 与涨分在强 reader 栈上不可兼得。**
+
+### 坑 2 — 写侧 query-agnostic 构造双向证伪
+
+LazyMem 深读结论:"retrieve-then-construct 优于 construct-then-retrieve(query-agnostic
+写时构造有不可逆信息损失)——与 024/025/027/028 写侧 NO-GO 完全一致"。engram 写侧
+最近四次:024 write_dedup 几乎不触发(21,860 判定仅 20 抑制)、025 episode 聚合
+OVERALL −7.7pp(聚合叙事挤掉逐证据覆盖)、027/028 event 替换三连。**写侧元字段增强
+虽区别于"替换",但 engram 土壤上写侧改造尚无一次正结果。**
+
+### 坑 3 — 046 完美信号账封印"分数族"方法
+
+040:完美信号上限 89.2% < k150 的 90.13%——42 体量题(79% 增量)对 RRF 曲线/
+EVT/rerank/**任何相关性分数**隐形。**原方案 US1(维度软路由)属分数族,预期从
+"低"降为"结构性封印",降为不做或仅诊断。**
+
+### 坑 4 — 033 归因口径与 caption 缺口
+
+`gold_in_pool` 只证任意命中≠回答链完整;DiaID 命中≠答案文本进 prompt。**target 16 道
+single-hop 残差中 10 道关键细节只在 blip_caption**(全局 --image-captions 已被 018
+证伪 −0.71pp;正确姿势 = 查询期命中 turn 后的 late-binding)。任何表示/检索改造
+救不了 caption 缺失——这是独立缺口。
+
+### 坑 5 — 工程坑(执行时必带)
+
+- **跨实现序漂移**:本地 fastembed 序 vs box vllm 序绝对数不可对标(quota28 教训:
+  本地 net+32 → box +4);本地 sweep 只判方向,幅度以 box 单变量实测为准。
+- **`--judge-mem0-aligned` 必带**(k30 unified 口径,漏传 76% 假读数)。
+- **embed 并发非确定**:`--max-num-seqs 1`(并发≥4 同文本微差向量→parity fail-closed)。
+- **不同 `--chunk-target-chars` 的 store 不可比**(flag 自带告警)——粒度 sweep 每档一店。
+- **LME 杂讯 chunk**:`EMBED_TRUNCATE_PROMPT_TOKENS=-1`(0.031% 超长 chunk 400 会
+  fail-closed 整批)。
+- **SSE 超时**:`--per-call-timeout` 15m(思考模型×长上下文 8m 不够)。
+- 044 已删 013/025 temporal-score、030/031 装配链、021/029/042 等 flag——相关机制
+  重做需新代码,且注意"没转正的机制最终被清理"的维护成本哲学。
+
+## 修正后的方案(覆盖前文 US1/US2/US3 排序)
+
+对账后真正开放、且 docs 明确认可的结构方向只有一个主轴:
+
+**A2 — turn/语义粒度 chunk(structured-content-directions 标注"唯一未测的写侧粒度结构")**
+- 机制:检索单元从 900-char chunk(混 5–10 turns)细化到 turn/语义段粒度,同 30 槽位
+  覆盖更多 gold turn、剔除邻居噪声——**token 降(gold 密度升)而非内容压**,
+  不踩坑 1 的"压缩"语义。EverMemOS 证据:语义分段 vs 固定切块 +4.6pp 同候选同预算。
+- 对症:quota28 verdict 自己指出"下一杠杆须解决翻车 42 题(更细 quota 点位或 chunk
+  排序,均未试)";040 的"体量"需求在小粒度下同 token 可容纳更多单元。
+- 已有基建:lossless chunking(DiaID 每片段保留)、`--chunk-target-chars` 现成、
+  chunkTurns 映射、wide-dump sweep 方法论。
+- 已知风险对冲:009"turn@k 对 fact 级 assoc 失明"→ turn±1 邻窗或语义段(EverMemOS
+  式连贯分段而非硬 turn);045 碎片化反例 → 统一粒度+邻窗≠贪心选短项,但 sweep 必须
+  看类别分解(multi-hop/计数类是否断链);LME 侧超长 turn 已有拆分逻辑。
+- 验证:本地多粒度重建店 sweep(gold@30 × token × 类别分解,零 API)→ 方向成立后
+  box 单变量 3-rep clean 配对。
+
+**次优先(独立缺口,非 token 主线)**:caption late-binding(033 的 10/16 钥匙,
+查询期命中后绑定);跨 hit 邻域合并去重(idx 级确定性,LazyMem 借鉴)。
+
+**明确不做**(本轮对账新增强制项):紧凑骨架/按需展开(坑 1)、写侧类型化聚合
+(坑 2)、维度分数路由(坑 3)、迭代/置信度门控(041/042)、训练线、图、agentic。
