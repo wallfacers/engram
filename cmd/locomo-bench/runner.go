@@ -143,8 +143,11 @@ func newUsageModelCaller(p provider.Provider, model string, maxTokens int, tempe
 // answers finish in seconds, but top-k150 retrieval triples the evidence
 // context and Qwen thinking+answer can exceed three minutes (observed
 // 2026-08-14), so eight minutes is a deliberate headroom for local-vllm
-// long requests while still bounding a genuinely dead relay.
-const perCallTimeout = 8 * time.Minute
+// long requests while still bounding a genuinely dead relay. A var
+// (flag-overridable) because slow answerers with long thinking (dense 27B
+// over a ~7k-token k30-quota28 context) can exceed 8 minutes mid-generation
+// and get scored wrong via a broken SSE stream.
+var perCallTimeout = 8 * time.Minute
 
 func gateUsage(sem chan struct{}, c usageModelCaller) usageModelCaller {
 	return gateUsageAttempts(sem, c, 2)

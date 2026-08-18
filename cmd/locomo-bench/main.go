@@ -302,6 +302,7 @@ func run() error {
 	flag.StringVar(&opt.plannerBaseURL, "planner-base-url", "", "local planner sidecar base URL (OpenAI-compatible; enables --compiler-arm planner; empty = extractive fallback)")
 	flag.StringVar(&opt.plannerModel, "planner-model", "", "planner model served by the sidecar (e.g. Qwen2.5-7B-Instruct)")
 	flag.DurationVar(&opt.plannerTimeout, "planner-timeout", 0, "planner proposal timeout (0 = default 6s)")
+	flag.DurationVar(&perCallTimeout, "per-call-timeout", 8*time.Minute, "bound for one LLM call while holding a semaphore slot (slow thinking answerers may need more)")
 	flag.BoolVar(&opt.writeDedup, "write-dedup", false, "024 write-time redundancy suppression: suppress duplicate fact projections (additive mechanism flag; formal context required)")
 	flag.BoolVar(&opt.neighborExtend, "neighbor-extend", false, "024 hit-time neighbor extension: add shared-evidence sibling facts to answer context (additive mechanism flag; formal context required)")
 	flag.BoolVar(&opt.episodeCluster, "episode-cluster", false, "025 cross-session semantic episode clustering: rebuild semantic_episode projections from the clusterer before rendering (additive mechanism flag; semantic_episode representation required)")
