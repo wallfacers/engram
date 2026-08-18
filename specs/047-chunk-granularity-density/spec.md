@@ -167,8 +167,11 @@ GPU-bound ~11-12h 级,box 数据盘执行)。LME 的超长 turn 已有 lossless 
 - **FR-003**: US1 判据 MUST 在门计算前冻结:all-gold-turns-covered 定义(gold turns
   全集 = parsedGoldTurns(qa.Evidence) 的 DiaID 并集)、token-parity 预算线(3614/
   6957 两档)、multi-hop 塌方阈值(−2pp)、42 翻车题核验口径。审计清单随门报告。
-- **FR-004**: US2 probe MUST 同批配对、同 judge(`--judge-mem0-aligned`)、同批顺序
-  执行、repeats ≥3;对照臂同批重跑不引历史锚。显著为负 MUST NO-GO。
+- **FR-004**: US2 分两段门(2026-08-18 维护者成本决定,deepseek 涨价下不全量重跑):
+  **probe 段** = 2 臂 × 1-rep 同批配对(方向筛,当天止损;1-rep 噪声已知——029 教训,
+  probe GO 仅授权补全,不作为正式口径);**正式段** = probe GO 后补 2-rep 凑 3-rep +
+  flash clean 重判(凌晨空闲时段)。两段都 MUST 同 judge(`--judge-mem0-aligned`)、
+  同批顺序执行;对照臂同批重跑不引历史锚。正式段显著为负 MUST NO-GO。
 - **FR-005**: 两臂 answer-context tokens 均值 MUST 与分数差同表呈现(体量 parity);
   机制臂 MUST NOT 靠装更多 token 赢。
 - **FR-006**: 邻窗装配(若实现)MUST 确定性、零模型调用、基于 chunkTurns DiaID 序;
