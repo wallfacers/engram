@@ -82,6 +82,22 @@ quota12 锚判对 = 纯 run 质量损失**。1382 + 6 = 1388 = **90.13%**。
    (更细的 quota 点位或 chunk 排序,均未试)。
 3. 无任何类别/数据集特化;quota 是全局检索参数;无 paid 服务。
 
+## 附:answerer 互补性发现(flash smoke,98 题分层,2026-08-18)
+
+等 box 凭证期间用本地栈(HF 009 store 副本 + fastembed bge-large sidecar + DeepSeek
+flash API)对 quota28 做了 answerer 替换探查(answerer=deepseek-v4-flash 禁思考,
+k30/quota28/unified 同配方,在线 judge):
+
+- **对题保持 50/50 = 100%(零翻车)**;Qwen3.8(思考)错题救回 **16/48 = 33.3%**
+- 全量外推 ~93%(1-rep 在线口径,未验证 3-rep+clean)
+- 机制假设:思考模型在 28-chunk 长上下文上"想太多"引入自我怀疑/拒答倾向,
+  禁思考模型直接抽取反而更准——与 unified 契约×k150 的 idk 观察同族
+  (上下文越长,思考的边际伤害越大)
+- flash 全量 3-rep run 启动后被维护者中止(花费授权确认中,~10% 进度,未产生数据)
+
+无论后续走哪条路线,这个互补性本身是可复用的结论:**LoCoMo k30 高位 quota 配方下,
+answerer 选型存在"思考 vs 抽取"的权衡,不是单调"更强模型更好"**。
+
 ## 产物
 
 - box: `/root/autodl-tmp/046-qwen38-runs/locomo-k30-q28-qwen38-3rep`(备份 `eval-backup-20260818-160838`),已关机
