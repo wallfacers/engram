@@ -1,8 +1,8 @@
 ---
-title: k30 chunk-quota 28 — top-k 30 预算内的 90pp 冲线(进行中)
+title: k30 chunk-quota 28 — top-k 30 预算内的 90pp 冲线(已收线)
 date: 2026-08-18
 tags: [evaluation, locomo, retrieval, chunk-quota, k30]
-status: 89.74% 已实测(+4 题 vs 锚),失败 rep 补跑 pending
+status: 收线定格 clean 89.74%(+4 vs 锚 89.48%);90pp 冲线目标取消(2026-08-18 维护者决定:box 实例 GPU 已释放不可重启、flash 全量太贵)
 ---
 
 # k30 chunk-quota 28 — 同预算槽位重分配
@@ -72,7 +72,10 @@ quota12 锚判对 = 纯 run 质量损失**。1382 + 6 = 1388 = **90.13%**。
 
 补跑协议(数据完整性修复,非刷分):33 题全新 3-rep 同配方(`--only-questions` 子集),
 替换被污染题的 majority,其余 1507 题原判定不动。名单 `q28-failed-questions.txt`,
-脚本 `run-q28-retry.sh`(本地 /tmp/qwen38-eval/)。**pending:等 box 短开机 ~20min。**
+脚本 `run-q28-retry.sh` + timeout 干净重跑 `run-q28-clean-rerun.sh`(`--per-call-timeout`
+flag 已进 harness,6b160e5)。**A/B 计划均未执行,已作废**:box 实例 GPU 释放后不可
+重启(凭证路径不存在),flash 全量被维护者否决(太贵)。若未来重新租卡,补跑 20min
+或 t15 干净重跑 3.4h 的脚本与 binary 均已备齐,直接可用。
 
 ## 中间结论
 
