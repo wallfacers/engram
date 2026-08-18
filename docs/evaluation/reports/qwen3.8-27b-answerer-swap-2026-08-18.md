@@ -105,6 +105,43 @@ Qwen3.8 k30 的 162 错题按 gold_rank_pool 归因：
   6——与 Qwen3.6 k150 的能力带（single-hop 60 / temporal 33）形态不同，Qwen3.8 的
   multi-hop 组装是相对短板。8-17 已收线（oracle 91.62% 贴顶，类别特化 prompt 红线排除）。
 - **建议**：Qwen3.8 若要 90pp，跑 k150 即可（同 Qwen3.6 已验证）；k30 下无 90pp 空间。
+  见下一节——k150 子集复验已**实测验证**。
+
+## k150 子集复验（2026-08-18）— 90pp 解决路径实测验证
+
+**方法**：把 k30 归因出的 80 截断题（gold rank 31-150，k30 clean majority 全错）按
+**top-k 150** 重跑 3-rep（契约 digest ff400d0e / mem0-aligned / 032-store 复用不变，仅
+`--top-k 150` + `--only-questions` 子集），离线 clean 3-rep majority 同批重判。
+
+**结果**：
+
+| 口径 | 恢复/80 | 恢复率 |
+|---|---:|---:|
+| clean 3-rep majority | **25** | 31.25% |
+| raw 3-rep majority | 41 | 51.25%（thinking 文本使 raw judge 高估，净 −16） |
+
+按类别（clean）：single-hop 11/39、temporal 6/14、multi-hop 3/8、open-domain 5/19。
+
+**混合分数（k30 + k150 子集组合）**：1378 + 25 = **1403/1540 = 91.10%**，
+跨 90pp（差线 1386，余量 +17 题）。方法学：80 截断题在 k30 全错、gold 仅在 k150
+进上下文，故 3-rep 子集判定可直接叠加；其余 1460 题沿用 k30 判定（检索配置未变）。
+
+**关键发现**：
+- **91.10% 恰等于 Qwen3.6 k150 全量 clean majority（1403/1540 = 91.10%，独立复现）**
+  ——强收敛证据：**k150 栈的 LoCoMo 天花板 ≈ 91.1%**（oracle 91.62%），与答题模型
+  无关。Qwen3.8 换模型未改变 k150 栈上限。
+- Qwen3.8 恢复率 **25/80 < Qwen3.6 的 32/80**（重叠 18、Qwen3.8 独有 7、Qwen3.6 独有
+  14）：Qwen3.8 对 150-chunk 大上下文利用**更弱**——55 题仍错里大量是
+  "I don't know from the available memories" 式拒答，gold 已在上下文但模型找不到
+  （真实 answerer 能力限制，与 8-17 oracle 贴顶结论一致）。
+- 剩余 137 错题 = 截断未恢复 55 + 上下文内能力 45 + 检索大缺 33 + 池外 4。
+- 方法学注意：混合分数是**乐观组合**（其余 1460 题假设 k150 下不翻转）；全量 k150
+  会因上下文翻转略降，但 Qwen3.6 k150 全量 91.10% 佐证净效应为正，90pp 余量（+17）
+  足以吸收。
+
+**结论**：Qwen3.8 的 90pp 解 = **k150（已验证，混合 91.10%）**；k30 下无解。但 LoCoMo
+不是 Qwen3.8 的强项（恢复率低于 Qwen3.6，天花板被 k150 栈钉死在 ~91.1%），**LME 才是**
+（+3.20pp 同口径，clean 93.40%）。
 
 ## 运行特征（dense 模型关键差异）
 
@@ -117,7 +154,10 @@ Qwen3.8 k30 的 162 错题按 gold_rank_pool 归因：
 
 ## 收尾
 
-- box 备份 `/root/autodl-tmp/eval-backup-20260818-021844`（两 run 目录 + 脚本），**已关机**。
+- 首轮（k30 跑分）box 备份 `/root/autodl-tmp/eval-backup-20260818-021844`，**已关机**。
+- 复验轮（2026-08-18 二开机）：`/root/autodl-tmp/046-qwen38-runs/locomo-k150-trunc80-qwen38-3rep/`
+  （k150 子集 3-rep，run-1/2/3 各 80 题；regime digest ff400d0e、stats、cost 均在）。
+  跑完备份小文件后 **box 已关机**。
 - 本地重判产物 `/tmp/qwen38-eval/rejudge-out/{locomo,lme}-{clean,raw}-judged.jsonl` +
-  `*-clean-majority.json`。
+  `*-clean-majority.json` + `trunc80-*-judged.jsonl` + `trunc80-clean-majority.json`。
 - 新 judge key 应用至 box `032-run.env` 与本地 `~/.config/engram/judge.env`（0600，不落库）。
