@@ -51,7 +51,11 @@ type AttributionTrace struct {
 	// GoldRankPool is the 1-indexed rank of the first gold-covering hit within
 	// the wide diagnostic pool; -1 when absent. Drives outranked_by (which
 	// non-gold hits sit above gold when we look wider than top-K).
-	GoldRankPool int            `json:"gold_rank_pool"`
+	GoldRankPool int `json:"gold_rank_pool"`
+	// WidePool is the first wideDumpCap hits of the wide pool, gold-annotated,
+	// for offline retrieval-parameter sweeps (e.g. chunk-quota replays over the
+	// full fact/chunk interleaving). nil unless --wide-dump is set.
+	WidePool     []RetrievedHit `json:"wide_pool,omitempty"`
 	OutrankedBy  []RetrievedHit `json:"outranked_by"`
 	Quadrant      string         `json:"quadrant"`
 	Correct       *bool          `json:"correct,omitempty"`
@@ -80,7 +84,7 @@ type QuadrantDistribution struct {
 	TotalGradeable   int    `json:"total_gradeable"`
 }
 
-func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHits []memory.Result, chunkTurns map[string][]string, goldTurnText map[string]string, topK, outrankCap int, tau float64, correct *bool) AttributionTrace {
+func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHits []memory.Result, chunkTurns map[string][]string, goldTurnText map[string]string, topK, outrankCap, wideDumpCap int, tau float64, correct *bool) AttributionTrace {
 	goldTurns := parsedGoldTurns(qa.Evidence)
 
 	// Narrow top-K: what the answerer actually consumed → gold_rank_topk.
@@ -96,17 +100,30 @@ func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHit
 	}
 
 	// Wide pool: gold's true rank when we look past top-K → gold_rank_pool,
-	// and the non-gold hits sitting above it → outranked_by.
+	// the non-gold hits sitting above it → outranked_by, and (when a dump cap
+	// is set) the pool prefix a parameter sweep replays against. The loop must
+	// run past gold while the dump is filling, so it stops only once gold is
+	// resolved AND the dump (if any) is complete.
 	goldRankPool := -1
 	outRankedBy := make([]RetrievedHit, 0)
+	var wideDump []RetrievedHit
+	if wideDumpCap > 0 {
+		wideDump = make([]RetrievedHit, 0, wideDumpCap)
+	}
 	for index, hit := range wideHits {
 		mapped := hitMappedGoldTurns(hit, chunkTurns, goldTurnText, goldTurns, tau)
 		if len(mapped) > 0 {
-			goldRankPool = index + 1
-			break
-		}
-		if outrankCap > 0 && len(outRankedBy) < outrankCap {
+			if goldRankPool < 0 {
+				goldRankPool = index + 1
+			}
+		} else if goldRankPool < 0 && outrankCap > 0 && len(outRankedBy) < outrankCap {
 			outRankedBy = append(outRankedBy, newRetrievedHit(hit, index+1, nil))
+		}
+		if wideDumpCap > 0 && len(wideDump) < wideDumpCap {
+			wideDump = append(wideDump, newRetrievedHit(hit, index+1, mapped))
+		}
+		if goldRankPool > 0 && (wideDumpCap <= 0 || len(wideDump) >= wideDumpCap) {
+			break
 		}
 	}
 	if goldRankPool < 0 {
@@ -127,6 +144,7 @@ func buildAttributionTrace(convID, questionIndex int, qa locomoQA, hits, wideHit
 		GoldInPool:   goldInPool,
 		GoldRankTopK: goldRankTopK,
 		GoldRankPool: goldRankPool,
+		WidePool:     wideDump,
 		OutrankedBy:  outRankedBy,
 		Quadrant:     classifyAttribution(len(goldTurns) > 0, goldInPool, goldRankTopK, topK, correct),
 	}
@@ -410,7 +428,7 @@ func runAttributionCLI(ctx context.Context, opt options, convs []conversation, a
 				return fmt.Errorf("attribution wide retrieve conv=%d question=%d: %w", conv.ID, selected.Index, err)
 			}
 			correct := joined[resultKey{Conv: conv.ID, Q: selected.Index}]
-			traces = append(traces, buildAttributionTrace(conv.ID, selected.Index, qa, hits, wideHits, runtime.chunkTurns, goldTurnText, topK, opt.outrankCap, opt.factCoverageTau, correct))
+			traces = append(traces, buildAttributionTrace(conv.ID, selected.Index, qa, hits, wideHits, runtime.chunkTurns, goldTurnText, topK, opt.outrankCap, opt.wideDump, opt.factCoverageTau, correct))
 			if opt.embedProbe && len(probeQueries) < defaultEmbedProbeQueries {
 				probeQueries = append(probeQueries, qa.Question)
 			}

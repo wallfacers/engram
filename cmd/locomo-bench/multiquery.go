@@ -436,8 +436,8 @@ func runRecallDiagnosticCLI(ctx context.Context, opt options, convs []conversati
 					}
 				}
 
-				singleTrace := buildAttributionTrace(conv.ID, selected.Index, qa, singleHits, singleWide, runtime.chunkTurns, goldTurnText, topK, 0, opt.factCoverageTau, nil)
-				multiTrace := buildAttributionTrace(conv.ID, selected.Index, qa, multiHits, multiWide, runtime.chunkTurns, goldTurnText, topK, 0, opt.factCoverageTau, nil)
+				singleTrace := buildAttributionTrace(conv.ID, selected.Index, qa, singleHits, singleWide, runtime.chunkTurns, goldTurnText, topK, 0, 0, opt.factCoverageTau, nil)
+				multiTrace := buildAttributionTrace(conv.ID, selected.Index, qa, multiHits, multiWide, runtime.chunkTurns, goldTurnText, topK, 0, 0, opt.factCoverageTau, nil)
 				singleCoverage, singleSession, singleGradeable := evidenceRecallAt(qa, singleHits, runtime.chunkTurns)
 				multiCoverage, multiSession, multiGradeable := evidenceRecallAt(qa, multiHits, runtime.chunkTurns)
 				goldResolved := len(singleTrace.GoldTurns) > 0

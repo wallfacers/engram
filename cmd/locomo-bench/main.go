@@ -161,6 +161,7 @@ type options struct {
 	joinResults                string
 	embedProbe                 bool
 	outrankCap                 int
+	wideDump                   int
 	widePool                   int
 	factCoverageTau            float64
 	contextParity              *contextParityJournal
@@ -354,6 +355,7 @@ func run() error {
 	flag.StringVar(&opt.joinResults, "join-results", "", "archived results JSONL to join by (conv,q) for correctness quadrants")
 	flag.BoolVar(&opt.embedProbe, "embed-probe", false, "with --attribution-trace, probe query embedding determinism")
 	flag.IntVar(&opt.outrankCap, "outrank-cap", 5, "maximum non-gold hits to record before the first gold hit")
+	flag.IntVar(&opt.wideDump, "wide-dump", 0, "with --attribution-trace, record the first N wide-pool hits per question in trace.jsonl, gold-annotated (offline chunk-quota sweep input; 0 = off)")
 	flag.IntVar(&opt.widePool, "wide-pool", 0, "candidate pool size for gold_in_pool (0 = max(300, top-k*6))")
 	flag.Float64Var(&opt.factCoverageTau, "fact-coverage-tau", defaultFactCoverageTau, "attribution: min fraction of a fact's content words that must appear in a gold turn (session-gated) to count as covering it")
 	flag.BoolVar(&opt.notebook, "notebook", false, "after the run, capture per-question gold attribution (gold_resolved/candidate_covered/bundle_covered) + accumulate mistakes into the notebook dir (default ./eval-notebook); off = results byte-identical (SC-004)")

@@ -35,7 +35,7 @@ func TestAttributionTraceGoldenRankOutrankersAndCorrectness(t *testing.T) {
 	}
 
 	correct := true
-	trace := buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, defaultFactCoverageTau, &correct)
+	trace := buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, 0, defaultFactCoverageTau, &correct)
 	if trace.GoldRankTopK != 4 {
 		t.Fatalf("gold_rank_topk = %d, want 4", trace.GoldRankTopK)
 	}
@@ -57,7 +57,7 @@ func TestAttributionTraceGoldenRankOutrankersAndCorrectness(t *testing.T) {
 	}
 
 	correct = false
-	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, defaultFactCoverageTau, &correct)
+	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, 0, defaultFactCoverageTau, &correct)
 	if trace.Quadrant != quadrantAnswerSide {
 		t.Fatalf("quadrant with correct=false = %q, want %q", trace.Quadrant, quadrantAnswerSide)
 	}
@@ -68,6 +68,64 @@ func TestAttributionTraceGoldenRankOutrankersAndCorrectness(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "per_signal_ranks") {
 		t.Fatalf("US1 retrieved hit unexpectedly serialized per_signal_ranks: %s", raw)
+	}
+}
+
+func TestAttributionTraceWideDump(t *testing.T) {
+	qa := locomoQA{
+		Evidence:     []string{"D3:14"},
+		Category:     1,
+		CategoryName: "single_hop",
+	}
+	hits := []memory.Result{
+		{Name: "chunk-aerial-yoga", Score: 0.031},
+		{Name: "chunk-hot-yoga", Score: 0.029},
+		{Name: "chunk-pilates", Score: 0.027},
+		{Name: "chunk-kundalini-yoga", Score: 0.024},
+	}
+	chunkTurns := map[string][]string{
+		"chunk-aerial-yoga":    {"D2:7"},
+		"chunk-hot-yoga":       {"D1:9"},
+		"chunk-pilates":        {"D4:2"},
+		"chunk-kundalini-yoga": {"D3:14", "D3:15"},
+	}
+
+	// wideDumpCap=3 records the first 3 wide-pool hits with gold annotation;
+	// the gold hit at rank 4 stays out of the dump but still resolves
+	// gold_rank_pool (the sweep input is a prefix, not a replacement).
+	trace := buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, 3, defaultFactCoverageTau, nil)
+	if len(trace.WidePool) != 3 {
+		t.Fatalf("wide_pool length = %d, want 3", len(trace.WidePool))
+	}
+	for i, hit := range trace.WidePool {
+		if hit.Rank != i+1 {
+			t.Fatalf("wide_pool[%d].rank = %d, want %d", i, hit.Rank, i+1)
+		}
+		if hit.CoversGold {
+			t.Fatalf("wide_pool[%d].covers_gold = true, want false (gold sits at rank 4)", i)
+		}
+	}
+	if trace.GoldRankPool != 4 {
+		t.Fatalf("gold_rank_pool = %d, want 4 (dump prefix must not truncate gold resolution)", trace.GoldRankPool)
+	}
+	// OutrankedBy still records only pre-gold hits, unchanged by the dump.
+	if len(trace.OutrankedBy) != 2 {
+		t.Fatalf("outranked_by length = %d, want 2", len(trace.OutrankedBy))
+	}
+
+	// A dump deep enough to cover gold annotates the gold hit itself.
+	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, 4, defaultFactCoverageTau, nil)
+	if len(trace.WidePool) != 4 || !trace.WidePool[3].CoversGold {
+		t.Fatalf("wide_pool with cap 4 = %+v, want 4 hits with rank 4 covering gold", trace.WidePool)
+	}
+	if !reflect.DeepEqual(trace.WidePool[3].MappedGoldTurns, []string{"D3:14"}) {
+		t.Fatalf("wide_pool[3].mapped_gold_turns = %v, want [D3:14]", trace.WidePool[3].MappedGoldTurns)
+	}
+
+	// cap=0 keeps WidePool nil (omitempty drops it; legacy trace bytes unchanged).
+	trace = buildAttributionTrace(2, 111, qa, hits, hits, chunkTurns, nil, 4, 2, 0, defaultFactCoverageTau, nil)
+	if trace.WidePool != nil {
+		t.Fatalf("wide_pool with cap 0 = %+v, want nil", trace.WidePool)
 	}
 }
 
@@ -146,7 +204,7 @@ func TestAttributionCorrectnessJoinAndMissingJoinFallback(t *testing.T) {
 	if got := classifyAttribution(true, true, 1, 3, nil); got != quadrantRetrievalOnly {
 		t.Fatalf("missing join quadrant = %q, want %q", got, quadrantRetrievalOnly)
 	}
-	trace := buildAttributionTrace(2, 111, locomoQA{Evidence: []string{"D3:14"}}, nil, nil, nil, nil, 3, 5, defaultFactCoverageTau, nil)
+	trace := buildAttributionTrace(2, 111, locomoQA{Evidence: []string{"D3:14"}}, nil, nil, nil, nil, 3, 5, 0, defaultFactCoverageTau, nil)
 	raw, err := json.Marshal(trace)
 	if err != nil {
 		t.Fatalf("marshal retrieval-only trace: %v", err)
@@ -163,7 +221,7 @@ func TestAttributionGoldOnlyInWidePoolTargetsUS2(t *testing.T) {
 	chunkTurns := map[string][]string{"chunk-wide-gold": {"D2:8"}}
 	wrong := false
 
-	trace := buildAttributionTrace(0, 0, qa, topHits, wideHits, chunkTurns, nil, 2, 5, defaultFactCoverageTau, &wrong)
+	trace := buildAttributionTrace(0, 0, qa, topHits, wideHits, chunkTurns, nil, 2, 5, 0, defaultFactCoverageTau, &wrong)
 	if !trace.GoldInPool || trace.GoldRankTopK != -1 || trace.GoldRankPool != 3 || trace.Quadrant != quadrantUS2Target {
 		t.Fatalf("wide-pool trace = %+v, want gold_in_pool=true gold_rank_topk=-1 gold_rank_pool=3 quadrant=%q", trace, quadrantUS2Target)
 	}
@@ -195,7 +253,7 @@ func TestAttributionFactHitCoversGoldViaContentMatch(t *testing.T) {
 	goldTurnText := map[string]string{"D19:3": "Maria Yeah, I am trying kundalini yoga these days, it is really calming."}
 	correct := true
 
-	trace := buildAttributionTrace(2, 111, qa, hits, hits, nil, goldTurnText, 5, 5, defaultFactCoverageTau, &correct)
+	trace := buildAttributionTrace(2, 111, qa, hits, hits, nil, goldTurnText, 5, 5, 0, defaultFactCoverageTau, &correct)
 	if trace.GoldRankTopK != 2 {
 		t.Fatalf("gold_rank_topk = %d, want 2 (kundalini fact at rank 2 covers gold)", trace.GoldRankTopK)
 	}

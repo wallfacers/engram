@@ -466,7 +466,7 @@ func runTemporalDiagnostic(ctx context.Context, opt options, convs []conversatio
 						return
 					}
 				}
-				trace := buildAttributionTrace(conv.ID, selected.Index, qa, hits, wide, runtime.chunkTurns, goldTurnText, topK, 0, targetOpt.factCoverageTau, nil)
+				trace := buildAttributionTrace(conv.ID, selected.Index, qa, hits, wide, runtime.chunkTurns, goldTurnText, topK, 0, 0, targetOpt.factCoverageTau, nil)
 				goldFactNames := attributedGoldFactNames(qa, storedFacts, runtime.chunkTurns, goldTurnText, targetOpt.factCoverageTau)
 
 				// Layer 1: event-date coverage over the resolved gold facts.
