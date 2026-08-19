@@ -226,19 +226,19 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 ## 基准评测
 
-| 基准 | 检索参数 | 答题模型 | 判题模型 | 得分 | p | 判定 |
-|---|---|---|---|---:|---:|---|
-| LoCoMo（1,540） | 900-char · k30 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
-| LoCoMo（1,540） | 900-char · k150 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise |
-| LongMemEval-S（500） | 900-char · k30 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
-| LongMemEval-S（500） | 900-char · k150 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
-| LoCoMo（1,540） | 900-char · k30 · q12 | Qwen3.8-27B | deepseek-v4-flash | **89.48%** | — | 3-rep clean majority · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LoCoMo（1,540） | 900-char · k30 · q28 | Qwen3.8-27B | deepseek-v4-flash | **89.74%** | — | 3-rep clean majority · 生产配方锚 · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
-| LoCoMo（1,540） | 900-char · k150（子集重判） | Qwen3.8-27B | deepseek-v4-flash | **91.10%** | — | k30 majority + 80 题 k150 重判 · [90pp 归因](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LongMemEval-S（500） | 900-char · k30 · q12 | Qwen3.8-27B | deepseek-v4-flash | **93.40%** | — | 3-rep clean majority · 同口径 +3.20pp · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LoCoMo（203 题配对 probe） | 450-char · k75 · q45 | Qwen3.8-27B | deepseek-v4-flash | **~92%**（外推） | 0.001 | 子集 probe：配对较 900-char k30-q28 锚 +11.3pp · 3-rep majority · 在线判题 · 上下文 token +8% · 全量跑已推迟，[047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
+| 基准 | 检索参数 | 答题模型 | 得分 | 备注 |
+|---|---|---|---:|---|
+| LoCoMo（1,540） | 900-char · k30 | Qwen3.6-35B | **87.9%** | 高于噪声（p=.019）· [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
+| LoCoMo（1,540） | 900-char · k150 | Qwen3.6-35B | **91.43%** | 042 配对 · within-noise |
+| LongMemEval-S（500） | 900-char · k30 | Qwen3.6-35B | **90.2%** | 高于噪声（p=.0001） |
+| LongMemEval-S（500） | 900-char · k150 | Qwen3.6-35B | **92.0%** | 3-run clean majority · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
+| LoCoMo（1,540） | 900-char · k30 · q12 | Qwen3.8-27B | **89.48%** | 3-rep clean majority · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo（1,540） | 900-char · k30 · q28 | Qwen3.8-27B | **89.74%** | 生产配方锚 · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
+| LoCoMo（1,540） | 900-char · k150（子集） | Qwen3.8-27B | **91.10%** | k30 majority + 80 题 k150 重判 · [90pp 归因](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LongMemEval-S（500） | 900-char · k30 · q12 | Qwen3.8-27B | **93.40%** | 同口径 +3.2pp · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo（配对 probe，203 题） | 450-char · k75 · q45 | Qwen3.8-27B | **~92%**（外推） | 配对 +11.3pp（p=.001）· 在线判题 · [047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
 
-所有分数均为 unified 答题契约下 clean 判题（只判 final answer）、三次配对多数投票；047 行为在线判题的同批配对 probe（两臂同批、逐题多数票）——其报告结果是配对差，~92% 为外推值而非实测全量分。91.10% 行为 k30 全量 majority 混合 80 题 k150 重判的口径；其全量 k150 等价值已在 Qwen3.6 上实测，同为 91.10%。
+各行统一：unified 答题契约、deepseek-v4-flash 判题、clean 口径（只判 final answer）、三次配对多数投票。Qwen3.6-35B 即 Qwen3.6-35B-A3B-FP8；未标 quota 的行是 chunk-quota 机制引入前的配方。末行为同批在线判题配对 probe——实测结果是配对差（较 900-char k30-q28 锚 +11.3pp、上下文 token +8%），~92% 为外推值而非全量实测分。91.10% 行的全量 k150 等价值已在 Qwen3.6 上实测，同为 91.10%。
 
 [评测详情与复现证据 →](docs/evaluation/results.md)
 
