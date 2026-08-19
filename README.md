@@ -239,19 +239,19 @@ your installed version for its exact startup contract.
 
 ## Benchmarks
 
-| Benchmark | Retrieval params | Contract | Answer model | Judge model | Score | p | Validation |
-|---|---|---|---|---|---:|---:|---|
-| LoCoMo (1,540) | 900-char · k30 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
-| LoCoMo (1,540) | 900-char · k150 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 paired · within-noise |
-| LongMemEval-S (500) | 900-char · k30 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
-| LongMemEval-S (500) | 900-char · k150 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [re-run record](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
-| LoCoMo (1,540) | 900-char · k30 · q12 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **89.48%** | — | 3-rep clean majority · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LoCoMo (1,540) | 900-char · k30 · q28 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **89.74%** | — | 3-rep clean majority · production recipe anchor · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
-| LoCoMo (1,540) | 900-char · k150 (subset re-judge) | **unified** | Qwen3.8-27B | deepseek-v4-flash | **91.10%** | — | k30 majority + 80-question k150 re-judge · [90pp attribution](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LongMemEval-S (500) | 900-char · k30 · q12 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **93.40%** | — | 3-rep clean majority · +3.20pp same-protocol · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
-| LoCoMo (203-question paired probe) | 450-char · k75 · q45 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **~92%** (extrapolated) | 0.001 | subset probe: paired +11.3pp vs 900-char k30-q28 anchor · 3-rep majority · online judge · +8% context tokens · full-scale run deferred, [047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
+| Benchmark | Retrieval params | Answer model | Judge model | Score | p | Validation |
+|---|---|---|---|---:|---:|---|
+| LoCoMo (1,540) | 900-char · k30 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
+| LoCoMo (1,540) | 900-char · k150 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 paired · within-noise |
+| LongMemEval-S (500) | 900-char · k30 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
+| LongMemEval-S (500) | 900-char · k150 · quota — | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [re-run record](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
+| LoCoMo (1,540) | 900-char · k30 · q12 | Qwen3.8-27B | deepseek-v4-flash | **89.48%** | — | 3-rep clean majority · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo (1,540) | 900-char · k30 · q28 | Qwen3.8-27B | deepseek-v4-flash | **89.74%** | — | 3-rep clean majority · production recipe anchor · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
+| LoCoMo (1,540) | 900-char · k150 (subset re-judge) | Qwen3.8-27B | deepseek-v4-flash | **91.10%** | — | k30 majority + 80-question k150 re-judge · [90pp attribution](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LongMemEval-S (500) | 900-char · k30 · q12 | Qwen3.8-27B | deepseek-v4-flash | **93.40%** | — | 3-rep clean majority · +3.20pp same-protocol · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo (203-question paired probe) | 450-char · k75 · q45 | Qwen3.8-27B | deepseek-v4-flash | **~92%** (extrapolated) | 0.001 | subset probe: paired +11.3pp vs 900-char k30-q28 anchor · 3-rep majority · online judge · +8% context tokens · full-scale run deferred, [047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
 
-All scores are clean-judged (final answer only) with 3-run paired majority; the 047 row is an online-judged paired probe (same-batch arms, per-question majority) — its paired diff is the reported result, the ~92% figure is an extrapolation, not a measured full-scale score. The 91.10% row mixes the k30 full-run majority with an 80-question k150 re-judge; its full-k150 equivalent was measured on Qwen3.6 at the same 91.10%.
+All scores are clean-judged (final answer only) with 3-run paired majority under the unified answer contract; the 047 row is an online-judged paired probe (same-batch arms, per-question majority) — its paired diff is the reported result, the ~92% figure is an extrapolation, not a measured full-scale score. The 91.10% row mixes the k30 full-run majority with an 80-question k150 re-judge; its full-k150 equivalent was measured on Qwen3.6 at the same 91.10%.
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
