@@ -226,15 +226,19 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 
 ## 基准评测
 
-| 基准 | 契约 | 答题模型 | 判题模型 | 得分 | p | 判定 |
-|---|---|---|---|---:|---:|---|
-| LoCoMo（1,540）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
-| LoCoMo（1,540）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise |
-| LongMemEval-S（500）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
-| LongMemEval-S（500）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
-| LoCoMo（203 题配对 probe）· 450-char 粒度，top-k 75 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **~92%**（外推） | 0.001 | 子集 probe：配对较 900-char 锚 +11.3pp · 3-rep majority · 在线判题 · 上下文 token +8% · 全量跑已推迟，[047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
+| 基准 | 检索参数 | 契约 | 答题模型 | 判题模型 | 得分 | p | 判定 |
+|---|---|---|---|---|---:|---:|---|
+| LoCoMo（1,540） | 900-char · k30 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **87.9%** | 0.019 | above-noise · context parity ✓ · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
+| LoCoMo（1,540） | 900-char · k150 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise |
+| LongMemEval-S（500） | 900-char · k30 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
+| LongMemEval-S（500） | 900-char · k150 · quota — | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
+| LoCoMo（1,540） | 900-char · k30 · q12 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **89.48%** | — | 3-rep clean majority · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo（1,540） | 900-char · k30 · q28 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **89.74%** | — | 3-rep clean majority · 生产配方锚 · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
+| LoCoMo（1,540） | 900-char · k150（子集重判） | **unified** | Qwen3.8-27B | deepseek-v4-flash | **91.10%** | — | k30 majority + 80 题 k150 重判 · [90pp 归因](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LongMemEval-S（500） | 900-char · k30 · q12 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **93.40%** | — | 3-rep clean majority · 同口径 +3.20pp · [换答题模型 verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
+| LoCoMo（203 题配对 probe） | 450-char · k75 · q45 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **~92%**（外推） | 0.001 | 子集 probe：配对较 900-char k30-q28 锚 +11.3pp · 3-rep majority · 在线判题 · 上下文 token +8% · 全量跑已推迟，[047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
 
-所有分数均为 clean 判题（只判 final answer）、三次配对多数投票；047 行为在线判题的同批配对 probe（两臂同批、逐题多数票）——其报告结果是配对差，~92% 为外推值而非实测全量分。
+所有分数均为 clean 判题（只判 final answer）、三次配对多数投票；047 行为在线判题的同批配对 probe（两臂同批、逐题多数票）——其报告结果是配对差，~92% 为外推值而非实测全量分。91.10% 行为 k30 全量 majority 混合 80 题 k150 重判的口径；其全量 k150 等价值已在 Qwen3.6 上实测，同为 91.10%。
 
 [评测详情与复现证据 →](docs/evaluation/results.md)
 
