@@ -245,8 +245,9 @@ your installed version for its exact startup contract.
 | LoCoMo (1,540) · top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 paired · within-noise |
 | LongMemEval-S (500) · top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
 | LongMemEval-S (500) · top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [re-run record](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
+| LoCoMo (203-question paired probe) · 450-char chunks, top-k 75 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **+11.3pp vs 900-char anchor** | 0.001 | 3-rep majority · online judge · subset probe; full-run extrapolates to ~92% (+8% context tokens) — full-scale run deferred, [047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
 
-All scores are clean-judged (final answer only) with 3-run paired majority.
+All scores are clean-judged (final answer only) with 3-run paired majority; the 047 row is an online-judged paired probe (same-batch arms, per-question majority) — its paired diff is the reported result, the ~92% figure is an extrapolation, not a measured full-scale score.
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 

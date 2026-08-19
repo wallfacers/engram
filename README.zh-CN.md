@@ -232,8 +232,9 @@ engram 当前面向本地、单用户、约 10 万条记忆规模，不是分布
 | LoCoMo（1,540）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **91.43%** | — | 042 配对 · within-noise |
 | LongMemEval-S（500）· top-k 30 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **90.2%** | 0.000112 | above-noise · context parity ✓ |
 | LongMemEval-S（500）· top-k 150 | **unified** | Qwen3.6-35B-A3B-FP8 | deepseek-v4-flash | **92.0%** | — | 3-run clean majority · context parity ✓ · [补跑记录](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
+| LoCoMo（203 题配对 probe）· 450-char 粒度，top-k 75 | **unified** | Qwen3.8-27B | deepseek-v4-flash | **较 900-char 锚 +11.3pp** | 0.001 | 3-rep majority · 在线判题 · 子集 probe；全量外推 ~92%（上下文 token +8%）——全量跑已推迟，[047 verdict](docs/evaluation/reports/047-granularity-probe-3rep-2026-08-19.md) |
 
-所有分数均为 clean 判题（只判 final answer）、三次配对多数投票。
+所有分数均为 clean 判题（只判 final answer）、三次配对多数投票；047 行为在线判题的同批配对 probe（两臂同批、逐题多数票）——其报告结果是配对差，~92% 为外推值而非实测全量分。
 
 [评测详情与复现证据 →](docs/evaluation/results.md)
 

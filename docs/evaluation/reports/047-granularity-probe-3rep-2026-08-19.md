@@ -99,8 +99,12 @@ Spec: [047-chunk-granularity-density](../../../specs/047-chunk-granularity-densi
 6. 本机 vllm(27B dense,32 并发)decode ~375 tok/s:ctl 臂 ~7-12 题/min,k75 上下文
    臂 ~4.8 题/min——子集 × 3-rep × 2 臂的时间主项。
 
-## 下一步(未执行,待维护者)
+## 下一步(2026-08-19 维护者决策:不跑全量,token 成本)
 
-- flash clean 离线重判(本地凌晨空闲,~¥3-5)→ 正式 clean 口径。
-- 全量 1540 3-rep 确证(预算另议);grB(k60q36)token-parity 臂可选。
-- GO 后 US3:LME 零重调迁移(spec FR-007)。
+- **全量 1540 3-rep 确证推迟**(预算 ~¥105-120,维护者判定太贵);结果以 probe
+  配对差 + 外推(~92%)收口,已备注 README 中英文 Benchmarks。
+- flash clean 离线重判未做(在线 mem0-aligned judge 口径;重判 1218 次高峰 ~¥5/空闲 ~¥2.5,留待下次)。
+- grB(k60q36)token-parity 臂未跑;US3 LME 迁移未启动。
+- 恢复点:下次开机器直接全量 3-rep(命令=chain7 去掉 --only-questions,或见
+  runbook);450 店/203 子集/两臂数据均在 eval-backup-0819-1539 + 本地
+  /tmp/qwen38-eval/047-3rep/。
