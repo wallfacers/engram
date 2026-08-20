@@ -1,11 +1,48 @@
 ---
-title: 047 — LoCoMo 全量运行:中断与恢复后的 1-rep clean verdict
+title: 047 — LoCoMo 全量运行:中断与恢复后的 1-rep clean verdict + 450@k150q90 配方
 date: 2026-08-20
 tags: [evaluation, locomo, chunk-granularity, spec-047, incident, verdict]
-status: 1-rep clean 判定完成(+1.36pp ns);3-rep 未做(维护者成本决策)
+status: chain9(450@k150q90)1-rep clean +2.01pp p=.011 显著;3-rep 未做(维护者成本决策)
 ---
 
 # 047 全量运行:中断与 1-rep clean verdict
+
+## chain9(2026-08-20 下午):450-char × k150q90 — 047 线首个显著全量赢
+
+前一节判定 450@k75q45(+1.36pp ns)后,归因显示 k75 档拿不到 k150 的体量题。
+chain9 补测未测格子:**450-char 池 + k150 级预算**(q90),1-rep 全量 1540,
+维护者指令"跑一次,别全跑,太贵了"。run 14:03-16:37(2h34m),store 复用
+`047-store-450`,binary/协议与同批 ctl 一致(`--top-k 150 --chunk-quota 90
+--chunk-target-chars 450 --chunk-max-chars 550`)。
+
+| 配方 | 均值上下文 | 在线(同批) | clean 1-rep | 配对 vs ctl(clean) | p |
+|---|---:|---:|---:|---|---:|
+| 900-char k30q28(生产配方,ctl) | ~7.2K | 88.64% | 85.97% | — | — |
+| 450-char k75q45 | 7.8K | 89.87% | 87.34% | +1.36pp(58:79) | .087 |
+| **450-char k150q90(chain9)** | **14,473** | **91.30%** | **87.99%** | **+2.01pp(55:86)** | **.011 ✓** |
+
+- clean 重判:1540 次调用 0 错误(~¥0.5);脚本
+  `/tmp/qwen38-eval/047-full/clean_rejudge_chain9.py`,产物
+  `clean-450k150q90-run1.jsonl`。
+- 类别分解(净赢 = 31 题):single-hop +18(90.0→92.2%)、open-domain +5
+  (60.4→65.6%)、multi-hop +5(86.9→88.7%)、temporal +3(82.2→83.2%)——
+  全类别净正,非单一类别驱动。
+- **vs 450/k75q45:+0.65pp(50:60)p=.39 ns** —— 在 450 池上把预算翻倍
+  (7.8K→14.5K)的边际增益小;047 线的赢主要来自粒度本身,k150 配额只是补齐
+  体量题下限。
+- 在线 91.30% 是本栈批次内最高在线分;与 900@k150 混合口径 91.10%(Aug-18 批,
+  k30 majority + 80 题重判归因)相比 **~15% token 节省**(14.5K vs ~17K),
+  但两者口径不同,严格同口径对照需 900@k150 全量 clean(未跑,费钱)。
+- 成本:box ~3.3h(¥18 级)+ 在线 judge + clean 重判 ~¥1;远端产物备份
+  `/root/autodl-tmp/eval-backup-20260820-chain9/`,本地
+  `/tmp/qwen38-eval/047-full/`;机器已关机、凭证已清。
+
+**判定:GO(方向+幅度+显著性)**。是否转正生产配方(k30q28→k150q90,
+token 7.2K→14.5K 换 +2.01pp 显著)= 维护者决策;3-rep majority 预计再 +
+0.3-0.9pp(ctl 三 rep 波动参考),README 口径为 3-run clean majority,加行前
+需补 rep 或标注 1-rep。
+
+
 
 **最终判定(2026-08-20 恢复后)**:机器续费恢复后核验发现 treatment run-1 已
 完整落盘(1540 行,欠费中断发生在 run-2 建目录时)——**1-rep 全量配对零额外
