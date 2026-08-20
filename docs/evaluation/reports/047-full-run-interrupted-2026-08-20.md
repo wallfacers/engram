@@ -1,17 +1,44 @@
 ---
-title: 047 — LoCoMo 全量 3-rep 运行中断记录
+title: 047 — LoCoMo 全量运行:中断与恢复后的 1-rep clean verdict
 date: 2026-08-20
-tags: [evaluation, locomo, chunk-granularity, spec-047, incident]
-status: INCOMPLETE — 不得作为全量分数或 92% 结论
+tags: [evaluation, locomo, chunk-granularity, spec-047, incident, verdict]
+status: 1-rep clean 判定完成(+1.36pp ns);3-rep 未做(维护者成本决策)
 ---
 
-# 047 全量运行中断记录
+# 047 全量运行:中断与 1-rep clean verdict
 
-本记录冻结 2026-08-20 的全量正式运行状态。AutoDL 实例在运行期间因欠费不可用；
-因此本次**没有**得到可发布的 LoCoMo 全量分数、配对差、p 值或 clean verdict。
-203 题 probe 的结论仍以
-[047-granularity-probe-3rep-2026-08-19](047-granularity-probe-3rep-2026-08-19.md)
-为准，不能把其中的约 92% 外推称为全量正式分数。
+**最终判定(2026-08-20 恢复后)**:机器续费恢复后核验发现 treatment run-1 已
+完整落盘(1540 行,欠费中断发生在 run-2 建目录时)——**1-rep 全量配对零额外
+跑动成本成立**。维护者指令"不要跑 3 次全量,先跑一次"就此满足,未启动任何新 run。
+
+| 口径 | ctl 900/k30q28 | trt 450/k75q45 | 配对差 | 翻转 | p |
+|---|---:|---:|---:|---|---:|
+| 在线 mem0-aligned judge | 88.64% (run-1) | 89.87% | +1.23pp | 41:60 | 0.073 |
+| **clean 重判**(flash, 同批) | **85.97%** | **87.34%** | **+1.36pp** | 58:79 | 0.087 |
+
+- clean 重判:2026-08-20 本地 32-worker 3080 次调用 0 错误(~¥2,协议逐字复刻
+  harness:`judgeMem0AlignedSystemPrompt` + `buildJudgePrompt` + `extractFinalAnswer`
+  + `parseJudgeVerdict`;脚本 `/tmp/qwen38-eval/047-full/clean_rejudge.py`,
+  产物 `clean-{ctl,trt}-run1.jsonl`)。
+- judge 作弊量 ~2.5-2.7pp(在线 vs clean),两臂近似对称抵消,配对差稳定 +1.2~1.4pp。
+- ctl 三 rep 高度一致(88.64/88.83/88.64%),majority 88.96%——单 rep 波动小,
+  1-rep 判定可信度高于一般预期。
+- token:ctl 7204 vs trt 7774(+7.9%,与 203 probe 一致)。
+
+## 对 probe 外推的修正(重要)
+
+203 题子集 probe 的 +11.3pp 是 91 道关键题富集放大的;全量摊薄后 **+1.36pp
+(clean, p=0.087, 未达 0.05)**。probe 报告中"全量外推 ~92%"**被实测推翻**——
+真实全量 1-rep clean = 87.34%,外推高估 ~4.7pp(子集富集 + 加权外推假设
+"88 关键题行为代表全量同类题"不成立)。README 已同步修正。
+
+**诚实结论**:450 档方向为正、幅度小、未达显著;未超过 k150 混合口径(91.10%)。
+是否转正生产配方(k30q28 → k75q45 换 +1.36pp ns 与 +7.9% token)由维护者决策;
+3-rep 显著性确证(约 ¥30/3.5h)为可选后续。
+
+## 中断事实记录(2026-08-20 凌晨,原样保留)
+
+本记录冻结 2026-08-20 的全量正式运行状态。AutoDL 实例在运行期间因欠费不可用。
 
 ## 已启动的正式配置
 
