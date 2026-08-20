@@ -246,12 +246,11 @@ your installed version for its exact startup contract.
 | LoCoMo (1,540) | 900-char · k30 · q28 | Qwen3.8-27B | **89.74%** | production recipe anchor · [quota-28 verdict](docs/evaluation/reports/k30-chunk-quota-28-verdict-2026-08-18.md) |
 | LoCoMo (1,540) | 900-char · k30 · q12 | Qwen3.8-27B | **89.48%** | 3-rep clean majority · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
 | LoCoMo (1,540) | 900-char · k30 | Qwen3.6-35B | **87.9%** | above-noise (p=.019) · [038 verdict](docs/evaluation/reports/unified-answer-contract-verdict-2026-08-13.md) |
-| LoCoMo (1,540) | 450-char · k75 · q45 | Qwen3.8-27B | **87.34%** | clean 1-rep · paired +1.36pp vs same-batch 900-char k30-q28 (85.97%, p=.087 ns) · [047 verdict](docs/evaluation/reports/047-full-run-interrupted-2026-08-20.md) |
 | LongMemEval-S (500) | 900-char · k30 · q12 | Qwen3.8-27B | **93.40%** | +3.2pp same-protocol · [swap verdict](docs/evaluation/reports/qwen3.8-27b-answerer-swap-2026-08-18.md) |
 | LongMemEval-S (500) | 900-char · k150 | Qwen3.6-35B | **92.0%** | 3-run clean majority · [re-run record](docs/operations/evaluation/lme-unified-k150-3rep-2026-08-15.md) |
 | LongMemEval-S (500) | 900-char · k30 | Qwen3.6-35B | **90.2%** | above-noise (p=.0001) |
 
-All rows: unified answer contract, judged by deepseek-v4-flash, clean-judged (final answer only) with 3-run paired majority; the 450-char row is a 1-rep paired run (same-batch arms). Answer models: Qwen3.6-35B = Qwen3.6-35B-A3B-FP8. Rows without a quota value predate the chunk-quota mechanism. The 91.10% row's full-k150 equivalent was measured on Qwen3.6 at the same 91.10%.
+All rows: unified answer contract, judged by deepseek-v4-flash, clean-judged (final answer only) with 3-run paired majority. Answer models: Qwen3.6-35B = Qwen3.6-35B-A3B-FP8. Rows without a quota value predate the chunk-quota mechanism. The 91.10% row's full-k150 equivalent was measured on Qwen3.6 at the same 91.10%.
 
 [Benchmark details and reproduction evidence →](docs/evaluation/results.md)
 
