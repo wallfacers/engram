@@ -73,6 +73,15 @@ skill-eval run --tool claude,codex,opencode \
   comparisons); `claude@opus` uses the variant as the claude `--model` slot
   (resolved through `--settings`). The variant namespaces the store container
   and the report label, so backends never collide.
+  Backend wiring notes (round-3, probe-verified): codex 0.150 dropped
+  `wire_api = "chat"` — OpenAI-compatible endpoints must serve `/responses`
+  (vLLM-style; set `wire_api = "responses"`); two codex runs must not execute
+  concurrently (shared models-cache refresh lock: `codex_models_manager`
+  timeout → 3-fail breaker); opencode `run` needs `--model provider/id` — the
+  project config's `model` key alone is ignored (it fell back to the free
+  Console tier), and quick successive standalone spawns can race provider
+  registration (`provider.no-route`) — a trivial wrapper script in PATH masks
+  it.
 - **opencode.json is generated per case** by the runner (v2 schema
   `mcp.servers.<name>`). Set `ENGRAM_SKILL_EVAL_OPENCODE_MODEL`
   (`provider/model-id`) and `ENGRAM_SKILL_EVAL_OPENCODE_BASE` (OpenAI-compatible
@@ -116,6 +125,28 @@ One iteration:
 7. Ship: `node scripts/validate-agent-skill.mjs --source` +
    `node --test scripts/validate-agent-skill.test.mjs` must be green; tag
    releases per the 020 release discipline (maintainer authorization).
+
+## Post-run hygiene: never pollute the maintainer's real memory (hard)
+
+Eval data is synthetic and must never linger in any real memory system
+(maintainer directive 2026-08-29). The runner enforces this automatically at
+the end of every `run` (`sweepHostArtifacts`):
+
+- **Host auto-memory dirs**: claude-code keys each eval instance's auto-memory
+  to its case cwd, leaving one `~/.claude/projects/-<encoded-scratch>…`
+  directory per case. All directories prefixed with the run's encoded scratch
+  path are removed.
+- **Leaked seeds in the user store**: any dataset seed entry that reached the
+  real default store `~/.engram/default.db` (early rounds seeded before
+  `--data-dir`/`ENGRAM_DATA_DIR` was plumbed everywhere) is deleted through
+  the engram CLI — never raw SQL, so the FTS mirror stays consistent.
+
+Both sweeps print a `swept N eval project dirs, M leaked seed entries` line.
+Manual cleanup of pre-sweep accumulated state (2026-08-30): 713 project dirs
+removed; `peanut-allergy`, `no-force-push-hard-rule`, `working-timezone`
+deleted from `~/.engram/default.db`. If you run the harness from a different
+scratch root, the sweep only covers that run's prefix — old roots need the
+matching manual `rm -rf ~/.claude/projects/-<encoded-old-scratch>*`.
 
 ## Reading the report
 

@@ -69,7 +69,83 @@ opencode 基线 9 例后遇 **Console 免费档 provider rate-limit** 全败—�
 
 **器材升级**(runner):per-case 独立 store(修 iw-pos-024 共享 store 污染误判);opencode.json 自动生成;claude 每 case 独立 cwd;`tool@variant` 模型矩阵语法(codex@ds/@qwen 走阿里 MaaS responses API;claude@opus 换模型槽)。
 
-<!-- ROUND3_NUMBERS -->
+### Round 3 成绩总表(模型矩阵 × skill 版本;判分含 write-neg 语义修正:误写才算,拒记时检索不算)
+
+**v0.2.0(冻结 skill,per-case store runner)**:
+
+| 后端 | write-pos | write-neg 误写 | read-pos | read-neg | regression |
+|---|---|---|---|---|---|
+| gpt-5.6(codex tf,历史轮) | 96% | 0% | 50% | 0% | 78% |
+| qwen3.8-flash(codex@qwen,全量) | 24/26 = 92% | 3/26 = 11.5% | 19/24 = 79% | 4/24 = 17% | 30/32 = 94% |
+| deepseek-v4-flash(codex@ds,写模块) | 22/26 = 85% | 3/23 = 13% | — | — | — |
+| glm-5.3-flash(claude) | 17/26 = 65% | 0 | 15/24 = 63% | 0 | — |
+| glm-5.3(claude@opus) | 18/26 = 69% | 0 | 16/24 = 67% | 0 | — |
+
+**v0.2.1**:
+
+| 后端 | write-pos | read-pos | neg |
+|---|---|---|---|
+| glm-5.3-flash(claude,B1) | 20/28 = **71%** | 18/28 = 64% | 0 误触发 |
+| glm-5.3(claude@opus,B1) | 18/28 = 64% | 18/28 = 64% | 0 误触发 |
+| qwen3.8-flash(opencode@maas,B3) | <!-- B3 --> | — | — |
+
+**结论**:claude 双低 ≠ 模型档位(GLM 档内 +4pp 噪声级);v0.2.1 对 flash +6pp(修好约束词 query/单词重试/complaint/污染例)但 **task-implied read 在 GLM 双档全灭**(纯动作 prompt 不进 skill 发现通道),宿主记忆竞争在 glm-5.3 更凶。Round-4 首选:隐式触发提示下沉 MCP 工具描述(适配器层,不依赖 skill 发现)。
+
+**未测/受限**:codex tf(gpt-5.6)的 v0.2.1 补跑被 **ChatGPT 订阅额度打光**阻断(恢复时间 2026-09-04,详见错题本);codex@ds 读模块复跑(B4)与 opencode@maas 全量(B3)进行中。
+
+## Round 3 补 · 统一模型矩阵(维护者定向:模型恒定 qwen3.8-flash,分差即工具链差异)
+
+三 CLI 多厂商配置全部落地(同一阿里 MaaS 实例,旧 key 生效/新 key InvalidApiKey 待激活):
+- **claude**:`~/.claude/settings.json.qwen` 照 glm_w 模式,经 **claude-code-router 桥**(MaaS 无 Anthropic 端点,/messages 404;ccr 网关 3456,gateway key 入其 sqlite,settings 引用),模型槽全映射 `maas,qwen3.8-flash`;冒烟模型自报正确。
+- **codex**:`~/.codex/qwen.config.toml`(`codex -p qwen --yolo`,wire_api=responses)。
+- **opencode**:runner 自动生成 provider 配置 + `--model maas/qwen3.8-flash` flag(config 的 model 键 run 不认);**opencode 自更新会原地删 exe 打断并发**→ 冻结 exe 快照 + `autoupdate:false` + 非超时单次重试。
+
+**三方对照(qwen3.8-flash 恒定,skill v0.2.1,同 runner 含 ENGRAM_DATA_DIR 注入)**:
+
+| | claude(ccr 桥) | codex | opencode |
+|---|---|---|---|
+| implicit-write-pos | **1/28 = 4%** | **28/28 = 100%** | <!-- B3V9 --> |
+| write-neg 误写 | 0/28 | 2/28 | — |
+| implicit-read-pos | 18/28 = 64% | 23/28 = 82% | — |
+| read-neg 误触发 | 0/28 | 5/28 | — |
+| regression | 28/32 | 24/32 | — |
+
+**核心结论**:同模型下三宿主行为谱两极——claude 宿主保守极简(负例零误触发、写正例全灭,qwen 不主动调 Skill 工具做发现,"已经记住了"纯口头承诺),codex 宿主激进全开(写正例满分)。**宿主的 skill 暴露方式 ≫ 模型差异**(qwen:claude 4% vs codex 100%;对照 GLM 在 claude 宿主 71%)。提升 claude 宿主写入的唯一根治路径 = Round-4 候选 #1:隐式触发提示下沉 MCP 工具描述(必然在场,不依赖 Skill 发现)。
+
+## Round 4 · 修复落地与验证(2026-08-29 深夜,v0.2.2)
+
+**根因双层确认**(维护者假设证实):①skill 发现断链(claude 两段式 skill 机制,qwen 不调 Skill 工具,§0 契约看不到);②**宿主 auto-memory 竞争**——144/144 raw 证实 qwen 严格遵守 claude 系统提示的宿主记忆机制,把事实写进 `~/.claude/projects/<cwd>/memory/*.md` 后告知"已记住"(如 no-cilantro.md),engram 一无所获。
+
+**修复**(适配器层,引擎 diff=0):MCP `memory_write`/`memory_search` 工具描述承载隐式触发契约+反宿主记忆竞争条款(mcpserver/server.go);SKILL.md §0 同步反竞争条款(v0.2.2)。
+
+**验证**(全 144,同 runner 同判分):
+
+| claude 宿主 | write-pos | 误写 | read-pos | 误触发 | regression |
+|---|---|---|---|---|---|
+| qwen 修复前(v0.2.1) | 1/28 = 4% | 0 | 64% | 0 | 28/32 |
+| **qwen 修复后(v0.2.2)** | **19/28 = 68%** | 2/28 | **68%** | 2/28 | 25/32 |
+| GLM 修复后 | 17/28 = 61%(前 71%,方差内) | **0** | 68% | 0 | 24/32 |
+| (参照)opencode+qwen v0.2.1+DATA_DIR | 25/28 = 89% | 1/28 | 82% | 0 | 20/31 |
+
+**修复定性**:工具描述下沉专救"不发现 skill 的模型"(qwen +64pp),对已发现 skill 的模型无显著增益也无大害;ENGRAM_DATA_DIR 注入专救"爱走 CLI 的宿主"(opencode 21%→89%)。负例误触发全部 ≤7%(门 ≤10% 内)。触发层收口,剩余失败在内容质量层(wrong-op/wrong-report)与模型能力层。
+
+## Round 5 · 器材修复 + 查询指导(v0.2.3 → v0.2.4,2026-08-30)
+
+Round-4 的"内容质量层失败"逐 raw 复核,大头是器材而非模型:**①runner MCP 配置按 label 共享 → 并发写竞态**(六个并行 case 的写入全部漏斗进 iw-pos-004 的 db,其 own db 反而空;write wrong-op ×5 与 read wrong-report 大部为其伪影)——修为每 case 一个配置文件;**②ParseClaude 不解析 Bash 里的 engram CLI 调用**(reg-011 实际正确跑了 stats/export 被判零调用)——补 cliInvocation 对齐 codex/opencode;**③ack 词表缺更新类说法**(已更新记忆/记入/记到);**④引擎级发现**:`memory/queryplan.go:183` 多词条 AND 语义下,教模型的"2–4 约束词"查询只要一个词不在文档就整体落空(CLI 复现:种子含 pnpm,查 `pnpm` 命中、查 8 词袋 0 命中)——v0.2.4 查询指导改"单属性词优先,诚实说明 AND";引擎 AND 空结果 OR 兜底列为增量候选(须 SDD + 宪法 IV 评估门,未实现)。**⑤防污染固化**:runner 每次 run 后自动 `sweepHostArtifacts`(清 `~/.claude/projects/-<编码scratch>*` eval 目录 + 经 CLI 删真实 store 泄漏种子);存量 3 条泄漏种子与 713 个目录已手清(维护者指示:跑分数据不得污染真实记忆系统)。
+
+**终数**(claude+qwen,f1⊕f3⊕f4 单跑重试协议合并;codex 参照为 v0.2.1 全量):
+
+| | v0.2.1 | **v0.2.4 终数** | codex+qwen |
+|---|---|---|---|
+| write-pos | 4% | **100%** | 100% |
+| write-neg 误写 | 0 | **0** | 2/28 |
+| read-pos | 64% | **82%** | 82% |
+| read-neg 误触发 | 0 | 1/28 | 5/28 |
+| regression | 28/32 | **94%** | 24/32 |
+
+claude 对 codex 差距完全收口(write/read 追平,误触发与 regression 反超);剩余 7 失败为 qwen-flash 依从性方差,非文本可治。逐圈明细见 failbook Round 5。
+
+
 
 ### SC 判定
 
