@@ -28,13 +28,20 @@ databases, transient chat context, or a request to merely summarize a conversati
 
 **Write proactively.** When ordinary conversation reveals a durable fact about the
 user, their setup, team, or project, record it with one write in the same turn and
-tell the user in one natural sentence what was stored ("已记住:…" / "Noted:…").
-Do not ask permission first. Durable-fact categories: stable tool/editor/language
-preferences; constraints and standing rules (dietary, schedule, branch policy);
-identity and role (job, team, city, timezone); project conventions; periodic
-obligations; long-term decisions and state changes ("switched servers to Debian");
-and complaints or corrections that reveal a standing rule ("又用 npm？我一直用
-pnpm" — the rule is the durable fact, not the annoyance).
+tell the user in one natural sentence what was stored ("已记住:…" / "Noted:…" /
+"已更新:…"). Do not ask permission first. A request like "save this so future
+sessions/conversations can retrieve it" is explicit write intent — write now, do
+not wait for a later confirmation. Durable-fact categories: stable tool/editor/
+language preferences; constraints and standing rules (dietary, schedule, branch
+policy); identity and role (job, team, city, timezone); project conventions;
+periodic obligations; long-term decisions and state changes ("switched servers to
+Debian"); and complaints or corrections that reveal a standing rule ("又用 npm？
+我一直用 pnpm" — the rule is the durable fact, not the annoyance).
+
+engram is this environment's memory system: writing the fact to a host-native
+memory mechanism (auto-memory directories, CLAUDE.md, project docs) or merely
+saying "已记住/Noted" without an engram write is a miss — redirect that write
+into engram.
 
 When the user corrects an earlier fact, write the new value (the update supersedes
 the old one for answering); deleting the old entry is optional, not required.
@@ -46,21 +53,28 @@ manager do I use", "我的/我们的/上次/老规矩…"); (b) a question, reco
 or plan must honor a standing constraint — allergies and dietary rules,
 timezone, naming and branch conventions; (c) an action the assistant is about
 to perform (install, build, run, deploy, format) could be governed by a
-remembered convention. Query the constraint vocabulary, not the task topic:
-2–4 short terms including the attribute words (过敏/allergy, 忌口, 时区/timezone,
-命名/naming, 偏好/preference, convention), never a whole sentence — long mixed
-queries match nothing. If a query returns empty, retry once with the single
-most distinctive term from the target fact before reporting empty. Ground the
+remembered convention. Plain environment or tool work — clearing a browser
+cache, tuning a Redis/database cache, saving an IDE window layout, committing
+to git, adding a browser bookmark, filing a link into Notion — is not governed
+by user memory rules: skip the search. Query the constraint's attribute word,
+not the task topic: ONE distinctive term first (过敏/allergy, 包管理器/package
+manager, 时区/timezone, 分支/branch, 命名/naming) — never a bag of words or a
+whole sentence: the keyword engine ANDs every term, so one absent word empties
+the result. Add a second term only when a single term returns too many
+unrelated hits. If a query returns empty, retry once with the attribute word
+alone before reporting empty. Ground the
 answer in what returns: for "what do I use / have" questions the remembered
 value is the answer — report it explicitly instead of substituting what the
 current environment happens to show. Empty or missing results are reported
 honestly; never invent a stored fact.
 
 **Never record:** one-off task details and transient states ("this week I'm…"),
-generic technical discussion, third-party/system knowledge not about the user's
-circle, secrets or credentials, facts about someone else misattributed to the user,
-and anything the user declined to store. A request to "remember in a file",
-"add to bookmarks", or "keep in this chat" is not a memory write.
+including a this-week crunch or deferral plan ("本周赶 demo、重构推迟到下周" is a
+schedule note, not a standing rule), generic technical discussion, third-party/
+system knowledge not about the user's circle, secrets or credentials, facts about
+someone else misattributed to the user, and anything the user declined to store.
+A request to "remember in a file", "add to bookmarks", or "keep in this chat"
+is not a memory write.
 
 ## 1. Preflight without changing state
 

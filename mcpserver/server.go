@@ -43,13 +43,25 @@ func Run(ctx context.Context, registry *Registry) error {
 
 func registerTools(server *mcp.Server, adapter *toolAdapter) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "memory_write",
-		Description: "Upsert one memory entry by name in a namespace; an existing entry with the same name is replaced.",
+		Name: "memory_write",
+		Description: "Upsert one memory entry by name in a namespace; an existing entry with the same name is replaced. " +
+			"This tool is the environment's persistent cross-session memory: call it proactively — without waiting for the user to say \"remember\" — " +
+			"whenever ordinary conversation reveals a durable fact about the user, their setup, team, or project " +
+			"(stable preferences, constraints and standing rules, identity or role, project conventions, long-term decisions, state changes, " +
+			"or a complaint/correction that reveals a standing rule), then acknowledge what was stored in the same turn. " +
+			"\"Save this so future sessions can retrieve it\" is explicit write intent — write now. " +
+			"Writing the fact to a host-native memory mechanism (auto-memory directories, CLAUDE.md, project docs) or just saying \"noted\" without writing here is a miss — " +
+			"this tool, not those, is the memory system. Never store secrets, transient one-off task details, or this-week scheduling plans.",
 		Annotations: toolAnnotations("Write memory", false, true, false, false),
 	}, adapter.memoryWrite)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "memory_search",
-		Description: "Return a ranked bounded subset of relevant memories from one namespace; empty results do not prove absence.",
+		Name: "memory_search",
+		Description: "Return a ranked bounded subset of relevant memories from one namespace; empty results do not prove absence. " +
+			"Search BEFORE answering questions that depend on remembered facts — \"which/what/when + my/our/usual/previous\" questions about the user's setup, preferences, or past decisions — " +
+			"and BEFORE performing actions (install, build, run, deploy, format) that a remembered convention (package manager, toolchain, naming, branch policy) could govern. " +
+			"Plain environment or tool work — browser/system cache, Redis or DB cache tuning, IDE layout, git commit, bookmarks, Notion links — is not governed by user memory: skip the search. " +
+			"Query ONE distinctive constraint term first — the attribute word itself (allergy 过敏, timezone 时区, package manager 包管理器, naming) — never a bag of words: the keyword engine ANDs every term, so one absent word empties the result; if empty, retry once with the attribute word alone. " +
+			"For \"what do I use/have\" questions the remembered value is the answer — report it instead of substituting what the current environment happens to show.",
 		Annotations: toolAnnotations("Search memories", true, false, false, false),
 	}, adapter.memorySearch)
 	mcp.AddTool(server, &mcp.Tool{

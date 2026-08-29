@@ -2,13 +2,13 @@
   "schema_version": 1,
   "skill": {
     "name": "engram",
-    "version": "0.2.1"
+    "version": "0.2.4"
   },
   "triggers": {
-    "explicit": "user wording asks for a memory operation",
-    "implicit_write": "ordinary conversation reveals a durable fact (stable preference, constraint, identity, project convention, long-term decision/state change, or a complaint revealing a standing rule) — write once in the same turn and acknowledge",
-    "implicit_read": "question or task depends on remembered facts — 'which/what/when + my/our/usual/previous' question forms, plans needing a standing constraint, or actions (install/build/run) a remembered convention could govern — search before answering or acting; query constraint vocabulary in 2-4 short terms; report empty results honestly",
-    "never": ["transient task context", "RAM/cache/database near-misses", "secrets", "facts the user declined to store", "third-party facts misattributed to the user"]
+    "explicit": "user wording asks for a memory operation, including 'save this so future sessions can retrieve it'",
+    "implicit_write": "ordinary conversation reveals a durable fact (stable preference, constraint, identity, project convention, long-term decision/state change, or a complaint revealing a standing rule) — write once in the same turn and acknowledge; host-native memory mechanisms do not substitute",
+    "implicit_read": "question or task depends on remembered facts — 'which/what/when + my/our/usual/previous' question forms, plans needing a standing constraint, or actions (install/build/run) a remembered convention could govern — search before answering or acting; query one distinctive constraint attribute term first (the keyword engine ANDs every term, so extra words empty the result); report empty results honestly; plain environment/tool work (browser or system cache, IDE layout, git commit, bookmarks, Notion links) needs no search",
+    "never": ["transient task context", "this-week crunch or deferral schedules", "RAM/cache/database near-misses", "secrets", "facts the user declined to store", "third-party facts misattributed to the user"]
   },
   "mcp": {
     "always": [
