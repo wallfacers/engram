@@ -36,6 +36,14 @@ rather than truncating it.
 
 Every successful `memory_search` response includes:
 
+`query` guidance: search with **short keyword queries** — two to four content
+terms naming the target fact, including the constraint/attribute vocabulary
+when one governs the task (`allergy 过敏`, `timezone 时区`, `naming convention`,
+`preference 偏好`), not a full sentence or question and not only the task
+topic. Long mixed-language queries match nothing; if a keyword query returns
+empty, retry once with the most distinctive single term (a name, brand, or
+domain word) before reporting empty.
+
 ```json
 {
   "scope": "ranked_subset",

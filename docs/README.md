@@ -33,6 +33,7 @@ tags: [documentation, portal, navigation]
 - [engram Agent Skill](../skills/engram/references/install.md)：安装、发现、重载与恢复的唯一详细正本；只正式支持 Claude Code、Codex、OpenCode。
 - [CLI 使用指南](guides/cli.md)：安装、命令、离线与模型边界。
 - [MCP Server 配置指南](guides/mcp-server.md)：MCP 配置、工具、namespace 与 curation。
+- [Skill 触发评测与数据飞轮](guides/skill-eval.md)：skill-eval runner、触发数据集、飞轮迭代一圈的标准流程。
 
 ### 安装 Agent Skill
 

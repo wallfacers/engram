@@ -62,18 +62,36 @@ may be user-maintained or of unknown provenance.
 
 ## Discovery and invocation
 
+Native scan of the shared universal directory was probe-verified on 2026-08-29
+against codex-cli 0.150.1, opencode2 v0.0.0-beta-18600, and Claude Code
+2.1.251: a single `~/.agents/skills/engram` install was discovered by all
+three, exactly once each, with no private-directory copies present.
+
 | Client | Project path | User path | Explicit use | Reload |
 |---|---|---|---|---|
 | Claude Code | `.claude/skills/engram` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` | `/engram` | Restart if the top-level skills directory was newly created; otherwise invoke it again or open a new session. |
-| Codex | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; `${CODEX_HOME:-~/.codex}/skills/` is also scanned) | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
-| OpenCode | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/` is also scanned) | Ask it to load and use the `engram` skill | Restart and open a new session. |
+| Codex | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; verified native scan) | `$engram` or choose it from `/skills` | It normally auto-discovers; restart if absent. |
+| OpenCode | `.agents/skills/engram` | `~/.agents/skills/engram` (shared; verified native scan, incl. v2 betas) | Ask it to load and use the `engram` skill | Restart and open a new session. |
 
 At both scopes the package exists once, in `.agents/skills/engram`
 (`~/.agents/skills/engram` at user scope); Claude Code reads
 `.claude/skills/engram`, which is a symlink into that shared copy, and
-Codex/OpenCode scan the shared directory natively (in addition to their own
-`~/.codex/skills/` and `~/.config/opencode/skills/`). The installed package is
+Codex/OpenCode scan the shared directory natively. The installed package is
 discovered as-is — never copy it into additional client directories by hand.
+
+### Do not duplicate into private directories
+
+Codex and OpenCode also still scan their legacy private directories
+(`${CODEX_HOME:-~/.codex}/skills/`, `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/`),
+but a package installed in the shared universal directory is already discovered,
+so a private-directory copy is a redundant duplicate: it drifts out of sync on
+upgrade and shadows the shared copy. Machines carrying pre-universal-install
+leftovers (verified case: identical `gsap-*` and `find-skills` copies in all
+three directories) should keep only the `~/.agents/skills/` copy and remove the
+private-directory duplicates. Prefer the standard shared directory first;
+install into a private directory only for a client with no shared-directory
+support (today: none of the three supported clients — Claude Code consumes the
+shared copy through its symlink).
 A discovered skill is not proof that MCP or CLI tooling is configured. If
 neither is available, it must report that condition rather than pretending an
 operation ran.

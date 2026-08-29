@@ -46,8 +46,10 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 二进制与 MCP server 仍需分别安装和配置。默认命令在公共技能目录
 `~/.agents/skills/engram` 只保留**一份共享拷贝**，其余客户端（包括只认自家
 `~/.claude/skills/` 的 Claude Code）通过符号链接引用它；Codex/OpenCode 原生扫描
-`~/.agents/skills/`，装完即被发现。`--agent <id>` 仅用于显式限定安装到某一客户端
-的专有目录。
+`~/.agents/skills/`（已在 codex-cli 0.150.1 与 opencode2 v0.0.0-beta-18600
+上探针实测），装完即被发现。**不要再往 `~/.codex/skills/`、
+`~/.config/opencode/skills/` 这类私有目录重复拷贝**——冗余副本会在升级时漂移并
+遮蔽共享拷贝。`--agent <id>` 仅用于显式限定安装到某一客户端的专有目录。
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global

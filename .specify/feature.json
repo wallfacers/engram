@@ -1,1 +1,3 @@
-{"feature_directory":"specs/047-chunk-granularity-density"}
+{
+  "feature_directory": "specs/048-implicit-memory-flywheel"
+}

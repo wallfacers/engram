@@ -40,8 +40,8 @@ const expectedCliCommands = [
   "version",
 ];
 const expectedIntents = [
-  ["write", true, "memory_write", "add", "explicit user intent"],
-  ["search", false, "memory_search", "search", null],
+  ["write", true, "memory_write", "add", "explicit user intent or implicit durable-fact disclosure"],
+  ["search", false, "memory_search", "search", "memory-dependent question or task (implicit read)"],
   ["get", false, "memory_get", "get", null],
   ["list", false, "memory_list", "list", null],
   ["delete", true, "memory_delete", "delete", "explicit user intent"],

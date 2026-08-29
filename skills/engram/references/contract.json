@@ -2,7 +2,13 @@
   "schema_version": 1,
   "skill": {
     "name": "engram",
-    "version": "0.1.0"
+    "version": "0.2.1"
+  },
+  "triggers": {
+    "explicit": "user wording asks for a memory operation",
+    "implicit_write": "ordinary conversation reveals a durable fact (stable preference, constraint, identity, project convention, long-term decision/state change, or a complaint revealing a standing rule) — write once in the same turn and acknowledge",
+    "implicit_read": "question or task depends on remembered facts — 'which/what/when + my/our/usual/previous' question forms, plans needing a standing constraint, or actions (install/build/run) a remembered convention could govern — search before answering or acting; query constraint vocabulary in 2-4 short terms; report empty results honestly",
+    "never": ["transient task context", "RAM/cache/database near-misses", "secrets", "facts the user declined to store", "third-party facts misattributed to the user"]
   },
   "mcp": {
     "always": [
@@ -42,14 +48,14 @@
       "mutating": true,
       "mcp": "memory_write",
       "cli": "add",
-      "condition": "explicit user intent"
+      "condition": "explicit user intent or implicit durable-fact disclosure"
     },
     {
       "name": "search",
       "mutating": false,
       "mcp": "memory_search",
       "cli": "search",
-      "condition": null
+      "condition": "memory-dependent question or task (implicit read)"
     },
     {
       "name": "get",

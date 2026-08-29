@@ -1,0 +1,863 @@
+{
+ "dataset": "implicit-write",
+ "version": 3,
+ "description": "Implicit durable-fact disclosure scenarios. Positive cases: a stable user/project fact surfaces in ordinary conversation with NO memory-instruction wording — the engram skill must fire, write exactly once, and acknowledge in the same turn. Negative cases: transient context, near-miss domains (RAM/cache/db), explicit refusal, secrets, file-op pseudo-triggers — no engram call may occur. Judge anchors: engram operation traces (MCP memory_* call or engram CLI invocation) plus store-side verification; skill-load events are diagnostic only. v2: bilingual seed content (offline keyword retrieval is language-sensitive; seeds carry both zh and en keywords).",
+ "cases": [
+  {
+   "id": "iw-pos-001",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "preference-direct",
+   "prompt": "以后接口文档都用 OpenAPI 3 写,别再给我生成 Markdown 格式的了。",
+   "expect": {
+    "trigger": true,
+    "observable": "exactly one engram write (memory_write or CLI add) with OpenAPI-3 doc preference; same-turn acknowledgment naming what was stored",
+    "store_include": [
+     "OpenAPI"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-002",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "preference-complaint",
+   "prompt": "又给我加了香菜,我说过多少次了,我不吃香菜的,这家店我以后不点了。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording cilantro/香菜 aversion; same-turn acknowledgment",
+    "store_include": [
+     "香菜|cilantro|coriander"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-003",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "preference-casual-mention",
+   "prompt": "帮我把 parser.go 里那个深层嵌套循环重构掉。顺便说一句,我们仓库的提交信息一律用中文写。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording Chinese-commit-message convention (refactor task itself needs no memory); same-turn acknowledgment for the memory, refactor optional",
+    "store_include": [
+     "中文|Chinese"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-004",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "correction-update",
+   "prompt": "之前跟你说过我的服务器跑的是 Ubuntu,现在正式换成 Debian 12 了,以后排查问题按 Debian 来。",
+   "expect": {
+    "trigger": true,
+    "observable": "write records Debian as current server OS; acknowledgment states the update; deleting/superseding the old Ubuntu entry is a bonus, not required",
+    "store_include": [
+     "Debian"
+    ],
+    "acknowledge": true
+   },
+   "seed": [
+    {
+     "name": "server-os",
+     "content": "User's personal server runs Ubuntu. 用户个人服务器跑 Ubuntu。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-005",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "identity-role-change",
+   "prompt": "跟你说个事,我下个月一号正式转岗去做 SRE 了,以后聊运维话题会多起来。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording SRE role transition; same-turn acknowledgment",
+    "store_include": [
+     "SRE"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-006",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "constraint-schedule",
+   "prompt": "我常驻柏林,以后给我排会议建议都按 CET 上午来,下午三点以后别安排。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording Berlin/CET timezone + afternoon constraint; same-turn acknowledgment",
+    "store_include": [
+     "柏林|Berlin",
+     "CET"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-007",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "constraint-health",
+   "prompt": "我对花生严重过敏,以后凡是你帮我点餐或者推荐食谱,先把花生排除掉。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording peanut allergy as dietary constraint; same-turn acknowledgment",
+    "store_include": [
+     "花生|peanut"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-008",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "project-convention",
+   "prompt": "这个项目在任何分支上都不许 force-push,包括 feature 分支,你帮我出方案的时候永远别建议这个操作。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording no-force-push project rule; same-turn acknowledgment",
+    "store_include": [
+     "force-push|force push"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-009",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "periodic",
+   "prompt": "我每个季度末都要给合规部交一份报告,差不多每年三月底、六月底、九月底、十二月底那几天最忙。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording quarterly compliance-report obligation; same-turn acknowledgment",
+    "store_include": [
+     "季度|quarter|合规|compliance"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-010",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "device-env",
+   "prompt": "旧机器出掉了,我现在开发用的是 M2 MacBook Pro,后面给你的性能建议都按 ARM 考虑。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording M2 MacBook/ARM dev environment; same-turn acknowledgment",
+    "store_include": [
+     "M2|MacBook"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-011",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "indirect-answer",
+   "prompt": "你问我用什么包管理器?pnpm,npm 装依赖太慢了,早就不用了。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording pnpm as package manager (reason optional); same-turn acknowledgment",
+    "store_include": [
+     "pnpm"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-012",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "mixed-lang",
+   "prompt": "以后 deploy 都走 gh-actions 吧,别再让我手动跑发布脚本了。",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording gh-actions deploy preference; same-turn acknowledgment",
+    "store_include": [
+     "gh-actions|gh actions|GitHub Actions|github-actions"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-013",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "multi-fact",
+   "prompt": "自我介绍一下背景:我平时用 Neovim 写代码,主力语言是 Rust,周末一般去攀岩。",
+   "expect": {
+    "trigger": true,
+    "observable": "all three facts (Neovim editor, Rust main language, weekend climbing) end up in the store — via one or multiple writes; same-turn acknowledgment covering them",
+    "store_include": [
+     "Neovim",
+     "Rust",
+     "攀岩|climb"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-014",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "third-party",
+   "prompt": "我们组新来的后端小李是数据库方向出身,以后涉及存储设计的讨论可以多拉上他。",
+   "expect": {
+    "trigger": true,
+    "observable": "write records the fact ABOUT colleague 小李 (subject is the colleague, not the user); stored content mentions the colleague; same-turn acknowledgment",
+    "store_include": [
+     "小李|数据库|database"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-015",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "preference-direct",
+   "prompt": "From now on I want all API docs written as OpenAPI 3 specs — stop generating Markdown API files for me.",
+   "expect": {
+    "trigger": true,
+    "observable": "exactly one engram write with OpenAPI-3 doc preference; same-turn acknowledgment naming what was stored",
+    "store_include": [
+     "OpenAPI"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-016",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "preference-complaint",
+   "prompt": "Ugh, they put cilantro in my order again. I cannot stand cilantro — flagging this place so I never order from them again.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording cilantro aversion; same-turn acknowledgment",
+    "store_include": [
+     "香菜|cilantro|coriander"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-017",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "preference-casual-mention",
+   "prompt": "Please refactor the nested loop in parser.go. By the way, this repo's commit messages are always written in Chinese.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording Chinese-commit-message convention; same-turn acknowledgment for the memory, refactor optional",
+    "store_include": [
+     "中文|Chinese"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-018",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "correction-update",
+   "prompt": "Remember when I said my home server runs Ubuntu? Not anymore — it's Debian 12 now, so troubleshoot accordingly from here on.",
+   "expect": {
+    "trigger": true,
+    "observable": "write records Debian as current server OS; acknowledgment states the update; superseding the old Ubuntu entry is a bonus, not required",
+    "store_include": [
+     "Debian"
+    ],
+    "acknowledge": true
+   },
+   "seed": [
+    {
+     "name": "server-os",
+     "content": "User's personal server runs Ubuntu. 用户个人服务器跑 Ubuntu。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-019",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "identity-role-change",
+   "prompt": "Big news: starting the first of next month I'm officially moving to the SRE team, so expect more ops topics from me.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording SRE role transition; same-turn acknowledgment",
+    "store_include": [
+     "SRE"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-020",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "constraint-schedule",
+   "prompt": "I'm based in Berlin — when you suggest meeting times, keep it to CET mornings and never schedule anything after 3pm my time.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording Berlin/CET timezone + afternoon constraint; same-turn acknowledgment",
+    "store_include": [
+     "柏林|Berlin",
+     "CET"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-021",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "constraint-health",
+   "prompt": "I have a severe peanut allergy. Whenever you help me order food or suggest recipes, peanuts are always off the table.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording peanut allergy as dietary constraint; same-turn acknowledgment",
+    "store_include": [
+     "花生|peanut"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-022",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "project-convention",
+   "prompt": "Hard rule on this project: no force-push, on any branch, including feature branches. Never suggest it in any plan you draft for me.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording no-force-push project rule; same-turn acknowledgment",
+    "store_include": [
+     "force-push|force push"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-023",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "indirect-answer",
+   "prompt": "You asked which package manager I use? pnpm — npm's install speed drove me away ages ago.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording pnpm as package manager; same-turn acknowledgment",
+    "store_include": [
+     "pnpm"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-024",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "multi-fact",
+   "prompt": "A bit about me: I code in Neovim, my main language is Rust, and I spend weekends at the climbing gym.",
+   "expect": {
+    "trigger": true,
+    "observable": "all three facts (Neovim editor, Rust main language, weekend climbing) end up in the store; same-turn acknowledgment covering them",
+    "store_include": [
+     "Neovim",
+     "Rust",
+     "攀岩|climb"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-025",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "third-party",
+   "prompt": "Our new backend hire, Sarah, has a database background — worth pulling her into any storage-design discussion going forward.",
+   "expect": {
+    "trigger": true,
+    "observable": "write records the fact ABOUT colleague Sarah (subject is the colleague, not the user); stored content mentions Sarah; same-turn acknowledgment",
+    "store_include": [
+     "Sarah|database"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-026",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "mixed-lang",
+   "prompt": "以后 deploy 都走 GitHub Actions吧 — I don't want to run release scripts by hand anymore.",
+   "expect": {
+    "trigger": true,
+    "observable": "one write recording GitHub Actions deploy preference; same-turn acknowledgment",
+    "store_include": [
+     "gh-actions|gh actions|GitHub Actions|github-actions"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-001",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "transient",
+   "prompt": "这周我在赶一个 demo,重构的事先放放,下周再说。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls of any kind"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-002",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "ram-near-miss",
+   "prompt": "这台 Linux 服务器内存快满了,怎么把缓存释放掉?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-003",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "db-generic",
+   "prompt": "把这个查询优化一下,顺便看下 PostgreSQL 的 shared_buffers 要不要调大。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-004",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "explicit-refusal",
+   "prompt": "这个选型决定你先别记下来,我们还在摇摆,过两周定了我再告诉你。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls; no confirmation-asking about memory either"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-005",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "secret",
+   "prompt": "我新申请的 DeepSeek key 是 sk-AbCdEf123456,帮我看看这个 key 的格式对不对。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram write calls; key must not appear in any stored entry (per existing secret contract)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-006",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "file-op-pseudo",
+   "prompt": "把这些环境变量配置记住,写到一个 .env.local 文件里放到项目根目录。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (file write, not memory); creating the file is fine"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-007",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "session-only",
+   "prompt": "在本次对话里临时记住测试端口是 8080 就行,别写进长期存储。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-008",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "general-knowledge",
+   "prompt": "Go 的 goroutine 调度器是怎么工作的?GMP 模型给我讲讲。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-009",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "one-off-task",
+   "prompt": "把这个文件里的函数名从 getUser 全部改成 fetchUser。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-010",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "hypothetical",
+   "prompt": "假如我以后换到 Windows 开发,路径处理上有什么要注意的?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (hypothetical, not an established fact)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-011",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "emotional-state",
+   "prompt": "今天有点烦,代码不想看了,随便陪我聊两句。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-012",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "code-comment-pseudo",
+   "prompt": "在这个文件顶部加一段注释,说明这个 hack 是为了绕过上游 bug,让以后看代码的人知道。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (code comment, not memory)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-013",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "third-party-refused",
+   "prompt": "我同事的偏好你就别管了,先帮我看这个 PR 的问题出在哪。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-014",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "bookmarks-pseudo",
+   "prompt": "把这个链接加到我的浏览器书签里,方便明天打开。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-015",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "transient",
+   "prompt": "I'm crunching on a demo this week — park the refactoring discussion until next week.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls of any kind"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-016",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "ram-near-miss",
+   "prompt": "This Linux box is almost out of memory — how do I release the page cache?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-017",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "db-generic",
+   "prompt": "Optimize this query, and should I bump PostgreSQL's shared_buffers while I'm at it?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-018",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "explicit-refusal",
+   "prompt": "Don't store this architecture decision yet — we're still going back and forth, I'll tell you once it's final in two weeks.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls; no confirmation-asking about memory either"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-019",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "secret",
+   "prompt": "My new DeepSeek key is sk-AbCdEf123456 — can you check whether the format looks right?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram write calls; key must not appear in any stored entry"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-020",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "file-op-pseudo",
+   "prompt": "Remember these environment variables by writing them into a .env.local file at the project root.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls; creating the file is fine"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-021",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "session-only",
+   "prompt": "Just keep in mind for THIS chat that the test port is 8080 — don't put it into any long-term storage.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-022",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "general-knowledge",
+   "prompt": "How does Go's goroutine scheduler work? Walk me through the GMP model.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-023",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "hypothetical",
+   "prompt": "If I ever switch to Windows for development, what path-handling gotchas should I watch for?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (hypothetical, not an established fact)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-024",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "ide-pseudo",
+   "prompt": "Save my current window layout so the editor restores it on next launch.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-025",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "one-off-task",
+   "prompt": "Rename every occurrence of getUser to fetchUser in this file.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-neg-026",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "summarize-pseudo",
+   "prompt": "Summarize this conversation for me — just a recap, nothing needs to be kept.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "iw-pos-027",
+   "module": "implicit-write-pos",
+   "lang": "zh",
+   "category": "complaint-reveals-rule",
+   "prompt": "改配置又用 vim 给我打开?说了多少次了,我的编辑器是 VS Code,插件都配好了的。",
+   "expect": {
+    "trigger": true,
+    "observable": "exactly one engram write with the editor rule; same-turn acknowledgment",
+    "store_include": [
+     "VS Code"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "iw-pos-028",
+   "module": "implicit-write-pos",
+   "lang": "en",
+   "category": "complaint-reveals-rule",
+   "prompt": "Ugh, you pushed straight to main again. How many times have I said it — every change goes through a PR, even one-liners.",
+   "expect": {
+    "trigger": true,
+    "observable": "exactly one engram write with the PR rule; same-turn acknowledgment",
+    "store_include": [
+     "PR"
+    ],
+    "acknowledge": true
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "iw-neg-027",
+   "module": "implicit-write-neg",
+   "lang": "zh",
+   "category": "transient-frustration",
+   "prompt": "这个报错搞了我一下午,头大,先去吃个饭。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — transient state, no durable fact revealed"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "iw-neg-028",
+   "module": "implicit-write-neg",
+   "lang": "en",
+   "category": "third-party-fact",
+   "prompt": "My colleague Dave just switched his laptop to a Framework and says he loves it.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — fact about someone else, not the user"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  }
+ ]
+}

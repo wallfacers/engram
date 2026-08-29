@@ -49,9 +49,13 @@ installs only the skill; install the CLI and configure the MCP server
 separately. The default command keeps **one shared copy** in the universal
 skills directory `~/.agents/skills/engram`; every other client — including
 Claude Code, which only reads its own `~/.claude/skills/` — gets a symlink to
-it. Codex and OpenCode scan `~/.agents/skills/` natively, so the package is
-discovered as-is; scoping flags like `--agent <id>` are only for explicitly
-restricting an install to one client's own directory.
+it. Codex and OpenCode scan `~/.agents/skills/` natively (probe-verified on
+codex-cli 0.150.1 and opencode2 v0.0.0-beta-18600), so the package is
+discovered as-is. **Never additionally copy the skill into private directories
+such as `~/.codex/skills/` or `~/.config/opencode/skills/`** — those duplicates
+are redundant, drift on upgrade, and shadow the shared copy. Scoping flags
+like `--agent <id>` are only for explicitly restricting an install to one
+client's own directory.
 
 ```bash
 npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global

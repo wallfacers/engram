@@ -32,7 +32,7 @@ namespace rather than assuming it is the same store.
 | Intent | Command | Evidence and boundary |
 |---|---|---|
 | write/update | `engram [global flags] add --name <name> --content <text> [--trigger <text>] [--category <value>] [--pinned]` | `# added` and the added name; explicit intent only |
-| search | `engram [global flags] search "<query>" [--limit <n>]` | rendered hits or an empty result; limit must be positive |
+| search | `engram [global flags] search "<query>" [--limit <n>]` | rendered hits or an empty result; limit must be positive; use short keyword queries (2–4 content terms including the constraint vocabulary, e.g. `package manager`, `allergy 过敏`, `naming convention`), never a full sentence — retry once with the single most distinctive term before reporting empty |
 | exact get | `engram [global flags] get <name>` | rendered entry or not-found exit code |
 | list | `engram [global flags] list` | rendered entries, possibly empty |
 | delete | `engram [global flags] delete <name>` | `# deleted` only for an actual deletion |

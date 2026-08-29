@@ -1,0 +1,988 @@
+{
+ "dataset": "implicit-read",
+ "version": 3,
+ "description": "Implicit memory-read scenarios. Positive cases: the question/task depends on the user's/project's persisted facts — the engram skill must fire a search (memory_search or CLI search) BEFORE answering, and the answer must be grounded in seeded store content (empty store => honest not-found, no invention). Negative cases: questions unrelated to any persisted fact — no engram call may occur. Seeds are planted deterministically via CLI before the prompt runs; judge anchors are engram operation traces plus answer-text content checks. v2: bilingual seed content (offline keyword retrieval is language-sensitive; seeds carry both zh and en keywords).",
+ "cases": [
+  {
+   "id": "ir-pos-001",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "direct-query",
+   "prompt": "我平时用什么包管理器来着?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer names pnpm",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager",
+     "content": "User uses pnpm as their package manager. 用户的包管理器是 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-002",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "anaphoric-convention",
+   "prompt": "按我们之前定好的命名规范,给这个新的配置解析模块起个文件名。",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; proposed name uses snake_case per the seeded convention",
+    "answer_include": [
+     "snake_case|snake case"
+    ]
+   },
+   "seed": [
+    {
+     "name": "naming-convention",
+     "content": "Project convention: all Go source files are named in snake_case, e.g. config_loader.go. 项目命名规范:Go 源文件一律 snake_case 下划线命名。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-003",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "task-implied",
+   "prompt": "帮我把这个项目的依赖装一下,装完跑一遍测试。",
+   "expect": {
+    "trigger": true,
+    "observable": "search call occurs before running any install command; the chosen install command is pnpm (not npm/yarn)",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager",
+     "content": "User uses pnpm as their package manager. 用户的包管理器是 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-004",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "enumeration",
+   "prompt": "我有哪些饮食上的禁忌?帮我列全,一会儿点餐要用。",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer includes BOTH peanut allergy and cilantro aversion (enumeration must sweep all records)",
+    "answer_include": [
+     "花生|peanut",
+     "香菜|cilantro"
+    ]
+   },
+   "seed": [
+    {
+     "name": "diet-peanut",
+     "content": "User has a severe peanut allergy. 用户对花生严重过敏。"
+    },
+    {
+     "name": "diet-cilantro",
+     "content": "User does not eat cilantro. 用户不吃香菜。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-005",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "temporal",
+   "prompt": "我之前提过的合规报告,下次截止大概是什么时候?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer mentions quarter-end (季度末/三月底 etc.)",
+    "answer_include": [
+     "季|quarter"
+    ]
+   },
+   "seed": [
+    {
+     "name": "compliance-report",
+     "content": "User submits a compliance report at the end of every quarter (late Mar/Jun/Sep/Dec). 用户每个季度末提交合规报告。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-006",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "empty-honest",
+   "prompt": "我常用的 RSS 阅读器是哪个?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call occurs; answer states nothing stored/not found (没有/未找到/没记录/not found/no stored) — must NOT invent a specific reader",
+    "notfound": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-007",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "supersede",
+   "prompt": "我家那台服务器现在跑的是什么系统?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer names Debian 12 as the current OS (mentioning the old Ubuntu as history is fine; answering only Ubuntu is a fail)",
+    "answer_include": [
+     "Debian"
+    ]
+   },
+   "seed": [
+    {
+     "name": "server-os-old",
+     "content": "User's personal server used to run Ubuntu. 用户个人服务器以前用 Ubuntu。"
+    },
+    {
+     "name": "server-os-now",
+     "content": "User's personal server now runs Debian 12 (switched from Ubuntu). 用户个人服务器现在运行 Debian 12(从 Ubuntu 换过来)。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-008",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "decision-rationale",
+   "prompt": "当初我为什么弃用 npm 的,你还有印象吗?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer cites slow installs (太慢/slow) as the reason",
+    "answer_include": [
+     "慢|slow"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager-why",
+     "content": "User switched from npm to pnpm because npm installs were too slow. 用户弃用 npm 因为安装太慢,改用 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-009",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "aggregate",
+   "prompt": "新开一个结对编程会话,先总结一下我的开发环境,方便你后面写代码时对齐。",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the summary; summary includes M2 MacBook, Neovim, and Rust (all three seeded facts)",
+    "answer_include": [
+     "M2|MacBook",
+     "Neovim",
+     "Rust"
+    ]
+   },
+   "seed": [
+    {
+     "name": "dev-machine",
+     "content": "User develops on an M2 MacBook Pro (ARM). 用户开发机是 M2 MacBook Pro(ARM)。"
+    },
+    {
+     "name": "editor",
+     "content": "User codes in Neovim. 用户用 Neovim 写代码。"
+    },
+    {
+     "name": "main-lang",
+     "content": "User's main language is Rust. 用户主力语言是 Rust。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-010",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "identity-query",
+   "prompt": "我现在是做什么的?周末一般干嘛?",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the answer; answer covers SRE role AND weekend climbing",
+    "answer_include": [
+     "SRE",
+     "攀岩|climb"
+    ]
+   },
+   "seed": [
+    {
+     "name": "role",
+     "content": "User transitioned to the SRE team. 用户已转岗到 SRE 团队。"
+    },
+    {
+     "name": "weekend",
+     "content": "User goes to the climbing gym most weekends. 用户周末一般去攀岩馆。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-011",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "constraint-application",
+   "prompt": "帮我推荐一个今晚点的川菜外卖,两个人吃。",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the recommendation; recommendation explicitly avoids peanuts (e.g. states no peanut dishes per allergy) — recommending peanut-heavy dishes without checking is a fail",
+    "answer_include": [
+     "花生|peanut"
+    ]
+   },
+   "seed": [
+    {
+     "name": "diet-peanut",
+     "content": "User has a severe peanut allergy. 用户对花生严重过敏。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-012",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "meeting-schedule",
+   "prompt": "下周一帮我约一个 30 分钟的技术评审,找个合适的时间。",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the proposal; proposed time respects Berlin CET morning (no slot after 15:00 CET; the proposal references the user's timezone constraint)",
+    "answer_include": [
+     "CET|柏林|Berlin"
+    ]
+   },
+   "seed": [
+    {
+     "name": "tz-constraint",
+     "content": "User is based in Berlin; meetings only CET mornings, never after 3pm user time. 用户常驻柏林,会议只排 CET 上午,下午三点后不排。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-013",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "direct-query",
+   "prompt": "Which package manager do I use day to day, remind me?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer names pnpm",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager",
+     "content": "User uses pnpm as their package manager. 用户的包管理器是 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-014",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "anaphoric-convention",
+   "prompt": "Following our usual naming convention, pick a file name for this new config-parsing module.",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; proposed name uses snake_case per the seeded convention",
+    "answer_include": [
+     "snake_case|snake case"
+    ]
+   },
+   "seed": [
+    {
+     "name": "naming-convention",
+     "content": "Project convention: all Go source files are named in snake_case, e.g. config_loader.go. 项目命名规范:Go 源文件一律 snake_case 下划线命名。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-015",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "task-implied",
+   "prompt": "Install this project's dependencies and run the test suite.",
+   "expect": {
+    "trigger": true,
+    "observable": "search call occurs before running any install command; the chosen install command is pnpm (not npm/yarn)",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager",
+     "content": "User uses pnpm as their package manager. 用户的包管理器是 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-016",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "enumeration",
+   "prompt": "What dietary restrictions do I have? List everything — I'm about to order food.",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer includes BOTH peanut allergy and cilantro aversion",
+    "answer_include": [
+     "花生|peanut",
+     "香菜|cilantro"
+    ]
+   },
+   "seed": [
+    {
+     "name": "diet-peanut",
+     "content": "User has a severe peanut allergy. 用户对花生严重过敏。"
+    },
+    {
+     "name": "diet-cilantro",
+     "content": "User does not eat cilantro. 用户不吃香菜。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-017",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "temporal",
+   "prompt": "That compliance report I mentioned — when is the next deadline roughly?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer mentions quarter-end",
+    "answer_include": [
+     "季|quarter"
+    ]
+   },
+   "seed": [
+    {
+     "name": "compliance-report",
+     "content": "User submits a compliance report at the end of every quarter (late Mar/Jun/Sep/Dec). 用户每个季度末提交合规报告。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-018",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "empty-honest",
+   "prompt": "Which RSS reader do I usually use?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call occurs; answer states nothing stored/not found — must NOT invent a specific reader",
+    "notfound": true
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-019",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "supersede",
+   "prompt": "What OS is my home server running these days?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer names Debian 12 as current (mentioning old Ubuntu as history is fine; answering only Ubuntu is a fail)",
+    "answer_include": [
+     "Debian"
+    ]
+   },
+   "seed": [
+    {
+     "name": "server-os-old",
+     "content": "User's personal server used to run Ubuntu. 用户个人服务器以前用 Ubuntu。"
+    },
+    {
+     "name": "server-os-now",
+     "content": "User's personal server now runs Debian 12 (switched from Ubuntu). 用户个人服务器现在运行 Debian 12(从 Ubuntu 换过来)。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-020",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "decision-rationale",
+   "prompt": "Why did I drop npm again? Do you remember my reasoning?",
+   "expect": {
+    "trigger": true,
+    "observable": "search call precedes the answer; answer cites slow installs as the reason",
+    "answer_include": [
+     "慢|slow"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager-why",
+     "content": "User switched from npm to pnpm because npm installs were too slow. 用户弃用 npm 因为安装太慢,改用 pnpm。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-021",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "aggregate",
+   "prompt": "New pairing session — start by summarizing my dev setup so we're aligned before writing code.",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the summary; summary includes M2 MacBook, Neovim, and Rust",
+    "answer_include": [
+     "M2|MacBook",
+     "Neovim",
+     "Rust"
+    ]
+   },
+   "seed": [
+    {
+     "name": "dev-machine",
+     "content": "User develops on an M2 MacBook Pro (ARM). 用户开发机是 M2 MacBook Pro(ARM)。"
+    },
+    {
+     "name": "editor",
+     "content": "User codes in Neovim. 用户用 Neovim 写代码。"
+    },
+    {
+     "name": "main-lang",
+     "content": "User's main language is Rust. 用户主力语言是 Rust。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-022",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "constraint-application",
+   "prompt": "Recommend a Sichuan takeout order for dinner tonight, two people.",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the recommendation; recommendation explicitly avoids peanuts per the allergy",
+    "answer_include": [
+     "花生|peanut"
+    ]
+   },
+   "seed": [
+    {
+     "name": "diet-peanut",
+     "content": "User has a severe peanut allergy. 用户对花生严重过敏。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-023",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "meeting-schedule",
+   "prompt": "Set up a 30-minute design review for me next Monday — pick a sensible time.",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the proposal; proposed time respects Berlin CET morning (no slot after 15:00 CET)",
+    "answer_include": [
+     "CET|柏林|Berlin"
+    ]
+   },
+   "seed": [
+    {
+     "name": "tz-constraint",
+     "content": "User is based in Berlin; meetings only CET mornings, never after 3pm user time. 用户常驻柏林,会议只排 CET 上午,下午三点后不排。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-024",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "git-safety",
+   "prompt": "I need to rewrite the history of this feature branch — what's the safest approach?",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the answer; answer reflects the seeded no-force-push rule (does NOT recommend force-push; references the project rule)",
+    "answer_include": [
+     "force-push|force push|forcepush"
+    ]
+   },
+   "seed": [
+    {
+     "name": "git-rule",
+     "content": "Project hard rule: no force-push on any branch, including feature branches. 项目硬规则:任何分支都不许 force-push 强推。"
+    }
+   ],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-001",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "pure-tech",
+   "prompt": "Go 的 defer 语义是什么?执行顺序帮我讲清楚。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-002",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "current-affairs",
+   "prompt": "现在最新的 Go 稳定版本是多少?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-003",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "hypothetical-generic",
+   "prompt": "如果一个小团队想用 Redis 存 session,要注意什么?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (generic hypothetical user, not this user's facts)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-004",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "generic-best-practice",
+   "prompt": "REST API 设计有哪些通用的最佳实践?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-005",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "third-party-topic",
+   "prompt": "Python 适合写游戏吗?大概什么规模的项目合适?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-006",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "code-task-generic",
+   "prompt": "把这个函数的错误处理补全,该回滚的地方回滚。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls (task carries no reference to any persisted user/project fact)"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-007",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "math",
+   "prompt": "解一下这个方程:3x + 5 = 20,把步骤写出来。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-008",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "creative",
+   "prompt": "帮我写一首关于秋天傍晚的短诗,四行就好。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-009",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "translation",
+   "prompt": "把这段话翻译成英文:内存管理是操作系统的核心功能之一。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-010",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "definition",
+   "prompt": "幂等性是什么意思?在接口设计里为什么重要?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-011",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "doc-request",
+   "prompt": "给这个 Bash 脚本写个使用说明,放 README 里。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-012",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "compare-generic",
+   "prompt": "对比一下几种常见消息队列的优缺点,做个选型参考表。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-013",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "pure-tech",
+   "prompt": "Explain Go's defer semantics and execution order.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-014",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "current-affairs",
+   "prompt": "What's the latest stable Go release right now?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-015",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "hypothetical-generic",
+   "prompt": "If a small team wants to store sessions in Redis, what should they watch out for?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-016",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "generic-best-practice",
+   "prompt": "What are the generally accepted REST API design best practices?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-017",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "third-party-topic",
+   "prompt": "Is Python a good fit for game development? Up to what project scale?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-018",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "code-task-generic",
+   "prompt": "Fill in the missing error handling in this function — roll back where needed.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-019",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "math",
+   "prompt": "Solve 3x + 5 = 20 and show the steps.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-020",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "creative",
+   "prompt": "Write a short four-line poem about an autumn evening.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-021",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "translation",
+   "prompt": "Translate this sentence to Chinese: Memory management is one of the OS's core functions.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-022",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "definition",
+   "prompt": "What does idempotency mean, and why does it matter in API design?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-023",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "doc-request",
+   "prompt": "Write a usage guide for this Bash script for the README.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-neg-024",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "compare-generic",
+   "prompt": "Compare the common message queues and make a selection reference table.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls"
+   },
+   "seed": [],
+   "source": "initial"
+  },
+  {
+   "id": "ir-pos-025",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "task-implied",
+   "prompt": "帮我跑一下这个项目的构建。",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the build; build runs with pnpm per remembered convention",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "build-tool",
+     "content": "User builds this project with pnpm build, never npm. 用户构建固定用 pnpm build。"
+    }
+   ],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-pos-026",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "task-implied",
+   "prompt": "Install the project dependencies for me.",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the install; install runs with pnpm per remembered convention",
+    "answer_include": [
+     "pnpm"
+    ]
+   },
+   "seed": [
+    {
+     "name": "pkg-manager",
+     "content": "User uses pnpm as their package manager; never npm. 用户的包管理器是 pnpm。"
+    }
+   ],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-pos-027",
+   "module": "implicit-read-pos",
+   "lang": "zh",
+   "category": "anaphoric-question",
+   "prompt": "我要开新分支了,我们上次的分支策略是什么来着?",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes the answer; answer names the trunk-based strategy",
+    "answer_include": [
+     "trunk"
+    ]
+   },
+   "seed": [
+    {
+     "name": "branch-policy",
+     "content": "Branch strategy: trunk-based with short-lived branches. 分支策略是 trunk-based 短生命周期分支。"
+    }
+   ],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-pos-028",
+   "module": "implicit-read-pos",
+   "lang": "en",
+   "category": "memory-over-environment",
+   "prompt": "Set up my keyboard layout the same way here — which layout do I use again?",
+   "expect": {
+    "trigger": true,
+    "observable": "search precedes setup; the Dvorak layout from memory is applied and named",
+    "answer_include": [
+     "Dvorak"
+    ]
+   },
+   "seed": [
+    {
+     "name": "keyboard-layout",
+     "content": "User types on a Dvorak keyboard layout. 用户的键盘布局是 Dvorak。"
+    }
+   ],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-neg-025",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "env-action-no-convention",
+   "prompt": "把这个目录里所有 .log 临时文件删掉。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — deletion of temp files, nothing remembered governs it"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-neg-026",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "generic-knowledge",
+   "prompt": "How do I exit vim?",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — generic editor question, not a remembered personal fact"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-neg-027",
+   "module": "implicit-read-neg",
+   "lang": "zh",
+   "category": "generic-knowledge",
+   "prompt": "解释一下这个正则 ^[a-z]{3}-\\d+$ 匹配什么。",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — generic regex explanation, no personal fact involved"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  },
+  {
+   "id": "ir-neg-028",
+   "module": "implicit-read-neg",
+   "lang": "en",
+   "category": "summarize-pseudo",
+   "prompt": "Summarize what this conversation is about in two sentences.",
+   "expect": {
+    "trigger": false,
+    "observable": "zero engram calls — summarization request is not a memory operation"
+   },
+   "seed": [],
+   "source": "flywheel-round-3"
+  }
+ ]
+}
