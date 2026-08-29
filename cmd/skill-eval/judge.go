@@ -17,7 +17,8 @@ type Verdict struct {
 // ackTokens: same-turn acknowledgment phrasings (write cases).
 var ackTokens = []string{
 	"已记", "已保存", "已存", "记下", "记住", "存入", "写入", "已录入", "帮你记",
-	"saved", "stored", "recorded", "noted", "added to memory", "wrote to memory",
+	"已更新", "更新记忆", "记入", "记好", "记到",
+	"saved", "stored", "recorded", "noted", "updated", "added to memory", "wrote to memory",
 }
 
 // notFoundTokens: honest not-found phrasings (read cases with empty stores).
@@ -75,9 +76,18 @@ func Judge(c Case, events []Event, storeDump string) Verdict {
 	retrievals := count("search") + count("get") + count("list")
 
 	if !c.Expect.Trigger {
-		if len(ops) > 0 {
+		// Write-negative cases: only a mutating engram op (write/delete) is a
+		// misfire — a search performed while declining to store ("别记" → the
+		// agent verifies nothing stale exists) is careful behavior, not a
+		// violation. Read-negative cases keep the strict any-call rule: for a
+		// memory-independent question even a search is an over-trigger.
+		misfire := len(ops) > 0
+		if c.Module == "implicit-write-neg" {
+			misfire = count("write") > 0 || count("delete") > 0
+		}
+		if misfire {
 			v.Failure = "false-positive"
-			v.Detail = fmt.Sprintf("expected no engram call, saw ops %v", ops)
+			v.Detail = fmt.Sprintf("expected no engram misfire, saw ops %v", ops)
 		} else {
 			v.Pass = true
 		}

@@ -159,7 +159,12 @@ func (c *RunConfig) AddTool(spec string) {
 		// next — the round-1 auto-memory contamination, now per-case.
 		tc.PerCaseCwd = true
 		tc.build = func(tc ToolConfig, binDir, settings, caseDir, prompt string) *exec.Cmd {
-			mcpCfg := filepath.Join(c.Scratch, "run", "mcp-claude-"+tc.Label+".json")
+			// Per-case config file: one shared path per label is a write race
+			// under concurrency — parallel claude processes overwrite it and
+			// every store funnels into whichever caseDir the last writer
+			// encoded.
+			mcpCfg := filepath.Join(c.Scratch, "run",
+				"mcp-claude-"+tc.Label+"-"+filepath.Base(caseDir)+".json")
 			writeMCPConfig(mcpCfg, filepath.Join(binDir, "engram-mcp"), caseDir)
 			args := []string{"--settings", settings, "--mcp-config", mcpCfg,
 				"--allowed-tools", "mcp__engram__*"}
@@ -195,7 +200,15 @@ func (c *RunConfig) AddTool(spec string) {
 			// --standalone: private server per invocation — the shared
 			// background service is a serialization point whose sessions
 			// stall a worker pool when a client is killed on timeout.
-			return exec.Command("opencode2", "run", "--standalone", "--auto", "--format", "json", prompt, caseDir)
+			// The model must ALSO be passed as --model: `run` does not honor
+			// the project config's "model" key for provider selection (it
+			// fell back to the free Console tier in round 3).
+			args := []string{"run", "--standalone", "--auto", "--format", "json"}
+			if m := os.Getenv("ENGRAM_SKILL_EVAL_OPENCODE_MODEL"); m != "" {
+				args = append(args, "--model", m)
+			}
+			args = append(args, prompt, caseDir)
+			return exec.Command("opencode2", args...)
 		}
 	}
 	c.Tools = append(c.Tools, tc)
@@ -237,6 +250,9 @@ func writeMCPConfig(path, engramMCP, dataDir string) {
 func writeOpenCodeConfig(dir, binDir string) {
 	cfg := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
+		// self-update rewrites the installed binary in place, briefly
+		// deleting the exe and 127-killing concurrent spawns mid-run
+		"autoupdate": false,
 		"mcp": map[string]any{
 			"servers": map[string]any{
 				"engram": map[string]any{
@@ -302,7 +318,67 @@ func Run(cfg *RunConfig) error {
 	writeJSON(filepath.Join(cfg.OutDir, "run-report.json"), agg)
 	writeFailures(cfg.OutDir, agg)
 	fmt.Print(agg.Summary())
+
+	// Post-run hygiene: eval data must never linger in the maintainer's real
+	// memory systems — remove the eval claude instances' project auto-memory
+	// directories and any dataset seed entries that leaked into the user's
+	// default engram store.
+	var seedNames []string
+	seen := map[string]bool{}
+	for _, cs := range cfg.cases {
+		for _, s := range cs.Seed {
+			if !seen[s.Name] {
+				seen[s.Name] = true
+				seedNames = append(seedNames, s.Name)
+			}
+		}
+	}
+	if dirs, seeds, err := sweepHostArtifacts(cfg.Scratch, seedNames, cfg.engramBin); err != nil {
+		fmt.Printf("sweep warning: %v\n", err)
+	} else if dirs > 0 || seeds > 0 {
+		fmt.Printf("swept %d eval project dirs, %d leaked seed entries from the user store\n", dirs, seeds)
+	}
 	return nil
+}
+
+// sweepHostArtifacts removes eval-spawned host state after a run:
+// (1) claude-code keys each instance's auto-memory to its project cwd, so a
+// run leaves one ~/.claude/projects/-<encoded caseDir> directory per case —
+// all directories prefixed by the encoded scratch path are removed;
+// (2) dataset seed entries that leaked into the user's real default store
+// (~/.engram/default.db) are deleted through the engram CLI (never raw SQL —
+// the FTS mirror must stay consistent). It returns how many project
+// directories and seed entries were removed.
+func sweepHostArtifacts(scratch string, seedNames []string, engramBin string) (dirs, seeds int, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, 0, err
+	}
+	projDir := filepath.Join(home, ".claude", "projects")
+	prefix := "-" + strings.ReplaceAll(scratch, string(filepath.Separator), "-")
+	if ents, err := os.ReadDir(projDir); err == nil {
+		for _, e := range ents {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(projDir, e.Name())); err == nil {
+				dirs++
+			}
+		}
+	}
+	userDB := filepath.Join(home, ".engram", "default.db")
+	if len(seedNames) > 0 && engramBin != "" {
+		if _, err := os.Stat(userDB); err == nil {
+			for _, name := range seedNames {
+				cmd := exec.Command(engramBin, "--data-dir", filepath.Join(home, ".engram"),
+					"delete", name)
+				if out, err := cmd.CombinedOutput(); err == nil && !bytes.Contains(out, []byte("not found")) {
+					seeds++
+				}
+			}
+		}
+	}
+	return dirs, seeds, nil
 }
 
 // ToolReport is one tool's full result.
@@ -384,8 +460,13 @@ func runTool(cfg *RunConfig, tc ToolConfig, settings string) *ToolReport {
 	close(jobs)
 	wg.Wait()
 	// Keep every verdict collected before an unavailable break — failed
-	// diagnostics must not be dropped with the report.
-	rep.Verdicts = verdicts
+	// diagnostics must not be dropped with the report. Unfilled slice slots
+	// (zero Verdicts after a breaker trip) are dropped: they are not cases.
+	for _, v := range verdicts {
+		if v.CaseID != "" {
+			rep.Verdicts = append(rep.Verdicts, v)
+		}
+	}
 	return rep
 }
 
@@ -428,20 +509,38 @@ func runCase(cfg *RunConfig, tc ToolConfig, settings string, c Case, rawDir stri
 		}
 	}
 
-	// 2. Run the agent CLI.
-	cmd := tc.build(tc, cfg.BinDir, settings, caseDir, c.Prompt)
-	if tc.PerCaseCwd {
-		cmd.Dir = caseDir
-	} else {
-		cmd.Dir = tc.Cwd
+	// 2. Run the agent CLI. Non-timeout spawn/exit failures (opencode
+	// self-update windows, transient provider aborts) get one immediate
+	// retry — timeouts do not (hopeless cases must not double wall time).
+	var raw []byte
+	var stderrBuf bytes.Buffer
+	var runErr error
+	for attempt := 0; ; attempt++ {
+		cmd := tc.build(tc, cfg.BinDir, settings, caseDir, c.Prompt)
+		if tc.PerCaseCwd {
+			cmd.Dir = caseDir
+		} else {
+			cmd.Dir = tc.Cwd
+		}
+		cmd.Env = append(os.Environ(),
+			"PATH="+cfg.BinDir+":"+os.Getenv("PATH"),
+			// Agents that prefer the CLI over MCP must still land in this
+			// case's store: bare `engram add` honors ENGRAM_DATA_DIR, so both
+			// surfaces converge on caseDir (opencode round-3 wrote correct
+			// content into the default store and was judged wrong-op).
+			"ENGRAM_DATA_DIR="+caseDir)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr = runWithTimeout(cmd, cfg.Timeout)
+		raw = stdout.Bytes()
+		stderrBuf = stderr
+		if runErr == nil || attempt == 1 || strings.HasPrefix(runErr.Error(), "timeout") {
+			break
+		}
 	}
-	cmd.Env = append(os.Environ(), "PATH="+cfg.BinDir+":"+os.Getenv("PATH"))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	runErr := runWithTimeout(cmd, cfg.Timeout)
-	raw := stdout.Bytes()
 	_ = os.WriteFile(filepath.Join(rawDir, c.ID+".jsonl"), raw, 0o644)
+	stderrStr := stderrBuf.String()
 
 	var events []Event
 	switch tc.Base {
@@ -459,7 +558,7 @@ func runCase(cfg *RunConfig, tc ToolConfig, settings string, c Case, rawDir stri
 	}
 	if runErr != nil {
 		return Verdict{CaseID: c.ID, Failure: "failed",
-			Detail: fmt.Sprintf("runner: %v (events captured: %d; stderr: %s)", runErr, len(events), truncate(stderr.String(), 300))}, diag
+			Detail: fmt.Sprintf("runner: %v (events captured: %d; stderr: %s)", runErr, len(events), truncate(stderrStr, 300))}, diag
 	}
 
 	// 3. Store-side verification dump (post-turn).

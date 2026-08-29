@@ -55,6 +55,21 @@ func TestJudgeWriteNeg(t *testing.T) {
 	if v.Pass || v.Failure != "false-positive" {
 		t.Errorf("false-positive neg: %+v", v)
 	}
+	// A read while declining to store (refusal case: verify nothing stale
+	// exists) is careful behavior, not a misfire.
+	v = Judge(c, []Event{
+		{Kind: EventEngramCall, Op: "search", Via: "mcp"},
+		{Kind: EventText, Text: "好的,不记;记忆里也没有旧条目需要清理。"},
+	}, "")
+	if !v.Pass {
+		t.Errorf("search-only refusal handling should pass: %+v", v)
+	}
+	// Read-negative keeps the strict any-call rule.
+	r := Case{ID: "ir-neg-001", Module: "implicit-read-neg", Expect: Expect{Trigger: false}}
+	v = Judge(r, []Event{{Kind: EventEngramCall, Op: "search", Via: "mcp"}}, "")
+	if v.Pass || v.Failure != "false-positive" {
+		t.Errorf("read-neg search must stay a misfire: %+v", v)
+	}
 }
 
 func readCase() Case {
@@ -110,6 +125,27 @@ func TestJudgeRegression(t *testing.T) {
 	}
 	if v := Judge(pos, nil, ""); v.Pass || v.Failure != "false-negative" {
 		t.Errorf("regression pos without op: %+v", v)
+	}
+}
+
+func TestJudgeAckPhrasings(t *testing.T) {
+	base := writeCase()
+	// Natural update/record acknowledgments observed in real runs (f1):
+	// "已更新记忆", "记入长期记忆" — write + store were correct, only the
+	// ack token list was too narrow to see them.
+	for _, ack := range []string{
+		"已更新记忆:服务器换成 Debian 12。",
+		"我已经把这条信息记入长期记忆:花生过敏。",
+		"已记好了,以后按这个来。",
+		"Noted — stored your OpenAPI preference.",
+	} {
+		v := Judge(base, []Event{
+			{Kind: EventEngramCall, Op: "write", Via: "mcp"},
+			{Kind: EventText, Text: ack},
+		}, "OpenAPI 3 preference stored")
+		if !v.Pass {
+			t.Errorf("ack phrasing %q should pass, got %+v", ack, v)
+		}
 	}
 }
 

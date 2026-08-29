@@ -70,6 +70,30 @@ func TestParseClaudeIgnoresNonEngramTools(t *testing.T) {
 	}
 }
 
+func TestParseClaudeBashCLIInvocation(t *testing.T) {
+	// claude reaches CLI-only intents (stats/export/version) through its Bash
+	// tool; codex/opencode parses the same shape, so claude must too — a CLI
+	// fallback invisible to the judge reads as "no engram call" (reg-011).
+	in := strings.Join([]string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"engram version"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"env | grep -i engram; engram stats 2>&1"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"engram --data-dir /d export"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"sed -n '1,240p' /home/u/.claude/skills/engram/SKILL.md"}}]}}`,
+	}, "\n")
+	ev := ParseClaude(strings.NewReader(in))
+	var others int
+	for _, e := range ev {
+		if e.Kind != EventEngramCall || e.Op != "other" || e.Via != "cli" {
+			t.Errorf("unexpected event %+v (want 3x engram_call other/cli)", e)
+		} else {
+			others++
+		}
+	}
+	if others != 3 {
+		t.Errorf("claude bash cli ops = %d, want 3 (SKILL.md sed must not count)", others)
+	}
+}
+
 func TestParseCodex(t *testing.T) {
 	in := strings.Join([]string{
 		`Reading additional input from stdin...`,

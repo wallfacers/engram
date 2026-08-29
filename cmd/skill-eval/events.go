@@ -141,6 +141,16 @@ func ParseClaude(r io.Reader) []Event {
 						if op, ok := mcpOp(tool); ok {
 							ev = append(ev, Event{Kind: EventEngramCall, Op: op, Via: "mcp"})
 						}
+					} else if name == "Bash" {
+						// CLI-only intents (stats/export/version) surface as Bash
+						// commands; codex/opencode parse their shell tool the
+						// same way, so an invisible CLI fallback here would be
+						// judged "no engram call".
+						input, _ := blk["input"].(map[string]any)
+						cmd, _ := input["command"].(string)
+						if op, ok := cliInvocation(cmd); ok {
+							ev = append(ev, Event{Kind: EventEngramCall, Op: op, Via: "cli"})
+						}
 					}
 				case "text":
 					t, _ := blk["text"].(string)
