@@ -31,19 +31,28 @@ Datasets live in the skill package at `skills/engram/evals/`:
 |---|---|---|
 | `implicit-write.json` | `implicit-write-pos` / `implicit-write-neg` | durable-fact disclosures vs. never-record cases |
 | `implicit-read.json` | `implicit-read-pos` / `implicit-read-neg` | memory-dependent questions vs. independent ones |
+| `trap.json` | `trap-read-pos` / `trap-write-neg` / `trap-read-neg` | adversarial layer: store-content injection, entity confusion, dated supersession, retelling recount, memory-over-environment, secret read/write, imperative-"remember", pasted-text injection |
 | `trigger-evals.json` | `regression` | the frozen 020 explicit set (16 pos / 16 neg), never edited |
 
 Rules: datasets are **append-only** (cases are never deleted or reworded —
 fixed cases are added back with `source: "flywheel-round-N"`); every positive
 case carries machine-readable judge rules (`store_include`, `answer_include`,
-`acknowledge`, `notfound`); zh/en must both be covered per module.
+`acknowledge`, `notfound`); zh/en must both be covered per module. Trap cases
+add two exclude rules — `answer_exclude` (no listed token may appear in the
+answer: injection canaries, echoed secrets) and `store_exclude` (no listed
+token may remain in the store after the turn) — and may stage environment
+evidence via `files` (planted into the per-case workspace; visible to
+claude/opencode whose cwd is the case dir — codex runs in the shared scratch,
+so file-backed traps degrade to memory-over-nothing there).
 
 ```bash
 ~/bin/skill-eval validate --dataset skills/engram/evals
 ```
 
-enforces module coverage, ≥20 cases per module, 40/40 pos-neg balance, unique
-ids, and machine-rule completeness. A run refuses to start on a failed gate.
+enforces module coverage, ≥20 cases per implicit module, 40/40 pos-neg balance,
+unique ids, and machine-rule completeness. A run refuses to start on a failed
+gate. Trap modules carry their own gates (≥4 per module, zh+en, pos≥12/neg≥8,
+every trap read case must carry at least one machine rule).
 
 ## Running
 
@@ -147,6 +156,16 @@ removed; `peanut-allergy`, `no-force-push-hard-rule`, `working-timezone`
 deleted from `~/.engram/default.db`. If you run the harness from a different
 scratch root, the sweep only covers that run's prefix — old roots need the
 matching manual `rm -rf ~/.claude/projects/-<encoded-old-scratch>*`.
+
+**Evidence-ledger leakage (manual; the CLI has no evidence surface)**: a
+harness bug can land `memory_write`-sourced rows in the ledger
+(`memory_evidence` / `memory_evidence_heads` / `memory_evidence_events`)
+while `memory_entries` stays empty — `list` shows nothing, so the CLI sweep
+misses them. Audit by counting the three tables; rows carrying eval content
+(scratch paths, seed facts) are leaked. Back up `default.db` to the scratchpad
+first, then delete those evidence ids in one transaction — the ledger tables
+are not FTS-mirrored, so this stays consistent. (3 such rows from the
+2026-08-29 matrix harness found and cleaned 2026-08-30.)
 
 ## Reading the report
 

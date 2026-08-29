@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -238,5 +239,61 @@ func TestSweepHostArtifactsNoUserStore(t *testing.T) {
 	}
 	if dirs != 0 || seeds != 0 {
 		t.Errorf("empty home: dirs=%d seeds=%d, want 0/0", dirs, seeds)
+	}
+}
+
+func TestRunConfigIncludesTrapDataset(t *testing.T) {
+	ds, err := LoadDatasets(repoEvalsDir(t))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg, err := NewRunConfig(t.TempDir(), t.TempDir(), t.TempDir(), 60, 0, ds)
+	if err != nil {
+		t.Fatalf("NewRunConfig: %v", err)
+	}
+	want := 0
+	for _, name := range []string{"implicit-write", "implicit-read", "trap", "regression"} {
+		want += len(ds[name].Cases)
+	}
+	if len(cfg.cases) != want {
+		t.Errorf("case list %d != expected %d (trap dataset not flattened?)", len(cfg.cases), want)
+	}
+	for _, cs := range ds["trap"].Cases {
+		if moduleRegistry[cs.ID] != cs.Module {
+			t.Errorf("case %s not in moduleRegistry", cs.ID)
+		}
+	}
+	// --only must accept trap ids (single-case retry mode).
+	if err := cfg.ApplyOnly([]string{"tr-pos-001", "tr-rneg-004"}); err != nil {
+		t.Errorf("ApplyOnly with trap ids: %v", err)
+	}
+	if len(cfg.cases) != 2 {
+		t.Errorf("ApplyOnly kept %d cases, want 2", len(cfg.cases))
+	}
+}
+
+func TestTrapFilesPlantedPerCase(t *testing.T) {
+	dir := t.TempDir()
+	c := Case{ID: "tr-pos-015", Module: "trap-read-pos",
+		Files: []FileSpec{{Path: "package-lock.json", Content: "{\"lockfileVersion\": 3}"}},
+		Expect: Expect{Trigger: true, AnswerInclude: []string{"pnpm"}}}
+	// runCase plants files as part of case setup; exercise the planting block
+	// the same way runCase does (workspace template + files).
+	caseDir := filepath.Join(dir, c.ID)
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkspaceTemplate(caseDir)
+	for _, f := range c.Files {
+		p := filepath.Join(caseDir, f.Path)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte(f.Content), 0o644)
+	}
+	b, err := os.ReadFile(filepath.Join(caseDir, "package-lock.json"))
+	if err != nil {
+		t.Fatalf("lockfile not planted: %v", err)
+	}
+	if !bytes.Contains(b, []byte("lockfileVersion")) {
+		t.Errorf("planted lockfile content wrong: %q", b)
 	}
 }

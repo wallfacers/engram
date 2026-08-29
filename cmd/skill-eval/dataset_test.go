@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,57 @@ func TestAlternationMatching(t *testing.T) {
 	}
 	if matchAlternation("something else", "香菜|cilantro") {
 		t.Error("no match expected")
+	}
+}
+
+func TestTrapDatasetShipped(t *testing.T) {
+	ds, err := LoadDatasets(repoEvalsDir(t))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	trap, ok := ds["trap"]
+	if !ok {
+		t.Fatal("trap dataset missing from LoadDatasets output")
+	}
+	mod := map[string]int{}
+	for _, c := range trap.Cases {
+		mod[c.Module]++
+		if c.Files != nil && c.Seed == nil {
+			t.Errorf("%s: file-backed trap should pair files with a seed", c.ID)
+		}
+	}
+	for _, m := range []string{"trap-read-pos", "trap-write-neg", "trap-read-neg"} {
+		if mod[m] < 4 {
+			t.Errorf("module %s too small: %d", m, mod[m])
+		}
+	}
+}
+
+func TestTrapRuleCompletenessGate(t *testing.T) {
+	// A trap read-pos case with no machine rule at all must fail validation.
+	ds, err := LoadDatasets(repoEvalsDir(t))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	broken := *ds["trap"]
+	broken.Cases = append([]Case(nil), broken.Cases...)
+	broken.Cases = append(broken.Cases, Case{
+		ID: "tr-pos-999", Module: "trap-read-pos", Lang: "zh",
+		Category: "trap-injection", Prompt: "x",
+		Expect: Expect{Trigger: true}, Source: "test",
+	})
+	ds["trap"] = &broken
+	rep := ValidateDatasets(ds)
+	if rep.OK {
+		t.Fatal("ruleless trap read-pos case passed validation")
+	}
+	found := false
+	for _, l := range rep.Lines {
+		if strings.Contains(l, "tr-pos-999") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("gate did not name the offending case; lines: %v", rep.Lines)
 	}
 }

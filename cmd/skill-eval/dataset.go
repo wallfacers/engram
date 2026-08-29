@@ -18,6 +18,7 @@ type Case struct {
 	Prompt   string     `json:"prompt"`
 	Expect   Expect     `json:"expect"`
 	Seed     []SeedItem `json:"seed"`
+	Files    []FileSpec `json:"files,omitempty"`
 	Source   string     `json:"source"`
 }
 
@@ -30,12 +31,26 @@ type Expect struct {
 	AnswerInclude []string `json:"answer_include,omitempty"` // each item: |-separated alternations, every item must match the answer text
 	Acknowledge   bool     `json:"acknowledge,omitempty"`    // write cases: same-turn acknowledgment required
 	NotFound      bool     `json:"notfound,omitempty"`       // read cases: honest not-found statement required
+	// Trap-layer rules (trap.json): none of the |-separated alternations may
+	// appear — answer_exclude catches injected canaries / echoed secrets in the
+	// reply, store_exclude catches forbidden content that must never be stored.
+	AnswerExclude []string `json:"answer_exclude,omitempty"`
+	StoreExclude  []string `json:"store_exclude,omitempty"`
 }
 
 // SeedItem is a memory entry planted deterministically via the CLI before the
 // prompt runs.
 type SeedItem struct {
 	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// FileSpec is a workspace file planted into the per-case directory before the
+// prompt runs — trap cases use it to stage environment evidence that
+// contradicts remembered facts (e.g. an npm lockfile vs. a remembered pnpm
+// convention).
+type FileSpec struct {
+	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
@@ -59,11 +74,11 @@ var requiredModules = []string{
 	"implicit-read-neg",
 }
 
-// LoadDatasets loads the implicit-write/implicit-read datasets plus the 020
-// legacy trigger set (mapped into the regression module) from dir.
+// LoadDatasets loads the implicit-write/implicit-read/trap datasets plus the
+// 020 legacy trigger set (mapped into the regression module) from dir.
 func LoadDatasets(dir string) (map[string]*Dataset, error) {
 	out := map[string]*Dataset{}
-	for _, name := range []string{"implicit-write.json", "implicit-read.json"} {
+	for _, name := range []string{"implicit-write.json", "implicit-read.json", "trap.json"} {
 		var d Dataset
 		if err := loadJSON(filepath.Join(dir, name), &d); err != nil {
 			return nil, fmt.Errorf("load %s: %w", name, err)
@@ -149,7 +164,7 @@ func ValidateDatasets(datasets map[string]*Dataset) ValidationReport {
 			modLang[c.Module][c.Lang] = true
 		}
 	}
-	for _, name := range []string{"implicit-write", "implicit-read", "regression"} {
+	for _, name := range []string{"implicit-write", "implicit-read", "trap", "regression"} {
 		d, ok := datasets[name]
 		if !ok {
 			rep.addf(false, "dataset %s missing", name)
@@ -163,6 +178,35 @@ func ValidateDatasets(datasets map[string]*Dataset) ValidationReport {
 		rep.addf(len(modLang[m]) >= 2, "module %s language coverage: %v (gate: zh+en)", m, keysOf(modLang[m]))
 	}
 	rep.addf(modCount["regression"] >= 20, "module regression has %d cases (gate: >=20)", modCount["regression"])
+
+	// Trap-layer gates: adversarial cases are their own modules, grown
+	// append-only like everything else. Smaller floors than the implicit
+	// layers; every trap read case must carry at least one machine rule
+	// (include, exclude, or notfound) so nothing passes by accident.
+	for _, m := range []string{"trap-read-pos", "trap-write-neg", "trap-read-neg"} {
+		rep.addf(modCount[m] >= 4, "module %s has %d cases (gate: >=4)", m, modCount[m])
+		rep.addf(len(modLang[m]) >= 2, "module %s language coverage: %v (gate: zh+en)", m, keysOf(modLang[m]))
+	}
+	if trap, ok := datasets["trap"]; ok {
+		pos, neg := 0, 0
+		for _, c := range trap.Cases {
+			if c.Expect.Trigger {
+				pos++
+			} else {
+				neg++
+			}
+			if !strings.HasPrefix(c.Category, "trap-") {
+				rep.addf(false, "%s: trap case category %q must be trap-prefixed", c.ID, c.Category)
+			}
+			if !c.Expect.Trigger || c.Module != "trap-read-pos" {
+				continue
+			}
+			if len(c.Expect.AnswerInclude) == 0 && len(c.Expect.AnswerExclude) == 0 && !c.Expect.NotFound {
+				rep.addf(false, "%s: trap read-pos missing answer_include/answer_exclude/notfound rules", c.ID)
+			}
+		}
+		rep.addf(pos >= 12 && neg >= 8, "trap balance pos=%d neg=%d (gate: pos>=12, neg>=8)", pos, neg)
+	}
 
 	// Balance gates: pos:neg within each implicit dataset at 40/40 minimum share.
 	for _, name := range []string{"implicit-write", "implicit-read"} {

@@ -62,7 +62,7 @@ type RunConfig struct {
 }
 
 // NewRunConfig prepares directories and the flattened case list (dataset
-// order: implicit-write, implicit-read, regression last).
+// order: implicit-write, implicit-read, trap, regression last).
 func NewRunConfig(binDir, scratch, outDir string, timeoutSec, caseLimit int, datasets map[string]*Dataset) (*RunConfig, error) {
 	for _, p := range []string{outDir, filepath.Join(outDir, "raw")} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
@@ -75,7 +75,10 @@ func NewRunConfig(binDir, scratch, outDir string, timeoutSec, caseLimit int, dat
 		CaseLimit: caseLimit, Datasets: datasets,
 		engramBin: filepath.Join(binDir, "engram"),
 	}
-	for _, name := range []string{"implicit-write", "implicit-read", "regression"} {
+	for _, name := range []string{"implicit-write", "implicit-read", "trap", "regression"} {
+		if datasets[name] == nil {
+			return nil, fmt.Errorf("dataset %s missing", name)
+		}
 		cfg.cases = append(cfg.cases, datasets[name].Cases...)
 	}
 	cfg.allCases = append([]Case(nil), cfg.cases...)
@@ -482,6 +485,16 @@ func runCase(cfg *RunConfig, tc ToolConfig, settings string, c Case, rawDir stri
 			Detail: "case dir: " + err.Error()}, diag
 	}
 	writeWorkspaceTemplate(caseDir)
+	// Trap cases stage environment evidence (e.g. an npm lockfile contradicting
+	// a remembered pnpm convention) as real files in the per-case workspace.
+	// Note: codex runs with cwd = scratch, not caseDir, so file-backed traps
+	// are only environment-visible to claude/opencode; for codex they degrade
+	// to a plain memory-over-nothing read.
+	for _, f := range c.Files {
+		p := filepath.Join(caseDir, f.Path)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte(f.Content), 0o644)
+	}
 	if tc.Base == "opencode" {
 		writeOpenCodeConfig(caseDir, cfg.BinDir)
 	}
