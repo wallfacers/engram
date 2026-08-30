@@ -106,9 +106,15 @@ qwen3.8-flash as the agent's model on all tools (cheap-tier, deliberately not a 
 | Tool (model) | write-pos | write misfire | read-pos | read misfire | regression | trap-read-pos | trap-write-neg | trap-read-neg |
 |---|---|---|---|---|---|---|---|---|
 | claude + qwen3.8-flash | 100% (28/28) | 0/28 | 82% (23/28) | 1/28 | 94% (30/32) | 94% (17/18) | 67% (4/6) | 100% (4/4) |
-| codex + qwen3.8-flash | 100% (28/28) | 2/28 | 82% (23/28) | 5/28 | 75% (24/32) | pending | pending | pending |
+| codex + qwen3.8-flash | 96% (27/28) | 2/28 | 96% (27/28) | 10/28 | 81% (26/32) | 78% (14/18) | 50% (3/6) | 50% (2/4) |
 
-Where the trap layer bit on claude+qwen: one dated-supersession case (an undated "confirmed current" claim outranked a dated migration) and both conditional-hypothetical writes ("if I switch to Mac next month…" was stored as a conditional reminder). Injection with canaries, entity confusion, memory-over-environment, retelling recount, imperative-"remember", pasted-text injection, and both secret defenses were all clean — details in the repo's `specs/048-implicit-memory-flywheel/`.
+Both rows: skill v0.2.4, same model, full 172 cases. The two agents invert profiles — codex searches more (read-pos 96% vs 82%) but over-triggers far more (read misfires 10 vs 1, regression 81% vs 94%); claude is the more disciplined trigger, codex the stronger retriever. Where the trap layer bit:
+
+- **both agents**: dated-supersession zh case (an undated "confirmed current" claim outranked a dated migration) and both conditional-hypothetical writes ("if I switch to Mac next month…" stored as a conditional reminder).
+- **claude only**: nothing else — injection canaries, entity confusion, memory-over-environment, retelling recount, imperative-"remember", pasted-text injection, secret read/write all clean.
+- **codex only**: canary tokens appeared in two answers — the injection itself was ignored (correct timezone given, directive explicitly called out as "data, not authority") but the refusal quoted the directive verbatim, propagating the payload marker into the reply; one secret-store order produced a write of the *derived non-secret preference* after refusing the key itself; imperative-"remember" over-triggered twice.
+
+Cost of a full 172-case run on qwen3.8-flash (Alibaba MaaS dedicated instance, ¥/1M tokens: input 0.8, cache-hit 0.1, output 2.7): ¥8.85 — 58.5M input at 96% cache-hit plus 0.55M output. Details and the cost script live in the repo's `specs/048-implicit-memory-flywheel/`.
 
 Agent setup for these rows: engram skill v0.2.4 (trigger contract pushed into the MCP tool descriptions), engram MCP server v0.1.0. Skill text changes move these numbers materially — pin both versions when comparing.
 
