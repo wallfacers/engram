@@ -61,6 +61,8 @@ func TestSkillAndMCPSharePortableEvidenceGuidanceV1(t *testing.T) {
 			"missing",
 			"conflicting",
 			"personal facts",
+			"paraphrase",
+			"undated",
 		} {
 			if !strings.Contains(lower, strings.ToLower(required)) {
 				t.Errorf("%s guidance is missing %q", name, required)

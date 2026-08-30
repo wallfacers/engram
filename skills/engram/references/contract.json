@@ -2,13 +2,22 @@
   "schema_version": 1,
   "skill": {
     "name": "engram",
-    "version": "0.2.4"
+    "version": "0.2.7"
   },
   "triggers": {
     "explicit": "user wording asks for a memory operation, including 'save this so future sessions can retrieve it'",
     "implicit_write": "ordinary conversation reveals a durable fact (stable preference, constraint, identity, project convention, long-term decision/state change, or a complaint revealing a standing rule) — write once in the same turn and acknowledge; host-native memory mechanisms do not substitute",
-    "implicit_read": "question or task depends on remembered facts — 'which/what/when + my/our/usual/previous' question forms, plans needing a standing constraint, or actions (install/build/run) a remembered convention could govern — search before answering or acting; query one distinctive constraint attribute term first (the keyword engine ANDs every term, so extra words empty the result); report empty results honestly; plain environment/tool work (browser or system cache, IDE layout, git commit, bookmarks, Notion links) needs no search",
-    "never": ["transient task context", "this-week crunch or deferral schedules", "RAM/cache/database near-misses", "secrets", "facts the user declined to store", "third-party facts misattributed to the user"]
+    "implicit_read": "question or task depends on remembered facts — 'which/what/when + my/our/usual/previous' question forms, plans needing a standing constraint, or actions (install/build/run/commit/history rewrite) a remembered convention could govern (plain task phrasing does not make it memory-independent) — search before answering or acting; query one distinctive constraint attribute term first (the keyword engine ANDs every term, so extra words empty the result); report empty results honestly; skip only when nothing remembered could govern the reply: general technical questions with no user-specific reference; imperative commands whose action and target are already fully specified ('remember to <do X>' with exact parameters — a reminder to act even when it touches git or config files); current-environment content questions (filesystem); and plain environment/tool state work (browser/system cache, IDE window layout, bookmarks, Notion links). A request that must CONSULT a convention before acting ('the way I usually do', under a branch/history policy, choosing names) still searches first",
+    "never": [
+      "transient task context",
+      "this-week crunch or deferral schedules",
+      "conditional what-ifs ('if I switch to X next month' is hypothetical, not a standing fact)",
+      "anything derived from a request whose secret payload was declined",
+      "RAM/cache/database near-misses",
+      "secrets",
+      "facts the user declined to store",
+      "third-party facts misattributed to the user"
+    ]
   },
   "mcp": {
     "always": [

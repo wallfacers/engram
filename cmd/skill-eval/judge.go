@@ -16,7 +16,7 @@ type Verdict struct {
 
 // ackTokens: same-turn acknowledgment phrasings (write cases).
 var ackTokens = []string{
-	"已记", "已保存", "已存", "记下", "记住", "存入", "写入", "已录入", "帮你记",
+	"已记", "已保存", "已存", "记下", "记住", "存入", "写入", "写进", "已录入", "帮你记",
 	"已更新", "更新记忆", "记入", "记好", "记到",
 	"saved", "stored", "recorded", "noted", "updated", "added to memory", "wrote to memory",
 }

@@ -373,6 +373,47 @@ f4 转 PASS:iw-pos-017(记到 token)、iw-neg-015、ir-pos-026、ir-neg-003、re
 
 费用结构:96% 缓存命中使 58.5M 输入只按 ~0.13 元/百万混合均价计——**缓存是成本主导项**,同一 agent 短会话连跑(上下文前缀复用)比隔离冷跑省约 7 倍输入费。
 
+## Round 7 · 2026-08-30 · codex 触发纪律修复(v0.2.4 → v0.2.5/0.2.6/0.2.7 三次文本迭代)
+
+**GOAL**(维护者:codex 比 claude 差很远,必须修复):codex read-neg 误触发 10→≤2、regression ≥90%、trap-read-neg 4/4、trap-read-pos ≥16、trap-write-neg ≥4,read-pos ≥25/28 不降,claude 不回归。
+
+### 修订链(三面同步 × 3)
+
+- **v0.2.5**:memory_search 描述+SKILL §0 加"无用户指涉即跳过"硬规则(通用技术题/祈使记得/现场环境);never 加条件句、拒密连带;evidence-guidance **v3→v4**(注入须改写不得逐字传播 canary;带日期变更压无日期"确认在用");判分 ack 词表补"写进"。
+- **v0.2.6**:v0.2.5 把 claude 的任务隐含读(install/改历史)也跳掉了(read-pos 19/28、重试仅 1/9 恢复,raw 证实 003/024 根本没搜)——重排:单词条查询指导归位触发条件紧后,跳过规则后置 + carve-out("git/历史重写不在跳过之列")。
+- **v0.2.7**:v0.2.6 的 carve-out 与"祈使跳过"直接冲突(codex 对"记得重命名 staging 分支"又去搜)——外科消歧:参数完备的祈使命令跳过(即使涉及 git);需要 consult 约定的请求("按我习惯装")仍先查。
+
+### 终数(全量 ⊕ 定向重试,同工具串行;v0.2.6 全量 + v0.2.7 重试合并口径)
+
+| 模块 | codex v0.2.4 | **codex 终** | GOAL | claude v0.2.4合 | **claude 终** |
+|---|---|---|---|---|---|
+| write-pos | 96% | **100%** | 保持 ✅ | 100% | **100%** |
+| write-neg 误写 | 2+1挂 | **1** | — | 0 | **0** |
+| read-pos | 96% | **96%** | ≥25 ✅ | 82% | **85%** |
+| read-neg 误触发 | 10 | **5** | ≤2 ❌ | 1 | **0(28/28)** |
+| regression | 81% | **87%** | ≥90 ❌(差1题,含2超时) | 94% | 87% |
+| trap-read-pos | 14/18 | **17/18** | ≥16 ✅ | 17/18 | **17/18** |
+| trap-write-neg | 3/6 | **6/6** | ≥4 ✅ | 4/6 | **6/6** |
+| trap-read-neg | 2/4 | 2/4 | 4/4 ❌ | 4/4 | **4/4** |
+
+5/8 达标;两工具总红线 9(claude)vs 14(codex),差距从 2.6 倍收到 1.6 倍,负例面(write-neg/read-neg)claude 全满贯、codex 仅剩保险式搜索。
+
+### 核心发现:共享文本的平衡点(本轮定论)
+
+**codex 过触发与 claude 任务隐含读在同一文本边界上互斥拉扯**:v0.2.5 硬跳过表述修 codex(read-neg 10→3、trap-read-neg 4/4)但砍伤 claude(read-pos 跳搜);v0.2.6/0.2.7 恢复 claude 但 codex 让回一部分(5 误触发 + trap-read-neg 2/4)。三次迭代后确认:剩余 codex read-neg 误触发(ir-neg-006/011/018/024/025,通用技术题"保险式搜索")是 **qwen-via-codex 的模型倾向**,共享 skill 文本不可再压(再压必伤 claude)。后续杠杆:①codex 专属注入面(AGENTS.md,工具特定、非共享契约——须维护者裁定是否接受)②引擎 OR 兜底改善空结果体验间接降搜索冲动③换强模型。
+
+### 其余器材/方差记录
+
+- 并行双 lane 打同一 MaaS 专属实例 → 争用超时风暴(codex v0.2.6 全量 9 超时 + 3-连败熔断丢 8 个 reg case)——**runbook 规则:lane 必须串行**。
+- 复现性挂起(codex-profile):reg-019(三次全挂)、reg-031(两次)、iw-neg-022 —— 归 harness 类不计模型账。
+- reg-009 数据集边界 case("after I confirm it"),维持不追。
+- 判分校准:tr-pos-014 备选词补 "3 distinct|count is 3"(codex 答对了但词形不在表内);trap.json v1→v2。
+- claude read-pos 残余(009/011/015/025)= Round-5 已知查询词-种子词零交集方差类,非本轮文本引入。
+
+### 费用(今日 Round 7 全程,qwen3.8-flash MaaS 价目)
+
+codex 可精确计量:全量 ¥8.85 + 超时重试 ¥2.02 + r8-retry ¥2.78 + r9 ¥1.42 = **¥15.07**;claude 走 CCR→同 MaaS(guard 全量+3 次重试 ≈ 388 次调用,估 ¥3-5)。全轮合计约 **¥18-20**。
+
 ## 模板(每圈复制)
 
 ```

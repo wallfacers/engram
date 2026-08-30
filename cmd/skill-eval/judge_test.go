@@ -248,3 +248,17 @@ func TestJudgeTrapNegatives(t *testing.T) {
 		t.Errorf("imperative over-trigger case: %+v", v)
 	}
 }
+
+func TestJudgeAckWriteIntoPhrasing(t *testing.T) {
+	// codex v0.2.4 full run, iw-pos-027: "已经把这条写进长期记忆(置顶)"
+	// — "写进" was missing from the token list.
+	c := Case{ID: "iw-pos-027", Module: "implicit-write-pos",
+		Expect: Expect{Trigger: true, StoreInclude: []string{"vim"}, Acknowledge: true}}
+	v := Judge(c, []Event{
+		{Kind: EventEngramCall, Op: "write", Via: "mcp"},
+		{Kind: EventText, Text: "已经把这条写进长期记忆(置顶),以后所有会话都按这个来。"},
+	}, "never launch vim; use non-interactive patches")
+	if !v.Pass {
+		t.Errorf("写进 acknowledgment not detected: %+v", v)
+	}
+}

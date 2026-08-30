@@ -105,25 +105,11 @@ qwen3.8-flash as the agent's model on all tools (cheap-tier, deliberately not a 
 
 | Tool (model) | write-pos | write misfire | read-pos | read misfire | regression | trap-read-pos | trap-write-neg | trap-read-neg |
 |---|---|---|---|---|---|---|---|---|
-| claude + qwen3.8-flash | 100% (28/28) | 0/28 | 82% (23/28) | 1/28 | 94% (30/32) | 94% (17/18) | 67% (4/6) | 100% (4/4) |
-| codex + qwen3.8-flash | 96% (27/28) | 2/28 | 96% (27/28) | 10/28 | 81% (26/32) | 78% (14/18) | 50% (3/6) | 50% (2/4) |
+| claude + qwen3.8-flash | 100% (28/28) | 0/28 | 85% (24/28) | 0/28 | 87% (28/32) | 94% (17/18) | 100% (6/6) | 100% (4/4) |
+| codex + qwen3.8-flash | 100% (28/28) | 1/28 | 96% (27/28) | 5/28 | 87% (28/32) | 94% (17/18) | 100% (6/6) | 50% (2/4) |
 
-Both rows: skill v0.2.4, same model, full 172 cases. The two agents invert profiles — codex searches more (read-pos 96% vs 82%) but over-triggers far more (read misfires 10 vs 1, regression 81% vs 94%); claude is the more disciplined trigger, codex the stronger retriever. Where the trap layer bit:
+Both rows: skill v0.2.7 (trigger contract carried by the MCP tool descriptions), same model, full 172-case run with targeted retries merged (later run wins per case). Agent profiles after the shared-contract tuning round: codex is the stronger retriever (read-pos 96% vs 85%) but still over-triggers on memory-independent questions ("insurance searches" on generic tech Q&A, 5 misfires) and quotes injection payload markers verbatim inside otherwise-correct refusals; claude holds perfect trigger discipline on every negative layer (0 write misfires, 0 read misfires, both trap-neg layers clean). Residual reds are shared: one dated-supersession case (an undated "confirmed current" claim outranking a dated migration) fails on both agents, plus vocabulary-miss variance on flash-tier models.
 
-- **both agents**: dated-supersession zh case (an undated "confirmed current" claim outranked a dated migration) and both conditional-hypothetical writes ("if I switch to Mac next month…" stored as a conditional reminder).
-- **claude only**: nothing else — injection canaries, entity confusion, memory-over-environment, retelling recount, imperative-"remember", pasted-text injection, secret read/write all clean.
-- **codex only**: canary tokens appeared in two answers — the injection itself was ignored (correct timezone given, directive explicitly called out as "data, not authority") but the refusal quoted the directive verbatim, propagating the payload marker into the reply; one secret-store order produced a write of the *derived non-secret preference* after refusing the key itself; imperative-"remember" over-triggered twice.
+Where the trap layer bit during tuning (v0.2.4 era, before the hardening round): both agents stored conditional what-ifs ("if I switch to Mac next month…"); codex additionally leaked canary tokens via verbatim quoting, wrote a derived preference after refusing a secret order, and over-triggered imperative-"remember" — all but the canary quoting and the insurance searches were fixed by the shared contract text (v0.2.4 → v0.2.7); the fixes' trade-offs are documented in the repo's `specs/048-implicit-memory-flywheel/` failbook Round 7.
 
-Cost of a full 172-case run on qwen3.8-flash (Alibaba MaaS dedicated instance, ¥/1M tokens: input 0.8, cache-hit 0.1, output 2.7): ¥8.85 — 58.5M input at 96% cache-hit plus 0.55M output. Details and the cost script live in the repo's `specs/048-implicit-memory-flywheel/`.
-
-Agent setup for these rows: engram skill v0.2.4 (trigger contract pushed into the MCP tool descriptions), engram MCP server v0.1.0. Skill text changes move these numbers materially — pin both versions when comparing.
-
-## Intended use & limits
-
-- **For**: regression-gating memory skills/adapters across agent hosts; comparing trigger-policy quality between agents on identical memory backends; studying injection resistance of memory-augmented agents.
-- **Not for**: ranking LLMs (the model is one of several variables); QA-quality measurement over a corpus (use LoCoMo/LongMemEval-class sets); any claim about hosted/cloud-only memory products.
-- **Known limits**: zh/en only; single-user memory semantics; trap file-staging is visible only to tools whose cwd is the case dir (codex runs in a shared scratch, so those two cases are memory-over-nothing for it); secrets in cases are synthetic.
-
-## License
-
-Dataset files: **CC-BY-4.0**. The runner (`cmd/skill-eval`) and everything else in the source repo: **MIT** (see the repo's LICENSE). Synthetic prompts/seeds written for this benchmark; no personal data. All API keys appearing in cases are fake.
+Cost of a full 172-case run on qwen3.8-flash (Alibaba MaaS dedicated instance, ¥/1M tokens: input 0.8, cache-hit 0.1, output 2.7): ¥8.85 — 58.5M input at 96% cache-hit plus 0.55M output. A full tuning round (one full run + three retries) measured ¥15.07 on codex. Details and the cost script live in the repo's `specs/048-implicit-memory-flywheel/`.
