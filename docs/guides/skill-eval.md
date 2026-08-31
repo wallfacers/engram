@@ -1,3 +1,14 @@
+---
+title: Skill trigger evaluation & data flywheel (skill-eval)
+summary: 本文说明 cmd/skill-eval 触发评估 runner 的用途、判题口径与产出物；面向运行 skill 数据飞轮评估的维护者与 agent。
+status: active
+audience: [maintainers, agents]
+owner: engram-maintainers
+last_reviewed: 2026-08-31
+canonical_for: [skill-eval-harness]
+tags: [skill-eval, guide, evaluation]
+---
+
 # Skill trigger evaluation & data flywheel (skill-eval)
 
 `cmd/skill-eval` is the trigger-evaluation runner for the engram agent skill
