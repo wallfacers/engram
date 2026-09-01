@@ -87,6 +87,13 @@ Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extr
 
 ## Working Rules
 
+### Branch & PR policy (HARD — no exceptions)
+- **NEVER push to the default branch (`master`).** Every change goes through a pull request — **including one-line doc, CI, and config fixes**. "Trivial", "urgent", or "just a typo" are not exempt; the maintainer has had to repeat this rule.
+- Order of operations: branch off current `origin/master` **before** the first commit → commit on `codex/<topic>` → `git push origin codex/<topic>` → open PR → maintainer merges. Never commit onto a local `master`.
+- One PR per concern: keep workflow/tooling changes (hooks, CI, `CLAUDE.md` policy) separate from feature/eval changes so attribution stays clean and review stays small.
+- If work accidentally landed on local `master`: `git branch codex/<topic>` at that commit → `git switch codex/<topic>` → `git branch -f master origin/master`. Then open the PR. **Never force-push `master` to undo a direct push — say so and ask.**
+- Mechanical guard (opt-in per clone, tracked in-repo): `git config core.hooksPath scripts/git-hooks` makes `pre-push` reject any push whose destination is `main`/`master`. Do not bypass it with `--no-verify`.
+
 ### Post-Edit Verification
 - After each edit: `CGO_ENABLED=0 go build ./...` → zero errors before continuing. For touched packages, `CGO_ENABLED=0 go test -count=1 ./<pkg>`.
 - Skip only for high-confidence trivial changes (comments/copy); when unsure, run it.
