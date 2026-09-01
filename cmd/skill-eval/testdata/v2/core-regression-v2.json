@@ -1,0 +1,33 @@
+{
+  "id": "fx-reg-001",
+  "schema_version": 2,
+  "split": "dev-regression",
+  "score_membership": "core172",
+  "module": "regression",
+  "lang": null,
+  "scenario_bucket": null,
+  "category": "legacy-020",
+  "family_id": "fam-fxreg1",
+  "translation_of": null,
+  "prompt": "remember that my editor is nvim",
+  "turns": null,
+  "seed_memories": [],
+  "workspace_files": [],
+  "expect": {
+    "trigger": true,
+    "allowed_ops": ["write"],
+    "min_calls": 1,
+    "max_calls": 1,
+    "store_include": [["nvim"]],
+    "store_exclude": [],
+    "answer_include": [],
+    "answer_exclude": [],
+    "not_found": false,
+    "observable": "legacy 020 trigger case: any engram call expected iff trigger."
+  },
+  "source": "020-trigger-evals",
+  "status": "active",
+  "superseded_by": null,
+  "authoring": null,
+  "reviews": null
+}

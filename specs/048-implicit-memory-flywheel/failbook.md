@@ -1,5 +1,7 @@
 # 错题本（failbook）— engram skill 触发飞轮
 
+> **历史证据边界（2026-08-31）**：下列 Round 1–5 记录来自 048 正式协议冻结前的探索性/diagnostic 运行，其中的 `--only`、补跑合并和旧分母只用于保留历史根因，**不得**进入当前 SC-5 baseline、FailureArchive、两项正式分数或 PASS 判定。当前可比错题本必须由 `skill-eval failure-archive` 从 complete sealed `dev-comparison` 三宿主 × 三 ordinal core172 series 重新生成，并遵守 [runner CLI contract](contracts/runner-cli.md) 与 [score contract](contracts/scoring-report.md)。T054 会在不删除历史内容的前提下追加该 sealed archive 引用。
+
 每圈失败逐条归因,是下一圈 skill 修订的唯一输入。纪律:**不全量补跑**(限流/超时类失败单独补),修复后失败例回填数据集(只增不减,`source: flywheel-round-N`)。root cause 词表:`contract-too-narrow`(契约没覆盖)/`contract-wording`(措辞歧义)/`dataset-semantics`(数据集语义边界,非 skill 缺陷)/`rate-limit-suspected`(订阅限流/超时,先单个补跑)/`host-memory-competition`(宿主自带记忆竞争)/`eval-env-retrieval`(评测环境检索能力,非 skill 缺陷)/`host-behavior`(宿主特有)。
 
 ## Round 1 · 2026-08-29 · v0.1.0 → v0.2.0
@@ -422,3 +424,35 @@ codex 可精确计量:全量 ¥8.85 + 超时重试 ¥2.02 + r8-retry ¥2.78 + r9
 ### 失败逐条:case_id | 工具 | 类型 | root cause | 处置 | 状态
 ### 器材修复 / Round-N+1 候选
 ```
+
+## SDD 实施期器材记录（2026-09-01，T017/T018）
+
+- **opencode2 lane 三连坑（T018，r1 172 全红 → 冒烟复现 → 修复）**：
+  (1) **继承 env 污染破坏 provider 路由（真根因）**：宿主 shell 残留的 ANTHROPIC_*/模型
+  provider 变量会让 opencode2 报 `provider.no-route: Model unavailable`，即使项目
+  opencode.json 完全正确（baseURL/apiKey/model 都在）。最小 env 二分定位（PATH/HOME/
+  MAAS_API_KEY 即成功）。修复：runner 对 opencode 子进程用**白名单 env**。
+  (2) **Go spawn 公共行覆盖 lane env（次生 bug）**：`cmd.Env` 在 switch 后的公共代码
+  `append(os.Environ(), ...)` 无条件覆盖了 lane 分支设置的白名单——"设置了却不生效"
+  的经典陷阱。修复：`if cmd.Env == nil` 才填默认。排查工具：最小 Go 复刻程序对照
+  （同 cwd/env/argv 下 ocspawn 成功 vs runner 失败 → 差异只剩进程本身 → 锁定覆盖行）。
+  (3) **Windows service 守护吞 key（r1 的并发放大器）**：`opencode2.exe serve --service`
+  常驻进程不继承 run 的 env，`{env:MAAS_API_KEY}` 在旧 service 里展开为空。runbook：
+  opencode leg 启动前若见 service 进程，按 PID 杀掉再跑。作废数据保留于
+  `opencode/`（r1）与 `*-stale-0.1.0skill/`（r2/早期 r3，skill 版本错配期）。
+- **相对 --scratch 路径三杀（T018 冒烟）**：runner 内部把 caseDir 当绝对路径用（claude
+  相对自己 cwd 解析 --mcp-config、opencode2 相对 cwd 找项目 config、engram-mcp 的
+  --data-dir）——相对 --scratch 一次踩三个。修复：runV2Case 入口处 filepath.Abs。
+- **v2 runner MCP 接线缺失（静态审查发现）**：v1 runner 有 claude --mcp-config（每 case
+  独立文件防并发写竞争）与 codex `-c mcp_servers.engram.*`，v2 runV2Child 漏带——
+  claude/codex 腿 MCP 全断只能走 CLI 降级。已补齐（对齐 v1 语义）。
+- **安装副本版本错配（T018 中止重启）**：诊断跑分前必须核对 `~/.agents/skills/engram`
+  版本与冻结 snapshot 一致（本次实测 0.1.0 vs snap 0.2.7，claude symlink 还缺失）。
+  已按 048 安装纪律重装（标准目录一份 + ~/.claude/skills symlink），runbook：每次
+  跑分前 `diff` 安装副本 vs snapshot。
+- **extractDecisionJSON wrapper 事件坑（T017 首跑作废 ~0.02 元）**：三 lane
+  stream-json 的首个 JSON 对象是 wrapper/系统事件，朴素"找第一个 {…}"会把它静默
+  解析成 `same_family=false`。修复为按 host 提取最终回答信封（claude `result` /
+  codex `agent_message` / opencode `text`），找不到决策键即报错，fail-closed。
+- **lane 调用瞬时失败**（opencode exit -1 一次）：bounded retry（3 次尝试 + 退避）
+  已加入 lane driver；判定语义不变。

@@ -439,3 +439,83 @@ test("fixture root and package name remain explicit for install-runner reuse", (
   assert.equal(basename(packageRoot), "engram");
   assert.equal(resolve(packageRoot), join(root, "skills", "engram"));
 });
+
+// ---------------------------------------------------------------------------
+// T019 (048): write-side package-contract assertions pinned to the REAL
+// repository package. These guard the implicit-write semantics against
+// regression when later revisions edit SKILL.md / contract.json: any revision
+// that drops one of these anchors must fail the validator suite.
+
+function realPackageText(relativePath) {
+  return readFileSync(join(repositoryRoot, "skills", "engram", relativePath), "utf8");
+}
+
+function assertMatches(source, pattern, what) {
+  assert.match(source, pattern, `missing write-contract anchor: ${what}`);
+}
+
+test("real package: implicit write is direct, same-turn, and never asks confirmation", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /write once[^.\n]*in the same turn|同一轮[^。\n]*写入|write once and acknowledge/i, "one write in the same turn");
+  assertMatches(body, /do not ask permission|without (?:asking for|requesting) confirmation|不要先请求确认|不等待.*确认/i, "direct write without a confirmation request");
+  const contract = JSON.parse(realPackageText("references/contract.json"));
+  const writeIntent = contract.intents?.find((intent) => intent.name === "write");
+  assert.ok(writeIntent, "contract.json must declare the write intent");
+  assert.match(writeIntent.condition, /implicit durable-fact disclosure/, "write intent must stay open to implicit durable-fact disclosure");
+  assert.doesNotMatch(writeIntent.condition, /confirm|确认/, "write intent condition must not gate on confirmation");
+  assert.match(contract.triggers?.implicit_write ?? "", /same turn|同一轮/, "triggers.implicit_write must carry the same-turn rule");
+});
+
+test("real package: update semantics supersede the earlier value", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /supersed|取代|覆盖.*旧|update supersedes/i, "updated facts supersede earlier stored values");
+});
+
+test("real package: non-write exclusions (transient, generic discussion, third-party, secrets)", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /transient|临时/i, "transient states stay unwritten");
+  assertMatches(body, /generic[\s-]+(?:technical[\s-]+)?discussion|一般性技术讨论|泛泛/i, "generic discussion stays unwritten");
+  assertMatches(body, /third-party|第三方/i, "third-party facts are not stored as the user's own");
+  assertMatches(body, /secret|秘密/i, "secrets are never written");
+  assertMatches(body, /never record|不记录|禁止记录/i, "a closed never-record list exists");
+});
+
+test("real package: same-turn acknowledgement and honest refusal on secret requests", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /acknowledg|告知|已记录|已保存/i, "the write is acknowledged to the user");
+  assertMatches(body, /declin(?:e|ing) to store a secret|拒.*秘密|write nothing derived/i, "secret requests store nothing derived");
+});
+
+// ---------------------------------------------------------------------------
+// T023 (048): read-side package-contract assertions pinned to the REAL
+// repository package. They guard the implicit-read semantics (search before
+// answering, evidence-grounded replies, honest empty results, and the
+// no-search boundary) against regression in later SKILL.md revisions.
+
+test("real package: implicit read searches before answering or acting", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /search before answering|search memory first|先查|先搜索/i, "memory-dependent asks search before answering");
+  assertMatches(body, /which \/ what|\bmy \/ our \/ usual \/ previous\b|我的\/我们的/i, "possessive question forms activate the read path");
+  assertMatches(body, /install, build, run|actions?[^.\n]*could be governed|install\/build\/run/i, "convention-governed actions search first");
+  const contract = JSON.parse(realPackageText("references/contract.json"));
+  assert.match(contract.triggers?.implicit_read ?? "", /search before answering|先查后答|search first/i, "triggers.implicit_read must carry search-before-answering");
+});
+
+test("real package: answers are grounded in retrieved evidence", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /Ground the answer|evidence/i, "answers must be grounded in what the search returns");
+  assertMatches(body, /report it explicitly|never invent|如实/i, "remembered values are reported explicitly, never substituted");
+});
+
+test("real package: empty results are honest", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /Empty or missing results are reported honestly|never invent a stored fact|诚实/i, "empty results must be reported honestly");
+});
+
+test("real package: no-search boundaries keep plain technical work free of memory calls", () => {
+  const body = realPackageText("SKILL.md");
+  assertMatches(body, /Skip the search|无需查询记忆|do not activate/i, "a closed skip-search boundary exists");
+  assertMatches(body, /general\s+technical question|generic error handling|best practices/i, "generic technical questions stay memory-free");
+  assertMatches(body, /clearing a browser cache|Redis\/database cache|browser bookmark/i, "environment/tool state work stays memory-free");
+  assertMatches(body, /remember to <do X>|reminder to act/i, "'remember to X' with given parameters is a reminder, not a lookup");
+});

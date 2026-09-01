@@ -1,5 +1,7 @@
 # 048 数据集加难:评估、陷阱层与 HF 发布方案
 
+> **历史设计记录（2026-08-31）**：本文解释现有 28 条 dev trap 的来源与旧实测，不是现行 holdout author/review/seal 或正式计分契约。正式边界、固定 96-case 配额、八个 scenario bucket、label-blind 双审、source-bias diagnostics 与 protected execution 以 [dataset protocol](contracts/dataset-protocol.md)、[runner contract](contracts/runner-cli.md) 和 [score contract](contracts/scoring-report.md) 为准；旧 `--only` 合并结果只能作 diagnostic 证据。
+
 状态:进行中(2026-08-30)· 上游:[validation-report.md](validation-report.md) Round 5 · [failbook.md](failbook.md)
 
 ## 1. 难度评估:分数是真实能力,还是数据集偏易?

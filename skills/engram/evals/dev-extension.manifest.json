@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "canonicalization": "agent-memory-trigger-canonical-json-v1",
+  "dataset_id": "agent-memory-trigger-bench",
+  "dataset_version": "dev-extension-v0",
+  "split": "dev-regression",
+  "score_membership": "dev-extension",
+  "case_count": 0,
+  "module_counts": {},
+  "language_counts": {},
+  "case_ids": [],
+  "case_ids_digest": "PLACEHOLDER_COMPUTED_AT_RUNTIME",
+  "payload_files": [],
+  "payload_digest": "empty-extension",
+  "dev_family_index_digest": null,
+  "extension_lineage": {},
+  "sealed_at": null,
+  "seal": null
+}

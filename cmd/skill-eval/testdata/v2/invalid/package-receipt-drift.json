@@ -1,0 +1,19 @@
+{
+  "snapshot_id": "fx-snapshot-0001",
+  "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "snapshot_anchor_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "skill_version": "0.0.0-fictional",
+  "skill_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "file_records_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "file_records": [
+    { "relative_path": "SKILL.md", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 100 }
+  ],
+  "validator_revision": "020-validator-v1",
+  "validator_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "validator_argv_digest": "ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000",
+  "validator_output_digest": "ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111",
+  "checks": {"description_body_reference_sync": true, "version_bump": true, "line_reference_digest_consistency": true},
+  "passed": true,
+  "validated_at": "2026-09-01T00:00:00Z",
+  "receipt_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

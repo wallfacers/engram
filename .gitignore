@@ -15,6 +15,7 @@ coverage.*
 !coverage_test.go
 cmd/locomo-bench/locomo-bench
 /locomo-bench
+/skill-eval
 
 # Python bytecode (eval/analysis scripts under scripts/)
 __pycache__/
@@ -50,3 +51,6 @@ ans-pcic*
 
 # eval notebook (per-run mistake attribution; contains raw conversation text)
 /eval-notebook/
+
+# session scratchpads (never commit)
+.scratch/

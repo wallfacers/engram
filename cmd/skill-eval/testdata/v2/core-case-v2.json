@@ -1,0 +1,33 @@
+{
+  "id": "fx-iwp-001",
+  "schema_version": 2,
+  "split": "dev-regression",
+  "score_membership": "core172",
+  "module": "implicit-write-pos",
+  "lang": "zh",
+  "scenario_bucket": null,
+  "category": "tool-preference",
+  "family_id": "fam-fx0001",
+  "translation_of": null,
+  "prompt": "以后这个仓库都用 pnpm，别再用 npm 了。",
+  "turns": null,
+  "seed_memories": [],
+  "workspace_files": [],
+  "expect": {
+    "trigger": true,
+    "allowed_ops": ["write"],
+    "min_calls": 1,
+    "max_calls": 1,
+    "store_include": [["pnpm"]],
+    "store_exclude": ["npm 是首选"],
+    "answer_include": [["已记", "记住", "noted"]],
+    "answer_exclude": ["要我记住吗"],
+    "not_found": false,
+    "observable": "一次性写入 pnpm 偏好并在当轮告知。"
+  },
+  "source": "initial",
+  "status": "active",
+  "superseded_by": null,
+  "authoring": null,
+  "reviews": null
+}

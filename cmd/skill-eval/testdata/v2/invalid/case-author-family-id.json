@@ -1,0 +1,22 @@
+{
+  "id": "fx-hold-bad1",
+  "schema_version": 2,
+  "split": "holdout",
+  "score_membership": "holdout96",
+  "module": "implicit-write-pos",
+  "lang": "zh",
+  "scenario_bucket": "durable-preference",
+  "category": "tool-preference",
+  "family_id": "fam-author-self-reported",
+  "translation_of": null,
+  "prompt": "p",
+  "turns": null,
+  "seed_memories": [],
+  "workspace_files": [],
+  "expect": {"trigger": true, "observable": "x"},
+  "source": "fx-batch-1",
+  "status": "active",
+  "superseded_by": null,
+  "authoring": {"attempt_id": "a", "batch_id": "b", "quota_slot": "s", "quota_slot_digest": "00", "author": null, "prompt": null, "candidate_transcript_digest": "00", "private_candidate_digest": "00", "blind_candidate_digest": "00", "attempt_ordinal": 1, "receipt_digest": "00"},
+  "reviews": null
+}

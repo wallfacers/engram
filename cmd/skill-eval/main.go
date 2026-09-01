@@ -37,16 +37,12 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
-	case "validate":
-		err = cmdValidate(os.Args[2:])
-	case "run":
-		err = cmdRun(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
+		fmt.Print(usageV2)
+		return
 	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", os.Args[1])
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		err = routeOrLegacy(os.Args[1:])
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
