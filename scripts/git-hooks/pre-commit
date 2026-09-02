@@ -1,0 +1,33 @@
+#!/bin/sh
+# Guard: every change goes through a pull request. Work starts on a branch, so
+# a commit made while HEAD is on the default branch is the lapse itself.
+# This catches it before it can become a push (pre-push is too late: the
+# offending commit was made on master and only branched afterwards).
+
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0   # detached HEAD: allow
+
+case "$branch" in
+	main | master)
+		cat >&2 <<MSG
+
+pre-commit: refusing to commit on '$branch'.
+
+Every change goes through a pull request, including one-line doc, CI, and
+config fixes. Branch off current origin/$branch first:
+
+  git switch -c codex/<short-topic> origin/$branch
+
+If commits already exist on local $branch, rescue them without pushing:
+
+  git branch codex/<short-topic>
+  git switch codex/<short-topic>
+  git branch -f $branch origin/$branch
+
+Then push the branch and open a PR. Never force-push $branch to undo a direct
+push -- report it and ask the maintainer.
+MSG
+		exit 1
+		;;
+esac
+
+exit 0

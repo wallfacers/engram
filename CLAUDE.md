@@ -92,7 +92,8 @@ Strategy & positioning: [docs/memory-strategy.md](docs/memory-strategy.md). Extr
 - Order of operations: branch off current `origin/master` **before** the first commit → commit on `codex/<topic>` → `git push origin codex/<topic>` → open PR → maintainer merges. Never commit onto a local `master`.
 - One PR per concern: keep workflow/tooling changes (hooks, CI, `CLAUDE.md` policy) separate from feature/eval changes so attribution stays clean and review stays small.
 - If work accidentally landed on local `master`: `git branch codex/<topic>` at that commit → `git switch codex/<topic>` → `git branch -f master origin/master`. Then open the PR. **Never force-push `master` to undo a direct push — say so and ask.**
-- Mechanical guard (opt-in per clone, tracked in-repo): `git config core.hooksPath scripts/git-hooks` makes `pre-push` reject any push whose destination is `main`/`master`. Do not bypass it with `--no-verify`.
+- Mechanical guards (tracked in `scripts/git-hooks/`, POSIX `sh`): `pre-commit` rejects a commit made while HEAD is on `main`/`master` — the lapse starts at the commit, not the push; `pre-push` rejects any push whose destination is `main`/`master`.
+- Activate per clone once after cloning: `git config core.hooksPath scripts/git-hooks`. A relative path resolves against each worktree's top level, so it also covers parallel feature worktrees. Until this lands, the same two files are installed in `.git/hooks/` (the default path, no config needed). Never bypass with `--no-verify`, and never "temporarily" unset `core.hooksPath`.
 
 ### Post-Edit Verification
 - After each edit: `CGO_ENABLED=0 go build ./...` → zero errors before continuing. For touched packages, `CGO_ENABLED=0 go test -count=1 ./<pkg>`.
