@@ -67,6 +67,16 @@ against codex-cli 0.150.1, opencode2 v0.0.0-beta-18600, and Claude Code
 2.1.251: a single `~/.agents/skills/engram` install was discovered by all
 three, exactly once each, with no private-directory copies present.
 
+A read-only re-probe on 2026-09-03 (Claude Code 2.1.259, codex-cli 0.153.0,
+opencode2 v0.0.0-beta-18743) confirmed the same layout facts: the canonical
+`~/.agents/skills/engram` copy was byte-identical to the repository package,
+Claude Code's `~/.claude/skills/engram` symlink resolved to it, no
+private-directory engram copy existed under `${CODEX_HOME:-~/.codex}/skills/`
+or `~/.config/opencode/skills/`, and codex's private skills directory
+continued to hold only its own real-directory skills. The universal-directory
+discovery behavior itself was not re-exercised in that probe; the 2026-08-29
+scan remains the behavioral evidence.
+
 | Client | Project path | User path | Explicit use | Reload |
 |---|---|---|---|---|
 | Claude Code | `.claude/skills/engram` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/engram` | `/engram` | Restart if the top-level skills directory was newly created; otherwise invoke it again or open a new session. |

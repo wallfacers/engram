@@ -27,6 +27,16 @@ func TestCliInvocation(t *testing.T) {
 		{`./engram --data-dir /d delete --name old || true`, "delete", true},
 		{`echo "engram add is a command"`, "", false}, // prose mention inside echo
 		{`engram version 2>&1 || true`, "other", true},
+		// Shell-variable indirection (observed from the opencode lane,
+		// 2026-09-01: `ENGRAM=/path/engram; $ENGRAM --data-dir "$PWD"
+		// --namespace default search "命名"` was judged "no call"):
+		// an assignment NAME=<path>/engram followed by $NAME <subcommand>.
+		{`ENGRAM=/home/u/bin/engram; $ENGRAM --data-dir "$PWD" --namespace default search "命名" --limit 10`, "search", true},
+		{`E=./engram; $E --data-dir /d add --name x --content y`, "write", true},
+		{`export ENGRAM=/home/u/bin/engram`, "", false},               // assignment alone runs nothing
+		{`ENGRAM=/home/u/bin/engram-mcp; $ENGRAM --data-dir /d`, "", false}, // mcp binary via var stays inert
+		{`E=/bin/other; $E search tea`, "", false},                    // unrelated variable
+		{`ENGRAM=/home/u/bin/engram; $ENGRAM version 2>&1 | head -5`, "other", true},
 	}
 	for _, c := range cases {
 		got, ok := cliInvocation(c.cmd)

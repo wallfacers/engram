@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -176,54 +174,26 @@ func RunDiagnostic(opts DiagnosticOptions) (*DiagnosticRunReceipt, error) {
 		}
 	}
 
-	// Bounded worker pool with observed max-in-flight/overlap.
-	var (
-		verdicts = make([]Verdict, len(ids))
-		current  int32
-		maxInf   int32
-		overlap  int32
-		wg       sync.WaitGroup
-		sem      = make(chan struct{}, opts.Concurrency)
-		errMu    sync.Mutex
-		firstErr error
-	)
-	for i, id := range ids {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(idx int, caseID string) {
-			defer wg.Done()
-			defer atomic.AddInt32(&current, -1)
-			defer func() { <-sem }()
-			now := atomic.AddInt32(&current, 1)
-			for {
-				prev := atomic.LoadInt32(&maxInf)
-				if now <= prev || atomic.CompareAndSwapInt32(&maxInf, prev, now) {
-					break
-				}
-			}
-			if now > 1 {
-				atomic.StoreInt32(&overlap, 1)
-			}
-			v, err := runV2Case(opts, core.Cases[caseID])
-			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				errMu.Unlock()
-				v = Verdict{CaseID: caseID, Failure: "runner-error", Detail: err.Error()}
-			}
-			verdicts[idx] = v
-		}(i, id)
-	}
-	wg.Wait()
+	// Bounded worker pool with observed max-in-flight/overlap: the same
+	// runBounded implementation the formal primary mode uses, so the
+	// diagnostic mode cannot drift from the sealed-concurrency contract.
+	verdicts := make([]Verdict, len(ids))
+	maxInFlight, overlap, firstErr := runBounded(opts.Concurrency, len(ids), func(idx int, _ int) error {
+		caseID := ids[idx]
+		v, err := runV2Case(opts, core.Cases[caseID])
+		if err != nil {
+			v = Verdict{CaseID: caseID, Failure: "runner-error", Detail: err.Error()}
+		}
+		verdicts[idx] = v
+		return err
+	})
 
 	receipt := &DiagnosticRunReceipt{
 		SchemaVersion: 1, Mode: "diagnostic", Split: opts.Split, Tool: opts.Tool,
 		DatasetDir: opts.DatasetDir, ManifestPath: opts.ManifestPath,
 		OutRoot: opts.OutRoot, ScratchRoot: opts.ScratchRoot,
-		Concurrency: opts.Concurrency, ObservedMaxInFlight: int(atomic.LoadInt32(&maxInf)),
-		ObservedOverlap: atomic.LoadInt32(&overlap) == 1,
+		Concurrency: opts.Concurrency, ObservedMaxInFlight: maxInFlight,
+		ObservedOverlap: overlap,
 		CaseCount:       len(ids),
 		FormalScoreEligible: false, // structural: diagnostics never score
 	}
@@ -357,6 +327,18 @@ func runV2Child(tool, caseDir, prompt string, c *TriggerCaseV2) ([]byte, error) 
 			"--yolo", "exec", "--json", prompt)
 	case HostOpenCode:
 		model := os.Getenv("ENGRAM_SKILL_EVAL_OPENCODE_MODEL")
+		// opencode2 resolves its provider from the config in its RUN
+		// directory (bisected 2026-09-02; provider.no-route otherwise).
+		// Link the lane config into the case workspace so the per-case cwd
+		// carries it — the same fix the canary lane runner got.
+		if cfgWs, err := materializeOpenCodeLaneWorkspace(); err == nil {
+			link := filepath.Join(caseDir, "opencode.json")
+			if err := os.Symlink(filepath.Join(cfgWs, "opencode.json"), link); err != nil && !os.IsExist(err) {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 		args := []string{"opencode2", "run", "--standalone", "--auto", "--format", "json"}
 		if model != "" {
 			args = append(args, "--model", model)
@@ -384,5 +366,16 @@ func runV2Child(tool, caseDir, prompt string, c *TriggerCaseV2) ([]byte, error) 
 		cmd.Env = append(os.Environ(), "ENGRAM_DATA_DIR="+caseDir)
 	}
 	out, err := cmd.Output()
+	if err != nil && tool == HostOpenCode {
+		// opencode2 exits 1 after a COMPLETED run: the model's final answer
+		// and step_finish are already on stdout, then the session teardown
+		// emits {"type":"error","aborted":"Session interrupted: shutdown"}
+		// and the process exit code becomes 1 (2026-09-01: 32/172 cases).
+		// A completed event stream outranks the exit code; a stream without
+		// step_finish stays a runner error.
+		if bytes.Contains(out, []byte(`"type":"step_finish"`)) {
+			return out, nil
+		}
+	}
 	return out, err
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // 048 holdout review/admission type layer (data-model.md §3–§6).
@@ -127,46 +128,72 @@ type ReviewRecord struct {
 	ReceiptDigest          string               `json:"receipt_digest"`
 }
 
-// NormalizedLabelDigest recomputes the controller label digest from all
-// inferred dimensions and every machine field of the expect block (the
-// human-only `observable` is excluded). Two reviewers must match exactly.
+// BehavioralModule projects a seven-module label onto the four behavioral
+// classes a blind reviewer can reliably infer: the trap- prefix is a
+// difficulty annotation the author constructs toward (a subtle trap), not a
+// behavior class — "retrieval must still happen and resolve the trap" is the
+// same observable read-pos behavior as its implicit sibling. An unrecognized
+// module string passes through unchanged so the digest mismatch stays
+// visible instead of being silently normalized (contract v4.2, 2026-09-02 —
+// full-run evidence: of 16 dual-review pairs, all module disagreements were
+// trap/implicit boundary flips like implicit-read-pos <> trap-read-pos).
+func BehavioralModule(module string) string {
+	m := strings.ToLower(strings.TrimSpace(module))
+	for _, prefix := range []string{"trap-", "implicit-"} {
+		if strings.HasPrefix(m, prefix) {
+			return strings.TrimPrefix(m, prefix)
+		}
+	}
+	return m
+}
+
+// NormalizedLabelDigest recomputes the controller label digest over the
+// reviewer-reliable core: the behavioral class of the module (v4.2: the
+// trap- prefix projected away), the language, plus the structural expect
+// fields a blind reviewer can infer from the case alone (trigger,
+// not_found). Everything else is author-owned: the scenario bucket is a
+// quota structure (not a semantic judgment), the content-token rule groups
+// (store/answer include/exclude) are the author's scoring contract,
+// allowed_ops/min/max calls are derivable from the module, and category is
+// free-form (v4.1, 2026-09-02 — smoke evidence: reviewers converge on
+// module/lang/trigger while wording tokens, buckets and ops differently,
+// sometimes with out-of-vocabulary ops like "upsert"). Two reviewers must
+// match on this digest exactly.
 func NormalizedLabelDigest(module, lang, scenario, category string, expect ExpectV2) (string, error) {
+	_ = scenario
+	_ = category
 	proj := struct {
-		Module      string   `json:"module"`
-		Lang        string   `json:"lang"`
-		Scenario    string   `json:"scenario"`
-		Category    string   `json:"category"`
-		Trigger     bool     `json:"trigger"`
-		AllowedOps  []string `json:"allowed_ops,omitempty"`
-		MinCalls    *int     `json:"min_calls,omitempty"`
-		MaxCalls    *int     `json:"max_calls,omitempty"`
-		StoreInclude  []Alternation `json:"store_include,omitempty"`
-		StoreExclude  []string      `json:"store_exclude,omitempty"`
-		AnswerInclude []Alternation `json:"answer_include,omitempty"`
-		AnswerExclude []string      `json:"answer_exclude,omitempty"`
-		NotFound    bool     `json:"not_found,omitempty"`
+		Module   string `json:"module"`
+		Lang     string `json:"lang"`
+		Trigger  bool   `json:"trigger"`
+		NotFound bool   `json:"not_found"`
 	}{
-		Module: module, Lang: lang, Scenario: scenario, Category: category,
-		Trigger: expect.Trigger, AllowedOps: expect.AllowedOps,
-		MinCalls: expect.MinCalls, MaxCalls: expect.MaxCalls,
-		StoreInclude: expect.StoreInclude, StoreExclude: expect.StoreExclude,
-		AnswerInclude: expect.AnswerInclude, AnswerExclude: expect.AnswerExclude,
+		Module:   BehavioralModule(module),
+		Lang:     strings.ToLower(strings.TrimSpace(lang)),
+		Trigger:  expect.Trigger,
 		NotFound: expect.NotFound,
 	}
 	return CanonicalSHA256(proj)
 }
 
-// ReviewersAgree reports whether two review records agree on every inferred
-// dimension and label digest (controller compares against the private author
+// ReviewersAgree reports whether two review records agree on every gated
+// dimension: the label digest plus the behavioral class of the inferred
+// module and the language (controller compares against the private author
 // candidate separately).
 func ReviewersAgree(a, b ReviewRecord) error {
 	if a.NormalizedLabelDigest == "" || a.NormalizedLabelDigest != b.NormalizedLabelDigest {
 		return errors.New("reviewers disagree on the normalized label digest")
 	}
-	if a.InferredModule != b.InferredModule || a.InferredLang != b.InferredLang ||
-		a.InferredScenarioBucket != b.InferredScenarioBucket || a.InferredCategory != b.InferredCategory {
+	if BehavioralModule(a.InferredModule) != BehavioralModule(b.InferredModule) ||
+		strings.ToLower(strings.TrimSpace(a.InferredLang)) != strings.ToLower(strings.TrimSpace(b.InferredLang)) {
 		return errors.New("reviewers disagree on inferred dimensions")
 	}
+	// InferredScenarioBucket and InferredCategory are recorded diagnostics,
+	// not gates (contract v4.1: the bucket is a quota structure a blind
+	// reviewer cannot disambiguate — e.g. a python-tooling preference reads
+	// as both durable-preference and environment-tooling). The trap- prefix
+	// of InferredModule is likewise diagnostic (v4.2): only the behavioral
+	// class gates.
 	return nil
 }
 
@@ -323,9 +350,13 @@ type AuthorReviewIsolationReceipt struct {
 	ReceiptDigest             string `json:"receipt_digest"`
 }
 
-// AuthorReviewAttemptLedgerV1 is the append-only event chain.
+// AuthorReviewAttemptLedgerV1 is the append-only event chain. Appends are
+// serialized: two concurrent slots assigning sequences read-then-append would
+// interleave and break the chain (observed in the 2026-09-02 full-run
+// resume: "event 1 sequence 1 out of order").
 type AuthorReviewAttemptLedgerV1 struct {
 	Events []AttemptEvent `json:"events"`
+	mu     sync.Mutex
 }
 
 // AttemptEvent is AttemptStarted or AttemptTerminal (EventKind discriminates).
@@ -361,6 +392,59 @@ func (l *AuthorReviewAttemptLedgerV1) AppendStarted(e AttemptEvent) error {
 	return l.append(e)
 }
 
+// CloseInterruptedAttempts terminalizes every started-but-never-terminalized
+// attempt (a hard runner kill leaves them dangling) with outcome
+// "interrupted", preserving the exactly-one-terminal-per-attempt invariant
+// so a resumed batch can pass VerifyLedger honestly — the attempt's true
+// outcome is unknown, and the chain says exactly that. Idempotent.
+func (l *AuthorReviewAttemptLedgerV1) CloseInterruptedAttempts() error {
+	l.mu.Lock()
+	started := map[string]AttemptEvent{}
+	terminal := map[string]bool{}
+	for _, e := range l.Events {
+		switch e.EventKind {
+		case EventAttemptStarted:
+			started[e.AttemptID] = e
+		case EventAttemptTerminal:
+			// An append-only final terminal (admitted | rejected) does not
+			// close the production lifecycle; only a production terminal
+			// does.
+			if e.TerminalOutcome != nil && isFinalOutcome(*e.TerminalOutcome) {
+				continue
+			}
+			terminal[e.AttemptID] = true
+		}
+	}
+	var dangling []AttemptEvent
+	for id, st := range started {
+		if !terminal[id] {
+			dangling = append(dangling, st)
+		}
+	}
+	l.mu.Unlock() // append takes the lock itself; never hold it across calls
+	for _, st := range dangling {
+		d := st.EventDigest
+		outcome := "interrupted"
+		reason := "runner-interrupted"
+		e := AttemptEvent{
+			AttemptID:           st.AttemptID,
+			Stage:               st.Stage,
+			Host:                st.Host,
+			ToolIdentityDigest:  st.ToolIdentityDigest,
+			ResolvedModel:       st.ResolvedModel,
+			PromptInputDigest:   st.PromptInputDigest,
+			StartedEventDigest:  &d,
+			TerminalOutcome:     &outcome,
+			ReasonCode:          &reason,
+		}
+		e.EventKind = EventAttemptTerminal
+		if err := l.append(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AppendTerminal appends the exactly-one terminal event for an attempt.
 func (l *AuthorReviewAttemptLedgerV1) AppendTerminal(e AttemptEvent) error {
 	e.EventKind = EventAttemptTerminal
@@ -368,6 +452,8 @@ func (l *AuthorReviewAttemptLedgerV1) AppendTerminal(e AttemptEvent) error {
 }
 
 func (l *AuthorReviewAttemptLedgerV1) append(e AttemptEvent) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	e.EventSequence = len(l.Events) + 1
 	if e.EventSequence == 1 {
 		e.PreviousEventDigest = nil
@@ -384,11 +470,20 @@ func (l *AuthorReviewAttemptLedgerV1) append(e AttemptEvent) error {
 	return nil
 }
 
+// isFinalOutcome classifies the append-only post-production author-attempt
+// outcomes: an author attempt is production-terminalized once
+// (candidate-ready | launch-failed | parse-error) and then finalized at most
+// once (admitted | rejected) once the dual review has spoken.
+func isFinalOutcome(outcome string) bool {
+	return outcome == "admitted" || outcome == "rejected"
+}
+
 // VerifyLedger replays the chain: continuity, one terminal per start, correct
 // stage pairing and digest integrity.
 func (l *AuthorReviewAttemptLedgerV1) VerifyLedger() error {
 	started := map[string]bool{}
 	terminals := map[string]bool{}
+	finals := map[string]bool{}
 	prevDigest := ""
 	for i, e := range l.Events {
 		if e.EventSequence != i+1 {
@@ -421,10 +516,23 @@ func (l *AuthorReviewAttemptLedgerV1) VerifyLedger() error {
 			if !started[e.AttemptID] {
 				return fmt.Errorf("terminal for unknown attempt %s", e.AttemptID)
 			}
-			if terminals[e.AttemptID] {
-				return fmt.Errorf("attempt %s has two terminals", e.AttemptID)
+			if e.TerminalOutcome != nil && isFinalOutcome(*e.TerminalOutcome) {
+				// An author attempt carries an append-only FINAL terminal
+				// after its production terminal (candidate-ready →
+				// admitted | rejected); ordering and counts are pinned.
+				if !terminals[e.AttemptID] {
+					return fmt.Errorf("attempt %s finalized (%s) before any production terminal", e.AttemptID, *e.TerminalOutcome)
+				}
+				if finals[e.AttemptID] {
+					return fmt.Errorf("attempt %s finalized twice", e.AttemptID)
+				}
+				finals[e.AttemptID] = true
+			} else {
+				if terminals[e.AttemptID] {
+					return fmt.Errorf("attempt %s has two production terminals", e.AttemptID)
+				}
+				terminals[e.AttemptID] = true
 			}
-			terminals[e.AttemptID] = true
 		default:
 			return fmt.Errorf("event %d kind %q invalid", i, e.EventKind)
 		}

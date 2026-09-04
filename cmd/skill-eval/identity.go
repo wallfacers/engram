@@ -25,9 +25,19 @@ func runAndCapture(args []string) capturedOutput {
 // runAndCaptureIn runs argv with an explicit working directory ("", meaning
 // inherit) and captures exit/stdout/stderr.
 func runAndCaptureIn(args []string, cwd string) capturedOutput {
+	return runAndCaptureEnv(args, cwd, nil)
+}
+
+// runAndCaptureEnv additionally pins an explicit environment (nil inherits).
+// The opencode lane needs a whitelist: inherited ANTHROPIC_*/agent markers
+// break its provider routing (2026-09-01 bisect, T018 failbook).
+func runAndCaptureEnv(args []string, cwd string, env []string) capturedOutput {
 	cmd := exec.Command(args[0], args[1:]...)
 	if cwd != "" {
 		cmd.Dir = cwd
+	}
+	if env != nil {
+		cmd.Env = env
 	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdoutWriter{b: &stdout}

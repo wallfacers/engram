@@ -5,14 +5,15 @@ description: >-
   CLI for memory work: the user asks to remember/记住, recall/召回, search, get or
   inspect saved facts, list, delete, ingest conversations, curate, stats, export,
   namespaces, or version; OR ordinary conversation reveals a durable fact about
-  the user, their setup, team, or project (stable preference, constraint,
-  identity, convention, long-term decision, state change, or a complaint
-  revealing a standing rule) — write once and acknowledge in the same turn; OR a
+  the user, their setup, team, or project (preference, constraint, identity,
+  convention, long-term decision, state change, or complaint-revealed rule) —
+  write once and acknowledge in the same turn; OR a
   question or task depends on remembered facts — which/what/when +
   my/our/usual/previous questions (哪个/我的/上次/老规矩), plans needing a standing
-  constraint (allergy, timezone, naming), or actions a convention could govern
-  (install/build/run) — search before answering or acting. Preserve namespace
-  isolation, offline behavior, secret safety; not for ordinary RAM, cache,
+  constraint (allergy, timezone, naming), environment/setup summaries, or
+  convention-governed actions (install, build, run, test, history rewrite,
+  commit) — search before acting. Preserve namespace
+  isolation, offline behavior, secret safety; not for RAM, cache,
   generic database, transient chat context, one-off details, secrets, or
   anything the user declined to store.
 ---
@@ -46,16 +47,32 @@ into engram.
 When the user corrects an earlier fact, write the new value (the update supersedes
 the old one for answering); deleting the old entry is optional, not required.
 
+**Compose once, write once.** One disclosure moment → exactly one write call:
+build the complete entry — name, content, and the optional category/trigger
+fields — BEFORE the first call, and send it in that one call. When one turn
+discloses several durable facts, merge them into that single entry — one write
+covering all of them, never one write per fact. Send only the documented
+fields with strict types: `pinned` is a JSON boolean (`true`), never the
+string `"true"`, and `trigger` is one line of at most 120 code points — a
+wrong-typed value or an unknown field rejects the whole write. A `written:true`
+response ends the turn's write phase: never re-issue or re-word the entry in
+this or a later turn unless the user actually updates it — `memory_write` is an
+upsert, so a same-name rewrite silently replaces the first version and, without
+`pinned` re-passed, resets its pin. The one permitted re-send is correcting a
+rejected call: fix exactly the reported validation error and send the same
+entry once more.
+
 **Read before answering or acting.** Search memory first when:
 (a) the question refers to the user's own persisted facts — "which / what /
 when / how many + my / our / usual / previous" question forms ("which package
-manager do I use", "我的/我们的/上次/老规矩…"); (b) a question, recommendation,
+manager do I use", "我的/我们的/上次/老规矩…"), including "summarize my
+environment/setup/tools" style requests; (b) a question, recommendation,
 or plan must honor a standing constraint — allergies and dietary rules,
 timezone, naming and branch conventions; (c) an action the assistant is about
 to perform (install, build, run, deploy, format, commit, history rewrite)
 could be governed by a remembered convention — a plain task phrasing ("install
-the dependencies", "rewrite these commits") does not make it memory-independent;
-find the convention first.
+the dependencies", "run the build", "rewrite these commits") does not make it
+memory-independent; find the convention first, then act on it.
 
 Query the constraint's attribute word, not the task topic: ONE distinctive
 term first (过敏/allergy, 包管理器/package manager, 时区/timezone, 分支/branch,

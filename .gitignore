@@ -54,3 +54,7 @@ ans-pcic*
 
 # session scratchpads (never commit)
 .scratch/
+
+# stray build outputs / local tool indexes
+cmd/skill-eval/skill-eval
+.zvec-grep/

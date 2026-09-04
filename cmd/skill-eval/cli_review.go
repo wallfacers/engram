@@ -273,12 +273,21 @@ func BlindCaseProjection(core *CoreDatasetV2) MirrorContentProvider {
 // opencode lane runs inside a materialized lane workspace carrying its
 // provider config (key flows through {env:MAAS_API_KEY}, never a file).
 func runLaneCLI(lane string, cfg CLIReviewConfig, prompt string) ([]byte, error) {
+	return runLaneCLIIn(lane, cfg, prompt, "")
+}
+
+// runLaneCLIIn is the cwd-explicit variant. Holdout authoring/review children
+// must run inside their isolated attempt workspace — a lane child whose cwd
+// is the repository can shell out and read the dataset contract, which breaks
+// the label-blind envelope and burns tokens on exploration.
+func runLaneCLIIn(lane string, cfg CLIReviewConfig, prompt, cwdOverride string) ([]byte, error) {
 	tmpl, err := TemplateForHost(lane, cfg.ClaudeSettings, cfg.CodexProvider, cfg.CodexModel, cfg.OpenCodeModel)
 	if err != nil {
 		return nil, err
 	}
 	var argv []string
-	cwd := ""
+	cwd := cwdOverride
+	var env []string
 	switch lane {
 	case HostClaude:
 		argv = append(append([]string{}, tmpl.Args...), prompt)
@@ -289,16 +298,48 @@ func runLaneCLI(lane string, cfg CLIReviewConfig, prompt string) ([]byte, error)
 		if err != nil {
 			return nil, err
 		}
-		cwd = ws
-		argv = append(append([]string{}, tmpl.Args...), prompt, ws)
+		// opencode2 resolves its provider from the config in the directory
+		// it RUNS in (bisected 2026-09-02). Instead of pinning the cwd to
+		// the config scratch dir — which would break the canary/case
+		// contract that the child runs in its prepared workspace — link the
+		// lane config into that workspace and run there.
+		link := filepath.Join(cwd, "opencode.json")
+		if err := os.Symlink(filepath.Join(ws, "opencode.json"), link); err != nil && !os.IsExist(err) {
+			return nil, err
+		}
+		argv = append(append([]string{}, tmpl.Args...), prompt)
+		// Whitelist env: inherited ANTHROPIC_*/agent markers hang or misroute
+		// opencode2 even with a correct project config (T018 failbook).
+		env = []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + os.Getenv("HOME"),
+			"LANG=" + os.Getenv("LANG"),
+			"TMPDIR=" + os.Getenv("TMPDIR"),
+			"MAAS_API_KEY=" + os.Getenv("MAAS_API_KEY"),
+		}
 	default:
 		return nil, fmt.Errorf("unknown lane %q", lane)
 	}
-	out := runAndCaptureIn(argv, cwd)
+	out := runAndCaptureEnv(argv, cwd, env)
 	if out.exitCode != 0 {
-		return nil, fmt.Errorf("lane %s exited %d", lane, out.exitCode)
+		// opencode2 exits 1 after emitting a COMPLETED stream ("Session
+		// interrupted: shutdown" follows the final answer — same known
+		// behavior the v2 runner tolerates): a step_finish event stream
+		// outranks the exit code.
+		if lane == HostOpenCode && bytes.Contains(out.stdout, []byte(`"type":"step_finish"`)) {
+			return out.stdout, nil
+		}
+		return nil, fmt.Errorf("lane %s exited %d stderr=%s stdout=%s", lane, out.exitCode,
+			truncateFor(out.stderr, 200), truncateFor(out.stdout, 200))
 	}
 	return out.stdout, nil
+}
+
+func truncateFor(b []byte, n int) string {
+	if len(b) > n {
+		return string(b[:n]) + "…"
+	}
+	return string(b)
 }
 
 // materializeOpenCodeLaneWorkspace writes a minimal opencode project config

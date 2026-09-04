@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,11 +31,30 @@ Formal / protocol commands:
                 [--skill-package-validation <file>] [--series-root <dir>] --out <file>
   package validate --skill-dir <dir> --repository-root <repo> --snapshot-root <dir>
                 --green-test-receipt <file> --out <file>
+  core-plan create --out <plan.json> --core-exec <boundary-config.json>
+                --core-manifest <file> --timeout <s> --concurrency <n>
+                [--claude-settings <p>] [--codex-provider aq] [--codex-model <m>]
+                [--opencode-model <m>] [--seed-1 <s>] [--seed-2 <s>] [--seed-3 <s>]
+  series prepare --series <id> --series-root <dir> --purpose official-dual|dev-comparison
+                --core-execution-plan <plan.json> --skill-snapshot <dir>
+                --skill-package-validation <file> --green-test-receipt <file>
+                --core-exec <file> --timeout <s> --concurrency <n>
+                [--holdout-dataset --protected-root --author-audit-root --author-state-root]  (official-dual)
+  score --series-root <dir>   # official-dual only; dev-comparison is refused
+  failure-archive --series-root <dev-comparison-root> [--root-causes <file>]
+                --out <failure-archive.json>   # dev-only, no official score
+  compare --baseline-series-root <dev-comparison-root>
+                --candidate-series-root <official-dual-core-leg>
+                --failure-archive <file> [--extension-receipt <file>]
+                --out <flywheel-comparison.json>   # core172 paths only, no holdout read
 
 Dev commands (diagnostic, never score-eligible):
   run --mode diagnostic --split dev-regression --dataset <dir> --manifest <file>
                 --tool <t> --out <dir> --scratch <dir> --bin-dir <dir> --concurrency <n>
                 [--only ids] [--sample n] [--limit n] [--include-extension]
+  run --mode primary --series <id> --split dev-regression|holdout --run-ordinal 1|2|3
+                --tool <t> --series-root <dir> --core-execution-plan <plan.json>
+                --scratch <dir> --bin-dir <dir> [--green-test-receipt <file>]  (holdout ordinal 1)
   run (legacy)  --dataset <dir> --out <dir> [--tool ...] (v1 dev harness)
 `
 
@@ -64,8 +85,259 @@ func routeV2(args []string) (handled bool, err error) {
 			return true, fmt.Errorf("unknown package subcommand %q", args[1])
 		}
 		return true, cmdPackageValidate(args[2:])
+	case "rejudge":
+		return true, cmdRejudge(args[1:])
+	case "core-plan":
+		if len(args) < 2 {
+			return true, fmt.Errorf("core-plan requires a subcommand (create)")
+		}
+		if args[1] != "create" {
+			return true, fmt.Errorf("unknown core-plan subcommand %q", args[1])
+		}
+		return true, cmdCorePlanCreate(args[2:])
+	case "series":
+		if len(args) < 2 {
+			return true, fmt.Errorf("series requires a subcommand (prepare)")
+		}
+		if args[1] != "prepare" {
+			return true, fmt.Errorf("unknown series subcommand %q", args[1])
+		}
+		return true, cmdSeriesPrepare(args[2:])
+	case "score":
+		return true, cmdScore(args[1:])
+	case "failure-archive":
+		return true, cmdFailureArchive(args[1:])
+	case "compare":
+		return true, cmdCompare(args[1:])
+	case "holdout":
+		if len(args) < 2 {
+			return true, fmt.Errorf("holdout requires a subcommand (generate|review|seal)")
+		}
+		switch args[1] {
+		case "generate":
+			return true, cmdHoldoutGenerate(args[2:])
+		case "review":
+			return true, cmdHoldoutReview(args[2:])
+		case "seal":
+			return true, cmdHoldoutSeal(args[2:])
+		}
+		return true, fmt.Errorf("unknown holdout subcommand %q", args[1])
+	case "validate":
+		// v2 split/phase-aware validation; a bare `validate --dataset` still
+		// falls through to the legacy surface unless --split is given.
+		if hasFlag(args[1:], "split") {
+			return true, cmdValidateV2(args[1:])
+		}
+		return false, nil
 	}
 	return false, nil
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == "--"+name || strings.HasPrefix(a, "--"+name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// holdoutLaneConfig builds the frozen three-lane CLI config from the same
+// env-driven settings the family-index/review lanes use.
+func holdoutLaneConfig(datasetDir string) CLIReviewConfig {
+	return CLIReviewConfig{
+		Lanes:         []string{HostClaude, HostCodex, HostOpenCode},
+		ClaudeSettings: os.Getenv("ENGRAM_SKILL_EVAL_CLAUDE_SETTINGS"),
+		CodexProvider: os.Getenv("ENGRAM_SKILL_EVAL_CODEX_PROVIDER"),
+		CodexModel:    os.Getenv("ENGRAM_SKILL_EVAL_CODEX_MODEL"),
+		OpenCodeModel: os.Getenv("ENGRAM_SKILL_EVAL_OPENCODE_MODEL"),
+	}
+}
+
+func cmdHoldoutGenerate(argv []string) error {
+	fs := newFlagSet("holdout generate")
+	root := fs.String("root", "", "operator-provided protected root (absolute, must exist)")
+	datasetDir := fs.String("dataset", "skills/engram/evals", "dataset dir with prompts and dev index")
+	concurrency := fs.Int("concurrency", 2, "bounded author/review worker capacity")
+	maxAttempts := fs.Int("max-attempts-per-slot", 6, "regeneration budget per quota slot")
+	only := fs.String("only", "", "comma-separated slot keys (author/module/lang/scenario) to fill alone — smoke use")
+	if err := fs.Parse(argv); err != nil {
+		return err
+	}
+	if *root == "" {
+		return fmt.Errorf("--root is required (operator-provided protected root)")
+	}
+	cfg := HoldoutBatchConfig{
+		Root:               *root,
+		DatasetDir:         *datasetDir,
+		AuthorPromptFile:   filepath.Join(*datasetDir, "prompts", "holdout-authoring-v1.md"),
+		ReviewPromptFile:   filepath.Join(*datasetDir, "prompts", "holdout-review-v2.md"),
+		DevIndexFile:       filepath.Join(*datasetDir, "dev-family-index.json"),
+		Concurrency:        *concurrency,
+		MaxAttemptsPerSlot: *maxAttempts,
+	}
+	b, err := LoadOrInitHoldoutBatch(cfg)
+	if err != nil {
+		return err
+	}
+	var onlySet map[string]bool
+	if *only != "" {
+		onlySet = map[string]bool{}
+		for _, k := range strings.Split(*only, ",") {
+			onlySet[strings.TrimSpace(k)] = true
+		}
+	}
+	if err := b.Run(holdoutLaneConfig(*datasetDir), onlySet); err != nil {
+		return err
+	}
+	fmt.Printf("holdout generate: filled=%d/96 revision=%d attempts=%d\n",
+		len(b.persist.Filled), b.persist.Accepted.Revision, len(b.persist.Ledger.Events))
+	return nil
+}
+
+// cmdHoldoutReview re-runs the dual review for every unfilled slot's pending
+// candidates (fresh sessions against the newest accepted state).
+func cmdHoldoutReview(argv []string) error {
+	// Review is inlined in generate (stale CAS reruns both reviews in fresh
+	// sessions automatically); this command surfaces the same loop for an
+	// operator-triggered retry after an interrupted batch.
+	return cmdHoldoutGenerate(argv)
+}
+
+func cmdHoldoutSeal(argv []string) error {
+	fs := newFlagSet("holdout seal")
+	root := fs.String("root", "", "protected root of a completed batch")
+	datasetDir := fs.String("dataset", "skills/engram/evals", "dataset dir with prompts and dev index")
+	anchorType := fs.String("anchor-type", "immutable-object", "git-tag | detached-signature | immutable-object")
+	anchorID := fs.String("anchor-id", "", "external anchor identifier")
+	if err := fs.Parse(argv); err != nil {
+		return err
+	}
+	if *root == "" {
+		return fmt.Errorf("--root is required")
+	}
+	if *anchorID == "" {
+		return fmt.Errorf("--anchor-id is required (content address / tag / signature id)")
+	}
+	cfg := HoldoutBatchConfig{
+		Root:             *root,
+		DatasetDir:       *datasetDir,
+		AuthorPromptFile: filepath.Join(*datasetDir, "prompts", "holdout-authoring-v1.md"),
+		ReviewPromptFile: filepath.Join(*datasetDir, "prompts", "holdout-review-v2.md"),
+		DevIndexFile:     filepath.Join(*datasetDir, "dev-family-index.json"),
+		Concurrency:      1,
+		AnchorType:       *anchorType,
+		AnchorID:         *anchorID,
+	}
+	b, err := LoadOrInitHoldoutBatch(cfg)
+	if err != nil {
+		return err
+	}
+	m, err := b.Seal()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("holdout sealed: cases=%d payload=%s manifest=%s\n",
+		m.CaseCount, m.PayloadDigest[:16], m.Seal.ManifestDigest[:16])
+	fmt.Printf("receipt written to %s\n", filepath.Join(*root, "sealed", "manifest.json"))
+	return nil
+}
+
+// cmdRejudge re-runs the deterministic judge offline over one completed
+// diagnostic run: raw event streams and per-case stores are re-read, no CLI
+// or model is invoked, and the fresh verdicts are printed plus summarized.
+// This exists for harness-failure recovery (e.g. an exit-code misread) —
+// the observable evidence is unchanged.
+func cmdRejudge(argv []string) error {
+	fs := newFlagSet("rejudge")
+	datasetDir := fs.String("dataset", "skills/engram/evals", "dataset directory")
+	manifest := fs.String("manifest", "", "manifest file")
+	tool := fs.String("tool", "", "host tool of the completed run (claude|codex|opencode)")
+	runRoot := fs.String("run", "", "completed diagnostic run root (contains raw/) (required)")
+	scratchRoot := fs.String("scratch", "", "scratch root of that run (contains data/<case>/) (required)")
+	binDir := fs.String("bin-dir", "", "bin dir with the engram CLI (required)")
+	only := fs.String("only", "", "comma-separated case ids (default: all cases in the manifest)")
+	out := fs.String("out", "", "write the rejudge verdict list JSON")
+	if err := fs.Parse(argv); err != nil {
+		return err
+	}
+	if *manifest == "" {
+		*manifest = filepath.Join(*datasetDir, "dev-regression-core.manifest.json")
+	}
+	if *tool == "" || *runRoot == "" || *scratchRoot == "" || *binDir == "" {
+		return fmt.Errorf("--tool, --run, --scratch and --bin-dir are required")
+	}
+	core, err := LoadCoreV2(*datasetDir, *manifest)
+	if err != nil {
+		return err
+	}
+	var parsers = map[string]func(io.Reader) []Event{HostClaude: ParseClaude, HostCodex: ParseCodex, HostOpenCode: ParseOpenCode}
+	parse, ok := parsers[*tool]
+	if !ok {
+		return fmt.Errorf("unknown tool %q", *tool)
+	}
+	onlySet := map[string]bool{}
+	if *only != "" {
+		for _, id := range splitTools(*only) {
+			onlySet[id] = true
+		}
+	}
+	type row struct {
+		CaseID  string `json:"case_id"`
+		Pass    bool   `json:"pass"`
+		Failure string `json:"failure"`
+		Detail  string `json:"detail"`
+	}
+	var rows []row
+	modStats := map[string][2]int{}
+	for _, id := range sortedKeys(core.Cases) {
+		if len(onlySet) > 0 && !onlySet[id] {
+			continue
+		}
+		c := core.Cases[id]
+		raw, err := os.ReadFile(filepath.Join(*runRoot, "raw", id+".jsonl"))
+		if err != nil {
+			return fmt.Errorf("case %s: %w", id, err)
+		}
+		// The re-read exit-code policy: a stream that carries a completion
+		// event is a completed run regardless of the recorded exit code.
+		runErr := error(nil)
+		if len(raw) == 0 {
+			runErr = fmt.Errorf("empty raw stream")
+		}
+		events := parse(bytes.NewReader(raw))
+		caseDir := filepath.Join(*scratchRoot, "data", id)
+		storeDump := ""
+		if o, err := newStoreDumpCommand(filepath.Join(*binDir, "engram"), caseDir).Output(); err == nil {
+			storeDump = string(o)
+		}
+		v := JudgeV2(c, events, storeDump, runErr)
+		fmt.Printf("%s: pass=%v failure=%s detail=%s\n", v.CaseID, v.Pass, v.Failure, v.Detail)
+		s := modStats[c.Module]
+		if v.Pass {
+			s[0]++
+		}
+		s[1]++
+		modStats[c.Module] = s
+		rows = append(rows, row{CaseID: v.CaseID, Pass: v.Pass, Failure: v.Failure, Detail: v.Detail})
+	}
+	total, passed := 0, 0
+	for _, s := range modStats {
+		total += s[1]
+		passed += s[0]
+	}
+	fmt.Printf("rejudge: %d/%d passed (offline; no CLI/model invoked)\n", passed, total)
+	if *out != "" {
+		b, err := CanonicalJSON(rows)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*out, b, 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("rejudge verdicts: %s\n", *out)
+	}
+	return nil
 }
 
 func cmdGreenTestCreate(argv []string) error {
@@ -88,24 +360,40 @@ func cmdGreenTestCreate(argv []string) error {
 		return fmt.Errorf("suite %q is not one of the fixed suites %v", *suite, sortedStringsOf(fixedSuites))
 	}
 	bindings := GreenBindings{}
-	if *skillSnapshot != "" {
-		// Bind the materialized snapshot digest.
-		recs, err := inventoryPackage(*skillSnapshot)
-		if err != nil {
-			return fmt.Errorf("skill snapshot: %w", err)
-		}
-		d, err := FileRecordsDigest(recs)
-		if err != nil {
-			return err
-		}
-		bindings.SnapshotDigest = &d
-	}
-	if *skillPV != "" {
+	if *skillSnapshot != "" && *skillPV != "" {
+		// The series-grade pairing: the snapshot must rehash-verify against
+		// the exact-skill package receipt, and the bound snapshot digest is
+		// the receipt's own (the snapshot-root rehash includes controller
+		// metadata, which is not the skill-package digest).
 		pv, err := LoadPackageValidationReceipt(*skillPV)
 		if err != nil {
 			return err
 		}
+		if err := VerifyPackageValidationReceipt(pv, *skillSnapshot, *validator); err != nil {
+			return fmt.Errorf("skill snapshot does not verify against the package-validation receipt: %w", err)
+		}
+		bindings.SnapshotDigest = &pv.SnapshotDigest
 		bindings.PackageValidationReceiptDigest = &pv.ReceiptDigest
+	} else {
+		if *skillSnapshot != "" {
+			// Bind the materialized snapshot digest.
+			recs, err := inventoryPackage(*skillSnapshot)
+			if err != nil {
+				return fmt.Errorf("skill snapshot: %w", err)
+			}
+			d, err := FileRecordsDigest(recs)
+			if err != nil {
+				return err
+			}
+			bindings.SnapshotDigest = &d
+		}
+		if *skillPV != "" {
+			pv, err := LoadPackageValidationReceipt(*skillPV)
+			if err != nil {
+				return err
+			}
+			bindings.PackageValidationReceiptDigest = &pv.ReceiptDigest
+		}
 	}
 	if *suite == SuitePreHoldout {
 		if *seriesRoot == "" || *candidateBinding == "" || *coreLegCompletion == "" {
@@ -183,6 +471,22 @@ func cmdValidateV2(argv []string) error {
 			return fmt.Errorf("split %q invalid", *split)
 		}
 	}
+	if *split == SplitHoldout {
+		if *phase != "" {
+			return fmt.Errorf("phase %q applies to the dev split only (holdout validates its sealed matrix)", *phase)
+		}
+		// The sealed holdout dataset lives under the protected root; its
+		// payload/manifest pair is validated by the holdout matrix/seal pass.
+		root := filepath.Dir(filepath.Dir(*manifest))
+		rep := HoldoutValidation(root, *manifest)
+		for _, l := range rep.Lines {
+			fmt.Println(l)
+		}
+		if !rep.OK {
+			return fmt.Errorf("holdout validation failed")
+		}
+		return nil
+	}
 	core, err := LoadCoreV2(*datasetDir, *manifest)
 	if err != nil {
 		return err
@@ -247,6 +551,22 @@ type ValidationReceipt struct {
 
 // cmdRunV2 is the mode-aware run router.
 func cmdRunV2(argv []string) error {
+	// A primary leg carries flags of its own (--series, --run-ordinal, …);
+	// forward the raw argv before this router's diagnostic flag set sees it.
+	for _, a := range argv {
+		if a == "--mode" || strings.HasPrefix(a, "--mode=") {
+			if strings.Contains(a, "primary") {
+				return cmdRunPrimary(argv)
+			}
+			break
+		}
+	}
+	// "--mode primary <rest>" (separate argv words) also routes here.
+	for i, a := range argv {
+		if a == "--mode" && i+1 < len(argv) && argv[i+1] == "primary" {
+			return cmdRunPrimary(argv)
+		}
+	}
 	fs := newFlagSet("run")
 	mode := fs.String("mode", "", "primary|diagnostic (required)")
 	split := fs.String("split", "", "dev-regression|holdout (required for v2 modes)")
@@ -272,6 +592,9 @@ func cmdRunV2(argv []string) error {
 		if *datasetDir == "" || *out == "" || *scratch == "" || *binDir == "" {
 			return fmt.Errorf("--dataset, --out, --scratch and --bin-dir are required")
 		}
+		if *manifest == "" {
+			*manifest = filepath.Join(*datasetDir, "dev-regression-core.manifest.json")
+		}
 		opts := DiagnosticOptions{
 			Split: *split, Tool: *tool, DatasetDir: *datasetDir, ManifestPath: *manifest,
 			BinDir: *binDir, OutRoot: *out, ScratchRoot: *scratch, Concurrency: *concurrency,
@@ -294,7 +617,7 @@ func cmdRunV2(argv []string) error {
 			rec.CaseCount, rec.ObservedMaxInFlight, rec.ObservedOverlap, rec.FormalScoreEligible)
 		return nil
 	case "primary":
-		return fmt.Errorf("primary mode requires a prepared formal series (T045+); no primary run may start without one")
+		return cmdRunPrimary(fs.Args())
 	default:
 		return fmt.Errorf("mode %q invalid", *mode)
 	}

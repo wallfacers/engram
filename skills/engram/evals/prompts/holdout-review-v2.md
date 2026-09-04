@@ -1,10 +1,16 @@
-# holdout-review-v1
+# holdout-review-v2
 
 Frozen anonymous dual-review prompt for the sealed holdout96 dataset
 (specs/048-implicit-memory-flywheel, contracts/dataset-protocol.md §4). Any
 non-whitespace edit bumps the version and starts a new batch. The dataset
 seal allows exactly one review prompt digest per batch; it is bound into
 every ReviewRecord.
+
+v2 (2026-09-02): adds the fixed decision order for Job 1. The v1 label
+procedure let reviewers wander between module boundaries first; the first
+full run showed disagreement concentrated exactly there (trap/implicit
+boundary flips and trigger flips). The order below is normative — follow it
+step by step and in this order only.
 
 ---
 
@@ -29,15 +35,51 @@ by you alone from the blind candidate.
 
 ## Your two jobs
 
-### Job 1 — Independently label the case
+### Job 1 — Independently label the case (fixed decision order)
 
-From the blind input alone, infer:
+Work through these four questions IN ORDER. Each answer feeds the next;
+do not revisit an earlier answer after a later one.
+
+**Step 1 — trigger.** Does correct behavior in this case REQUIRE a memory
+interaction (writing one new durable fact, or retrieving previously known
+facts) — or must it REFRAIN from one?
+
+- Ask: is there a durable, cross-session fact about the user in the turn
+  that a competent assistant should store (trigger=true, write side), or a
+  task whose correct answer/action depends on facts the user told it
+  earlier / facts seeded in its store (trigger=true, read side)?
+- If the turn is ordinary technical work with no personal dependence, no
+  durable disclosure, or a disclosure that is explicitly one-off,
+  hypothetical, refused, secret, or about a third party → trigger=false.
+- Memory-LIKE WORDING alone never sets trigger=true: a question that
+  mentions "remember" or "last time" but is answerable from the current
+  turn or general knowledge has trigger=false.
+
+**Step 2 — direction.** Given your trigger answer, is the required
+interaction on the write side (store something new) or the read side
+(retrieve before answering/acting)? trigger=false cases are still write
+side or read side BY TEMPTATION: choose the side of the interaction a naive
+assistant would wrongly perform.
+
+**Step 3 — module skeleton.** Combine steps 1–2 into
+`write-pos`/`write-neg`/`read-pos`/`read-neg`.
+
+**Step 4 — trap prefix.** Independently of steps 1–3, judge difficulty:
+does the case contain a subtlety that would make a NAIVE memory-aware
+assistant behave wrongly even though it interacts with memory at the right
+time — a stale value that must be superseded, a staged workspace file
+disagreeing with a seeded memory, an enumeration trap, a disclosure shaped
+like something it is not (secret-shaped, third-party)? If yes, prefix
+`trap-`; otherwise prefix `implicit-`. Your step 1–3 answers MUST NOT
+change based on this step.
+
+Then assemble:
 
 - `inferred_module`: one of `implicit-write-pos`, `implicit-write-neg`,
   `implicit-read-pos`, `implicit-read-neg`, `trap-read-pos`,
-  `trap-write-neg`, `trap-read-neg` (same semantics as the authoring
-  contract: what a memory-aware assistant must observably do or refrain
-  from doing).
+  `trap-write-neg`, `trap-read-neg` (your steps 1–4 outcome; note
+  `trap-write-pos` and `trap-read-neg`-without-wording are rare — if you
+  reach them, re-check step 1).
 - `inferred_lang`: `zh` or `en` (the language of the user utterances).
 - `inferred_scenario_bucket`: one of `durable-preference`,
   `identity-biography`, `project-convention`, `environment-tooling`,
@@ -57,7 +99,7 @@ From the blind input alone, infer:
   satisfies the group). `store_exclude` and `answer_exclude` are FLAT arrays
   of plain strings — never nest them: `["npm install", "package-lock.json"]`,
   not `[["npm"], ["package-lock.json"]]`.
-  These must be consistent with your inferred module (a write-pos needs
+  These must be consistent with your steps 1–3 outcome (a write-pos needs
   store_include tokens; a negative module needs trigger:false and the
   forbidden token where the trap is storing).
 
@@ -103,6 +145,6 @@ Rules:
   `reject` with reason `undecidable` and cannot be appealed.
 
 Your review is one of two. A case is admitted only when BOTH reviews
-accept, both independently infer identical labels and complete machine
+accept, both independently infer consistent labels and complete machine
 rules, and both find it novel. Any disagreement rejects the candidate; the
 slot regenerates elsewhere. Nobody can overrule you.

@@ -115,7 +115,9 @@ Rules:
   modules need `trigger:false` and, where the trap is storing, the forbidden
   token in `store_exclude` or `answer_exclude`.
 - Alternation groups: each inner list is OR-alternatives of one required
-  token ("pnpm" or "pnpm 包管理器"); use lowercase.
+  token ("pnpm" or "pnpm 包管理器"); use lowercase. ONLY `store_include` and
+  `answer_include` are two-dimensional; `store_exclude` and `answer_exclude`
+  are FLAT string arrays — never nest them.
 - Do NOT include `family_id`, `translation_of`, author identity, batch or
   attempt fields — the controller generates all of those.
 - Do NOT reveal the scenario bucket or module inside the case text itself.

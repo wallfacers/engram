@@ -2,9 +2,82 @@
 
 **Feature**: `048-implicit-memory-flywheel`
 
-**Contract version**: 3
+**Contract version**: 4.4
 
-**Date**: 2026-09-01
+> **v4.4 (2026-09-03, seal time)**: the OpenCode `billing_class=free`
+> requirement is replaced by an honest-declaration gate. The three lanes
+> were unified onto the maintainer's existing authorized Bailian
+> qwen3.8-flash endpoint (maintainer decision 2026-09-01), so the original
+> "OpenCode2 rides a free model" row no longer described the running
+> configuration: every lane's provenance honestly records
+> `billing_class=existing-authorized`. The seal gate now requires every
+> authoring/review provenance record to carry a *declared* class
+> (`existing-authorized` | `free`) and rejects `unknown`; per-lane cost
+> equality is a recorded fact of this batch, not a gate.
+
+> **v4.3 (2026-09-02/03, second full run)**: the author↔reviewer label
+> cross-check became positive-slot-only. Second-run evidence: all 18
+> unfilled slots were negative modules (`implicit-read-neg` ×14,
+> `trap-read-neg` ×3) and 26/37 failures were the same flip — two blind
+> reviewers *unanimously* reading the case's environment/team distractors
+> as a durable disclosure (write-pos) while the author's scoring contract
+> says the turn must not produce a write. A natural negative case cannot
+> avoid such context (the difficulty rules demand concrete, real
+> situations), so the divergence is structural, not sloppiness: "what
+> counts as durable" is exactly the behavior under test, and the two
+> populations (author constructing a scoring contract, blind reviewers
+> reading disclosure) answer it differently by design. On negative slots
+> the gate is now: two independent accepts + reviewer-vs-reviewer digest
+> unanimity + novelty + the mechanical shape of the author's expect
+> (trigger=false, exclude tokens). The negative behavioral contract stays
+> author-owned and machine-checkable at scoring time; its residual
+> authoring bias is an explicit declared limit in the dataset card
+> (T037), and `unanimous reviewer label mismatches the private author
+> candidate` remains a hard rejection on every positive slot.
+
+**Date**: 2026-09-01 (v4 revision 2026-09-02)
+
+> **v4 revision (2026-09-02)**: `inferred_category` was removed from the
+> reviewer-unanimity gate and from the normalized-label digest preimage. It
+> is a free-form sub-taxonomy with no closed vocabulary, so two blind
+> reviewers agree semantically while wording it differently — smoke evidence:
+> 4/6 attempts died on category/wording-level digest mismatch with zero
+> semantic disagreements. It remains a recorded diagnostic. The unanimity
+> gate stays on the closed-set dimensions (module, language, scenario bucket)
+> plus the complete expect machine rules, now compared under canonical
+> normalization (lowercase tokens, sorted alternation groups, sorted flat
+> lists).
+>
+> **v4.1 (2026-09-02, same day)**: the unanimity gate shrank further to the
+> reviewer-reliable core — module, language, `trigger`, `not_found`. Smoke
+> evidence: blind reviewers converge on those exactly, but diverge on the
+> scenario bucket (a python-tooling preference legitimately reads as both
+> `durable-preference` and `environment-tooling` — the bucket is a quota
+> structure, not a semantic judgment), on content-token rule groups (the
+> author's scoring contract), and occasionally hallucinate out-of-vocabulary
+> `allowed_ops` (e.g. `upsert`). Those fields stay author-owned with reviewer
+> values recorded as diagnostics; admission enforces the author's expect as
+> the scoring contract.
+>
+> **v4.2 (2026-09-02, first full run)**: the `trap-` module prefix left the
+> gate. Full-run evidence: of 16 dual-review pairs, 10 disagreed and every
+> module disagreement was a trap/implicit boundary flip
+> (`implicit-read-pos <> trap-read-pos` ×3,
+> `implicit-write-neg <> trap-write-neg` ×1) plus 4 independent
+> `trigger` flips. The trap prefix is a difficulty annotation the author
+> constructs toward, not a behavior class — "retrieval must still happen and
+> resolve the trap" is the same observable read-pos behavior as its implicit
+> sibling, and a blind reviewer given only the case cannot reliably recover
+> the author's difficulty intent. `NormalizedLabelDigest` and the
+> reviewer-unanimity check now compare the projected behavioral class
+> (`write-pos`/`write-neg`/`read-pos`/`read-neg`) plus language, `trigger`,
+> `not_found`; the full seven-module inference and the author's slot module
+> (checked verbatim against the quota slot) are recorded diagnostics. The
+> frozen review prompt moves to `holdout-review-v2.md`, which fixes a
+> normative four-step decision order (trigger → direction → module skeleton
+> → trap prefix) so the two independent reviewers converge instead of
+> wandering the module boundaries first — the prompt-digest invariant
+> (one review prompt digest per batch) makes this a new batch root.
 
 ## 1. Scope and split boundary
 
@@ -135,8 +208,8 @@ For every schema-valid candidate:
 
 1. Construct `BlindCandidateV1`, a recursively closed allowlist. Its top level contains exactly `schema_version=blind-candidate-v1`, one of `prompt|turns`, `seed_memories`, and path-sorted `workspace_files`. Blind turns allow only `session/role/content/setup_only`; seed memories only `name/content/event_date`; workspace files only `path/content/sha256`. Reject unknown/duplicate keys, aliases, nested extensions and any free-form “safe judging context”; do not accept then strip them. Wrap only that candidate, `blind_candidate_digest`, review prompt digest, the actual anonymous dev/accepted-holdout family-summary payloads plus their source-bound canonical digests, and accepted-family revision in the review envelope. Omit IDs/family/translation, split/membership/status, author host/model/config, authoring receipt, private candidate digest, author-specific quota slot, batch/source, candidate ordinal, author rationale, prior review output **and the author's proposed expect/module/language/scenario/category/machine rules**. `blind_candidate_digest` is SHA-256 over `agent-memory-trigger-canonical-json-v1` bytes of the exact validated `BlindCandidateV1`. Two private candidates with the same blind projection but different private labels/rules/slots/family proposals must expose the same reviewer-visible candidate digest. The envelope MUST NOT contain any field or digest from which the authoring lane or proposed label can be derived.
 2. Materialize that same envelope independently into two fresh isolated reviewer input/state workspaces and send it to the two hosts other than the author. A reviewer child can read its own envelope but cannot traverse/list/read the private root, generation audit, author receipt, prior review or an active sibling workspace.
-3. Require each reviewer to return strict `ReviewRecord` JSON containing its exact review `attempt_id` and author `attempt_id`, independently inferred module, language, scenario bucket, category, the complete `ExpectedBehavior` machine rules, `accept|reject`, novelty verdict/nearest existing-family reference (dev or accepted holdout), a closed reason code, provenance and review timestamp. The normalized-label digest is controller-recomputed from all inferred dimensions and all machine fields except human-only `observable`; an opaque digest without its preimage fields is invalid.
-4. Accept only if both reviewers return `accept` and `novel=true`, their exact inferred fields and recomputed label digests match each other, those fields match the private author candidate, author/module/language/scenario match the complete private quota slot, and an atomic CAS confirms the reviewed accepted-family revision/source-state digest is still current immediately before admission. Under the CAS lock append an `AdmissionReceipt`: `committed` advances revision by one, adds the controller-generated family entry and binds the final case; `stale` leaves state unchanged and binds no case.
+3. Require each reviewer to return strict `ReviewRecord` JSON containing its exact review `attempt_id` and author `attempt_id`, independently inferred module, language, scenario bucket, category (diagnostic only since v4), the complete `ExpectedBehavior` machine rules, `accept|reject`, novelty verdict/nearest existing-family reference (dev or accepted holdout), a closed reason code, provenance and review timestamp. The normalized-label digest is controller-recomputed from the closed-set dimensions and all machine fields except human-only `observable`, under canonical normalization (lowercase, sorted alternation groups, sorted flat lists; category excluded per v4); an opaque digest without its preimage fields is invalid.
+4. Accept only if both reviewers return `accept` and `novel=true`, their exact inferred closed-set fields (module, language, scenario) and recomputed normalized label digests match each other, those fields plus the machine rules match the private author candidate, author/module/language/scenario match the complete private quota slot, and an atomic CAS confirms the reviewed accepted-family revision/source-state digest is still current immediately before admission. Under the CAS lock append an `AdmissionReceipt`: `committed` advances revision by one, adds the controller-generated family entry and binds the final case; `stale` leaves state unchanged and binds no case.
 5. On either rejection, non-novelty, parse error, timeout, provenance/isolation/model-identity violation, label disagreement, private-slot mismatch or stale-family CAS, append the corresponding terminal/admission evidence. A stale-family attempt may rerun both reviews in fresh sessions against the newest summary; all other failures regenerate a new candidate for the same quota slot.
 
 No reviewer can review its own candidate. No human can reconcile a split vote. Review-generated prose is audit metadata only; the machine rules are the scored contract.
@@ -197,7 +270,7 @@ Before holdout ordinal 1, the current `official-dual` series must already have a
 
 - count, author, language or module matrix mismatch;
 - scenario bucket count/author/language/module-coverage mismatch or an unknown bucket;
-- an author candidate supplies a family ID, a committed case lacks the controller-generated family ID, an author is also a reviewer, reviewer hosts are the same, review envelope exposes a proposed label/rule, reviewers disagree on module/language/scenario/category/complete machine rules, the unanimous reviewer label mismatches the private author/four-dimensional slot, or a stale accepted-family CAS changes state/admits a case;
+- an author candidate supplies a family ID, a committed case lacks the controller-generated family ID, an author is also a reviewer, reviewer hosts are the same, review envelope exposes a proposed label/rule, reviewers disagree on module/language/scenario/complete machine rules (category is diagnostic-only since v4), the unanimous reviewer label mismatches the private author/four-dimensional slot, or a stale accepted-family CAS changes state/admits a case;
 - `BlindCandidateV1` or `ReviewRecord` has an unknown/duplicate/aliased/nested-extra field, omits an inferred-label preimage, or reviewer-visible candidate digest is not the exact canonical closed-schema digest, differs for identical blind projections, or includes a private candidate/label/slot/provenance digest;
 - family-summary source-state/count/root/projection binding is missing or mismatched, a source family is omitted/duplicated, family-summary payload is missing/digest-mismatched, or a nearest-family reference is absent from the exact payload;
 - a missing/invalid author or reviewer stage-isolation receipt, missing controller target-existence proof, reused ephemeral state root, readable private/audit/author-receipt/prior-review/sibling target, unreadable own input, or access-policy/template/identity mismatch;

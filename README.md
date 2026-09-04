@@ -50,8 +50,10 @@ separately. The default command keeps **one shared copy** in the universal
 skills directory `~/.agents/skills/engram`; every other client — including
 Claude Code, which only reads its own `~/.claude/skills/` — gets a symlink to
 it. Codex and OpenCode scan `~/.agents/skills/` natively (probe-verified on
-codex-cli 0.150.1 and opencode2 v0.0.0-beta-18600), so the package is
-discovered as-is. **Never additionally copy the skill into private directories
+codex-cli 0.150.1 and opencode2 v0.0.0-beta-18600; layout re-confirmed on
+2026-09-03 against codex-cli 0.153.0, opencode2 v0.0.0-beta-18743, and Claude
+Code 2.1.259), so the package is discovered as-is. **Never additionally copy
+the skill into private directories
 such as `~/.codex/skills/` or `~/.config/opencode/skills/`** — those duplicates
 are redundant, drift on upgrade, and shadow the shared copy. Scoping flags
 like `--agent <id>` are only for explicitly restricting an install to one

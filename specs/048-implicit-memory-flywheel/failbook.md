@@ -456,3 +456,96 @@ codex 可精确计量:全量 ¥8.85 + 超时重试 ¥2.02 + r8-retry ¥2.78 + r9
   codex `agent_message` / opencode `text`），找不到决策键即报错，fail-closed。
 - **lane 调用瞬时失败**（opencode exit -1 一次）：bounded retry（3 次尝试 + 退避）
   已加入 lane driver；判定语义不变。
+- **codex write-pos 低分的解剖定案（T021 r4，2026-09-02）**：judge 机械计 write
+  调用次数（max 1），但 codex 的多次调用解剖后三层构成，且抽查 store 全部干净
+  （每 case 恰 1 条语义条目）：(a) **内容限制拒绝后的合法重写**——trigger 超 120
+  码点被拒，缩短后重发（skill 预期路径）；(b) **pinned 参数字符串化**——codex 的
+  MCP client 把 `pinned: true` 序列化成字符串 `"true"`，Go 端 bool 解码被拒/未生效
+  → 模型自诊断 "Pinning didn't take" 后重试（我们 schema 是 `Pinned bool`，
+  `mcpserver/tools.go:27`，不是服务端 bug）；(c) **同轮双发**——qwen3.8-flash 在
+  codex agent 循环里连续生成两个相同 tool_use（write,write 相邻无中间消息）。
+  v0.2.8 "Compose once, write once" 对 (a)(b) 类无约束力（重试在 skill 文本之下
+  一层发生），对 (c) 亦然。**结论：skill 层修复到此为止，不继续追**；按调用次数
+  vs 落盘语义条目数判定 write 合规性是 judge 窗口问题，归 T055 正式裁决（宪法 IV
+  口径变更纪律：不在诊断跑分里顺手改 judge）。r4 iw-neg-006 的 9 连发误触发是同
+  失控模式在负例上的偶发表现。
+- **description 强化的负例代价实测（T021 r4）**：读侧触发面扩宽（+environment/setup
+  summaries、任务型 actions）后 codex ir-neg 26→25（3 例 search 误触发，r3 为 2 例）；
+  claude/opencode 负例 56/56 全绿。ir-pos codex 23→28 全绿、opencode 17→23，净收益
+  远大于代价——修订保留。
+- **reviewer 无法盲推 trap 前缀（holdout 全量首跑，合同 v4.2，2026-09-02）**：v4.1
+  把门收缩到 module/lang/trigger/not_found 后，全量首跑 16 组双审 10 组分歧且 module
+  分歧全部是 trap/implicit 边界翻转（implicit-read-pos <> trap-read-pos ×3、
+  implicit-write-neg <> trap-write-neg ×1）另加 4 组独立 trigger 翻转。教训：**trap-
+  前缀是作者的难度构造目标，不是行为类别**——"检索仍须发生并解开陷阱"与非 trap 版
+  是同一可观测行为，盲审者拿不到作者意图不可能稳定复原。修复：NormalizedLabelDigest
+  与 ReviewersAgree 先投影行为四分类（write-pos/write-neg/read-pos/read-neg）再比
+  较；review prompt 升 v2（trigger→方向→骨架→前缀 的固定判定顺序压 trigger 分歧）。
+  这是 category→scenario 之后第三次同构发现：**一致性门只保留盲审者真正可推断的
+  维度，作者的构造目标一律降为诊断**。
+- **新根首 attempt 无 sibling 可探测（holdout v2 全量，2026-09-02）**：probesFor 的
+  sibling target 依赖 SnapshotActive（in-flight 或磁盘上最近的 retired workspace），
+  全新 batch 的第一个 attempt 启动瞬间两者皆空 → sibling probe 被静默跳过 → 该
+  attempt 的 admission 期聚合校验 fail-closed（"probe kind active-sibling-workspace-
+  read appears 0 times"），且 ledger append-only 使已启动 attempt 无法补记。修复：
+  controller 在 batch 初始化时物化永久 sibling fixture（attempts/sibling-fixture/
+  input/.locked，mode 0000），空池时探测目标落到 fixture——物理边界与真 sibling
+  完全一致，且与启动顺序无关。教训：**fail-closed 聚合 + 可选探测目标 = 首跑必然
+  自杀；可选目标必须有确定性 fallback**。
+
+## T054 dev-comparison baseline 全量（2026-09-04）· iw-pos 50 失败点定案 → T055 v0.2.9
+
+**跑法**：dev-comparison series `t054-dev-baseline`（manifest `025f4fcae01a7653…`），
+T018 pre-revision 快照（`f993c9780bc928f0…`），共享 core plan（`d98744959c506ae6…`），
+runner `runner-6f43f507822f` / judge `6e1252a7a3ae936d`，timeout 240s / concurrency 8。
+claude o1 + codex o1/o2/o3 共 4 腿全量 172 case、零 runner-error。opencode o1 被 CLI
+自动升级窗口（beta-18743→19059）打掉，维护者裁定作废并停跑（"opencode不要跑了"）；
+series 的 3 host × 3 ordinal 矩阵因此不完整，`failure-archive`/`compare` 的封盘前置
+（完整矩阵）当前构造不出 —— 归 host-matrix 决策（2-host 重规划 vs 补跑 opencode）后
+收口，详见 [receipts/flywheel-baseline.md](receipts/flywheel-baseline.md) §Pending。
+
+**分数（binary per-case）**：
+
+| 模块 | claude o1 | codex o1 | codex o2 | codex o3 |
+|---|---|---|---|---|
+| 总分 | **90.7%** (156/172) | 83.7% | 82.6% | 85.4% |
+| iw-pos | 89.3% | **39.3%** | **35.7%** | **46.4%** |
+| ir-pos | 82.1% | 100% | 96.4% | 92.9% |
+| ir-neg | 96.4% | 82.1% | 82.1% | 89.3% |
+| iw-neg | 100% | 100% | 100% | 100% |
+| reg | **81.2%** | 84.4% | 87.5% | 90.3% |
+| tr-pos | 94.4% | 100% | 88.9% | 88.9% |
+| tr-rneg / tr-wneg | 100% | 75/100% | 100% | 100% |
+
+**codex iw-pos 短板定案（三轮 50 个失败点全量解剖；推翻 T021-r4 "skill 层到此为止"）**。
+无第四类，全部 skill 文本可及：
+
+1. **retry-after-error ×24（48%）**——首写调用被 MCP schema 整单拒绝，模型读错误后
+   自修重发成功，store 内容全部正确：27 次 `pinned: "true"` 字符串 vs boolean
+   （**字符串是模型自己在 args JSON 里生成的**——同一 case 首调 `"pinned": "true"`、
+   重发 `"pinned": true`，不是 r4 归因的 client 序列化层，skill 文本可及）；7 次
+   trigger 超 120 码点（limit 在 SKILL.md 里，模型没在组合时计数）；1 次未文档化字段
+   `prompt`。judge 按 "write called N times (max 1)" 计次判死。
+2. **upsert-refine ×20（40%）**——同 name 渐进精化重写（薄写→调查→补全→再补）。
+   "Compose once, write once" 拦不住的根因：v0.2.8 给的理由 "the store keeps both
+   copies" **是错的**——mcp.md 自己写明 upsert keyed by name 会替换；模型观察到重写
+   无害后精化是"合理"行为。真 hazard 是重写不带 `pinned` 会静默重置 pin。
+3. **multi-entry-writes ×6（12%）**——multi-fact 披露（iw-pos-013/006/024）分多次写，
+   每写良构、store 三关键词全覆盖。**dataset 自相矛盾**：013 `observable` 明文
+   "via one or multiple writes"，`max_calls: 1` 机械判死。不改 dataset/judge 的
+   skill 侧修法存在：同轮多事实合并为单条单写。
+
+**T055 修订（v0.2.8 → v0.2.9，免费层，已落地）**：SKILL.md §0 "Compose once, write
+once" 整段重写（多事实合并单写 / strict-types 预检：`pinned` JSON boolean + trigger
+≤120 码点计数 / `written:true` 即终写并用 upsert 真实语义替换错误理由 / 被拒调用允许
+修正重发一次）；mcp.md write 段同步 strict-types 契约；contract.json `implicit_write`
+同步 + version 0.2.9。receipts：`t055-formal-tooling-green-test.json` +
+`t055-package-validation.json`，快照 `snap-b7112404425b39f609b442e7`
+（`~/.engram-eval/skill-snapshot-t055/`），skill_digest `bdda82f9…bfa04`。
+三靶覆盖 100% 失败质量；修好理论上限 iw-pos ≈100%、codex 总分 +8~9pp。
+judge 的调用计数窗口按宪法 IV 纪律本轮不动，留作正式裁决项（T056 compare 的
+fail-to-pass 集合将只反映 skill 文本效果）。
+
+**claude 侧短板（与 codex 正交，本轮未靶向）**：reg 81.2%（已召回答错）+ ir-pos
+82.1%。T055 靶子全在 write 纪律（claude iw-pos 已 89.3%），预期对 claude 中性；
+claude 短板归因留下一轮 flywheel，用本轮同法做失败点全量解剖。
