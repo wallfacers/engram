@@ -24,7 +24,15 @@ Pass the selected namespace on every relevant call. Empty input resolves to
 `^[A-Za-z0-9._-]{1,64}$`; reject `.`, `..`, `/`, and `\\` before a call.
 
 `memory_write` is an upsert, so it requires explicit user intent and a clear
-name/content target. Do not silently persist ordinary conversation. Because the
+name/content target. Do not silently persist ordinary conversation. Argument
+types and fields are strict: `pinned` must be a JSON boolean (`true`), never
+the string `"true"`, and every optional field must be one of `namespace`,
+`trigger`, `category`, `pinned` — a wrong-typed value or an unknown field
+rejects the entire call before anything is stored, so compose the entry with
+correct types and a one-line trigger (at most 120 code points) before the
+first call. One disclosure moment → one call, and a `written:true` response
+closes the turn's write phase; only a rejected call may be corrected — fix
+exactly the reported error and re-send the same entry once. Because the
 upsert is keyed by name, updating an existing entry without passing `pinned`
 resets that entry's pin to unset; re-pass `pinned` when a previously pinned
 memory must stay pinned. Do not send likely credentials or secrets in `content`

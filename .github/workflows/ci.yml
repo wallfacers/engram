@@ -25,6 +25,7 @@ jobs:
         run: |
           node --test scripts/validate-agent-skill.test.mjs
           node scripts/validate-agent-skill.mjs --source
+          node --test scripts/test-agent-skill-install.mjs
 
       - name: Run isolated local installation matrix
         run: node scripts/test-agent-skill-install.mjs --scratch "${RUNNER_TEMP}/engram-skill-install" --source ./skills/engram --installer-version 1.5.20

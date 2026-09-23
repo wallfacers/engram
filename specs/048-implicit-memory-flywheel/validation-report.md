@@ -1,5 +1,7 @@
 # Validation Report: 048 implicit-memory-flywheel
 
+> **历史报告，非当前正式判定（2026-08-31）**：本文记录旧 runner、旧分母与 diagnostic 补跑合并结果，不满足现行 core172 + sealed holdout96、三宿主 × 三 ordinal、shared CoreExecutionPlanReceipt、protected execution 与双正式分数协议。不得引用本文的 SC PASS/FAIL 作为本轮交付结论。T070 将在全部正式 receipts 完成后汇总新的 validation verdict；此前状态为未实现/未正式计分。
+
 **Date**: 2026-08-29 | **Spec**: [spec.md](spec.md) | **Tasks**: [tasks.md](tasks.md)
 
 ## 交付概览
@@ -221,3 +223,36 @@ query 在 keyword 检索返回空(CLI 复现),按宪法 II 作为候选引擎增
 
 **未竟事项**:SC-2 读取门未达(Round-3 候选已列);opencode 全量数据待有效
 provider;skill 包发布 tag 待维护者授权(候选 commit 即当前工作树)。
+
+---
+
+> 以下为 2026-09-01 SDD 实施期追加条目（v2 冻结数据集协议时代），与前文旧 runner 时代记录相互独立。
+
+## DevFamilyIndex v1→v2 取代记录（2026-09-01）
+
+`family-index build` 首次真实三 lane 运行（claude/codex/opencode 全部统一百炼
+qwen3.8-flash，57 对 mirror candidate）暴露 v1 join 判定的结构性过严：
+
+- **same_family 三票全真：52/57 对**（91%——lane 语义判断高度一致，与数据集
+  zh/en 镜像设计吻合；5 对分歧恰为设计中的否定对，lane 识别正确）。
+- **但 v1 要求三 lane 的 `canonical_family_digest` 字节全等才连边，仅 12/52 通过**。
+  40 对被拒纯粹因 slug 措辞粒度（例：`go-defer-semantics-execution-order` vs
+  `go-defer-semantics-order` vs `defer-semantics-execution-order`），逐对核对
+  **0 对真语义分歧**（40 对全部 token 集两两相交）。
+- 结论：字节全等惩罚的是措辞噪声而非语义分歧，与"lane 判断连边、人不可改"的
+  协议意图相悖。
+
+**处置**：算法 bump `dev-family-index-v2`——连边条件改为三 lane `same_family=true`
+且三个主题 slug **两两共享至少一个 `-` 分词**（空 slug 或 token 无交集仍拒连）。
+审查 prompt `dev-family-index-review-v1` 保持冻结不变（lane 端行为契约未变，放宽
+仅发生在 controller 侧判定）。v1 产物原样保留于
+`receipts/dev-family-index-v1-superseded.json`（immutable，未被覆盖或删除）。
+同步修订：data-model.md §3.1、contracts/dataset-protocol.md、contracts/runner-cli.md、
+tasks.md T006 描述。v2 重跑（同 57 对，约 0.15 元）结果见
+`receipts/family-index-freeze.md`。
+
+**附带修复**：lane provenance 从占位 `resolved_model=unavailable` 升级为结构性事实
+（claude：settings `model` 字段 + env 默认模型映射推导；codex/opencode：显式配置
+override），补 CLI 版本探测与 `tool_identity_digest`。首轮已废弃的调用产生于
+extractDecisionJSON 解析 bug（wrapper 事件被静默解析为 `same_family=false`），
+修复为 fail-closed 后才计入正式数据。

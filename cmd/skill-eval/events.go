@@ -44,6 +44,27 @@ var mcpToolOps = map[string]string{
 func cliInvocation(command string) (string, bool) {
 	// Neutralize the MCP binary name so "engram-mcp" never matches "engram".
 	s := strings.ReplaceAll(command, "engram-mcp", "\x00mcp\x00")
+	// First pass — shell-variable indirection: agents observed in the wild
+	// assign `ENGRAM=/path/to/engram` and then invoke `$ENGRAM <flags>
+	// <subcommand>` (opencode lane, 2026-09-01). Record NAME for every
+	// assignment whose value's basename is exactly `engram`.
+	vars := map[string]bool{}
+	for _, f := range strings.Fields(s) {
+		eq := strings.IndexByte(f, '=')
+		if eq <= 0 {
+			continue
+		}
+		name, value := f[:eq], f[eq+1:]
+		if strings.HasPrefix(name, "$") {
+			continue // $A=$B reassignment, not a fresh binding
+		}
+		// Strip shell separators/quotes that glue onto the value token
+		// (`ENGRAM=/path/engram; $ENGRAM …` keeps its semicolon on the value).
+		value = strings.Trim(value, ";|&\"'")
+		if base := lastPathBase(value); base == "engram" {
+			vars[name] = true
+		}
+	}
 	for _, seg := range regexp.MustCompile(`[;|&\n]`).Split(s, -1) {
 		seg = strings.TrimSpace(seg)
 		// Take the command token chain; an engram invocation is any token
@@ -53,8 +74,17 @@ func cliInvocation(command string) (string, bool) {
 		idx := -1
 		for i, f := range fields {
 			base := f
-			if i := strings.LastIndexByte(base, '/'); i >= 0 {
-				base = base[i+1:]
+			if strings.HasPrefix(f, "$") {
+				// $ENGRAM / ${ENGRAM}: an engram-path variable bound earlier
+				// in this same command string.
+				name := strings.TrimSuffix(strings.TrimPrefix(f, "$"), "}")
+				if vars[name] || vars[strings.TrimPrefix(name, "{")] {
+					base = "engram"
+				} else {
+					continue
+				}
+			} else {
+				base = lastPathBase(f)
 			}
 			if base == "engram" {
 				idx = i
@@ -83,6 +113,14 @@ func cliInvocation(command string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// lastPathBase returns the segment after the final path separator.
+func lastPathBase(f string) string {
+	if i := strings.LastIndexByte(f, '/'); i >= 0 {
+		return f[i+1:]
+	}
+	return f
 }
 
 // mcpOp classifies an MCP tool name; ok only for engram memory tools.

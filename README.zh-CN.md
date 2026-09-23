@@ -47,7 +47,8 @@ server、适合自动化的 CLI 和可嵌入的 Go 包使用。
 `~/.agents/skills/engram` 只保留**一份共享拷贝**，其余客户端（包括只认自家
 `~/.claude/skills/` 的 Claude Code）通过符号链接引用它；Codex/OpenCode 原生扫描
 `~/.agents/skills/`（已在 codex-cli 0.150.1 与 opencode2 v0.0.0-beta-18600
-上探针实测），装完即被发现。**不要再往 `~/.codex/skills/`、
+上探针实测；2026-09-03 又对 codex-cli 0.153.0、opencode2 v0.0.0-beta-18743 与
+Claude Code 2.1.259 复核了目录布局），装完即被发现。**不要再往 `~/.codex/skills/`、
 `~/.config/opencode/skills/` 这类私有目录重复拷贝**——冗余副本会在升级时漂移并
 遮蔽共享拷贝。`--agent <id>` 仅用于显式限定安装到某一客户端的专有目录。
 

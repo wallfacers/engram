@@ -1,0 +1,9 @@
+{
+  "schema_version": "blind-candidate-v1",
+  "prompt": "p",
+  "turns": null,
+  "seed_memories": [],
+  "workspace_files": [],
+  "module": "implicit-write-pos",
+  "expect": {"trigger": true}
+}

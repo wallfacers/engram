@@ -5,7 +5,7 @@ import "net/url"
 const (
 	defaultLoCoMoProvider = "anthropic"
 	defaultLoCoMoBaseURL  = "https://api.deepseek.com/anthropic"
-	defaultLoCoMoModel    = "deepseek-v4-pro"
+	defaultLoCoMoModel    = "deepseek-flash"
 )
 
 type judgeConfig struct {

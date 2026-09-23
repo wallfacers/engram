@@ -1,0 +1,23 @@
+{
+  "id": "fx-iwp-002",
+  "schema_version": 2,
+  "split": "dev-regression",
+  "score_membership": "core172",
+  "module": "implicit-write-pos",
+  "lang": "zh",
+  "scenario_bucket": null,
+  "category": "tool-preference",
+  "family_id": "fam-x",
+  "translation_of": null,
+  "prompt": "p",
+  "turns": null,
+  "seed_memories": [],
+  "workspace_files": [],
+  "expect": {"trigger": true, "observable": "x"},
+  "source": "initial",
+  "status": "active",
+  "superseded_by": null,
+  "authoring": null,
+  "reviews": null,
+  "safe_extra_context": {"note": "must be rejected"}
+}
