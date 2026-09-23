@@ -60,7 +60,7 @@ like `--agent <id>` are only for explicitly restricting an install to one
 client's own directory.
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.2.9/skills/engram --global
 ```
 
 Keep the installer's write confirmation; choose `Symlink` (default) or `Copy`

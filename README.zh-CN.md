@@ -53,7 +53,7 @@ Claude Code 2.1.259 复核了目录布局），装完即被发现。**不要再�
 遮蔽共享拷贝。`--agent <id>` 仅用于显式限定安装到某一客户端的专有目录。
 
 ```bash
-npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.1.0/skills/engram --global
+npx --yes skills@1.5.20 add https://github.com/wallfacers/engram/tree/engram-skill-v0.2.9/skills/engram --global
 ```
 
 请保留安装器的写入确认；默认选择 `Symlink`，受限文件系统选择 `Copy`。安装后重载
