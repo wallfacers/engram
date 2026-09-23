@@ -932,7 +932,7 @@ func PrepareSeries(root string, in SeriesPrepareInput) (*FormalSeriesManifest, e
 			ExecutionEnvironmentDigest:          in.ExecutionEnvironmentDigest,
 			ProtectedExecutionPolicyDigest:      policy,
 			SeriesPrepareIdentityDigest:         *green.StableIdentityDigest,
-		})
+		}, plan.Hosts)
 		if err != nil {
 			return nil, err
 		}

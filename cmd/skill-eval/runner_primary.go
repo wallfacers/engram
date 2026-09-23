@@ -302,7 +302,7 @@ func PrimaryHostTemplates(lane CLIReviewConfig) (map[string]InvocationTemplate, 
 	return templates, digests, nil
 }
 
-// NormalizedCoreTemplateDigest binds the three hosts' frozen invocation
+// NormalizedCoreTemplateDigest binds the configured hosts' frozen invocation
 // templates as one normalized execution-template digest. It is the value the
 // core plan freezes, every prepared probe/canary carries and the protected
 // receipt reports as its ExecutionTemplateSetDigest — one shared normalized

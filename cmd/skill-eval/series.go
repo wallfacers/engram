@@ -94,8 +94,11 @@ type CandidateBindingV1 struct {
 
 // CandidateBindingDigest computes the stable recovery key over the canonical
 // projection of the binding. It fails closed when a required stable input is
-// empty or a map is nil.
-func CandidateBindingDigest(b *CandidateBindingV1) (string, error) {
+// empty or a map is nil. hosts is the frozen host set the binding's tool
+// identities must cover exactly; it is validation-only and never enters the
+// hashed projection, so every previously valid binding keeps its
+// byte-identical digest.
+func CandidateBindingDigest(b *CandidateBindingV1, hosts []string) (string, error) {
 	if b == nil {
 		return "", errors.New("nil candidate binding")
 	}
@@ -200,8 +203,29 @@ func CandidateBindingDigest(b *CandidateBindingV1) (string, error) {
 	if len(p.DatasetIdentities) != 2 {
 		empties = append(empties, "dataset_identities(core172+holdout96)")
 	}
-	if len(p.ToolIdentityDigests) != 3 {
-		empties = append(empties, "tool_identity_digests(3 hosts)")
+	if len(hosts) == 0 {
+		empties = append(empties, "tool_identity_digests(host set empty)")
+	}
+	if len(p.ToolIdentityDigests) != len(hosts) {
+		empties = append(empties, fmt.Sprintf("tool_identity_digests(%d entries for %d hosts)",
+			len(p.ToolIdentityDigests), len(hosts)))
+	}
+	frozenHosts := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		frozenHosts[h] = true
+		if p.ToolIdentityDigests[h] == "" {
+			empties = append(empties, fmt.Sprintf("tool_identity_digests[%s]", h))
+		}
+	}
+	strays := make([]string, 0, len(p.ToolIdentityDigests))
+	for h := range p.ToolIdentityDigests {
+		if !frozenHosts[h] {
+			strays = append(strays, h)
+		}
+	}
+	sort.Strings(strays)
+	for _, h := range strays {
+		empties = append(empties, fmt.Sprintf("tool_identity_digests[%s](not in the frozen host set)", h))
 	}
 	// The seed map is checked on the ORIGINAL binding: the projection always
 	// materializes three entries, so a nil/short map would silently pass.

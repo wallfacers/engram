@@ -464,7 +464,7 @@ func TestCorePlanSharedBaselineCandidateImport(t *testing.T) {
 	if binding.CoreExecutionPlanDigest != plan.ReceiptDigest {
 		t.Fatal("candidate binding must reference the same frozen plan digest")
 	}
-	digest, err := CandidateBindingDigest(binding)
+	digest, err := CandidateBindingDigest(binding, fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,18 +614,18 @@ func TestSeriesPreSealPrerequisites(t *testing.T) {
 func TestCandidateBindingDigestStableKey(t *testing.T) {
 	plan := fxSeriesPlan()
 	binding := fxCandidateBinding(plan)
-	d1, err := CandidateBindingDigest(binding)
+	d1, err := CandidateBindingDigest(binding, fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("complete binding must digest: %v", err)
 	}
-	d2, err := CandidateBindingDigest(binding)
+	d2, err := CandidateBindingDigest(binding, fxCandidateHosts())
 	if err != nil || d1 != d2 {
 		t.Fatalf("digest must be deterministic: %q vs %q (%v)", d1, d2, err)
 	}
-	if again, _ := CandidateBindingDigest(fxCandidateBinding(plan)); again != d1 {
+	if again, _ := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts()); again != d1 {
 		t.Fatal("equal bindings must digest identically")
 	}
-	if d, err := CandidateBindingDigest(nil); err == nil || d != "" {
+	if d, err := CandidateBindingDigest(nil, fxCandidateHosts()); err == nil || d != "" {
 		t.Fatal("nil binding must fail closed")
 	}
 	for _, f := range []struct {
@@ -658,7 +658,7 @@ func TestCandidateBindingDigestStableKey(t *testing.T) {
 	} {
 		x := fxCandidateBinding(plan)
 		f.mutate(x)
-		if _, err := CandidateBindingDigest(x); err == nil {
+		if _, err := CandidateBindingDigest(x, fxCandidateHosts()); err == nil {
 			t.Fatalf("candidate binding digest must fail closed on %s", f.name)
 		}
 	}
@@ -666,7 +666,7 @@ func TestCandidateBindingDigestStableKey(t *testing.T) {
 
 func TestCandidateBindingDigestIgnoresSeriesContext(t *testing.T) {
 	plan := fxSeriesPlan()
-	digest, err := CandidateBindingDigest(fxCandidateBinding(plan))
+	digest, err := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +687,7 @@ func TestCandidateBindingDigestIgnoresSeriesContext(t *testing.T) {
 
 func TestCandidateBindingDigestDriftsOnPlanInputs(t *testing.T) {
 	plan := fxSeriesPlan()
-	base, err := CandidateBindingDigest(fxCandidateBinding(plan))
+	base, err := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +711,7 @@ func TestCandidateBindingDigestDriftsOnPlanInputs(t *testing.T) {
 	} {
 		x := fxCandidateBinding(plan)
 		f.drift(x)
-		d, err := CandidateBindingDigest(x)
+		d, err := CandidateBindingDigest(x, fxCandidateHosts())
 		if err != nil {
 			t.Fatalf("%s: drifted binding must still digest: %v", f.name, err)
 		}
@@ -723,7 +723,7 @@ func TestCandidateBindingDigestDriftsOnPlanInputs(t *testing.T) {
 
 func TestHoldoutBindingLifecycle(t *testing.T) {
 	plan := fxSeriesPlan()
-	digest, err := CandidateBindingDigest(fxCandidateBinding(plan))
+	digest, err := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestHoldoutBindingLifecycle(t *testing.T) {
 
 func TestHoldoutBindingRecoveryAfterInvalid(t *testing.T) {
 	plan := fxSeriesPlan()
-	digest, err := CandidateBindingDigest(fxCandidateBinding(plan))
+	digest, err := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +831,7 @@ func TestHoldoutBindingRecoveryAfterInvalid(t *testing.T) {
 	// a recovery of this holdout version.
 	driftedPlan := fxSeriesPlan()
 	driftedPlan.TimeoutSeconds = plan.TimeoutSeconds + 1
-	otherDigest, err := CandidateBindingDigest(fxCandidateBinding(driftedPlan))
+	otherDigest, err := CandidateBindingDigest(fxCandidateBinding(driftedPlan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +884,7 @@ func TestSeriesPreHoldoutAttestationFreshness(t *testing.T) {
 	validator := fxValidatorFile(t)
 	stubGreenRunner(t)
 	plan := fxSeriesPlan()
-	digest, err := CandidateBindingDigest(fxCandidateBinding(plan))
+	digest, err := CandidateBindingDigest(fxCandidateBinding(plan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -945,7 +945,7 @@ func TestSeriesPreHoldoutAttestationFreshness(t *testing.T) {
 	// input) never verifies against this holdout version.
 	driftedPlan := fxSeriesPlan()
 	driftedPlan.TimeoutSeconds = plan.TimeoutSeconds + 1
-	otherDigest, err := CandidateBindingDigest(fxCandidateBinding(driftedPlan))
+	otherDigest, err := CandidateBindingDigest(fxCandidateBinding(driftedPlan), fxCandidateHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
