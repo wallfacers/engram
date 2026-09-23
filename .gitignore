@@ -58,3 +58,13 @@ ans-pcic*
 # stray build outputs / local tool indexes
 cmd/skill-eval/skill-eval
 .zvec-grep/
+
+# local agent-skill install artifacts (skills@ installer output; machine-specific,
+# skills-lock.json embeds an absolute source path)
+/.agents/skills/
+/.claude/skills/
+/skills-lock.json
+
+# pi scheduled-task state (machine-local)
+/.claude/scheduled_tasks.json
+/.claude/scheduled_tasks.lock
