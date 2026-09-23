@@ -728,7 +728,7 @@ func routeOrLegacy(args []string) error {
 }
 
 // seriesManifestDigestAt reads the prepared series manifest digest from a
-// series root (placeholder until T045 wires FormalSeriesManifest).
+// series root.
 func seriesManifestDigestAt(seriesRoot string) (string, error) {
 	p := filepath.Join(seriesRoot, "series-manifest.json")
 	b, err := os.ReadFile(p)

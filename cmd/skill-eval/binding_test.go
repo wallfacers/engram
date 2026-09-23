@@ -59,6 +59,10 @@ func t042Binding() *CandidateBindingV1 {
 	}
 }
 
+// fxCandidateHosts is the frozen host set every synthetic candidate binding in
+// this package covers — the full three-host configuration.
+func fxCandidateHosts() []string { return []string{HostClaude, HostCodex, HostOpenCode} }
+
 // t042Attempt is the n-th append-only attempt entry; every per-series digest
 // is derived from n so distinct attempts never share artifacts.
 func t042Attempt(n int, bindingDigest string) HoldoutSeriesAttempt {
@@ -76,7 +80,7 @@ func t042Attempt(n int, bindingDigest string) HoldoutSeriesAttempt {
 // t042Receipt binds the holdout version to the n-th series' first attempt.
 func t042Receipt(t *testing.T, n int) (*HoldoutBindingReceipt, string) {
 	t.Helper()
-	d, err := CandidateBindingDigest(t042Binding())
+	d, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("fixture binding digest: %v", err)
 	}
@@ -110,11 +114,11 @@ func t042CopyAttempt(a HoldoutSeriesAttempt) HoldoutSeriesAttempt { return a }
 // ---------- CandidateBindingV1: the stable recovery key ----------
 
 func TestCandidateBindingDigestDeterministic(t *testing.T) {
-	d1, err := CandidateBindingDigest(t042Binding())
+	d1, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("valid binding rejected: %v", err)
 	}
-	d2, err := CandidateBindingDigest(t042Binding())
+	d2, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("identical binding rejected: %v", err)
 	}
@@ -133,7 +137,7 @@ func TestCandidateBindingDigestDeterministic(t *testing.T) {
 		HostClaude:   "digest-tool-claude-0001",
 	}
 	b.CaseOrderSeeds = map[int]string{3: "seed-ordinal-3", 2: "seed-ordinal-2", 1: "seed-ordinal-1"}
-	d3, err := CandidateBindingDigest(b)
+	d3, err := CandidateBindingDigest(b, fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("reordered binding rejected: %v", err)
 	}
@@ -143,18 +147,81 @@ func TestCandidateBindingDigestDeterministic(t *testing.T) {
 }
 
 func TestCandidateBindingDigestFailsClosed(t *testing.T) {
-	if d, err := CandidateBindingDigest(nil); err == nil || d != "" {
+	if d, err := CandidateBindingDigest(nil, fxCandidateHosts()); err == nil || d != "" {
 		t.Fatalf("nil binding accepted (digest %q)", d)
 	}
 	bad := t042Binding()
 	bad.SchemaVersion = 2
-	if _, err := CandidateBindingDigest(bad); err == nil {
+	if _, err := CandidateBindingDigest(bad, fxCandidateHosts()); err == nil {
 		t.Error("schema_version 2 accepted")
 	}
 	dev := t042Binding()
 	dev.Purpose = PurposeDevComparison
-	if _, err := CandidateBindingDigest(dev); err == nil {
+	if _, err := CandidateBindingDigest(dev, fxCandidateHosts()); err == nil {
 		t.Error("dev-comparison purpose accepted in a stable recovery key")
+	}
+}
+
+// TestCandidateBindingDigestAcceptsConfiguredHostSubsets proves the recovery
+// key accepts the reduced formal host sets a plan may now freeze (1..N hosts)
+// and stays deterministic for them.
+func TestCandidateBindingDigestAcceptsConfiguredHostSubsets(t *testing.T) {
+	for _, hosts := range [][]string{
+		{HostClaude},
+		{HostClaude, HostCodex},
+	} {
+		b := t042Binding()
+		b.ToolIdentityDigests = map[string]string{}
+		for _, h := range hosts {
+			b.ToolIdentityDigests[h] = "digest-tool-" + h + "-0001"
+		}
+		d1, err := CandidateBindingDigest(b, hosts)
+		if err != nil {
+			t.Fatalf("%d-host binding rejected: %v", len(hosts), err)
+		}
+		d2, err := CandidateBindingDigest(b, hosts)
+		if err != nil || d1 != d2 {
+			t.Fatalf("%d-host digest is not deterministic: %q vs %q (%v)", len(hosts), d1, d2, err)
+		}
+	}
+}
+
+// TestCandidateBindingDigestBindsHostSetExactly proves the frozen host set is
+// bound at the recovery key itself: a map that carries fewer or more tool
+// identities than the frozen hosts, and an empty host set, all fail closed.
+func TestCandidateBindingDigestBindsHostSetExactly(t *testing.T) {
+	cases := []struct {
+		name  string
+		hosts []string
+		mut   func(*CandidateBindingV1)
+		want  string
+	}{
+		{"two hosts one digest", []string{HostClaude, HostCodex}, func(b *CandidateBindingV1) {
+			delete(b.ToolIdentityDigests, HostCodex)
+			delete(b.ToolIdentityDigests, HostOpenCode)
+		}, "tool_identity_digests"},
+		{"two hosts three digests", []string{HostClaude, HostCodex}, func(*CandidateBindingV1) {}, "tool_identity_digests"},
+		{"empty host set", nil, func(*CandidateBindingV1) {}, "tool_identity_digests(host set empty)"},
+	}
+	for _, tc := range cases {
+		b := t042Binding()
+		tc.mut(b)
+		_, err := CandidateBindingDigest(b, tc.hosts)
+		t042Reject(t, err, tc.want)
+	}
+}
+
+// TestCandidateBindingDigestPreimageStable pins the 3-host recovery key to the
+// value the preimage produced before the frozen host set became an explicit
+// validation input: hosts never reaches the hash.
+func TestCandidateBindingDigestPreimageStable(t *testing.T) {
+	const want = "29960955e5990706aaa6b2679851a16589266c7de34258aead0777d6a7c8d5a8"
+	d, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
+	if err != nil {
+		t.Fatalf("3-host fixture rejected: %v", err)
+	}
+	if d != want {
+		t.Fatalf("recovery key preimage drifted: %s, want %s", d, want)
 	}
 }
 
@@ -194,13 +261,13 @@ func TestCandidateBindingDigestRejectsMissingStableInputs(t *testing.T) {
 	for _, tc := range cases {
 		b := t042Binding()
 		tc.mut(b)
-		_, err := CandidateBindingDigest(b)
+		_, err := CandidateBindingDigest(b, fxCandidateHosts())
 		t042Reject(t, err, tc.want)
 	}
 }
 
 func TestCandidateBindingDigestChangesOnEveryStableInput(t *testing.T) {
-	base, err := CandidateBindingDigest(t042Binding())
+	base, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("baseline binding rejected: %v", err)
 	}
@@ -238,7 +305,7 @@ func TestCandidateBindingDigestChangesOnEveryStableInput(t *testing.T) {
 	for _, tc := range cases {
 		b := t042Binding()
 		tc.mut(b)
-		d, err := CandidateBindingDigest(b)
+		d, err := CandidateBindingDigest(b, fxCandidateHosts())
 		if err != nil {
 			t.Errorf("%s: mutated binding rejected: %v", tc.name, err)
 			continue
@@ -470,7 +537,7 @@ func TestHoldoutBindingRecoveryChainKeepsStableDigest(t *testing.T) {
 	// The recovery series re-derives the SAME stable key from the same
 	// CandidateBindingV1 preimage; only its series_id / manifest / runtime
 	// receipts differ.
-	redigest, err := CandidateBindingDigest(t042Binding())
+	redigest, err := CandidateBindingDigest(t042Binding(), fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("recovery binding digest: %v", err)
 	}
@@ -514,7 +581,7 @@ func TestHoldoutBindingRecoveryRejectsChangedStableDigest(t *testing.T) {
 	// therefore a new holdout version — it must never append to this ledger.
 	changed := t042Binding()
 	changed.RunnerDigest = "digest-runner-0002"
-	newDigest, err := CandidateBindingDigest(changed)
+	newDigest, err := CandidateBindingDigest(changed, fxCandidateHosts())
 	if err != nil {
 		t.Fatalf("changed binding digest: %v", err)
 	}
