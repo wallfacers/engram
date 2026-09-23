@@ -300,6 +300,79 @@ invocations; no pay-as-you-go path used.
 - Scratch cleanup: both scratch directories (including the isolated-HOME auth
   copies) deleted after the run; no state outside the scratchpad.
 
+## T043 — engram-skill-v0.2.9 release candidate preparation (2026-09-23)
+
+- Proposed predeclared tag: `engram-skill-v0.2.9` (derived from
+  `references/contract.json` `skill.version` `0.2.9`). The tag existed neither
+  locally nor on the remote at preparation time (read-only `git ls-remote` +
+  local `git tag -l`; both rechecked immediately before publication).
+- The literal tag was written into the four user-facing surfaces only
+  (`references/install.md` three literals, `README.md`, `README.zh-CN.md`,
+  `docs/README.md`); spec-internal placeholders in `specs/020-*/` and
+  `scripts/` remain unchanged per the v0.1.0 precedent.
+- Candidate commit: `517a0d8856a9ab268074960d57585b5b023b1b5d` on branch
+  `release/skill-v0.2.9` (the preceding commit `8680f26…` is an orthogonal
+  .gitignore hygiene commit), later fast-forwarded to `master`. The tag points
+  at this exact commit. A full commit SHA is not written back into the hashed
+  package.
+- Candidate validation gates all green (11/11): `node
+  scripts/validate-agent-skill.mjs --release` (ok) and `--source` (ok, same
+  digest), `node --test scripts/validate-agent-skill.test.mjs`, `node --test
+  scripts/test-agent-skill-install.mjs`, the local install matrix (`node
+  scripts/test-agent-skill-install.mjs --scratch … --source ./skills/engram
+  --installer-version 1.5.20`, recovery: all final digests equal), `node --test
+  docs/validation/check-docs.test.mjs`, `node docs/validation/check-docs.mjs`,
+  `CGO_ENABLED=0 go build ./...`, `CGO_ENABLED=0 go vet ./...`, `CGO_ENABLED=0
+  go test -count=1 ./...` (all packages ok), and `git diff --check`.
+- Frozen package identity: `engram-package-sha256-v1`
+  `30425fa90d6486d58a132e63fafe8896d9912b07327ac26912f7c27b69976a84`.
+- `--release` confirms no `<ENGRAM_SKILL_TAG>` placeholder, mutable branch URL,
+  or commit-SHA self-reference in the four user-facing files.
+- No LoCoMo run required: skill/docs/validation-only change (invariant by
+  construction, same rationale as the v0.1.0 record). Incremental model cost
+  `0`; no provider or reranker configured.
+
+## T044 — engram-skill-v0.2.9 tag publication and remote smoke (2026-09-23)
+
+- Maintainer delegated the full publication flow. `release/skill-v0.2.9` was
+  fast-forward merged to `master` (`8f30ff7..517a0d8`); the candidate SHA is
+  unchanged. `master` was pushed with the session-authorized `--no-verify`
+  bypass of the PR-only pre-push policy hook (same authorization class as the
+  earlier session pushes); no force-push was used.
+- Annotated tag `engram-skill-v0.2.9` (remote tag object `d98187c1…`) was
+  created at `517a0d8…` and pushed to `origin`. `git rev-parse
+  engram-skill-v0.2.9^{commit}` equals the candidate SHA and the remote
+  annotated tag peels to the same commit — tag→commit binding confirmed.
+- Remote smoke with pinned `skills@1.5.20` against the exact public tag URL
+  `https://github.com/wallfacers/engram/tree/engram-skill-v0.2.9/skills/engram`,
+  all isolated under the session scratchpad `~/engram-scratch/release-v0.2.9/`:
+  - `add <url> --list`: exit 0, exactly one skill `engram` with the expected
+    description; the installer cloned the tag and resolved the package.
+  - single-client project (claude-code, symlink default): exit 0, scoped
+    install at the client's own `.claude/skills/engram`, byte-identical to the
+    candidate package.
+  - single-client user (codex, `--global`, isolated `HOME`): exit 0,
+    `~/.agents/skills/engram` byte-identical to the candidate package.
+  - three-client combo (`--agent claude-code --agent codex --agent opencode`):
+    exit 0, one physical copy `.agents/skills/engram` (universal for
+    Codex/OpenCode) + `.claude/skills/engram -> ../../.agents/skills/engram`
+    symlink, byte-identical.
+  - same-version rerun (exact repeat of the combo command): exit 0, layout and
+    bytes unchanged.
+  - copy mode (`--copy`, claude-code): exit 0, `.claude/skills/engram` is a
+    real copy, byte-identical.
+  - recovery smoke: `timeout -s KILL 1` truncated an install mid-flight (exit
+    137, no partial skill directory left), rerunning the same command
+    completed with exit 0 and the final state is byte-identical to the
+    candidate package.
+- The published package digest is `engram-package-sha256-v1`
+  `30425fa90d6486d58a132e63fafe8896d9912b07327ac26912f7c27b69976a84`,
+  matching the candidate gates' digest. A full commit SHA is not written back
+  into the hashed package.
+- Installer lock evidence: pinned `skills@1.5.20` (documented no-float
+  version); digest algorithm `engram-package-sha256-v1`; scratch cleaned after
+  the run.
+
 ## Remaining release gates
 
 - T045: complete (2026-08-17, see T045 section) — three-client project-level
@@ -313,6 +386,9 @@ invocations; no pay-as-you-go path used.
 - T037/T042: a maintainer must record an approving human-review disposition.
 - T043/T044: complete. `engram-skill-v0.1.0` is published at `cb83667…` on
   `master` (`1c5c7af…`); remote `--list` smoke discovered exactly one
-  `engram` skill with the matching digest.
+  `engram` skill with the matching digest. Re-executed for
+  `engram-skill-v0.2.9` (2026-09-23): published at `517a0d8…` on `master` —
+  see the engram-skill-v0.2.9 T043/T044 sections above for gates, binding and
+  the full remote smoke matrix.
 - T045: complete — see the T045 section above for the full matrix and the two
   environment-scoped residuals.
