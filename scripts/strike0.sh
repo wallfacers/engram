@@ -4,8 +4,8 @@ set -euo pipefail
 data_path=${1:?usage: scripts/strike0.sh DATA_PATH [RUN_ROOT]}
 run_root=${2:-.locomo-run/strike0}
 repeats=${REPEATS:-5}
-extract_a=${EXTRACT_MODEL_A:-${EXTRACT_MODEL:-${LOCOMO_MODEL:-deepseek-v4-pro}}}
-extract_b=${EXTRACT_MODEL_B:-${LOCOMO_MODEL:-deepseek-v4-pro}}
+extract_a=${EXTRACT_MODEL_A:-${EXTRACT_MODEL:-${LOCOMO_MODEL:-deepseek-flash}}}
+extract_b=${EXTRACT_MODEL_B:-${LOCOMO_MODEL:-deepseek-flash}}
 
 # 单价=账单实测有效价（$即人民币1:1），可用 LOCOMO_PRICE_TABLE 覆盖
 export LOCOMO_PRICE_TABLE=${LOCOMO_PRICE_TABLE:-'{"gpt-5.6-sol":{"in":0.950,"out":5.668},"gpt-5.6-luna":{"in":0.1905,"out":1.1282}}'}

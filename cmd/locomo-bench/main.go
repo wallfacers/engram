@@ -21,7 +21,7 @@
 //	LOCOMO_API_KEY   (required) answer-side key; judge fallback key
 //	LOCOMO_PROVIDER  (default anthropic; set "openai" for OpenAI-chat endpoints)
 //	LOCOMO_BASE_URL  (default https://api.deepseek.com/anthropic)
-//	LOCOMO_MODEL     (default deepseek-v4-pro)     answer-side model
+//	LOCOMO_MODEL     (default deepseek-flash)      answer-side model
 //	JUDGE_PROVIDER / JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL
 //	                 (optional; each falls back independently to LOCOMO_*)
 //	EXTRACT_MODEL    (default = LOCOMO_MODEL)      extraction model (a fast,
