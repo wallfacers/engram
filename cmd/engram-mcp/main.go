@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/wallfacers/engram/embedding"
+	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/mcpserver"
 	"github.com/wallfacers/engram/memory/pipeline"
 )
@@ -32,8 +33,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	searchFilter, err := mcpserver.BuildSearchFilter(config)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	writeGate, err := mcpserver.BuildWriteGate(config)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	ctx := context.Background()
-	registry, err := mcpserver.NewRegistry(ctx, buildRegistryConfig(config, embClient, llmCaller))
+	registry, err := mcpserver.NewRegistry(ctx, buildRegistryConfig(config, embClient, llmCaller, searchFilter, writeGate))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -45,6 +56,9 @@ func main() {
 		"embedding", embClient != nil,
 		"memory_ingest", llmCaller != nil,
 		"curation", config.CurationEnabled,
+		"search_filter", config.SearchFilter,
+		"relevance_filter", searchFilter != nil,
+		"write_gate", config.JevWriteGate && writeGate != nil,
 		"max_open_namespaces", config.MaxOpenNamespaces,
 	)
 	if err := mcpserver.Run(ctx, registry); err != nil {
@@ -53,13 +67,20 @@ func main() {
 	}
 }
 
-func buildRegistryConfig(config mcpserver.ServerConfig, embClient embedding.Client, llmCaller pipeline.ModelCaller) mcpserver.RegistryConfig {
+func buildRegistryConfig(config mcpserver.ServerConfig, embClient embedding.Client, llmCaller pipeline.ModelCaller, searchFilter filter.RelevanceFilter, writeGate filter.WriteGate) mcpserver.RegistryConfig {
 	return mcpserver.RegistryConfig{
 		DataDir:           config.DataDir,
 		EmbClient:         embClient,
 		LLMCaller:         llmCaller,
 		MaxOpenNamespaces: config.MaxOpenNamespaces,
 		CurationEnabled:   config.CurationEnabled,
+
+		SearchFilter:     searchFilter,
+		SearchFilterName: config.SearchFilter,
+		SearchPool:       config.SearchPool,
+		SearchPolicy:     config.SearchPolicy(),
+		WriteGate:        writeGate,
+		WriteGateEnabled: config.JevWriteGate,
 	}
 }
 

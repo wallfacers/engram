@@ -175,6 +175,39 @@ Missing embedding can degrade search to available signals; report only the
 returned structural degradation and never probe engine-internal failures. Never
 recommend a hosted reranker or recall model as a prerequisite or scoring lever.
 
+### Relevance filter knobs (server-side, opt-in)
+
+The retrieval-side relevance filter is configured on the server, never by the
+caller: `ENGRAM_FILTER` (`none` | `jev`) and `ENGRAM_SEARCH_POOL` (1..500) are
+read from the MCP server's environment, and an MCP client cannot set them. While
+both are unset, `memory_search` behaves exactly as before — same fields, no
+`pool_size`, no `filter` telemetry — and a call that passes none of the new
+parameters stays byte-identical. A call may also opt in with `candidate_pool`,
+`filter`, and a `theta` override. A `filter: "jev"` call that cannot reach the
+filter degrades structurally to the fused top-`limit` list with
+`filter.degraded: true` (the backend is still reported honestly), and an empty
+`results` array means nothing cleared the threshold — report it as an honest
+empty result and never pad it back to `limit`.
+
+`ENGRAM_JEV_BASE_URL` / `ENGRAM_JEV_MODEL` / `ENGRAM_JEV_API_KEY` point at the
+scoring endpoint, with `ENGRAM_JEV_THETA`, `ENGRAM_JEV_RELAX_THETA`,
+`ENGRAM_JEV_KSHOW_MAX`, and `ENGRAM_JEV_RELAX=0` shaping the threshold policy.
+Credentials come from the environment only: never echo a key into a reply, a
+command, or a tracked file.
+
+`ENGRAM_JEV_WRITE_GATE=1` additionally switches on the optional write gate for
+manual `memory_write` calls. A draft that looks like a secret never leaves the
+host and is skipped unless the user explicitly asked for it to be stored
+(`user_requested`); an unavailable gate fails open, so the current write rules
+still apply and a write is never blocked or delayed by the gate.
+
+The Jev filter is the one sanctioned hosted scoring lever for this surface (the
+AGENTS.md death rule is amended for it alone), and it stays opt-in and
+default-off; no other hosted reranker or recall model may be recommended.
+`theta` is a caller-side tuning knob, not a self-service dial: gated evaluation
+pre-registers its thresholds in the run manifest and never tunes them against
+the measured run.
+
 ## 4. Route the intent
 
 | Intent | Preferred surface | Rule |

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/wallfacers/engram/embedding"
+	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/curation"
 	"github.com/wallfacers/engram/memory/pipeline"
@@ -23,6 +24,22 @@ type RegistryConfig struct {
 	LLMCaller         pipeline.ModelCaller
 	MaxOpenNamespaces int
 	CurationEnabled   bool
+
+	// SearchFilter is the optional relevance filter behind memory_search's
+	// filter="jev". A nil (or typed-nil) filter means the filter is unavailable:
+	// asking for it degrades honestly instead of calling out.
+	SearchFilter filter.RelevanceFilter
+	// SearchFilterName is the server-side default for memory_search's filter
+	// parameter ("" keeps the parameter default of none).
+	SearchFilterName string
+	// SearchPool is the server-side default candidate pool; 0 means "use limit".
+	SearchPool int
+	// SearchPolicy is the threshold policy applied to filtered searches.
+	SearchPolicy filter.Policy
+	// WriteGate is the optional pre-write gate. It is never consulted unless
+	// WriteGateEnabled is set.
+	WriteGate        filter.WriteGate
+	WriteGateEnabled bool
 }
 
 // NamespaceHandle owns one independent engine store and its assembled public
@@ -71,8 +88,16 @@ type Registry struct {
 	llmCaller         pipeline.ModelCaller
 	maxOpenNamespaces int
 	curationEnabled   bool
-	ctx               context.Context
-	cancel            context.CancelFunc
+
+	searchFilter     filter.RelevanceFilter
+	searchFilterName string
+	searchPool       int
+	searchPolicy     filter.Policy
+	writeGate        filter.WriteGate
+	writeGateEnabled bool
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu        sync.Mutex
 	handles   map[string]*NamespaceHandle
@@ -107,6 +132,23 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 	if config.CurationEnabled && config.LLMCaller == nil {
 		return nil, errors.New("curation requires an LLM caller")
 	}
+	// Collapse typed nils at this boundary: a concrete-nil client would look
+	// configured as an interface and dereference a nil receiver on use.
+	if filter.IsNilRelevanceFilter(config.SearchFilter) {
+		config.SearchFilter = nil
+	}
+	if filter.IsNilWriteGate(config.WriteGate) {
+		config.WriteGate = nil
+	}
+	if config.SearchFilterName != "" && config.SearchFilterName != filter.BackendNone && config.SearchFilterName != filter.BackendJev {
+		return nil, fmt.Errorf("unsupported search filter %q (want %q or %q)", config.SearchFilterName, filter.BackendNone, filter.BackendJev)
+	}
+	if config.SearchPool < 0 {
+		return nil, errors.New("search pool must not be negative")
+	}
+	if config.SearchPool > maxCandidatePool {
+		config.SearchPool = maxCandidatePool
+	}
 	dataDir, err := filepath.Abs(filepath.Clean(config.DataDir))
 	if err != nil {
 		return nil, fmt.Errorf("resolve data directory: %w", err)
@@ -131,6 +173,12 @@ func NewRegistry(ctx context.Context, config RegistryConfig) (*Registry, error) 
 		llmCaller:         config.LLMCaller,
 		maxOpenNamespaces: config.MaxOpenNamespaces,
 		curationEnabled:   config.CurationEnabled,
+		searchFilter:      config.SearchFilter,
+		searchFilterName:  config.SearchFilterName,
+		searchPool:        config.SearchPool,
+		searchPolicy:      config.SearchPolicy.WithDefaults(),
+		writeGate:         config.WriteGate,
+		writeGateEnabled:  config.WriteGateEnabled,
 		ctx:               registryCtx,
 		cancel:            cancel,
 		handles:           make(map[string]*NamespaceHandle),

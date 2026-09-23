@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wallfacers/engram/embedding"
+	"github.com/wallfacers/engram/filter"
 )
 
 // rrfK is the Reciprocal Rank Fusion constant. 60 is the value from the original
@@ -119,6 +120,10 @@ type Result struct {
 	SourceSessionID string
 	ClusterSweep    bool
 	Score           float64
+	// Pinned mirrors Entry.Pinned. It is what makes a user-pinned entry bypass
+	// the relevance filter's threshold when its trigger matches the query
+	// (051-jev-relevance-filter).
+	Pinned bool
 }
 
 // SearchDiagnostics reports optional retrieval-path details for callers that
@@ -201,6 +206,7 @@ func (r *Retriever) SearchMulti(ctx context.Context, subqueries []string, k int)
 			ProjectionKind:  ProjectionAtomicFact,
 			Name:            entry.Name,
 			Trigger:         entry.Trigger,
+			Pinned:          entry.Pinned,
 			Content:         entry.Content,
 			EventDate:       entry.EventDate,
 			CreatedAt:       entry.CreatedAt,
@@ -314,6 +320,7 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 			ProjectionKind:  ProjectionAtomicFact,
 			Name:            e.Name,
 			Trigger:         e.Trigger,
+			Pinned:          e.Pinned,
 			Content:         e.Content,
 			EventDate:       e.EventDate,
 			CreatedAt:       e.CreatedAt,
@@ -324,6 +331,97 @@ func (r *Retriever) SearchWithDiagnostics(ctx context.Context, query string, k i
 	}
 	r.attachProjectionIdentity(ctx, out)
 	return out, diagnostics, nil
+}
+
+// SearchFiltered runs hybrid retrieval and applies an optional relevance filter
+// to a wide candidate pool, returning the surviving short list.
+//
+// pool is the width of the pool handed to the filter; show is how many results
+// an unfiltered or degraded call returns. This is the composition point frozen
+// by 051-jev-relevance-filter:
+//
+//   - A nil filter (including a concrete-nil *jev.Client, collapsed at this
+//     boundary) means "no filtering": the call is exactly
+//     Search(ctx, query, min(pool, show)) and no filter is invoked.
+//   - With a filter, the wide pool is mapped to filter.Candidate, scored, and
+//     filtered through filter.SelectForQuery — which owns the KShowMax/RelaxMax
+//     truncation. The composition owns Kept/Dropped, because a filter's own
+//     counts are only advisory telemetry.
+//   - A filter failure never propagates: the call degrades to the fused
+//     top-show list with Meta.Degraded=true and a nil error, so the degraded
+//     arm stays comparable with the unfiltered short list (SC-005). A non-nil
+//     error means the underlying search itself failed.
+func (r *Retriever) SearchFiltered(ctx context.Context, query string, pool, show int, flt filter.RelevanceFilter, pol filter.Policy) ([]Result, filter.FilterMeta, error) {
+	if show <= 0 {
+		show = 8 // Search's own default k
+	}
+	if pool <= 0 {
+		pool = show
+	}
+	pol = pol.WithDefaults()
+
+	if filter.IsNilRelevanceFilter(flt) {
+		results, err := r.Search(ctx, query, min(pool, show))
+		if err != nil {
+			return nil, filter.FilterMeta{Backend: filter.BackendNone, Theta: pol.Theta}, err
+		}
+		if len(results) > show {
+			results = results[:show]
+		}
+		return results, filter.FilterMeta{Backend: filter.BackendNone, Theta: pol.Theta, Kept: len(results)}, nil
+	}
+
+	wide, err := r.Search(ctx, query, pool)
+	if err != nil {
+		return nil, filter.FilterMeta{Theta: pol.Theta}, err
+	}
+
+	cands := make([]filter.Candidate, len(wide))
+	for i, hit := range wide {
+		cands[i] = filter.Candidate{
+			ID:      hit.ID,
+			Name:    hit.Name,
+			Text:    hit.Content,
+			Trigger: hit.Trigger,
+			Pinned:  hit.Pinned,
+			Score:   hit.Score,
+		}
+	}
+
+	probs, meta, filterErr := flt.Filter(ctx, query, cands)
+	if filterErr != nil || len(probs) != len(cands) {
+		// Any filter failure — or a filter that violates the index-alignment
+		// contract — degrades the whole call: no partial adoption.
+		degraded, searchErr := r.Search(ctx, query, show)
+		if searchErr != nil {
+			return nil, meta, searchErr
+		}
+		meta.Degraded = true
+		meta.Kept = len(degraded)
+		// The degraded fallback searches `show` wide even when the caller asked
+		// for a narrower pool, so the count difference can be negative; a
+		// dropped count is never negative in telemetry.
+		meta.Dropped = max(0, len(wide)-len(degraded))
+		if meta.Theta == 0 {
+			meta.Theta = pol.Theta
+		}
+		return degraded, meta, nil
+	}
+
+	kept := filter.SelectForQuery(query, probs, cands, pol)
+	out := make([]Result, 0, len(kept))
+	for _, idx := range kept {
+		out = append(out, wide[idx])
+	}
+	// The composition layer owns Kept/Dropped: it knows the pool size and the
+	// final ordering, and a filter's own counts may predate the query-aware
+	// pinned injection.
+	meta.Kept = len(out)
+	meta.Dropped = len(cands) - len(out)
+	if meta.Theta == 0 {
+		meta.Theta = pol.Theta
+	}
+	return out, meta, nil
 }
 
 // activeAtomicFactScores removes candidates whose facts are no longer an

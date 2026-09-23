@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/pipeline"
 	"github.com/wallfacers/engram/store"
@@ -25,17 +26,45 @@ type memoryWriteInput struct {
 	Trigger   string `json:"trigger,omitempty" jsonschema:"optional retrieval trigger"`
 	Category  string `json:"category,omitempty" jsonschema:"optional memory category"`
 	Pinned    bool   `json:"pinned,omitempty" jsonschema:"whether this memory is pinned"`
+	// UserTurn is the conversation turn the draft came from. When omitted, the
+	// optional write gate judges the content alone.
+	UserTurn string `json:"user_turn,omitempty" jsonschema:"optional user turn that produced this memory; when omitted the write gate judges content alone"`
+	// UserRequested records explicit user intent to store this exact content. It
+	// is what lets a user-requested credential be stored while an unrequested one
+	// is skipped.
+	UserRequested bool `json:"user_requested,omitempty" jsonschema:"set true only when the user explicitly asked for this content to be stored"`
 }
 
 type memoryWriteOutput struct {
 	Name    string `json:"name"`
 	Written bool   `json:"written"`
+	// Gate carries write-gate telemetry and is omitted entirely while the gate is
+	// switched off, which keeps the ungated response byte-identical.
+	Gate *writeGateOutput `json:"gate,omitempty"`
+}
+
+// writeGateOutput is the write-gate telemetry surface. An unavailable gate is
+// reported as degraded instead of failing the write (fail-open).
+type writeGateOutput struct {
+	Route     string             `json:"route,omitempty"`
+	Reasons   map[string]float64 `json:"reasons,omitempty"`
+	Backend   string             `json:"backend,omitempty"`
+	Degraded  bool               `json:"degraded,omitempty"`
+	LatencyMs int                `json:"latency_ms,omitempty"`
+	CostUSD   float64            `json:"cost_usd,omitempty"`
 }
 
 type memorySearchInput struct {
 	Namespace string `json:"namespace,omitempty" jsonschema:"target namespace; empty uses default"`
 	Query     string `json:"query" jsonschema:"search query"`
 	Limit     *int   `json:"limit,omitempty" jsonschema:"positive result limit; omitted uses 8"`
+	// CandidatePool widens the RRF pool the filter sees. Omitted uses the
+	// server-side default (or limit), so an unchanged call stays unchanged.
+	CandidatePool *int `json:"candidate_pool,omitempty" jsonschema:"optional RRF candidate pool wider than limit (1..500); omitted uses the configured default"`
+	// Filter selects the relevance-filter backend. "none" keeps the fused order.
+	Filter string `json:"filter,omitempty" jsonschema:"relevance filter backend: none (default) or jev"`
+	// Theta overrides the threshold for tuning and evaluation only.
+	Theta *float64 `json:"theta,omitempty" jsonschema:"optional relevance threshold override in (0,1)"`
 }
 
 type memorySearchOutput struct {
@@ -44,6 +73,23 @@ type memorySearchOutput struct {
 	Returned int                  `json:"returned"`
 	Results  []searchResultOutput `json:"results"`
 	Degraded degradedOutput       `json:"degraded"`
+	// PoolSize and Filter are only emitted when a filter path or an explicit pool
+	// ran, which is what keeps the unchanged call byte-identical.
+	PoolSize *int                   `json:"pool_size,omitempty"`
+	Filter   *relevanceFilterOutput `json:"filter,omitempty"`
+}
+
+// relevanceFilterOutput is the filter telemetry contract. Notes stay engine-side
+// and are deliberately not serialized; latency and cost are honest zeros when
+// the filter reported no usage.
+type relevanceFilterOutput struct {
+	Backend   string  `json:"backend"`
+	Theta     float64 `json:"theta"`
+	Kept      int     `json:"kept"`
+	Dropped   int     `json:"dropped"`
+	Degraded  bool    `json:"degraded"`
+	LatencyMs int     `json:"latency_ms"`
+	CostUSD   float64 `json:"cost_usd"`
 }
 
 type searchResultOutput struct {
@@ -213,6 +259,13 @@ func (a *toolAdapter) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err := budgets.CheckTrigger(input.Trigger); err != nil {
 		return nil, memoryWriteOutput{}, err
 	}
+	// The gate runs before the namespace handle is pinned: it may call out, and a
+	// pinned handle must not be held across network I/O. It never blocks on
+	// failure (fail-open) and only an explicit skip route stops the write.
+	gateOutput, proceed := a.gateForWrite(ctx, input)
+	if !proceed {
+		return nil, memoryWriteOutput{Name: input.Name, Written: false, Gate: gateOutput}, nil
+	}
 	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memoryWriteOutput{}, err
@@ -237,7 +290,53 @@ func (a *toolAdapter) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, i
 	if handle.curator != nil {
 		handle.curator.Notify()
 	}
-	return nil, memoryWriteOutput{Name: entry.Name, Written: true}, nil
+	return nil, memoryWriteOutput{Name: entry.Name, Written: true, Gate: gateOutput}, nil
+}
+
+// gateForWrite consults the optional write gate and reports whether the write
+// may proceed. It returns nil telemetry while the gate is switched off, which
+// keeps the ungated response byte-identical.
+func (a *toolAdapter) gateForWrite(ctx context.Context, input memoryWriteInput) (*writeGateOutput, bool) {
+	if !a.registry.writeGateEnabled {
+		return nil, true
+	}
+	gate := a.registry.writeGate
+	if filter.IsNilWriteGate(gate) {
+		// Enabled but no gate is configured: structurally degraded, not a
+		// failure to report, and never a reason to block the write.
+		return &writeGateOutput{Backend: filter.BackendNone, Degraded: true}, true
+	}
+	decision, err := gate.GateWithOptions(ctx, filter.GateRequest{
+		UserTurn:      input.UserTurn,
+		Draft:         input.Content,
+		UserRequested: input.UserRequested,
+	})
+	output := toWriteGateOutput(decision, err)
+	// Only an explicit skip blocks the write. Everything else — a write verdict,
+	// no decision at all (failed open), and the placeholder defer_to_packet route
+	// — proceeds with the caller's own write rules; defer_to_packet is the future
+	// short-packet line's hook and carries no meaning yet.
+	if err != nil || decision.Route != filter.RouteSkip {
+		return output, true
+	}
+	return output, false
+}
+
+func toWriteGateOutput(decision filter.GateDecision, gateErr error) *writeGateOutput {
+	output := &writeGateOutput{
+		Backend:   decision.Meta.Backend,
+		Degraded:  decision.Meta.Degraded || gateErr != nil,
+		LatencyMs: decision.Meta.LatencyMs,
+		CostUSD:   decision.Meta.CostUSD,
+	}
+	if gateErr != nil {
+		// The gate did not decide: the caller keeps its own write rules, and the
+		// empty route plus degraded flag say exactly that.
+		return output
+	}
+	output.Route = decision.Route
+	output.Reasons = decision.Reasons
+	return output
 }
 
 func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, input memorySearchInput) (*mcp.CallToolResult, memorySearchOutput, error) {
@@ -248,15 +347,73 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		limit = *input.Limit
 	}
+	filterName, err := a.resolveSearchFilter(input.Filter)
+	if err != nil {
+		return nil, memorySearchOutput{}, err
+	}
+	policy := a.registry.searchPolicy
+	if input.Theta != nil {
+		if *input.Theta <= 0 || *input.Theta >= 1 {
+			return nil, memorySearchOutput{}, errors.New("theta must be in (0,1)")
+		}
+		policy.Theta = *input.Theta
+		if policy.RelaxTheta > policy.Theta {
+			policy.RelaxTheta = policy.Theta
+		}
+	}
+	pool := limit
+	if a.registry.searchPool > 0 {
+		pool = a.registry.searchPool
+	}
+	if input.CandidatePool != nil {
+		pool = *input.CandidatePool
+	}
+	pool = clampCandidatePool(pool, limit)
+
 	handle, release, err := a.registry.Acquire(ctx, input.Namespace)
 	if err != nil {
 		return nil, memorySearchOutput{}, err
 	}
 	defer release()
-	results, err := handle.retriever.Search(ctx, input.Query, limit)
+
+	// The unchanged call keeps the original code path exactly — no new fields,
+	// no filter, no server-side knob — which is the parity invariant.
+	if filterName == filter.BackendNone && input.CandidatePool == nil && a.registry.searchPool == 0 && a.registry.searchFilterName == "" {
+		results, err := handle.retriever.Search(ctx, input.Query, limit)
+		if err != nil {
+			return nil, memorySearchOutput{}, err
+		}
+		return nil, a.searchOutput(results, limit), nil
+	}
+
+	var flt filter.RelevanceFilter
+	unavailable := false
+	if filterName == filter.BackendJev {
+		if filter.IsNilRelevanceFilter(a.registry.searchFilter) {
+			// Structurally known: Jev was requested but no client is configured.
+			// Degrade to the fused shortlist without calling anything.
+			unavailable = true
+		} else {
+			flt = a.registry.searchFilter
+		}
+	}
+	results, meta, err := handle.retriever.SearchFiltered(ctx, input.Query, pool, limit, flt, policy)
 	if err != nil {
 		return nil, memorySearchOutput{}, err
 	}
+	if unavailable {
+		meta.Backend = filter.BackendNone
+		meta.Degraded = true
+	}
+	output := a.searchOutput(results, limit)
+	output.PoolSize = &pool
+	output.Filter = toRelevanceFilterOutput(meta)
+	return nil, output, nil
+}
+
+// searchOutput builds the shared search envelope. Filter telemetry is attached
+// separately so the unfiltered path stays byte-identical.
+func (a *toolAdapter) searchOutput(results []memory.Result, limit int) memorySearchOutput {
 	output := memorySearchOutput{
 		Scope:    "ranked_subset",
 		Limit:    limit,
@@ -272,7 +429,52 @@ func (a *toolAdapter) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, 
 	for _, result := range results {
 		output.Results = append(output.Results, toSearchResultOutput(result))
 	}
-	return nil, output, nil
+	return output
+}
+
+// resolveSearchFilter picks the effective filter backend: the request parameter
+// when present, otherwise the server-side default. Both go through one
+// whitelist.
+func (a *toolAdapter) resolveSearchFilter(requested string) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(requested))
+	if name == "" {
+		name = a.registry.searchFilterName
+	}
+	switch name {
+	case "", filter.BackendNone:
+		return filter.BackendNone, nil
+	case filter.BackendJev:
+		return filter.BackendJev, nil
+	default:
+		return "", fmt.Errorf("unsupported filter %q (want %q or %q)", requested, filter.BackendNone, filter.BackendJev)
+	}
+}
+
+// clampCandidatePool applies the contracted pool rules: at least one, at most
+// maxCandidatePool, and never narrower than the requested result limit.
+func clampCandidatePool(pool, limit int) int {
+	if pool > maxCandidatePool {
+		pool = maxCandidatePool
+	}
+	if pool < 1 {
+		pool = 1
+	}
+	if pool < limit {
+		pool = limit
+	}
+	return pool
+}
+
+func toRelevanceFilterOutput(meta filter.FilterMeta) *relevanceFilterOutput {
+	return &relevanceFilterOutput{
+		Backend:   meta.Backend,
+		Theta:     meta.Theta,
+		Kept:      meta.Kept,
+		Dropped:   meta.Dropped,
+		Degraded:  meta.Degraded,
+		LatencyMs: meta.LatencyMs,
+		CostUSD:   meta.CostUSD,
+	}
 }
 
 func toSearchResultOutput(result memory.Result) searchResultOutput {
