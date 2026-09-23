@@ -127,6 +127,14 @@ type evalExperimentProtocol struct {
 	ControlProtocolHash string          `json:"control_protocol_hash"`
 	PrimaryCohort       string          `json:"primary_cohort"`
 	MechanismFlags      map[string]bool `json:"mechanism_flags"`
+	// Filter is the 051 read-side filter registration (filter.jev.v1). It is a
+	// pointer so a protocol that does not declare the mechanism keeps
+	// byte-identical canonical bytes — and therefore an unchanged hash — while a
+	// four-arm manifest carries the pinned filter model and the pre-registered
+	// threshold policy. freezeFormalProtocol attaches it before the protocol
+	// digest is computed, so the registration is covered by ProtocolHash rather
+	// than mutated onto a frozen manifest afterwards.
+	Filter *jevFilterRegistration `json:"filter,omitempty"`
 }
 
 func canonicalEvalProtocolJSON(protocol evalProtocol) ([]byte, error) {
@@ -187,6 +195,9 @@ func validateEvalProtocol(protocol evalProtocol, mode evalRunMode) error {
 		}); err != nil {
 			return err
 		}
+	}
+	if err := validateJevProtocolBinding(protocol); err != nil {
+		return err
 	}
 	if protocol.Retrieval.Reranker != "disabled" {
 		return fmt.Errorf("reranker must be disabled in a formal 022 protocol")

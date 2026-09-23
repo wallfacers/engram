@@ -164,11 +164,22 @@ func chunkTrigger(content string) string {
 // by kind, each side keeps its fused order, and shortfall on either side is
 // backfilled from the other. quota <= 0 degrades to a plain Search.
 func retrieveWithQuota(ctx context.Context, r *memory.Retriever, query string, topK, quota int) ([]memory.Result, error) {
-	hits, _, err := retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota, nil)
+	hits, _, err := retrieveWithQuotaDiagnostics(ctx, r, query, topK, quota, nil, nil)
 	return hits, err
 }
 
-func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, query string, topK, quota int, selector chunkSelector) ([]memory.Result, memory.SearchDiagnostics, error) {
+// retrieveWithQuotaDiagnostics is the shared retrieval seam. fr optionally routes
+// the call through the filtered composition (memory.Retriever.SearchFiltered):
+// when the spec is nil, or its filter collapses to a typed nil, the legacy quota
+// path runs byte-for-byte unchanged (SC-006 parity). The filtered path deliberately
+// skips the chunk selector/quota partitioning — the filter is the selection — and
+// reports zero-valued search diagnostics because SearchFiltered does not surface
+// per-signal counters; the four-arm harness measures the candidates it gets back.
+func retrieveWithQuotaDiagnostics(ctx context.Context, r *memory.Retriever, query string, topK, quota int, selector chunkSelector, fr *filterRetrieval) ([]memory.Result, memory.SearchDiagnostics, error) {
+	if fr.active() {
+		hits, _, err := r.SearchFiltered(ctx, query, fr.Pool, fr.Show, fr.Filter, fr.Policy)
+		return hits, memory.SearchDiagnostics{}, err
+	}
 	if quota <= 0 {
 		return r.SearchWithDiagnostics(ctx, query, topK)
 	}

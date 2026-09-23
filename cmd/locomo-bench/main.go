@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/wallfacers/engram/embedding"
+	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/memory"
 	"github.com/wallfacers/engram/memory/curation"
 	"github.com/wallfacers/engram/memory/evidencecompiler"
@@ -230,6 +231,27 @@ type options struct {
 	notebookDir     string  // --notebook-dir: output dir for notebook.jsonl / mistakes-*.md / index.md (default ./eval-notebook)
 	notebookFactTau float64 // --notebook-fact-tau: notebook attribution fact-coverage threshold (lower than factCoverageTau: the notebook must flag "gold plausibly in context" rather than require strict lexical proof). Does NOT affect retrieval or the formal protocol.
 
+	// 051 four-arm protocol (runtime-only, never serialized). jevFilter carries the
+	// arm's filter spec through the shared retrieval seam; it stays nil for every
+	// ordinary run, so the legacy path is byte-identical. The three declared fields
+	// are the operator's 038 prerequisites: validateJevDeclaredPrerequisites refuses
+	// a run without them instead of assuming them.
+	jevArms               bool
+	jevDegradedPass       bool
+	jevFilter             *filterRetrieval
+	jevModel              string
+	jevBaseURL            string
+	jevBaseURLHost        string
+	jevAPIKey             string
+	jevPath               string
+	jevDeadline           time.Duration
+	jevPricePerMillion    float64
+	jevCostAttribution    string
+	jevPolicy             filter.Policy
+	jevPilotGateConfirmed bool
+	jevWarmupDisposed     bool
+	jevSameWindowReps     bool
+	jevB0Continuity       bool
 }
 
 func main() {
@@ -312,6 +334,14 @@ func run() error {
 	flag.IntVar(&opt.repeats, "repeats", 1, "independent repeated evaluation runs")
 	flag.BoolVar(&opt.estimate, "estimate", false, "estimate local cost and exit without API calls")
 	flag.BoolVar(&opt.noIDKRetry, "no-idk-retry", false, "disable the legacy IDK retrieval retries")
+	flag.BoolVar(&opt.jevArms, "jev-arms", false, "051 four-arm Jev evaluation: requires --store-dir, --run-dir, --no-idk-retry, --token-counter-base-url and a frozen protocol")
+	flag.BoolVar(&opt.jevDegradedPass, "jev-degraded-pass", false, "051 four-arm degraded pass: run the arms with no configured filter to measure the fallback path (SC-005/SC-006)")
+	flag.StringVar(&opt.jevModel, "jev-filter-model", "", "051 pinned Jev filter model revision (a floating tag such as -latest is refused)")
+	flag.StringVar(&opt.jevCostAttribution, "jev-cost-attribution", "", "051 attribution note required when the filter segment is more than 10x off the expectation (SC-007)")
+	flag.BoolVar(&opt.jevPilotGateConfirmed, "jev-pilot-gate-confirmed", false, "051 declaration: the 038 pilot gate passed for this run")
+	flag.BoolVar(&opt.jevWarmupDisposed, "jev-warmup-disposed", false, "051 declaration: the warm-up records were disposed of before the gated run")
+	flag.BoolVar(&opt.jevSameWindowReps, "jev-same-window-reps", false, "051 declaration: all three repetitions run in one window")
+	flag.BoolVar(&opt.jevB0Continuity, "jev-b0-continuity-declared", false, "051 declaration: this run-dir carries the B0 continuity receipts, so the validity gate requires their summary artifact")
 	flag.Float64Var(&opt.budgetBaseline, "budget-baseline", 0, "calibrated answer context token baseline for the 1.5x budget gate")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
 	flag.IntVar(&opt.mqMaxSubqueries, "mq-max-subqueries", 4, "maximum subqueries produced for --recall-diagnostic multi retrieval")
@@ -454,6 +484,11 @@ func run() error {
 	arms, err := armsFor(opt.retrieval)
 	if err != nil {
 		return err
+	}
+	if opt.jevArms {
+		if err := validateJevArmsOptions(opt, arms); err != nil {
+			return err
+		}
 	}
 	if unifiedPromptPairExperimentRequested(opt, arms) {
 		if err := validateUnifiedPromptPairExperiment(opt, arms); err != nil {
@@ -907,13 +942,18 @@ func run() error {
 		}
 	}()
 
-
 	if opt.coverageOnly {
 		// Retrieval-only bake-off: no answer/judge tokens are spent, so the only
 		// cost is the one-time store build (reusable via --store-dir) plus query
 		// embeddings from the local sidecar. Skips the repeat/paired/stats/cost
 		// answer machinery entirely.
 		return runCoverage(ctx, opt, convs, runtimes, arms, logger)
+	}
+
+	if opt.jevArms {
+		// 051 four-arm protocol: the arms re-read persisted stores and re-answer
+		// the same questions, so it runs after the shared runtimes exist.
+		return runJevArms(ctx, opt, convs, prices, logger)
 	}
 
 	var formalReplay *formalQuestionReplay
@@ -1591,11 +1631,11 @@ type armSpec struct {
 }
 
 var supportedArmMechanisms = map[string]struct{}{
-	"tplan":        {},
-	"rerank":       {},
-	"pcic":         {},
-	"oracle":       {},
-	"unified":      {},
+	"tplan":   {},
+	"rerank":  {},
+	"pcic":    {},
+	"oracle":  {},
+	"unified": {},
 }
 
 func parseArm(name string) (armSpec, error) {
@@ -1963,7 +2003,6 @@ func answerRegimeFingerprint(opt options) string {
 	}
 	return fingerprint
 }
-
 
 func (o options) judgeAlignmentMode() string {
 	if o.judgeMem0Aligned {
@@ -2477,7 +2516,9 @@ func retrieve(ctx context.Context, retriever *memory.Retriever, filterCall model
 }
 
 func retrieveWithDiagnostics(ctx context.Context, retriever *memory.Retriever, _ modelCaller, query string, topK, quota int, opt options) ([]memory.Result, memory.SearchDiagnostics, error) {
-	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota, opt.selector)
+	// opt.jevFilter is the four-arm harness's arm spec: nil for every ordinary
+	// run, which keeps the legacy path byte-identical.
+	return retrieveWithQuotaDiagnostics(ctx, retriever, query, topK, quota, opt.selector, opt.jevFilter)
 }
 
 // retryWithRewrite runs the IDK second round. Returns (answer, true) only when
@@ -2562,7 +2603,7 @@ func retryWithWiderNetUsage(ctx context.Context, retriever *memory.Retriever, ca
 
 func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Retriever, call usageModelCaller, opt options, qa locomoQA, prompt string) (string, provider.Usage, []memory.Result, memory.SearchDiagnostics, bool) {
 	topK, quota := opt.retrievalFor(qa.Category)
-	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, opt.selector)
+	hits, diagnostics, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK*3, quota*3, opt.selector, opt.jevFilter)
 	if err != nil || len(hits) <= topK {
 		return "", provider.Usage{}, nil, diagnostics, false
 	}
@@ -2572,7 +2613,6 @@ func retryWithWiderNetUsageDiagnostics(ctx context.Context, retriever *memory.Re
 	}
 	return retry, usage, hits, diagnostics, true
 }
-
 
 func toMemories(hits []memory.Result) []retrievedMemory {
 	mems := make([]retrievedMemory, 0, len(hits))
@@ -2947,6 +2987,9 @@ func estimateDatasetCost(convs []conversation, opt options, prices priceTable, m
 }
 
 func printEstimate(convs []conversation, opt options, prices priceTable, model, extractModel, judgeModel string) error {
+	if opt.jevArms {
+		printJevArmEstimate(convs, opt, prices, opt.jevModel, model, judgeModel)
+	}
 	plan := buildCallPlan(convs, opt)
 	report := estimateReport(convs, opt, prices, model, extractModel, judgeModel)
 	fmt.Printf("estimate: dataset=%s repeats=%d questions=%d extract_calls=%d estimated_usd=%.6f\n",

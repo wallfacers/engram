@@ -590,7 +590,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 		if replayErr == nil {
 			hits = replay.Hits
 		} else if os.IsNotExist(replayErr) {
-			hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
+			hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil, nil)
 			if retrieveErr != nil {
 				frozen.InvalidReasons = []string{"retrieval_failed"}
 				return frozen
@@ -604,7 +604,7 @@ func materializeFormalB1Question(ctx context.Context, protocol evalProtocol, opt
 			return frozen
 		}
 	} else {
-		hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil)
+		hits, _, retrieveErr = retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, protocol.Retrieval.CandidateLimit, opt.chunkQuota, nil, nil)
 		if retrieveErr != nil {
 			frozen.InvalidReasons = []string{"retrieval_failed"}
 			return frozen
@@ -1372,6 +1372,14 @@ func freezeFormalProtocol(opt options, convs []conversation, controlHash string)
 	}
 	if !opt.chunks {
 		return fmt.Errorf("formal B1 freeze requires --chunks for lossless source identity")
+	}
+	if opt.jevArms {
+		// The 051 four-arm protocol seals its filter registration into this same
+		// manifest, before the digest: the run then verifies it instead of mutating
+		// a frozen manifest (freeze-before-digest, AGENTS.md).
+		if err := attachJevArmsRegistrationForFreeze(opt, &protocol); err != nil {
+			return err
+		}
 	}
 	if _, err := freezeEvalProtocolFile(opt.evalFreezeProtocol, protocol, evalRunFormal); err != nil {
 		return err

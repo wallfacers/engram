@@ -98,8 +98,8 @@ func TestPCICSiblingPreservesBaselineRetrievalBytes(t *testing.T) {
 func callRetrieveWithOptionalSelector(t *testing.T, ctx context.Context, r *memory.Retriever, query string, topK, quota int) []memory.Result {
 	t.Helper()
 	fn := reflect.ValueOf(retrieveWithQuotaDiagnostics)
-	if fn.Type().NumIn() != 6 {
-		t.Fatalf("retrieveWithQuotaDiagnostics has %d inputs, want optional selector as sixth input", fn.Type().NumIn())
+	if fn.Type().NumIn() != 7 {
+		t.Fatalf("retrieveWithQuotaDiagnostics has %d inputs, want optional selector then optional filter spec", fn.Type().NumIn())
 	}
 	results := fn.Call([]reflect.Value{
 		reflect.ValueOf(ctx),
@@ -108,6 +108,7 @@ func callRetrieveWithOptionalSelector(t *testing.T, ctx context.Context, r *memo
 		reflect.ValueOf(topK),
 		reflect.ValueOf(quota),
 		reflect.Zero(fn.Type().In(5)),
+		reflect.Zero(fn.Type().In(6)),
 	})
 	if !results[2].IsNil() {
 		t.Fatalf("retrieve: %v", results[2].Interface())

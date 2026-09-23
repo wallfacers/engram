@@ -416,7 +416,7 @@ func runAttributionCLI(ctx context.Context, opt options, convs []conversation, a
 		for _, selected := range selectQuestions(conv, opt) {
 			qa := selected.QA
 			topK, quota := armOpt.retrievalFor(qa.Category)
-			hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK, quota, nil)
+			hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK, quota, nil, nil)
 			if err != nil {
 				runtime.Close()
 				return fmt.Errorf("attribution retrieve conv=%d question=%d: %w", conv.ID, selected.Index, err)

@@ -170,7 +170,7 @@ func computeAbstainProbe(ctx context.Context, opt options, convs []conversation,
 		for questionIndex, qa := range conv.QA {
 			topK, quota := armOpt.retrievalFor(qa.Category)
 			selector, _ := selectorForArm(runtime, conv.ID, arm, armOpt, nil, false)
-			hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK, quota, selector)
+			hits, _, err := retrieveWithQuotaDiagnostics(ctx, retriever, qa.Question, topK, quota, selector, nil)
 			if err != nil {
 				return ProbeReport{}, fmt.Errorf("abstain probe retrieve conv=%d question=%d: %w", conv.ID, questionIndex, err)
 			}
