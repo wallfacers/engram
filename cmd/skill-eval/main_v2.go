@@ -35,6 +35,8 @@ Formal / protocol commands:
                 --core-manifest <file> --timeout <s> --concurrency <n>
                 [--claude-settings <p>] [--codex-provider aq] [--codex-model <m>]
                 [--opencode-model <m>] [--seed-1 <s>] [--seed-2 <s>] [--seed-3 <s>]
+                (ENGRAM_SKILL_EVAL_HOSTS=claude,codex freezes a two-host plan;
+                 unset means all three; later gates check the frozen set)
   series prepare --series <id> --series-root <dir> --purpose official-dual|dev-comparison
                 --core-execution-plan <plan.json> --skill-snapshot <dir>
                 --skill-package-validation <file> --green-test-receipt <file>

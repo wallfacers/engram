@@ -258,19 +258,18 @@ func ValidateCoreExecutionPlan(p *CoreExecutionPlanReceipt) error {
 		p.RunnerDigest == "" || p.JudgeRuleDigest == "" {
 		return errors.New("plan identity fields incomplete")
 	}
-	if len(p.Hosts) != 3 {
-		return fmt.Errorf("plan hosts %d, want exactly 3", len(p.Hosts))
+	if len(p.Hosts) == 0 {
+		return errors.New("plan hosts empty")
 	}
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
-		found := false
-		for _, hh := range p.Hosts {
-			if hh == h {
-				found = true
-			}
+	seenHost := map[string]bool{}
+	for _, h := range p.Hosts {
+		if !validHosts[h] {
+			return fmt.Errorf("plan host %q is not a formal host", h)
 		}
-		if !found {
-			return fmt.Errorf("plan missing host %s", h)
+		if seenHost[h] {
+			return fmt.Errorf("plan repeats host %s", h)
 		}
+		seenHost[h] = true
 		if p.ToolIdentityDigests[h] == "" {
 			return fmt.Errorf("plan missing tool_identity_digest for %s", h)
 		}
@@ -363,8 +362,18 @@ func ValidateFormalSeriesManifest(m *FormalSeriesManifest) error {
 	default:
 		return fmt.Errorf("purpose %q invalid", m.Purpose)
 	}
-	if len(m.Hosts) != 3 {
-		return fmt.Errorf("series hosts %d, want exactly 3", len(m.Hosts))
+	if len(m.Hosts) == 0 {
+		return errors.New("series hosts empty")
+	}
+	seenSeriesHost := map[string]bool{}
+	for _, h := range m.Hosts {
+		if !validHosts[h] {
+			return fmt.Errorf("series host %q is not a formal host", h)
+		}
+		if seenSeriesHost[h] {
+			return fmt.Errorf("series repeats host %s", h)
+		}
+		seenSeriesHost[h] = true
 	}
 	if len(m.RequiredOrdinals) != 3 || m.RequiredOrdinals[0] != 1 || m.RequiredOrdinals[1] != 2 || m.RequiredOrdinals[2] != 3 {
 		return errors.New("required_ordinals must be exactly [1,2,3]")
@@ -1277,11 +1286,12 @@ func scoreGate(host, split string, g ScoreMetric, specs []ScoreCaseSpec, cells m
 	}
 }
 
-// validateScoreHosts requires exactly the three formal hosts with no
-// duplicates: SC-9's host-specific gates have no partial-host mode.
+// validateScoreHosts requires a non-empty, duplicate-free set of formal
+// hosts: SC-9's host-specific gates have no partial-host mode, and the
+// caller passes the host set the series manifest froze.
 func validateScoreHosts(hosts []string) error {
-	if len(hosts) != 3 {
-		return fmt.Errorf("score hosts %d, want exactly 3", len(hosts))
+	if len(hosts) == 0 {
+		return errors.New("score hosts empty")
 	}
 	seen := map[string]bool{}
 	for _, h := range hosts {

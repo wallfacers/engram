@@ -96,6 +96,9 @@ func BuildFailureArchive(in *FailureArchiveInput) (*FailureArchive, error) {
 	if causes == nil {
 		causes = map[string]DevRootCause{}
 	}
+	if len(ev.Plan.ToolIdentityDigests) == 0 {
+		return nil, errors.New("core execution plan freezes no host tool identities")
+	}
 	entries := []FailureArchiveEntry{}
 	for _, key := range ev.sortedCells() {
 		cell := ev.Cells[key]
@@ -285,7 +288,7 @@ func sealFailureArchive(a *FailureArchive) error {
 	if a.BaselineSkillSnapshotDigest == "" || a.CoreExecutionPlanDigest == "" {
 		return errors.New("archive does not bind its baseline snapshot and core plan")
 	}
-	if len(a.ToolIdentityDigests) != len(validHosts) {
+	if len(a.ToolIdentityDigests) == 0 {
 		return errors.New("archive does not bind every host tool identity")
 	}
 	d, err := CanonicalSHA256(failureArchiveDigestProjection(a))
@@ -754,6 +757,15 @@ func CompareDevSeries(in *CompareDevSeriesInput) (*FlywheelComparisonReceipt, er
 	if archive.BaselineSkillSnapshotDigest != baseline.Manifest.SkillSnapshotDigest {
 		return nil, fmt.Errorf("failure archive is bound to baseline snapshot %q, the series froze %q",
 			archive.BaselineSkillSnapshotDigest, baseline.Manifest.SkillSnapshotDigest)
+	}
+	if len(archive.ToolIdentityDigests) != len(plan.ToolIdentityDigests) {
+		return nil, fmt.Errorf("failure archive binds %d host tool identities, the shared plan froze %d",
+			len(archive.ToolIdentityDigests), len(plan.ToolIdentityDigests))
+	}
+	for h, d := range plan.ToolIdentityDigests {
+		if archive.ToolIdentityDigests[h] != d {
+			return nil, fmt.Errorf("failure archive host %s tool identity %q, the shared plan freezes %q", h, archive.ToolIdentityDigests[h], d)
+		}
 	}
 	// Every entry must name this exact baseline series: an archive of another
 	// dev-comparison series is a foreign baseline, never this one's truth.

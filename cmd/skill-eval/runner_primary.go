@@ -278,12 +278,16 @@ func dirInventoryDigest(dir string) (string, error) {
 // ---------- T049: host invocation parity ----------
 
 // PrimaryHostTemplates resolves the frozen invocation template and digest for
-// every host from one lane configuration. A configuration that cannot express
-// all three hosts has no primary parity and is rejected before any child runs.
+// every configured lane host from one lane configuration. A configuration
+// that cannot express every configured host has no primary parity and is
+// rejected before any child runs.
 func PrimaryHostTemplates(lane CLIReviewConfig) (map[string]InvocationTemplate, map[string]string, error) {
+	if len(lane.Lanes) == 0 {
+		return nil, nil, errors.New("primary host templates need at least one configured lane: no lanes")
+	}
 	templates := map[string]InvocationTemplate{}
 	digests := map[string]string{}
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	for _, h := range lane.Lanes {
 		t, err := TemplateForHost(h, lane.ClaudeSettings, lane.CodexProvider, lane.CodexModel, lane.OpenCodeModel)
 		if err != nil {
 			return nil, nil, fmt.Errorf("host %s invocation template: %w", h, err)
@@ -305,8 +309,8 @@ func PrimaryHostTemplates(lane CLIReviewConfig) (map[string]InvocationTemplate, 
 // identity, with each host's concrete template still distinguishable through
 // its own digest inside the same canonical map.
 func NormalizedCoreTemplateDigest(templateDigests map[string]string) (string, error) {
-	if len(templateDigests) != 3 {
-		return "", fmt.Errorf("normalized execution template needs exactly 3 host digests, got %d", len(templateDigests))
+	if len(templateDigests) == 0 {
+		return "", fmt.Errorf("normalized execution template needs at least one host digest")
 	}
 	return CanonicalSHA256(templateDigests)
 }

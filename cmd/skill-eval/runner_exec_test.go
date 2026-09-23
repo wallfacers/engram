@@ -965,9 +965,9 @@ func TestPrimaryHostTemplatesAllThreeHosts(t *testing.T) {
 			t.Errorf("host %s lost its template digest", h)
 		}
 	}
-	if _, _, err := PrimaryHostTemplates(CLIReviewConfig{ClaudeSettings: "x", CodexProvider: "p", CodexModel: "m"}); err == nil ||
-		!strings.Contains(err.Error(), HostOpenCode) {
-		t.Fatalf("incomplete lane configuration accepted: %v", err)
+	if _, _, err := PrimaryHostTemplates(CLIReviewConfig{Lanes: nil, ClaudeSettings: "x", CodexProvider: "p", CodexModel: "m"}); err == nil ||
+		!strings.Contains(err.Error(), "no lanes") {
+		t.Fatalf("an empty lane set must be refused: %v", err)
 	}
 }
 

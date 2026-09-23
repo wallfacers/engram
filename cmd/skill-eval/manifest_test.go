@@ -413,7 +413,8 @@ func TestCorePlanStableFieldsValidate(t *testing.T) {
 	drift("empty runner revision", func(p *CoreExecutionPlanReceipt) { p.RunnerRevision = "" })
 	drift("empty runner digest", func(p *CoreExecutionPlanReceipt) { p.RunnerDigest = "" })
 	drift("empty judge rule digest", func(p *CoreExecutionPlanReceipt) { p.JudgeRuleDigest = "" })
-	drift("two hosts", func(p *CoreExecutionPlanReceipt) { p.Hosts = p.Hosts[:2] })
+	drift("no hosts", func(p *CoreExecutionPlanReceipt) { p.Hosts = nil })
+	drift("unknown host", func(p *CoreExecutionPlanReceipt) { p.Hosts[0] = "terminal" })
 	drift("four hosts", func(p *CoreExecutionPlanReceipt) { p.Hosts = append(p.Hosts, "fourth") })
 	drift("unknown host substituted", func(p *CoreExecutionPlanReceipt) { p.Hosts[1] = "ghost" })
 	drift("missing tool identity", func(p *CoreExecutionPlanReceipt) { delete(p.ToolIdentityDigests, HostCodex) })
@@ -563,7 +564,8 @@ func TestSeriesPreSealPrerequisites(t *testing.T) {
 	}
 	drop("series_id", func(x *FormalSeriesManifest) { x.SeriesID = "" })
 	drop("a core execution plan", func(x *FormalSeriesManifest) { x.CoreExecutionPlanDigest = "" })
-	drop("three hosts", func(x *FormalSeriesManifest) { x.Hosts = x.Hosts[:2] })
+	drop("no hosts", func(x *FormalSeriesManifest) { x.Hosts = nil })
+	drop("an unknown host", func(x *FormalSeriesManifest) { x.Hosts[0] = "terminal" })
 	drop("all three ordinals", func(x *FormalSeriesManifest) { x.RequiredOrdinals = []int{1, 2} })
 	drop("ordinal order [1,2,3]", func(x *FormalSeriesManifest) { x.RequiredOrdinals = []int{1, 3, 2} })
 	drop("exact-skill package-validation receipt", func(x *FormalSeriesManifest) { x.SkillPackageValidationReceiptDigest = "" })
@@ -1491,7 +1493,7 @@ func (fx *implSeriesFixture) coreLeg(t *testing.T, seriesID string) ([]string, s
 			minute++
 		}
 	}
-	digest, err := CoreLegCompletionDigest(runs)
+	digest, err := CoreLegCompletionDigest(runs, []string{HostClaude, HostCodex, HostOpenCode})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2172,7 +2174,7 @@ func TestImplCoreLegCompletionDigestMatrix(t *testing.T) {
 		}
 		runs = append(runs, r)
 	}
-	again, err := CoreLegCompletionDigest(runs)
+	again, err := CoreLegCompletionDigest(runs, []string{HostClaude, HostCodex, HostOpenCode})
 	if err != nil || again != digest {
 		t.Fatalf("core-leg digest must be reproducible: %v", err)
 	}
@@ -2183,22 +2185,42 @@ func TestImplCoreLegCompletionDigestMatrix(t *testing.T) {
 	}
 	// Reordering the input does not change the digest.
 	reversed := append([]*PrimaryRunManifest{}, runs[8], runs[7], runs[6], runs[5], runs[4], runs[3], runs[2], runs[1], runs[0])
-	reordered, err := CoreLegCompletionDigest(reversed)
+	reordered, err := CoreLegCompletionDigest(reversed, []string{HostClaude, HostCodex, HostOpenCode})
 	if err != nil || reordered != digest {
 		t.Fatalf("core-leg digest must be order-independent: %v", err)
 	}
 	// Missing an ordinal is not a complete leg.
-	if _, err := CoreLegCompletionDigest(runs[:8]); err == nil {
+	if _, err := CoreLegCompletionDigest(runs[:8], []string{HostClaude, HostCodex, HostOpenCode}); err == nil {
 		t.Fatal("an incomplete core leg must be refused")
 	}
 	// A duplicated host × ordinal is refused.
-	if _, err := CoreLegCompletionDigest(append(append([]*PrimaryRunManifest{}, runs...), runs[0])); err == nil {
+	if _, err := CoreLegCompletionDigest(append(append([]*PrimaryRunManifest{}, runs...), runs[0]), []string{HostClaude, HostCodex, HostOpenCode}); err == nil {
 		t.Fatal("a duplicated run must be refused")
+	}
+	// A two-host leg is complete against a two-host frozen set, and a host
+	// outside the frozen set is a splice. Pristine copies: the cross-series
+	// case below mutates shared pointers.
+	two := make([]*PrimaryRunManifest, 0, 6)
+	for _, r := range runs[:6] {
+		cp := *r
+		two = append(two, &cp)
+	}
+	if _, err := CoreLegCompletionDigest(two, []string{HostClaude, HostCodex}); err != nil {
+		t.Fatalf("a complete two-host leg must be accepted against its own host set: %v", err)
+	}
+	if _, err := CoreLegCompletionDigest(two, []string{HostClaude, HostCodex, HostOpenCode}); err == nil {
+		t.Fatal("a two-host leg must not satisfy a three-host frozen set")
+	}
+	mixed := append(two[:0:0], two...)
+	mixed[0].Host = HostOpenCode
+	if _, err := CoreLegCompletionDigest(mixed, []string{HostClaude, HostCodex}); err == nil {
+		t.Fatal("a run outside the frozen host set must be refused")
 	}
 	// A run of another series is refused.
 	foreign := append([]*PrimaryRunManifest{}, runs...)
 	foreign[0].SeriesID = "series-impl-other"
-	if _, err := CoreLegCompletionDigest(foreign); err == nil {
+	if _, err := CoreLegCompletionDigest(foreign, []string{HostClaude, HostCodex, HostOpenCode}); err == nil {
 		t.Fatal("a cross-series core leg must be refused")
 	}
+
 }

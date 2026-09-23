@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -23,6 +24,41 @@ const (
 )
 
 var validHosts = map[string]bool{HostClaude: true, HostCodex: true, HostOpenCode: true}
+
+// formalHostSet resolves the formal eval host set. ENGRAM_SKILL_EVAL_HOSTS
+// (comma-separated) names a non-empty subset of the three hosts, emitted in
+// the canonical order; unset or empty means all three. Only plan creation and
+// lane resolution consume this — every later gate re-checks against the host
+// set a sealed plan/series froze, never against the live environment.
+// Dataset-construction lanes (family-index, holdout authoring/review) are not
+// affected and stay three-host by contract.
+func formalHostSet() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv("ENGRAM_SKILL_EVAL_HOSTS"))
+	if raw == "" {
+		return []string{HostClaude, HostCodex, HostOpenCode}, nil
+	}
+	seen := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		h := strings.ToLower(strings.TrimSpace(part))
+		if h == "" {
+			continue
+		}
+		if !validHosts[h] {
+			return nil, fmt.Errorf("ENGRAM_SKILL_EVAL_HOSTS entry %q is not a formal host (claude|codex|opencode)", part)
+		}
+		seen[h] = true
+	}
+	if len(seen) == 0 {
+		return nil, errors.New("ENGRAM_SKILL_EVAL_HOSTS is set but names no formal host")
+	}
+	out := make([]string, 0, len(seen))
+	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+		if seen[h] {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
 
 // ToolProvenance is the sanitized per-attempt capture. Any token/key/password,
 // raw env value, full endpoint, full settings/config or arbitrary stderr is

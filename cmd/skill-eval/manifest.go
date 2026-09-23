@@ -1228,9 +1228,12 @@ func LoadPrimaryRun(path string) (*PrimaryRunManifest, error) {
 }
 
 // CoreLegCompletionDigest is the receipt-set digest of a complete core172
-// leg: exactly three hosts × three ordinals of sealed, complete
+// leg: exactly the frozen host set × three ordinals of sealed, complete
 // dev-regression runs of one series, sorted for a canonical preimage.
-func CoreLegCompletionDigest(runs []*PrimaryRunManifest) (string, error) {
+func CoreLegCompletionDigest(runs []*PrimaryRunManifest, hosts []string) (string, error) {
+	if len(hosts) == 0 {
+		return "", errors.New("core leg host set empty")
+	}
 	if len(runs) == 0 {
 		return "", errors.New("core leg carries no primary run receipt")
 	}
@@ -1266,7 +1269,7 @@ func CoreLegCompletionDigest(runs []*PrimaryRunManifest) (string, error) {
 		seen[key] = true
 		proj.Runs = append(proj.Runs, entry{Host: r.Host, Ordinal: r.Ordinal, RunDigest: r.RunDigest, SealDigest: r.SealDigest})
 	}
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	for _, h := range hosts {
 		for _, o := range Ordinals {
 			if !seen[h+"/"+strconv.Itoa(o)] {
 				return "", fmt.Errorf("core leg is missing %s ordinal %d", h, o)
@@ -1282,7 +1285,7 @@ func CoreLegCompletionDigest(runs []*PrimaryRunManifest) (string, error) {
 	return CanonicalSHA256(proj)
 }
 
-func loadCoreLeg(paths []string, seriesID string) ([]*PrimaryRunManifest, string, error) {
+func loadCoreLeg(paths []string, seriesID string, hosts []string) ([]*PrimaryRunManifest, string, error) {
 	if len(paths) == 0 {
 		return nil, "", errors.New("no core-leg primary run receipt given")
 	}
@@ -1297,7 +1300,7 @@ func loadCoreLeg(paths []string, seriesID string) ([]*PrimaryRunManifest, string
 		}
 		runs = append(runs, r)
 	}
-	digest, err := CoreLegCompletionDigest(runs)
+	digest, err := CoreLegCompletionDigest(runs, hosts)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1448,7 +1451,7 @@ func BindHoldout(root string, in HoldoutBindInput) (*HoldoutBindingReceipt, erro
 	if m.CandidateBindingDigest == "" {
 		return nil, errors.New("series carries no stable candidate binding digest")
 	}
-	coreRuns, coreLeg, err := loadCoreLeg(in.CoreLegRunPaths, m.SeriesID)
+	coreRuns, coreLeg, err := loadCoreLeg(in.CoreLegRunPaths, m.SeriesID, m.Hosts)
 	if err != nil {
 		return nil, err
 	}
@@ -1543,7 +1546,7 @@ func AppendHoldoutAttempt(root string, in HoldoutAppendInput) (*HoldoutBindingRe
 		return nil, fmt.Errorf("recovery series recomputed candidate binding %q, binding holds %q: a new holdout version is required",
 			m.CandidateBindingDigest, cur.CandidateBindingDigest)
 	}
-	coreRuns, coreLeg, err := loadCoreLeg(in.CoreLegRunPaths, m.SeriesID)
+	coreRuns, coreLeg, err := loadCoreLeg(in.CoreLegRunPaths, m.SeriesID, m.Hosts)
 	if err != nil {
 		return nil, err
 	}

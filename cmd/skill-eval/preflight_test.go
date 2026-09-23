@@ -729,3 +729,37 @@ func TestCanaryHostSlotStagedFilesAfterFreeze(t *testing.T) {
 		t.Error("canary template digests must distinguish hosts")
 	}
 }
+
+// The formal host set is env-configurable for plan creation only: a subset of
+// the closed three-host set in canonical order, defaulting to all three.
+func TestFormalHostSetEnvOverride(t *testing.T) {
+	t.Setenv("ENGRAM_SKILL_EVAL_HOSTS", "")
+	all, err := formalHostSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("default host set %v, want all three", all)
+	}
+	t.Setenv("ENGRAM_SKILL_EVAL_HOSTS", "codex, claude")
+	two, err := formalHostSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(two) != 2 || two[0] != HostClaude || two[1] != HostCodex {
+		t.Fatalf("override host set %v, want canonical [claude codex]", two)
+	}
+	t.Setenv("ENGRAM_SKILL_EVAL_HOSTS", "codex,codex,")
+	dup, err := formalHostSet()
+	if err != nil || len(dup) != 1 || dup[0] != HostCodex {
+		t.Fatalf("duplicate/empty entries %v (%v), want [codex]", dup, err)
+	}
+	t.Setenv("ENGRAM_SKILL_EVAL_HOSTS", "terminal")
+	if _, err := formalHostSet(); err == nil || !strings.Contains(err.Error(), "not a formal host") {
+		t.Fatalf("unknown host accepted: %v", err)
+	}
+	t.Setenv("ENGRAM_SKILL_EVAL_HOSTS", " , ")
+	if _, err := formalHostSet(); err == nil || !strings.Contains(err.Error(), "names no formal host") {
+		t.Fatalf("blank host set accepted: %v", err)
+	}
+}

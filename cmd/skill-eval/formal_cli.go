@@ -36,7 +36,7 @@ import (
 // formalLaneConfig assembles the frozen three-lane configuration from flags
 // with the shared env fallbacks. A flag that is empty after the fallback
 // fails the host template resolution later, never silently.
-func formalLaneConfig(claudeSettings, codexProvider, codexModel, opencodeModel string) CLIReviewConfig {
+func formalLaneConfig(claudeSettings, codexProvider, codexModel, opencodeModel string) (CLIReviewConfig, error) {
 	if claudeSettings == "" {
 		claudeSettings = os.Getenv("ENGRAM_SKILL_EVAL_CLAUDE_SETTINGS")
 	}
@@ -49,13 +49,17 @@ func formalLaneConfig(claudeSettings, codexProvider, codexModel, opencodeModel s
 	if opencodeModel == "" {
 		opencodeModel = os.Getenv("ENGRAM_SKILL_EVAL_OPENCODE_MODEL")
 	}
+	hosts, err := formalHostSet()
+	if err != nil {
+		return CLIReviewConfig{}, err
+	}
 	return CLIReviewConfig{
-		Lanes:          []string{HostClaude, HostCodex, HostOpenCode},
+		Lanes:          hosts,
 		ClaudeSettings: claudeSettings,
 		CodexProvider:  codexProvider,
 		CodexModel:     codexModel,
 		OpenCodeModel:  opencodeModel,
-	}
+	}, nil
 }
 
 // coreExecConfig is the closed schema of the operator-provided `--core-exec`
@@ -88,12 +92,12 @@ func loadCoreExecConfig(path string) (BoundaryKind, string, error) {
 	return cfg.BoundaryKind, sha256Hex(b), nil
 }
 
-// measuredToolIdentities captures the three lanes' provenance and returns
+// measuredToolIdentities captures the configured lanes' provenance and returns
 // their stable identity digests — the values a plan freezes and every later
 // stage re-measures against.
 func measuredToolIdentities(lane CLIReviewConfig) (map[string]string, error) {
 	out := map[string]string{}
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	for _, h := range lane.Lanes {
 		prov := buildLaneProvenance(h, lane)
 		if prov.ResolvedModel == "" || prov.ResolvedModel == ResolvedUnavailable {
 			return nil, fmt.Errorf("no resolved model identity for %s — a formal plan needs every lane measurable", h)
@@ -157,7 +161,10 @@ func cmdCorePlanCreate(argv []string) error {
 	if *out == "" || *coreExec == "" || *timeout <= 0 || *concurrency <= 0 {
 		return fmt.Errorf("--out, --core-exec, a positive --timeout and a positive --concurrency are required")
 	}
-	lane := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	lane, err := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	if err != nil {
+		return err
+	}
 	_, templateDigests, err := PrimaryHostTemplates(lane)
 	if err != nil {
 		return err
@@ -174,7 +181,7 @@ func cmdCorePlanCreate(argv []string) error {
 	if err != nil {
 		return err
 	}
-	workerSet, err := NormalizedCoreWorkerIdentitySetDigest([]string{HostClaude, HostCodex, HostOpenCode}, *concurrency, normalizedTemplate)
+	workerSet, err := NormalizedCoreWorkerIdentitySetDigest(lane.Lanes, *concurrency, normalizedTemplate)
 	if err != nil {
 		return err
 	}
@@ -193,7 +200,7 @@ func cmdCorePlanCreate(argv []string) error {
 		PlanID:           id,
 		CoreManifestPath: *coreManifest,
 		RunnerRevision:   "runner-" + shortDigest(planRunnerDigest()),
-		Hosts:            []string{HostClaude, HostCodex, HostOpenCode},
+		Hosts:            lane.Lanes,
 		ToolIdentityDigests:                   identities,
 		TimeoutSeconds:                        *timeout,
 		Concurrency:                           *concurrency,
@@ -328,7 +335,10 @@ func cmdSeriesPrepare(argv []string) error {
 	if err != nil {
 		return err
 	}
-	lane := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	lane, err := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	if err != nil {
+		return err
+	}
 	_, templateDigests, err := PrimaryHostTemplates(lane)
 	if err != nil {
 		return err
@@ -556,11 +566,11 @@ func loadSeriesCases(seriesRoot, membership string) (map[string]*TriggerCaseV2, 
 	return cases, ids, nil
 }
 
-// coreLegRunPaths returns the nine sealed dev-split run manifests of a
-// series — the complete core leg a holdout ordinal 1 requires.
-func coreLegRunPaths(seriesRoot, seriesID string) ([]string, []*PrimaryRunManifest, error) {
+// coreLegRunPaths returns the sealed dev-split run manifests of a series's
+// frozen host set — the complete core leg a holdout ordinal 1 requires.
+func coreLegRunPaths(seriesRoot, seriesID string, hosts []string) ([]string, []*PrimaryRunManifest, error) {
 	var paths []string
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	for _, h := range hosts {
 		for _, o := range Ordinals {
 			paths = append(paths, filepath.Join(PrimaryRunRoot(seriesRoot, h, SplitDevRegression, o), runManifestName))
 		}
@@ -664,7 +674,10 @@ func cmdRunPrimary(argv []string) error {
 	if *concurrency != plan.Concurrency || *concurrency != manifest.Concurrency {
 		return fmt.Errorf("--concurrency %d != sealed %d: a primary run never changes execution conditions", *concurrency, plan.Concurrency)
 	}
-	lane := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	lane, err := formalLaneConfig(*claudeSettings, *codexProvider, *codexModel, *opencodeModel)
+	if err != nil {
+		return err
+	}
 	prov := buildLaneProvenance(*tool, lane)
 	if prov.ToolIdentityDigest != plan.ToolIdentityDigests[*tool] {
 		return fmt.Errorf("measured tool identity for %s drifted from the sealed plan — a primary run cannot start", *tool)
@@ -740,11 +753,11 @@ func bindHoldoutOrdinal1(seriesRoot string, manifest *FormalSeriesManifest, plan
 	if greenReceiptPath == "" {
 		return fmt.Errorf("holdout ordinal 1 requires --green-test-receipt (a fresh pre-holdout attestation)")
 	}
-	_, runs, err := coreLegRunPaths(seriesRoot, manifest.SeriesID)
+	_, runs, err := coreLegRunPaths(seriesRoot, manifest.SeriesID, manifest.Hosts)
 	if err != nil {
 		return err
 	}
-	coreLeg, err := CoreLegCompletionDigest(runs)
+	coreLeg, err := CoreLegCompletionDigest(runs, manifest.Hosts)
 	if err != nil {
 		return err
 	}
@@ -779,7 +792,7 @@ func bindHoldoutOrdinal1(seriesRoot string, manifest *FormalSeriesManifest, plan
 		if _, err := BindHoldout(seriesRoot, HoldoutBindInput{
 			DatasetManifestPath:     holdoutManifest,
 			SeriesManifestPath:      filepath.Join(seriesRoot, seriesManifestFile),
-			CoreLegRunPaths:         coreLegPaths(seriesRoot, manifest.SeriesID),
+			CoreLegRunPaths:         coreLegPaths(seriesRoot, manifest.SeriesID, manifest.Hosts),
 			CoreLegCompletionDigest: coreLeg,
 			PreHoldoutReceiptPath:   greenReceiptPath,
 			ValidatorPath:           validatorPath,
@@ -794,9 +807,9 @@ func bindHoldoutOrdinal1(seriesRoot string, manifest *FormalSeriesManifest, plan
 
 // coreLegPaths is the path-only view of coreLegRunPaths (BindHoldout loads
 // and re-verifies them itself).
-func coreLegPaths(seriesRoot, seriesID string) []string {
+func coreLegPaths(seriesRoot, seriesID string, hosts []string) []string {
 	var paths []string
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	for _, h := range hosts {
 		for _, o := range Ordinals {
 			paths = append(paths, filepath.Join(PrimaryRunRoot(seriesRoot, h, SplitDevRegression, o), runManifestName))
 		}
@@ -828,7 +841,7 @@ func appendHoldoutAttempt(seriesRoot, bindingPath string, manifest *FormalSeries
 	if _, err := AppendHoldoutAttempt(seriesRoot, HoldoutAppendInput{
 		BindingPath:             bindingPath,
 		SeriesManifestPath:      filepath.Join(seriesRoot, seriesManifestFile),
-		CoreLegRunPaths:         coreLegPaths(seriesRoot, manifest.SeriesID),
+		CoreLegRunPaths:         coreLegPaths(seriesRoot, manifest.SeriesID, manifest.Hosts),
 		CoreLegCompletionDigest: coreLeg,
 		PreHoldoutReceiptPath:   greenReceiptPath,
 		ValidatorPath:           validatorOf(seriesRoot),
@@ -857,18 +870,18 @@ func consumeHoldoutIfComplete(seriesRoot string, manifest *FormalSeriesManifest)
 	if _, err := os.Stat(bindingPath); err != nil {
 		return fmt.Errorf("holdout binding missing at holdout completion: %w", err)
 	}
-	paths, runs, err := coreLegRunPaths(seriesRoot, manifest.SeriesID)
+	paths, runs, err := coreLegRunPaths(seriesRoot, manifest.SeriesID, manifest.Hosts)
 	if err != nil {
 		return err
 	}
 	_ = paths
-	coreLeg, err := CoreLegCompletionDigest(runs)
+	coreLeg, err := CoreLegCompletionDigest(runs, manifest.Hosts)
 	if err != nil {
 		return err
 	}
 	_ = coreLeg
-	// All nine holdout runs must be complete sealed manifests.
-	for _, h := range []string{HostClaude, HostCodex, HostOpenCode} {
+	// Every frozen host's holdout runs must be complete sealed manifests.
+	for _, h := range manifest.Hosts {
 		for _, o := range Ordinals {
 			r, err := LoadPrimaryRun(filepath.Join(PrimaryRunRoot(seriesRoot, h, SplitHoldout, o), runManifestName))
 			if err != nil {
