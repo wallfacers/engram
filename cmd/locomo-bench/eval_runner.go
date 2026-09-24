@@ -462,7 +462,9 @@ func buildFormalExperiment(opt options, controlHash string) (evalExperimentProto
 // its manifest claims: a B1 control manifest must run without treatment
 // flags, and a treatment manifest must run with exactly the mechanism it was
 // frozen for, bound to a real control protocol hash. Any mismatch fails
-// closed before a single model call.
+// closed before a single model call. The 051 filter registration marker is not
+// a treatment: it is admitted as a b1 control flag only while it stays coherent
+// with the registration the freeze wrote beside it.
 func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
 	exp := protocol.Experiment
 	if exp.Stage == "b1" {
@@ -471,6 +473,22 @@ func validateFormalMechanismBinding(protocol evalProtocol, opt options) error {
 		}
 		if !isFormalControlMechanismFlags(exp.MechanismFlags) {
 			return fmt.Errorf("formal b1/legacy_count_packer manifest contains non-control mechanism flags")
+		}
+		// 051: the freeze path bakes the Jev read-filter registration into this same
+		// manifest before the protocol digest (attachJevArmsRegistrationForFreeze),
+		// so the b1 control legitimately carries the registration marker key even
+		// though it runs no treatment — per-arm behavior is selected at runtime by
+		// --jev-arms. Marker and registration must stay coherent in both directions,
+		// since the digest only covers the manifest the freeze actually wrote.
+		registrationKey := ""
+		if exp.Filter != nil {
+			registrationKey = exp.Filter.MechanismKey
+		}
+		if exp.MechanismFlags[jevFilterMechanismKey] != (registrationKey != "") {
+			return fmt.Errorf("formal b1/legacy_count_packer manifest %s registration is incoherent: mechanism flag=%v with registration key %q", jevFilterMechanismKey, exp.MechanismFlags[jevFilterMechanismKey], registrationKey)
+		}
+		if registrationKey != "" && registrationKey != jevFilterMechanismKey {
+			return fmt.Errorf("formal b1/legacy_count_packer manifest %s registration is incoherent: registered mechanism key %q", jevFilterMechanismKey, registrationKey)
 		}
 		// 025: --representation semantic_episode alongside --episode-cluster is a
 		// renderer selection, not a treatment — the mechanism difference is fully
@@ -527,6 +545,12 @@ func isFormalLegacyControlMechanismFlags(flags map[string]bool) bool {
 // Legacy keys must be present and false; density keys may be true or false; no
 // unknown key is allowed. A pure legacy control (3 keys) satisfies this —
 // backward compatible with frozen 022 assets.
+// The 051 Jev read-filter registration marker (jevFilterMechanismKey) is allowed
+// as well: the freeze bakes it into the manifest before the digest so the
+// protocol hash covers the registration, and it is a registration marker rather
+// than a treatment — which arm filters is chosen at runtime by --jev-arms. Its
+// presence is checked against the registration itself in
+// validateFormalMechanismBinding, not here.
 func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	if len(flags) < 3 {
 		return false
@@ -539,7 +563,7 @@ func isFormalControlMechanismFlags(flags map[string]bool) bool {
 	}
 	for name := range flags {
 		switch name {
-		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution", "counter_refine":
+		case "idk_retry", "iris", "rerank", "write_dedup", "neighbor_extend", "episode_cluster", "compiler", "temporal_resolution", "counter_refine", jevFilterMechanismKey:
 			continue
 		default:
 			return false

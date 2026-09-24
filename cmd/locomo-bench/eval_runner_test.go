@@ -740,6 +740,91 @@ func TestValidateFormalMechanismBindingDensityArms(t *testing.T) {
 	}
 }
 
+func TestValidateFormalMechanismBindingJevRegistrationCoherence(t *testing.T) {
+	// 051: the freeze path bakes the Jev read-filter registration into the b1
+	// manifest before the protocol digest (attachJevArmsRegistrationForFreeze →
+	// attachJevFilterRegistration), so the registration marker key is legitimately
+	// present on the frozen b1/legacy_count_packer control. It is a registration
+	// marker, not a treatment — per-arm behavior is selected at runtime by
+	// --jev-arms — so the binding check must admit it while keeping the marker and
+	// the registration coherent in both directions.
+	legacyControlFlags := func() map[string]bool {
+		return map[string]bool{"idk_retry": false, "iris": false, "rerank": false}
+	}
+	registeredControl := func() evalProtocol {
+		protocol := evalProtocol{Experiment: evalExperimentProtocol{
+			Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+			MechanismFlags: legacyControlFlags(),
+		}}
+		registration := jevTestRegistration()
+		if err := attachJevFilterRegistration(&protocol, registration); err != nil {
+			t.Fatalf("attach the frozen registration: %v", err)
+		}
+		return protocol
+	}
+
+	// The real run case: the freeze-written b1 control manifest with the marker
+	// key and its matching registration must bind for an unregistered run mode.
+	if err := validateFormalMechanismBinding(registeredControl(), options{}); err != nil {
+		t.Fatalf("frozen registered b1 control rejected: %v", err)
+	}
+
+	// A foreign treatment flag next to the marker key stays refused.
+	foreign := registeredControl()
+	foreign.Experiment.MechanismFlags["evil"] = true
+	if err := validateFormalMechanismBinding(foreign, options{}); err == nil {
+		t.Fatal("marker key smuggled an unknown treatment flag past the binding check")
+	}
+	foreignDensity := registeredControl()
+	foreignDensity.Experiment.MechanismFlags["write_dedup"] = true
+	if err := validateFormalMechanismBinding(foreignDensity, options{}); err == nil {
+		t.Fatal("marker key smuggled an unmatched density mechanism past the binding check")
+	}
+
+	// Marker without a matching registration is incoherent and must fail closed.
+	missingRegistration := registeredControl()
+	missingRegistration.Experiment.Filter = nil
+	if err := validateFormalMechanismBinding(missingRegistration, options{}); err == nil {
+		t.Fatal("marker key accepted with no filter registration")
+	}
+	mismatchedKey := registeredControl()
+	mismatchedKey.Experiment.Filter.MechanismKey = "filter.other.v1"
+	if err := validateFormalMechanismBinding(mismatchedKey, options{}); err == nil {
+		t.Fatal("marker key accepted with a different registration key")
+	}
+
+	// Registration without the marker (absent or false) is incoherent too: the
+	// freeze always writes both, so a lone registration cannot be covered by the
+	// digest it claims.
+	registrationNoMarker := registeredControl()
+	registrationNoMarker.Experiment.MechanismFlags = legacyControlFlags()
+	if err := validateFormalMechanismBinding(registrationNoMarker, options{}); err == nil {
+		t.Fatal("filter registration accepted without its mechanism marker")
+	}
+	registrationFalseMarker := registeredControl()
+	registrationFalseMarker.Experiment.MechanismFlags[jevFilterMechanismKey] = false
+	if err := validateFormalMechanismBinding(registrationFalseMarker, options{}); err == nil {
+		t.Fatal("filter registration accepted with a false mechanism marker")
+	}
+
+	// Backward compatibility: frozen 022/024/025/027 assets carry no filter
+	// fields at all and keep validating unchanged.
+	plain := evalProtocol{Experiment: evalExperimentProtocol{
+		Stage: "b1", Arm: "legacy_count_packer", PrimaryCohort: "all",
+		MechanismFlags: legacyControlFlags(),
+	}}
+	if err := validateFormalMechanismBinding(plain, options{}); err != nil {
+		t.Fatalf("pure legacy control rejected: %v", err)
+	}
+
+	// The legacy keys stay strictly false.
+	legacyTrue := registeredControl()
+	legacyTrue.Experiment.MechanismFlags["idk_retry"] = true
+	if err := validateFormalMechanismBinding(legacyTrue, options{}); err == nil {
+		t.Fatal("idk_retry=true accepted as a b1 control")
+	}
+}
+
 func TestExtendCandidatesWithSiblingsAppendsSharedEvidenceFacts(t *testing.T) {
 	// T017: neighbor extension (US2) — two facts sharing evidence; hitting one
 	// must append the sibling to the answer context, and the extension must not
