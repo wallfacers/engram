@@ -960,8 +960,8 @@ func validateJevArmsOptions(opt options, arms []string) error {
 	if !opt.noIDKRetry {
 		return fmt.Errorf("--jev-arms measures first-round evidence sets; pass --no-idk-retry so every arm shares one answer contract")
 	}
-	if opt.formalProtocol == nil {
-		return fmt.Errorf("--jev-arms requires a frozen protocol (--eval-freeze-protocol) whose manifest carries the filter registration and the answer-input cap")
+	if strings.TrimSpace(opt.evalProtocolPath) == "" {
+		return fmt.Errorf("--jev-arms requires a frozen protocol via --eval-protocol (whose manifest carries the filter registration and the answer-input cap)")
 	}
 	if strings.TrimSpace(opt.tokenCounterBaseURL) == "" {
 		return fmt.Errorf("--jev-arms requires --token-counter-base-url: the packer counts the exact answer input it admits")

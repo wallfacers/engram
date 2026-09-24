@@ -1044,6 +1044,60 @@ func TestValidateJevArmsOptionsPinsTheChunkQuotaRecipe(t *testing.T) {
 	}
 }
 
+// TestValidateJevArmsOptionsRequiresTheFrozenProtocolFlag pins the run-mode
+// pre-flight to the flag that names the frozen protocol. main.go assigns
+// opt.formalProtocol only when it has loaded --eval-protocol, and that load
+// happens after this pre-flight — so keying the check on the pointer refuses
+// every gated/degraded --jev-arms pass regardless of flags. The path stays the
+// authority here; the run-time backstop in runJevArmProtocol still requires the
+// bound protocol.
+func TestValidateJevArmsOptionsRequiresTheFrozenProtocolFlag(t *testing.T) {
+	for _, name := range []string{
+		"ENGRAM_JEV_THETA", "ENGRAM_JEV_RELAX_THETA", "ENGRAM_JEV_RELAX_MAX",
+		"ENGRAM_JEV_KSHOW_MAX", "ENGRAM_JEV_RELAX", "ENGRAM_JEV_MODEL",
+	} {
+		t.Setenv(name, "")
+	}
+	runMode := options{
+		datasetFormat:         "locomo",
+		repeats:               jevArmAnswerRepetitions,
+		runDir:                t.TempDir(),
+		storeDir:              t.TempDir(),
+		chunks:                true,
+		noIDKRetry:            true,
+		tokenCounterBaseURL:   "http://127.0.0.1:8000/v1",
+		jevDegradedPass:       true,
+		jevModel:              "jev-pinned-2026-09-21",
+		jevPilotGateConfirmed: true,
+		jevWarmupDisposed:     true,
+		jevSameWindowReps:     true,
+		jevB0Continuity:       true,
+		evalProtocolPath:      "protocol.json",
+	}
+	if runMode.formalProtocol != nil {
+		t.Fatal("the fixture no longer mirrors run mode: formalProtocol is bound before the pre-flight")
+	}
+	if err := validateJevArmsOptions(runMode, []string{"hybrid"}); err != nil {
+		t.Fatalf("a gated run-mode invocation carrying --eval-protocol was refused before the protocol is bound: %v", err)
+	}
+	unfrozen := runMode
+	unfrozen.evalProtocolPath = ""
+	err := validateJevArmsOptions(unfrozen, []string{"hybrid"})
+	if err == nil {
+		t.Fatal("--jev-arms without --eval-protocol was accepted")
+	}
+	if want := "--jev-arms requires a frozen protocol via --eval-protocol"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("the refusal does not name the missing flag: %v", err)
+	}
+	// The flag is the authority: a bound protocol cannot make an unfrozen run
+	// legal, because main.go only binds it together with the flag.
+	bound := unfrozen
+	bound.formalProtocol = &evalProtocol{}
+	if err := validateJevArmsOptions(bound, []string{"hybrid"}); err == nil {
+		t.Fatal("a bound protocol without --eval-protocol was accepted")
+	}
+}
+
 func TestValidateJevArmsRegistrationEnvironment(t *testing.T) {
 	for _, name := range []string{
 		"ENGRAM_JEV_THETA", "ENGRAM_JEV_RELAX_THETA", "ENGRAM_JEV_RELAX_MAX",
