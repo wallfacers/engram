@@ -99,3 +99,5 @@
 - **Slice 12 落地**（run 82eeeae1，qianwenai/deepseek-v4.1-flash）：typesafe 每题自包含绑定（goal 携记忆文本+查询、双规则含「无关答 no」；查键 need_<memKey>→memories[memKey]，未中→泛型回退保写门路径；2000 字 rune 边界截断）；TDD 6 测试，47 顶层全绿，chat 模式未动。**s13 排队：--jev-arms-reps 参数化（{1,3}——2 无多数语义故拒）**。
 
 - **Slice 13 落地**（run cf62e844，qianwenai/qwen3.8-flash）：--jev-arms-reps {1,3}（默认 3 字节不变、双向 mismatch 拒、2 无多数语义拒）；16 处硬编码 3 审计（B0 连续性/固定金标按设计保留 3-rep）；manifest answer_repetitions=1 全链一致；TDD 7 测试。**终冲刺：部署 s12 绑定 shim + s13 runner → 分离冒烟 → 1-rep 试点 freeze → gated-only 点火**。
+
+- **试点点火+止损（夜间自主）**：s12/s13 部署→分离冒烟完美（1/0/0/0）→freeze 6 域精确→gated 链点火 16:55；20 分钟后 H1（网关对 ~32k token 大分片 503 风暴→filter 96% 降级）触发 STOP→决策 A：证据离盒（pilot-artifacts/）→PID 击杀 143→看门狗 ~17:26 自动关机止损。**复盘修正：worker 的 H2「答题冻结」是指标误读（grep 了 length 标签；stop 标签 817−基线266≈28 答案/分=管线健康）——H1 是唯一真问题**。修复方案备好（晨报）：S14=ShardSize clamp [32,64]→[6,64]+eval 设 12（引擎字段本就存在；总 token 省 ~18%；小请求实测通过）+可选 S15 shim 在飞上限；等维护者晨间拍板。

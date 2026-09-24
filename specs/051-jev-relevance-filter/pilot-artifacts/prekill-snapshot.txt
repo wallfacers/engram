@@ -1,0 +1,33 @@
+SNAPSHOT_AT=2026-09-24 17:15:53
+=== vllm metrics ===
+# HELP vllm:num_requests_running Number of requests in model execution batches.
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 10.0
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 0.0
+# HELP vllm:num_requests_waiting_by_reason Number of waiting requests by reason. Reason labels: 'capacity' = waiting for scheduling capacity; 'deferred' = deferred by transient constraints (LoRA budget, KV transfer, blocked status). Sum of all reasons equals vllm:num_requests_waiting.
+# TYPE vllm:num_requests_waiting_by_reason gauge
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Qwen/Qwen3.6-35B-A3B-FP8",reason="capacity"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Qwen/Qwen3.6-35B-A3B-FP8",reason="deferred"} 0.0
+# HELP vllm:request_success_total Count of successfully processed requests.
+# TYPE vllm:request_success_total counter
+vllm:request_success_total{engine="0",finished_reason="stop",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 817.0
+vllm:request_success_total{engine="0",finished_reason="length",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 21.0
+vllm:request_success_total{engine="0",finished_reason="abort",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 0.0
+vllm:request_success_total{engine="0",finished_reason="error",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 0.0
+vllm:request_success_total{engine="0",finished_reason="repetition",model_name="Qwen/Qwen3.6-35B-A3B-FP8"} 0.0
+=== pgrep -a ===
+25741 /root/autodl-tmp/bin/openjev-shim --port 8020
+25973 bash /root/autodl-tmp/bin/run-p3-pilot.sh
+25974 bash /root/autodl-tmp/bin/run-p3-pilot.sh
+25975 /root/autodl-tmp/bin/locomo-bench --data /root/autodl-tmp/locomo.json --dataset-format locomo --run-dir /root/autodl-tmp/051-jev-arms-runs/formal-pilot-20260924T165449 --store-dir /root/autodl-tmp/051-stores/stores --retrieval hybrid --repeats 1 --no-idk-retry --chunk-quota=0 --chunks --top-k 30 --jev-arms --jev-arms-reps 1 --jev-filter-model typesafe-ai/jev --jev-b0-continuity-declared --jev-pilot-gate-confirmed --jev-warmup-disposed --jev-same-window-reps --eval-protocol /root/autodl-tmp/051-jev-arms-runs/formal-pilot-20260924T165449/protocol.json --token-counter-base-url http://127.0.0.1:8000/v1 --concurrency 32
+26350 bash /root/autodl-tmp/bin/pilot-autoshutdown.sh
+=== markers ===
+freeze.exit
+freeze.log
+gated.log
+jev_filter_calls.jsonl
+protocol.json
+regime.json
+shutdown-watcher.log

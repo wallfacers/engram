@@ -1,0 +1,36 @@
+time=2026-09-24T16:55:31.694+08:00 level=INFO msg=starting conversations=10 arms=[hybrid] concurrency=32 model=Qwen/Qwen3.6-35B-A3B-FP8 extract_model=Qwen/Qwen3.6-35B-A3B-FP8 judge_base_url_host=api.deepseek.com judge_model=deepseek-flash top_k=30
+time=2026-09-24T16:55:31.827+08:00 level=INFO msg="reusing persisted extraction" conversation=1 facts=205
+time=2026-09-24T16:55:31.861+08:00 level=INFO msg="reusing persisted extraction" conversation=0 facts=236
+time=2026-09-24T16:55:31.878+08:00 level=INFO msg="reusing persisted extraction" conversation=8 facts=283
+time=2026-09-24T16:55:31.889+08:00 level=INFO msg="reusing persisted extraction" conversation=9 facts=324
+time=2026-09-24T16:55:31.905+08:00 level=INFO msg="reusing persisted extraction" conversation=5 facts=329
+time=2026-09-24T16:55:31.907+08:00 level=INFO msg="reusing persisted extraction" conversation=7 facts=370
+time=2026-09-24T16:55:31.914+08:00 level=INFO msg="reusing persisted extraction" conversation=4 facts=357
+time=2026-09-24T16:55:31.916+08:00 level=INFO msg="reusing persisted extraction" conversation=3 facts=364
+time=2026-09-24T16:55:31.918+08:00 level=INFO msg="reusing persisted extraction" conversation=2 facts=324
+time=2026-09-24T16:55:31.925+08:00 level=INFO msg="reusing persisted extraction" conversation=6 facts=409
+time=2026-09-24T16:55:32.250+08:00 level=INFO msg="verbatim chunks ingested" conversation=1 chunks=63
+time=2026-09-24T16:55:32.320+08:00 level=INFO msg="verbatim chunks ingested" conversation=0 chunks=83
+time=2026-09-24T16:55:32.422+08:00 level=INFO msg="verbatim chunks ingested" conversation=8 chunks=93
+time=2026-09-24T16:55:32.506+08:00 level=INFO msg="verbatim chunks ingested" conversation=9 chunks=116
+time=2026-09-24T16:55:32.676+08:00 level=INFO msg="verbatim chunks ingested" conversation=3 chunks=106
+time=2026-09-24T16:55:32.704+08:00 level=INFO msg="verbatim chunks ingested" conversation=2 chunks=127
+time=2026-09-24T16:55:32.710+08:00 level=INFO msg="verbatim chunks ingested" conversation=5 chunks=115
+time=2026-09-24T16:55:32.712+08:00 level=INFO msg="verbatim chunks ingested" conversation=4 chunks=122
+time=2026-09-24T16:55:32.714+08:00 level=INFO msg="verbatim chunks ingested" conversation=7 chunks=111
+time=2026-09-24T16:55:32.731+08:00 level=INFO msg="verbatim chunks ingested" conversation=6 chunks=120
+2026/09/24 16:55:33 INFO memory: embedding backfill enqueued count=2 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:33 INFO memory: embedding backfill enqueued count=3 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=1 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=4 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=4 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=1 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=4 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=6 model=BAAI/bge-large-en-v1.5
+2026/09/24 16:55:34 INFO memory: embedding backfill enqueued count=1 model=BAAI/bge-large-en-v1.5
+time=2026-09-24T16:55:34.892+08:00 level=INFO msg="jev four-arm run" pass=gated filter_model=typesafe-ai/jev theta=0.5 pool=150 concurrency=32
+time=2026-09-24T16:55:34.904+08:00 level=INFO msg="jev arm split" arm=A pool_k=0 show_k=30
+time=2026-09-24T16:55:34.904+08:00 level=INFO msg="jev arm split" arm=B pool_k=150 show_k=0
+time=2026-09-24T16:55:34.904+08:00 level=INFO msg="jev arm split" arm=C pool_k=150 show_k=12
+time=2026-09-24T16:55:34.904+08:00 level=INFO msg="jev arm split" arm=D pool_k=150 show_k=0
+time=2026-09-24T16:55:34.904+08:00 level=INFO msg="jev arm split" arm=D-noRelax pool_k=150 show_k=0

@@ -1,0 +1,208 @@
+=== shim log tail-200 ===
+2026/09/24 16:55:45 answers failed: questions=48 attempts=3 elapsed=6.333336403s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:45 answers failed: questions=48 attempts=3 elapsed=6.535248357s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:47 answers failed: questions=44 attempts=3 elapsed=6.46730995s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:47 answers failed: questions=48 attempts=3 elapsed=6.51182659s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:47 answers failed: questions=48 attempts=3 elapsed=5.166412544s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=6 attempts=3 elapsed=5.609707596s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=5.828885352s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=7.215377444s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=5.86652054s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=5.834673635s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.089879208s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.080576155s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.086793245s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.073950953s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.25115959s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:48 answers failed: questions=48 attempts=3 elapsed=6.289659284s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:49 answers failed: questions=48 attempts=3 elapsed=7.156776196s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:49 answers failed: questions=48 attempts=3 elapsed=7.175131976s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:49 answers failed: questions=6 attempts=3 elapsed=7.141282212s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:49 answers failed: questions=48 attempts=3 elapsed=7.159497499s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:50 answers failed: questions=48 attempts=3 elapsed=7.800563223s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.278438606s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.294481421s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.719186616s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.714449817s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.71361701s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.716136094s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:55:54 answers failed: questions=48 attempts=3 elapsed=11.750107302s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:56:41 answers ok: questions=6 attempts=1 elapsed=1.037585485s
+2026/09/24 16:56:41 answers ok: questions=48 attempts=1 elapsed=1.605099183s
+2026/09/24 16:56:43 answers ok: questions=48 attempts=2 elapsed=3.109953559s
+2026/09/24 16:56:45 answers ok: questions=48 attempts=3 elapsed=5.092054352s
+2026/09/24 16:56:46 answers ok: questions=6 attempts=1 elapsed=832.871877ms
+2026/09/24 16:56:46 answers ok: questions=2 attempts=1 elapsed=941.44853ms
+2026/09/24 16:56:46 answers ok: questions=48 attempts=1 elapsed=1.451837664s
+2026/09/24 16:56:47 answers ok: questions=48 attempts=1 elapsed=1.661590644s
+2026/09/24 16:56:47 answers ok: questions=48 attempts=2 elapsed=2.483954157s
+2026/09/24 16:56:50 answers failed: questions=48 attempts=3 elapsed=4.689638754s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:56:50 answers failed: questions=48 attempts=3 elapsed=4.861769567s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:56:50 answers failed: questions=48 attempts=3 elapsed=4.877448322s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:57:29 answers ok: questions=6 attempts=1 elapsed=779.021804ms
+2026/09/24 16:57:31 answers ok: questions=48 attempts=2 elapsed=3.186459573s
+2026/09/24 16:57:32 answers ok: questions=48 attempts=2 elapsed=3.713902773s
+2026/09/24 16:57:33 answers failed: questions=48 attempts=3 elapsed=4.970515993s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:58:13 answers ok: questions=6 attempts=1 elapsed=1.764026337s
+2026/09/24 16:58:17 answers failed: questions=48 attempts=3 elapsed=6.010995467s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:58:18 answers failed: questions=48 attempts=3 elapsed=6.492066004s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:58:18 answers failed: questions=48 attempts=3 elapsed=6.703156133s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:09 answers ok: questions=6 attempts=1 elapsed=847.547753ms
+2026/09/24 16:59:10 answers ok: questions=6 attempts=1 elapsed=698.299119ms
+2026/09/24 16:59:13 answers failed: questions=48 attempts=3 elapsed=5.023792314s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:13 answers failed: questions=48 attempts=3 elapsed=5.092384566s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:13 answers failed: questions=48 attempts=3 elapsed=5.236475876s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:13 answers failed: questions=48 attempts=3 elapsed=4.371724698s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:14 answers failed: questions=48 attempts=3 elapsed=4.899619309s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 16:59:14 answers ok: questions=48 attempts=3 elapsed=4.900569233s
+2026/09/24 16:59:45 answers ok: questions=6 attempts=1 elapsed=834.723685ms
+2026/09/24 16:59:47 answers ok: questions=6 attempts=1 elapsed=692.851482ms
+2026/09/24 16:59:48 answers failed: questions=48 attempts=3 elapsed=4.341758855s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:59:48 answers failed: questions=48 attempts=3 elapsed=4.39760151s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:59:49 answers failed: questions=48 attempts=3 elapsed=4.496759148s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:59:50 answers failed: questions=48 attempts=3 elapsed=4.255162792s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:59:50 answers failed: questions=48 attempts=3 elapsed=4.31929968s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 16:59:50 answers failed: questions=48 attempts=3 elapsed=4.462404287s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:01:08 answers ok: questions=6 attempts=2 elapsed=1.894672493s
+2026/09/24 17:01:11 answers failed: questions=48 attempts=3 elapsed=5.051742919s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:01:11 answers failed: questions=48 attempts=3 elapsed=5.11700872s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:01:12 answers failed: questions=48 attempts=3 elapsed=5.870215353s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:01:49 answers ok: questions=48 attempts=1 elapsed=1.476009622s
+2026/09/24 17:01:50 answers ok: questions=48 attempts=1 elapsed=2.271406295s
+2026/09/24 17:01:53 answers failed: questions=44 attempts=3 elapsed=5.159809066s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:02:31 answers ok: questions=6 attempts=1 elapsed=1.620123973s
+2026/09/24 17:02:36 answers failed: questions=48 attempts=3 elapsed=6.133299056s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:02:36 answers failed: questions=48 attempts=3 elapsed=6.32422549s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:02:37 answers failed: questions=48 attempts=3 elapsed=7.043000889s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:03:19 answers ok: questions=6 attempts=1 elapsed=1.363738857s
+2026/09/24 17:03:23 answers failed: questions=48 attempts=3 elapsed=5.698748843s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:03:23 answers failed: questions=48 attempts=3 elapsed=5.6973127s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:03:23 answers failed: questions=48 attempts=3 elapsed=5.950460997s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:03:58 answers ok: questions=6 attempts=1 elapsed=1.24247921s
+2026/09/24 17:03:59 answers ok: questions=48 attempts=1 elapsed=1.65556805s
+2026/09/24 17:04:03 answers failed: questions=48 attempts=3 elapsed=5.608598705s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:04:03 answers failed: questions=48 attempts=3 elapsed=5.81098952s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:04:36 answers ok: questions=6 attempts=1 elapsed=1.09117048s
+2026/09/24 17:04:36 answers ok: questions=48 attempts=1 elapsed=1.583162585s
+2026/09/24 17:04:37 answers ok: questions=48 attempts=1 elapsed=1.129225277s
+2026/09/24 17:04:38 answers ok: questions=6 attempts=2 elapsed=2.249124498s
+2026/09/24 17:04:39 answers ok: questions=48 attempts=2 elapsed=3.172083616s
+2026/09/24 17:04:39 answers ok: questions=48 attempts=2 elapsed=3.168646354s
+2026/09/24 17:04:40 answers failed: questions=48 attempts=3 elapsed=5.236856795s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:04:40 answers ok: questions=48 attempts=3 elapsed=5.236485038s
+2026/09/24 17:04:40 answers ok: questions=6 attempts=1 elapsed=1.040584067s
+2026/09/24 17:04:41 answers ok: questions=48 attempts=1 elapsed=1.251966529s
+2026/09/24 17:04:45 answers ok: questions=48 attempts=3 elapsed=5.205042733s
+2026/09/24 17:04:45 answers failed: questions=48 attempts=3 elapsed=5.405158268s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:05:31 answers ok: questions=48 attempts=1 elapsed=1.209484873s
+2026/09/24 17:05:32 answers ok: questions=2 attempts=1 elapsed=1.656325476s
+2026/09/24 17:05:34 answers ok: questions=48 attempts=2 elapsed=3.373537853s
+2026/09/24 17:05:35 answers failed: questions=48 attempts=3 elapsed=5.115102154s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:05:35 answers ok: questions=6 attempts=1 elapsed=860.393105ms
+2026/09/24 17:05:36 answers ok: questions=48 attempts=1 elapsed=1.079265311s
+2026/09/24 17:05:36 answers ok: questions=48 attempts=1 elapsed=1.178341076s
+2026/09/24 17:05:39 answers failed: questions=48 attempts=3 elapsed=4.658212993s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:06:13 answers ok: questions=6 attempts=1 elapsed=1.076531306s
+2026/09/24 17:06:15 answers ok: questions=48 attempts=2 elapsed=3.283643522s
+2026/09/24 17:06:17 answers failed: questions=48 attempts=3 elapsed=5.411886778s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:06:17 answers failed: questions=48 attempts=3 elapsed=5.41148819s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:07:09 answers ok: questions=6 attempts=1 elapsed=984.784732ms
+2026/09/24 17:07:11 answers ok: questions=48 attempts=2 elapsed=3.133718308s
+2026/09/24 17:07:14 answers ok: questions=48 attempts=3 elapsed=5.843057917s
+2026/09/24 17:07:14 answers failed: questions=48 attempts=3 elapsed=6.328723702s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:07:53 answers ok: questions=48 attempts=1 elapsed=1.528296581s
+2026/09/24 17:07:56 answers failed: questions=37 attempts=3 elapsed=4.667851078s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:07:56 answers ok: questions=48 attempts=3 elapsed=4.880321876s
+2026/09/24 17:08:30 answers ok: questions=6 attempts=1 elapsed=1.136579793s
+2026/09/24 17:08:31 answers ok: questions=48 attempts=1 elapsed=1.530427206s
+2026/09/24 17:08:32 answers ok: questions=48 attempts=2 elapsed=3.309910007s
+2026/09/24 17:08:33 answers ok: questions=7 attempts=1 elapsed=676.581982ms
+2026/09/24 17:08:34 answers ok: questions=48 attempts=1 elapsed=1.423524906s
+2026/09/24 17:08:34 answers failed: questions=48 attempts=3 elapsed=4.960722597s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:08:38 answers ok: questions=48 attempts=3 elapsed=5.668925021s
+2026/09/24 17:09:36 answers ok: questions=6 attempts=1 elapsed=1.92515659s
+2026/09/24 17:09:36 answers ok: questions=48 attempts=1 elapsed=1.024019365s
+2026/09/24 17:09:36 answers ok: questions=48 attempts=1 elapsed=1.239990621s
+2026/09/24 17:09:38 answers ok: questions=41 attempts=2 elapsed=3.049051655s
+2026/09/24 17:09:38 answers ok: questions=6 attempts=1 elapsed=1.154014216s
+2026/09/24 17:09:38 answers ok: questions=48 attempts=1 elapsed=1.148805699s
+2026/09/24 17:09:39 answers ok: questions=6 attempts=1 elapsed=1.052932892s
+2026/09/24 17:09:39 answers failed: questions=48 attempts=3 elapsed=5.25447565s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:09:39 answers ok: questions=48 attempts=1 elapsed=1.309808295s
+2026/09/24 17:09:39 answers ok: questions=41 attempts=1 elapsed=1.142583518s
+2026/09/24 17:09:40 answers failed: questions=48 attempts=3 elapsed=5.626564212s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:09:40 answers ok: questions=48 attempts=1 elapsed=1.359931359s
+2026/09/24 17:09:40 answers ok: questions=48 attempts=3 elapsed=5.850940588s
+2026/09/24 17:09:41 answers ok: questions=48 attempts=2 elapsed=3.718452411s
+2026/09/24 17:09:42 answers failed: questions=48 attempts=3 elapsed=5.261027795s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:09:43 answers failed: questions=48 attempts=3 elapsed=4.765627538s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:09:43 answers failed: questions=48 attempts=3 elapsed=4.377089926s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:09:43 answers failed: questions=48 attempts=3 elapsed=5.239154297s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:10:15 answers ok: questions=44 attempts=1 elapsed=1.741366803s
+2026/09/24 17:10:19 answers failed: questions=48 attempts=3 elapsed=5.77533529s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:10:20 answers failed: questions=48 attempts=3 elapsed=5.994876186s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:10:53 answers ok: questions=6 attempts=1 elapsed=859.285575ms
+2026/09/24 17:10:54 answers ok: questions=48 attempts=1 elapsed=1.649167987s
+2026/09/24 17:10:55 answers ok: questions=48 attempts=2 elapsed=2.730553046s
+2026/09/24 17:10:57 answers failed: questions=48 attempts=3 elapsed=4.68262124s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:11:46 answers ok: questions=6 attempts=1 elapsed=661.183224ms
+2026/09/24 17:11:47 answers ok: questions=48 attempts=1 elapsed=1.704883455s
+2026/09/24 17:11:49 answers ok: questions=48 attempts=1 elapsed=1.943876453s
+2026/09/24 17:11:50 answers ok: questions=48 attempts=2 elapsed=3.298497387s
+2026/09/24 17:11:50 answers failed: questions=48 attempts=3 elapsed=4.939760954s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:11:51 answers failed: questions=48 attempts=3 elapsed=5.132457995s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:11:53 answers failed: questions=44 attempts=3 elapsed=5.778266648s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:12:32 answers ok: questions=6 attempts=1 elapsed=866.103851ms
+2026/09/24 17:12:33 answers ok: questions=6 attempts=1 elapsed=665.95741ms
+2026/09/24 17:12:36 answers failed: questions=48 attempts=3 elapsed=4.935893484s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:12:37 answers failed: questions=48 attempts=3 elapsed=5.137574865s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:12:37 answers failed: questions=48 attempts=3 elapsed=4.161082867s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:12:37 answers ok: questions=48 attempts=3 elapsed=5.548271066s
+2026/09/24 17:12:37 answers ok: questions=48 attempts=3 elapsed=4.654327594s
+2026/09/24 17:12:38 answers failed: questions=48 attempts=3 elapsed=5.022251926s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:13:14 answers ok: questions=6 attempts=1 elapsed=827.23274ms
+2026/09/24 17:13:17 answers ok: questions=2 attempts=1 elapsed=1.088218247s
+2026/09/24 17:13:18 answers failed: questions=48 attempts=3 elapsed=4.928744059s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:13:18 answers failed: questions=48 attempts=3 elapsed=5.010676818s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:13:19 answers ok: questions=48 attempts=3 elapsed=5.729578691s
+2026/09/24 17:13:20 answers failed: questions=48 attempts=3 elapsed=4.417662288s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:13:20 answers failed: questions=48 attempts=3 elapsed=4.447480259s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:13:20 answers failed: questions=48 attempts=3 elapsed=4.660944917s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:13:53 answers ok: questions=6 attempts=1 elapsed=872.679696ms
+2026/09/24 17:13:54 answers ok: questions=48 attempts=1 elapsed=2.20011289s
+2026/09/24 17:13:56 answers ok: questions=6 attempts=1 elapsed=926.733874ms
+2026/09/24 17:13:58 answers failed: questions=48 attempts=3 elapsed=5.895811822s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:13:58 answers failed: questions=48 attempts=3 elapsed=6.003996871s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:14:00 answers failed: questions=48 attempts=3 elapsed=5.055949369s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:14:00 answers failed: questions=48 attempts=3 elapsed=5.131264701s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:14:01 answers failed: questions=48 attempts=3 elapsed=6.088831784s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:14:44 answers ok: questions=6 attempts=1 elapsed=873.565813ms
+2026/09/24 17:14:46 answers ok: questions=3 attempts=1 elapsed=703.049592ms
+2026/09/24 17:14:47 answers ok: questions=48 attempts=1 elapsed=1.362394889s
+2026/09/24 17:14:49 answers failed: questions=48 attempts=3 elapsed=5.131423215s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:14:49 answers failed: questions=48 attempts=3 elapsed=5.130271352s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:14:49 answers ok: questions=48 attempts=3 elapsed=5.360536379s
+2026/09/24 17:14:51 answers failed: questions=48 attempts=3 elapsed=5.081252624s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:15:28 answers ok: questions=6 attempts=1 elapsed=1.707061338s
+2026/09/24 17:15:30 answers ok: questions=48 attempts=2 elapsed=3.510015438s
+2026/09/24 17:15:30 answers ok: questions=48 attempts=2 elapsed=3.743411243s
+2026/09/24 17:15:31 answers ok: questions=6 attempts=1 elapsed=870.498297ms
+2026/09/24 17:15:32 answers ok: questions=48 attempts=1 elapsed=1.50346799s
+2026/09/24 17:15:32 answers ok: questions=48 attempts=3 elapsed=6.191916921s
+2026/09/24 17:15:33 answers ok: questions=6 attempts=1 elapsed=662.23541ms
+2026/09/24 17:15:34 answers ok: questions=48 attempts=2 elapsed=3.590760379s
+2026/09/24 17:15:36 answers ok: questions=48 attempts=3 elapsed=5.645364682s
+2026/09/24 17:15:37 answers failed: questions=48 attempts=3 elapsed=4.441032581s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:15:37 answers failed: questions=48 attempts=3 elapsed=4.66219338s problem=upstream error: typesafe upstream returned status 503: Service temporarily unavailable. Please try again shortly.
+2026/09/24 17:15:37 answers failed: questions=48 attempts=3 elapsed=4.858278314s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:15:40 answers failed: questions=6 attempts=3 elapsed=3.382829493s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:15:40 answers failed: questions=48 attempts=3 elapsed=4.140252134s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:15:40 answers failed: questions=48 attempts=3 elapsed=4.14079035s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+2026/09/24 17:15:41 answers failed: questions=48 attempts=3 elapsed=4.842718412s problem=upstream error: typesafe upstream returned status 429: The upstream provider is currently experiencing high demand. Please retry shortly.
+=== attempts/failed counters (whole session) ===
+     77 attempts=1
+     21 attempts=2
+    118 attempts=3
+failed_total=104
+     49 status 429
+     55 status 503
