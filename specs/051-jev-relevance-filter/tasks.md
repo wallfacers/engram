@@ -97,3 +97,5 @@
 - **Pilot 5th 门 + 校准双发现**（run f215eb30）：真 Jev 部署+网关冒烟全通（48 题 2.84s、wire-header 闭）但 **`--repeats 1` 被拒**（jevfilter_protocol.go:940 无条件 ==3——jev-arms 冻结在 3-rep 多数协议，需显式试点参数化，非 bug）；**校准探针**：共享 state 绑定零分离（无关记忆也 0.95）→ **per-question 自包含绑定（instructions 携记忆文本+查询）完美二值分离（1.0/0.0）**——shim typesafe 翻译需小修。两片串行：s12 绑定修复（cmd/openjev-shim）→ s13 reps 参数化（cmd/locomo-bench）→ 部署+分离冒烟+试点 freeze+点火。
 
 - **Slice 12 落地**（run 82eeeae1，qianwenai/deepseek-v4.1-flash）：typesafe 每题自包含绑定（goal 携记忆文本+查询、双规则含「无关答 no」；查键 need_<memKey>→memories[memKey]，未中→泛型回退保写门路径；2000 字 rune 边界截断）；TDD 6 测试，47 顶层全绿，chat 模式未动。**s13 排队：--jev-arms-reps 参数化（{1,3}——2 无多数语义故拒）**。
+
+- **Slice 13 落地**（run cf62e844，qianwenai/qwen3.8-flash）：--jev-arms-reps {1,3}（默认 3 字节不变、双向 mismatch 拒、2 无多数语义拒）；16 处硬编码 3 审计（B0 连续性/固定金标按设计保留 3-rep）；manifest answer_repetitions=1 全链一致；TDD 7 测试。**终冲刺：部署 s12 绑定 shim + s13 runner → 分离冒烟 → 1-rep 试点 freeze → gated-only 点火**。
