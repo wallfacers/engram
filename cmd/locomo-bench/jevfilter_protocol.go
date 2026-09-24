@@ -103,8 +103,30 @@ type jevFilterRegistration struct {
 	SameWindowReps     bool `json:"same_window_reps"`
 }
 
+// validJevArmsReps reports whether n is an allowed --jev-arms-reps declaration:
+// the canonical majority-of-3 protocol or the majority-of-1 pilot. No other
+// count has majority semantics here (an even count can tie, and any other odd
+// count was never pre-registered).
+func validJevArmsReps(n int) bool {
+	return n == jevArmAnswerRepetitions || n == jevArmPilotRepetitions
+}
+
+// jevFreezeAnswerRepetitions is the aggregation answer_repetitions a protocol
+// freeze records. A --jev-arms freeze seals the declared protocol (canonical 3
+// or majority-of-1 pilot, already validated by validateJevArmsOptions before
+// the freeze runs); every other freeze keeps the canonical 3-repetition B1
+// control protocol byte-identical.
+func jevFreezeAnswerRepetitions(opt options) int {
+	if opt.jevArms {
+		return opt.jevArmsReps
+	}
+	return jevArmAnswerRepetitions
+}
+
 // newJevFilterRegistration builds the registration from a run's frozen policy.
-func newJevFilterRegistration(model, baseURLHost string, policy filter.Policy, pool int) jevFilterRegistration {
+// reps is the declared answer-repetition protocol (see validJevArmsReps): the
+// canonical 3 or the 1-repetition pilot.
+func newJevFilterRegistration(model, baseURLHost string, policy filter.Policy, pool, reps int) jevFilterRegistration {
 	pol := policy.WithDefaults()
 	return jevFilterRegistration{
 		MechanismKey:        jevFilterMechanismKey,
@@ -116,7 +138,7 @@ func newJevFilterRegistration(model, baseURLHost string, policy filter.Policy, p
 		KShowMax:            pol.KShowMax,
 		Pool:                pool,
 		AnswerInputCap:      jevArmAnswerInputCap,
-		AnswerRepetitions:   jevArmAnswerRepetitions,
+		AnswerRepetitions:   reps,
 		EmptyInjectionFloor: jevEmptyInjectionFloor,
 		Arms:                armNamesInOrder(),
 	}
@@ -150,8 +172,8 @@ func validateJevFilterRegistration(reg jevFilterRegistration) error {
 	if reg.AnswerInputCap != jevArmAnswerInputCap {
 		return fmt.Errorf("jev filter answer_input_cap %d must be the frozen cap %d", reg.AnswerInputCap, jevArmAnswerInputCap)
 	}
-	if reg.AnswerRepetitions != jevArmAnswerRepetitions {
-		return fmt.Errorf("jev filter answer_repetitions %d must be the frozen majority protocol %d", reg.AnswerRepetitions, jevArmAnswerRepetitions)
+	if !validJevArmsReps(reg.AnswerRepetitions) {
+		return fmt.Errorf("jev filter answer_repetitions %d must be the pilot %d (majority-of-1) or the frozen majority protocol %d", reg.AnswerRepetitions, jevArmPilotRepetitions, jevArmAnswerRepetitions)
 	}
 	if reg.EmptyInjectionFloor != jevEmptyInjectionFloor {
 		return fmt.Errorf("jev filter empty_injection_floor %v must be the pre-registered %v (post-run edits are forbidden)", reg.EmptyInjectionFloor, jevEmptyInjectionFloor)
@@ -523,7 +545,7 @@ type jevArmContrast struct {
 	CI                evalConfidenceInterval `json:"paired_ci"`
 }
 
-// jevArmContrastFor pairs two arms question by question on their three-repetition
+// jevArmContrastFor pairs two arms question by question on their declared-reps
 // majorities and runs the shared exact McNemar test plus the fixed paired
 // interval. Mismatched question sets are an error: a contrast over different
 // populations is not a paired contrast.
@@ -668,7 +690,7 @@ func planJevArmCost(questions int, repetitions int, prices priceTable, filterMod
 		Repetitions:         repetitions,
 		Arms:                armNamesInOrder(),
 		AnswerInputCap:      jevArmAnswerInputCap,
-		AnswerRepetitions:   jevArmAnswerRepetitions,
+		AnswerRepetitions:   repetitions,
 		EmptyInjectionFloor: jevEmptyInjectionFloor,
 	}
 	filterInTokens := jevArmPoolSize * jevEstimateFilterTokensPerCandidate
@@ -835,7 +857,7 @@ func answerJevArmQuestion(ctx context.Context, answerCall usageModelCaller, judg
 // The policy is frozen here — before any retrieval — so no diagnostic sweep can
 // become the reported gate (research R3a).
 func jevRegistrationForRun(opt options, pol filter.Policy) (jevFilterRegistration, error) {
-	registration := newJevFilterRegistration(opt.jevModel, opt.jevBaseURLHost, pol, jevArmPoolSize)
+	registration := newJevFilterRegistration(opt.jevModel, opt.jevBaseURLHost, pol, jevArmPoolSize, opt.jevArmsReps)
 	registration.PilotGateConfirmed = opt.jevPilotGateConfirmed
 	registration.WarmupDisposed = opt.jevWarmupDisposed
 	registration.SameWindowReps = opt.jevSameWindowReps
@@ -937,8 +959,11 @@ func validateJevArmsOptions(opt options, arms []string) error {
 	if opt.datasetFormat != "locomo" {
 		return fmt.Errorf("--jev-arms is a LoCoMo-口径 protocol (LongMemEval-S is deferred); got --dataset-format %q", opt.datasetFormat)
 	}
-	if opt.repeats != jevArmAnswerRepetitions {
-		return fmt.Errorf("--jev-arms is frozen at the %d-repetition majority protocol, got --repeats %d", jevArmAnswerRepetitions, opt.repeats)
+	if !validJevArmsReps(opt.jevArmsReps) {
+		return fmt.Errorf("--jev-arms-reps must be %d (pilot: one answer per question, majority-of-1) or %d (canonical %d-repetition majority protocol): %d has no majority semantics", jevArmPilotRepetitions, jevArmAnswerRepetitions, jevArmAnswerRepetitions, opt.jevArmsReps)
+	}
+	if opt.repeats != opt.jevArmsReps {
+		return fmt.Errorf("--jev-arms is frozen at the --jev-arms-reps %d-repetition majority protocol, got --repeats %d", opt.jevArmsReps, opt.repeats)
 	}
 	if len(arms) != 1 {
 		return fmt.Errorf("--jev-arms requires exactly one retrieval backend so every arm recalls identically (--retrieval fts|hybrid), got %d backends", len(arms))
@@ -1055,8 +1080,11 @@ func runJevArms(ctx context.Context, opt options, convs []conversation, prices p
 		opt.jevPricePerMillion = value
 	}
 	opt.jevBaseURLHost = baseURLHost(opt.jevBaseURL)
-	if opt.repeats != jevArmAnswerRepetitions {
-		return fmt.Errorf("--jev-arms is frozen at the %d-repetition majority protocol, got --repeats %d", jevArmAnswerRepetitions, opt.repeats)
+	if !validJevArmsReps(opt.jevArmsReps) {
+		return fmt.Errorf("--jev-arms-reps must be %d (pilot: one answer per question, majority-of-1) or %d (canonical %d-repetition majority protocol): %d has no majority semantics", jevArmPilotRepetitions, jevArmAnswerRepetitions, jevArmAnswerRepetitions, opt.jevArmsReps)
+	}
+	if opt.repeats != opt.jevArmsReps {
+		return fmt.Errorf("--jev-arms is frozen at the --jev-arms-reps %d-repetition majority protocol, got --repeats %d", opt.jevArmsReps, opt.repeats)
 	}
 	if opt.jevDegradedPass {
 		// The degraded pass is the product's no-key path: the configured client is

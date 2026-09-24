@@ -243,8 +243,9 @@ type jevArmOutcomeKey struct {
 	Arm  jevArm
 }
 
-// jevArmMajorityOutcomes collapses the per-repetition rows into one three-rep
-// majority outcome per question and arm. It fails loudly on an even measured
+// jevArmMajorityOutcomes collapses the per-repetition rows into one majority
+// outcome per question and arm (majority-of-3 canonical, majority-of-1 pilot).
+// It fails loudly on an even measured
 // repetition count, because majority is undefined then — the same rule
 // majorityCorrectness enforces for the rest of the harness.
 func jevArmMajorityOutcomes(rows []jevArmQuestionRow) (map[jevArmOutcomeKey]bool, error) {
@@ -442,7 +443,7 @@ type jevArmFlips struct {
 	DCorrectBWrong []jevArmQuestionRef `json:"d_correct_b_wrong"`
 }
 
-// measureJevArmFlips pairs the B and D rows per question on their three-rep
+// measureJevArmFlips pairs the B and D rows per question on their declared-reps
 // majorities. Questions whose answer stage did not run are excluded, so the lists
 // contain only measured flips.
 func measureJevArmFlips(rows []jevArmQuestionRow) (jevArmFlips, error) {

@@ -48,8 +48,14 @@ const (
 	// arms (research R7b). It is roomy enough for arm B's ~8.5k-token bundle, so
 	// B is never silently weakened: a budget stop invalidates the run instead.
 	jevArmAnswerInputCap = 32768
-	// jevArmAnswerRepetitions is the frozen 3-rep majority protocol (§23).
+	// jevArmAnswerRepetitions is the canonical frozen 3-rep majority protocol (§23).
+	// It remains the default for --jev-arms-reps; a gated pilot may instead declare
+	// jevArmPilotRepetitions.
 	jevArmAnswerRepetitions = 3
+	// jevArmPilotRepetitions is the 1-rep pilot protocol: one answer per question,
+	// majority-of-1. It exists for the gated 1-repetition × 1540-question pilot and
+	// is honest about what it measures: a single answer, no repetition variance.
+	jevArmPilotRepetitions = 1
 	// jevArmCategoryFiveBlock names the declared LoCoMo category-5 adversarial
 	// block. Its questions are reported separately and never enter the 1540
 	// main denominator (spec SC-004).

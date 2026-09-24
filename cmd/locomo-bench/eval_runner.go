@@ -1389,7 +1389,7 @@ func freezeFormalProtocol(opt options, convs []conversation, controlHash string)
 		},
 		Retrieval:      evalRetrievalProvenance{Recipe: arms[0], EmbeddingFingerprint: evalEmbeddingFingerprint(), Reranker: "disabled", CandidateLimit: opt.topK, CandidateRulesDigest: evalJSONDigest(evalFreezeCandidateRules{TopK: opt.topK, ChunkQuota: opt.chunkQuota, Chunks: opt.chunks, Retrieval: arms[0]})},
 		Budget:         evalBudgetProtocol{Profile: opt.evalBudgetProfile, AnswerInputTokenCap: opt.answerInputTokenCap, MaxOutputTokens: opt.maxTokens, CandidateLimit: opt.topK, RetrievalCallLimit: 1, AnswerCallLimit: 1, CounterFingerprint: opt.counterFingerprint},
-		Aggregation:    evalAggregationProtocol{AnswerRepetitions: 3, Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
+		Aggregation:    evalAggregationProtocol{AnswerRepetitions: jevFreezeAnswerRepetitions(opt), Rule: "majority_correctness", JudgeRepetitions: 1, SeedPolicy: "independent-recorded"},
 		JudgeAudit:     evalJudgeAuditProtocol{AllDiscordant: true, ConcordantSamplingDigest: evalTextDigest("022.v1:concordant-stratified-plan:freeze-before-treatment"), Reviewers: 2, BlindedToArm: true, AdjudicationRule: "independent_then_adjudicate"},
 		CoverageStrata: evalCoverageStrataProtocol{Boundaries: []float64{0, 0.5, 0.9, 1}, SelectionDigest: evalTextDigest("022.v1:coverage-strata:0,0.5,0.9,1")},
 		Experiment:     experiment,

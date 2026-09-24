@@ -22,7 +22,7 @@ import (
 // paired significance tests, the cost plan, and the SC-001..SC-007 verdict.
 
 func jevTestRegistration() jevFilterRegistration {
-	registration := newJevFilterRegistration("jev-pinned-2026-09-21", "jev.example.test", filter.DefaultPolicy(), jevArmPoolSize)
+	registration := newJevFilterRegistration("jev-pinned-2026-09-21", "jev.example.test", filter.DefaultPolicy(), jevArmPoolSize, jevArmAnswerRepetitions)
 	registration.PilotGateConfirmed = true
 	registration.WarmupDisposed = true
 	registration.SameWindowReps = true
@@ -147,9 +147,10 @@ func TestJevFilterRegistrationValidation(t *testing.T) {
 		"k_show_max":        func(r *jevFilterRegistration) { r.KShowMax = 20 },
 		"pool":              func(r *jevFilterRegistration) { r.Pool = 300 },
 		"cap":               func(r *jevFilterRegistration) { r.AnswerInputCap = 8192 },
-		"repetitions":       func(r *jevFilterRegistration) { r.AnswerRepetitions = 1 },
-		"lowered floor":     func(r *jevFilterRegistration) { r.EmptyInjectionFloor = 0.2 },
-		"arm set":           func(r *jevFilterRegistration) { r.Arms = []string{"A", "B"} },
+		// 1 is the legal pilot declaration (slice 13); 2 has no majority semantics.
+		"repetitions":   func(r *jevFilterRegistration) { r.AnswerRepetitions = 2 },
+		"lowered floor": func(r *jevFilterRegistration) { r.EmptyInjectionFloor = 0.2 },
+		"arm set":       func(r *jevFilterRegistration) { r.Arms = []string{"A", "B"} },
 	}
 	for name, mutate := range cases {
 		broken := jevTestRegistration()
@@ -1029,7 +1030,7 @@ func TestJevArmCoverageViolationRefusesAPartialCohort(t *testing.T) {
 }
 
 func TestValidateJevArmsOptionsPinsTheChunkQuotaRecipe(t *testing.T) {
-	base := options{datasetFormat: "locomo", repeats: jevArmAnswerRepetitions, estimate: true}
+	base := options{datasetFormat: "locomo", repeats: jevArmAnswerRepetitions, jevArmsReps: jevArmAnswerRepetitions, estimate: true}
 	if err := validateJevArmsOptions(base, []string{"hybrid"}); err != nil {
 		t.Fatalf("a valid estimate invocation was refused: %v", err)
 	}
@@ -1062,6 +1063,7 @@ func TestValidateJevArmsOptionsRequiresTheFrozenProtocolFlag(t *testing.T) {
 	runMode := options{
 		datasetFormat:         "locomo",
 		repeats:               jevArmAnswerRepetitions,
+		jevArmsReps:           jevArmAnswerRepetitions,
 		runDir:                t.TempDir(),
 		storeDir:              t.TempDir(),
 		chunks:                true,

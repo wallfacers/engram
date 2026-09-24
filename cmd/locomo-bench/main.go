@@ -252,6 +252,11 @@ type options struct {
 	jevWarmupDisposed     bool
 	jevSameWindowReps     bool
 	jevB0Continuity       bool
+	// jevArmsReps is the declared answer-repetition protocol for --jev-arms:
+	// 3 (default) is the canonical majority-of-3 protocol, 1 is the gated
+	// single-answer pilot (majority-of-1). No other value has majority
+	// semantics; validateJevArmsOptions refuses one by name.
+	jevArmsReps int
 }
 
 func main() {
@@ -338,9 +343,10 @@ func run() error {
 	flag.BoolVar(&opt.jevDegradedPass, "jev-degraded-pass", false, "051 four-arm degraded pass: run the arms with no configured filter to measure the fallback path (SC-005/SC-006)")
 	flag.StringVar(&opt.jevModel, "jev-filter-model", "", "051 pinned Jev filter model revision (a floating tag such as -latest is refused)")
 	flag.StringVar(&opt.jevCostAttribution, "jev-cost-attribution", "", "051 attribution note required when the filter segment is more than 10x off the expectation (SC-007)")
+	flag.IntVar(&opt.jevArmsReps, "jev-arms-reps", jevArmAnswerRepetitions, "051 --jev-arms answer repetitions: 3 = canonical majority-of-3 protocol (default), 1 = gated single-answer pilot; any other value is refused")
 	flag.BoolVar(&opt.jevPilotGateConfirmed, "jev-pilot-gate-confirmed", false, "051 declaration: the 038 pilot gate passed for this run")
 	flag.BoolVar(&opt.jevWarmupDisposed, "jev-warmup-disposed", false, "051 declaration: the warm-up records were disposed of before the gated run")
-	flag.BoolVar(&opt.jevSameWindowReps, "jev-same-window-reps", false, "051 declaration: all three repetitions run in one window")
+	flag.BoolVar(&opt.jevSameWindowReps, "jev-same-window-reps", false, "051 declaration: all answer repetitions (per --jev-arms-reps) run in one window")
 	flag.BoolVar(&opt.jevB0Continuity, "jev-b0-continuity-declared", false, "051 declaration: this run-dir carries the B0 continuity receipts, so the validity gate requires their summary artifact")
 	flag.Float64Var(&opt.budgetBaseline, "budget-baseline", 0, "calibrated answer context token baseline for the 1.5x budget gate")
 	flag.StringVar(&opt.retrieval, "retrieval", "both", "retrieval backend: fts | hybrid | both")
