@@ -15,9 +15,16 @@
 // It carries no credentials, reads none, and binds loopback only:
 //
 //	openjev-shim --port 8020
-//	  OPENJEV_UPSTREAM_BASE_URL  OpenAI-compatible base URL (default http://127.0.0.1:8000/v1)
-//	  OPENJEV_UPSTREAM_MODEL     upstream model revision (required)
-//	  OPENJEV_MAX_QUESTIONS      per-request question bound (default 256, larger -> 413)
+//	  OPENJEV_UPSTREAM_BASE_URL       OpenAI-compatible base URL (default http://127.0.0.1:8000/v1)
+//	  OPENJEV_UPSTREAM_MODEL          upstream model revision (required)
+//	  OPENJEV_MAX_QUESTIONS           per-request question bound (default 256, larger -> 413)
+//	  OPENJEV_MAX_COMPLETION_TOKENS   upstream max_tokens override (default 0 = computed:
+//	                                  24/question + 1024 for the upstream's inline-thinking
+//	                                  tax, floor 1280, cap 8192)
+//	  OPENJEV_THINKING                "off" (default) sends chat_template_kwargs
+//	                                  {"enable_thinking": false} upstream so a hybrid-thinking
+//	                                  model does not spend the budget on chain-of-thought;
+//	                                  "on" omits the field for an upstream that rejects it
 //
 // The client's whole-call deadline is part of its own Config, so the caller that
 // wires openjev must widen jev.Config.Deadline and jev.Config.PerRequestTimeout
@@ -77,6 +84,23 @@ func parseConfig(args []string, getenv func(string) string) (shimConfig, error) 
 			return shimConfig{}, fmt.Errorf("OPENJEV_MAX_QUESTIONS must be a positive integer, got %q", raw)
 		}
 		cfg.MaxQuestions = questions
+	}
+	if raw := strings.TrimSpace(getenv("OPENJEV_MAX_COMPLETION_TOKENS")); raw != "" {
+		tokens, err := strconv.Atoi(raw)
+		if err != nil || tokens < 0 {
+			return shimConfig{}, fmt.Errorf("OPENJEV_MAX_COMPLETION_TOKENS must be a non-negative integer (0 = computed), got %q", raw)
+		}
+		cfg.MaxCompletionTokens = tokens
+	}
+	if raw := strings.TrimSpace(getenv("OPENJEV_THINKING")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "on":
+			cfg.Thinking = true
+		case "off":
+			cfg.Thinking = false
+		default:
+			return shimConfig{}, fmt.Errorf(`OPENJEV_THINKING must be "on" or "off", got %q`, raw)
+		}
 	}
 	if err := cfg.applyDefaults(); err != nil {
 		return shimConfig{}, err

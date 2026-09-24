@@ -146,6 +146,9 @@ type upstreamChatRequest struct {
 	Messages    []upstreamChatMessage `json:"messages"`
 	Temperature float64               `json:"temperature"`
 	MaxTokens   int                   `json:"max_tokens"`
+	// ChatTemplateKwargs is the vllm body extension carrying the chat template's
+	// thinking switch. It stays nil when the shim omits the field.
+	ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs"`
 }
 
 type upstreamChatMessage struct {
@@ -167,13 +170,24 @@ func chatReply(content string) map[string]any {
 type upstreamRecorder struct {
 	mu       sync.Mutex
 	requests []upstreamChatRequest
+	raws     [][]byte
 }
 
-func (r *upstreamRecorder) record(req upstreamChatRequest) int {
+func (r *upstreamRecorder) record(req upstreamChatRequest, raw []byte) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, req)
+	r.raws = append(r.raws, raw)
 	return len(r.requests) - 1
+}
+
+// rawAt returns the exact bytes the shim sent. Field *presence* needs the bytes:
+// a decoded nil map cannot distinguish an omitted chat_template_kwargs from one
+// sent as null.
+func (r *upstreamRecorder) rawAt(i int) []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.raws[i]
 }
 
 func (r *upstreamRecorder) count() int {
@@ -194,13 +208,19 @@ func newFakeUpstream(t *testing.T, contents ...string) (*httptest.Server, *upstr
 	t.Helper()
 	rec := &upstreamRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			t.Errorf("read upstream chat request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		var req upstreamChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.Unmarshal(raw, &req); err != nil {
 			t.Errorf("decode upstream chat request: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		content := contents[min(rec.record(req), len(contents)-1)]
+		content := contents[min(rec.record(req, raw), len(contents)-1)]
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(chatReply(content))
 	}))
@@ -214,11 +234,23 @@ func newShimForTest(t *testing.T, upstreamURL string, mutate func(*shimConfig)) 
 		UpstreamBaseURL: upstreamURL,
 		UpstreamModel:   "openjev-test",
 		MaxQuestions:    defaultMaxQuestions,
-		UpstreamTimeout: 2 * time.Second,
-		Logger:          log.New(io.Discard, "", 0),
 	}
 	if mutate != nil {
 		mutate(&cfg)
+	}
+	return serveShimForTest(t, cfg)
+}
+
+// serveShimForTest adds the test-only defaults (quiet logger, short upstream
+// deadline) and serves the handler, so a config built by hand and one sourced
+// from parseConfig take the identical production path.
+func serveShimForTest(t *testing.T, cfg shimConfig) *httptest.Server {
+	t.Helper()
+	if cfg.Logger == nil {
+		cfg.Logger = log.New(io.Discard, "", 0)
+	}
+	if cfg.UpstreamTimeout <= 0 {
+		cfg.UpstreamTimeout = 2 * time.Second
 	}
 	srv, err := newShimServer(cfg)
 	if err != nil {
@@ -264,8 +296,8 @@ func TestAnswersGoldenWithClampingAndMissingKeys(t *testing.T) {
 	if call.Temperature != 0 {
 		t.Errorf("temperature = %v, want 0", call.Temperature)
 	}
-	if want := 4*5 + 64; call.MaxTokens != want {
-		t.Errorf("max_tokens = %d, want %d (4 per question + 64)", call.MaxTokens, want)
+	if call.MaxTokens != 1280 {
+		t.Errorf("max_tokens = %d, want 1280 (5 questions: 24*5+1024 = 1144, floored)", call.MaxTokens)
 	}
 	if len(call.Messages) != 2 || call.Messages[0].Role != "system" || call.Messages[1].Role != "user" {
 		t.Fatalf("messages = %+v, want one system + one user prompt", call.Messages)
@@ -895,5 +927,271 @@ func TestNewShimServerDefaults(t *testing.T) {
 
 	if _, err := newShimServer(shimConfig{UpstreamBaseURL: "http://127.0.0.1:1"}); err == nil {
 		t.Error("a missing upstream model must be rejected")
+	}
+}
+
+// --- upstream budget & thinking switch (P1.5c) -----------------------------
+//
+// Two real-box smoke defects live here. (1) The old budget (4 tokens per
+// question + 64) truncated a 64-key shard reply at 320 tokens, before the closing
+// brace, so the reply arrived as `finish_reason=length` and unparseable JSON and
+// the call retried into a 502; the upstream additionally prepends ~2497 chars
+// (~625+ tokens) of inline thinking on every call, so the allowance is per call,
+// not per key. (2) The hybrid-thinking upstream burned the completion budget on
+// chain-of-thought, which the shim now switches off in the request body.
+
+func memoryIDs(n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("m%02d", i)
+	}
+	return ids
+}
+
+func mustParseConfig(t *testing.T, env map[string]string) shimConfig {
+	t.Helper()
+	cfg, err := parseConfig(nil, envFrom(env))
+	if err != nil {
+		t.Fatalf("parseConfig(%v): %v", env, err)
+	}
+	return cfg
+}
+
+// mergedEnv layers extra onto base, so every case still carries the required
+// OPENJEV_UPSTREAM_MODEL.
+func mergedEnv(base, extra map[string]string) map[string]string {
+	env := make(map[string]string, len(base)+len(extra))
+	for k, v := range base {
+		env[k] = v
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
+}
+
+// TestMaxTokensForBudgetBoundaries pins the budget arithmetic and its three
+// documented boundaries: the 1280 floor, the per-key slope, and the 8192 cap.
+func TestMaxTokensForBudgetBoundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		questions int
+		override  int
+		want      int
+	}{
+		{name: "no questions takes the floor", questions: 0, want: 1280},
+		{name: "small request takes the floor", questions: 2, want: 1280}, // 24*2+1024 = 1072
+		{name: "mid request scales per key", questions: 32, want: 1792},   // 24*32+1024
+		{name: "sixty-four questions", questions: 64, want: 2560},         // 24*64+1024 — the real shard size
+		{name: "last size below the cap", questions: 298, want: 8176},     // 24*298+1024
+		{name: "first size past the cap", questions: 299, want: 8192},     // 8200 -> capped
+		{name: "wide shard stays capped", questions: 1024, want: 8192},
+		{name: "override wins over the computed value", questions: 64, override: 512, want: 512},
+		{name: "override may sit below the floor", questions: 2, override: 128, want: 128},
+		{name: "override may exceed the cap", questions: 64, override: 16384, want: 16384},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := maxTokensFor(tt.questions, tt.override); got != tt.want {
+				t.Errorf("maxTokensFor(%d, %d) = %d, want %d", tt.questions, tt.override, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpstreamBodyBudgetAndThinkingOffByDefault checks the two new body fields on
+// the exact bytes the shim sends: a 2-question request gets the 1280-token floor
+// (it must still clear the ~625-token inline-thinking tax), and the default body
+// switches the chat template's thinking off.
+func TestUpstreamBodyBudgetAndThinkingOffByDefault(t *testing.T) {
+	upstream, rec := newFakeUpstream(t, `{"need_m0": 0.7, "need_m1": 0.3}`)
+	shim := newShimForTest(t, upstream.URL, nil)
+
+	body := mustMarshal(t, pointerRequestFor("q", "openjev-test", "m0", "m1"))
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	want := map[string]float64{"need_m0": 0.7, "need_m1": 0.3}
+	if got := decodeWire(t, raw).Probabilities; !reflect.DeepEqual(got, want) {
+		t.Errorf("probabilities = %v, want %v", got, want)
+	}
+	if rec.count() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 (a parseable reply must not retry)", rec.count())
+	}
+	call := rec.at(0)
+	if call.MaxTokens != 1280 {
+		t.Errorf("max_tokens = %d, want 1280 (2 questions: 24*2+1024 = 1072, floored)", call.MaxTokens)
+	}
+	if len(call.ChatTemplateKwargs) != 1 || call.ChatTemplateKwargs["enable_thinking"] {
+		t.Errorf("chat_template_kwargs = %v, want {enable_thinking:false}", call.ChatTemplateKwargs)
+	}
+	if sent := string(rec.rawAt(0)); !strings.Contains(sent, `"chat_template_kwargs":{"enable_thinking":false}`) {
+		t.Errorf("body must carry the thinking switch verbatim:\n%s", sent)
+	}
+}
+
+// TestUpstreamBudgetScalesWithQuestionCount is the DEFECT 1 regression at the
+// handler level: a real 64-question shard reply costs ~900 tokens of JSON plus the
+// ~625-token inline-thinking tax, so its budget must clear that instead of the 320
+// the old formula allowed.
+func TestUpstreamBudgetScalesWithQuestionCount(t *testing.T) {
+	tests := []struct {
+		questions int
+		want      int
+	}{
+		{questions: 5, want: 1280},  // 24*5+1024 = 1144 -> floor
+		{questions: 64, want: 2560}, // the real shard size
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d_questions", tt.questions), func(t *testing.T) {
+			upstream, rec := newFakeUpstream(t, `{"need_m00": 0.9}`)
+			shim := newShimForTest(t, upstream.URL, nil)
+
+			body := mustMarshal(t, pointerRequestFor("q", "openjev-test", memoryIDs(tt.questions)...))
+			status, raw := postWire(t, shim.URL, body)
+			requireStatus(t, status, http.StatusOK, raw)
+
+			if got := rec.at(0).MaxTokens; got != tt.want {
+				t.Errorf("%d questions: max_tokens = %d, want %d", tt.questions, got, tt.want)
+			}
+			if got := decodeWire(t, raw).Probabilities["need_m00"]; got != 0.9 {
+				t.Errorf("%d questions: need_m00 = %v, want 0.9", tt.questions, got)
+			}
+		})
+	}
+}
+
+// TestUpstreamBudgetHonorsTheCapForWideShards walks the 8192 cap through the
+// handler, so one over-wide request cannot ask the upstream for unbounded output.
+func TestUpstreamBudgetHonorsTheCapForWideShards(t *testing.T) {
+	upstream, rec := newFakeUpstream(t, `{"need_m00": 0.5}`)
+	shim := newShimForTest(t, upstream.URL, func(c *shimConfig) { c.MaxQuestions = 400 })
+
+	body := mustMarshal(t, pointerRequestFor("q", "openjev-test", memoryIDs(400)...))
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	if got := rec.at(0).MaxTokens; got != 8192 {
+		t.Errorf("max_tokens = %d, want the 8192 cap (24*400+1024 = 10624)", got)
+	}
+}
+
+// TestOpenJEVThinkingOnOmitsChatTemplateKwargs is the escape hatch: an upstream
+// that rejects unknown body keys turns the switch off at the wire level, and the
+// pointer protocol still answers normally.
+func TestOpenJEVThinkingOnOmitsChatTemplateKwargs(t *testing.T) {
+	upstream, rec := newFakeUpstream(t, `{"need_m0": 0.7, "need_m1": 0.3}`)
+	shim := serveShimForTest(t, mustParseConfig(t, map[string]string{
+		"OPENJEV_UPSTREAM_BASE_URL": upstream.URL,
+		"OPENJEV_UPSTREAM_MODEL":    "openjev-test",
+		"OPENJEV_THINKING":          "on",
+	}))
+
+	body := mustMarshal(t, pointerRequestFor("q", "openjev-test", "m0", "m1"))
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	want := map[string]float64{"need_m0": 0.7, "need_m1": 0.3}
+	if got := decodeWire(t, raw).Probabilities; !reflect.DeepEqual(got, want) {
+		t.Errorf("probabilities = %v, want %v", got, want)
+	}
+	if call := rec.at(0); call.ChatTemplateKwargs != nil {
+		t.Errorf("OPENJEV_THINKING=on must omit the field, got %v", call.ChatTemplateKwargs)
+	}
+	if sent := string(rec.rawAt(0)); strings.Contains(sent, "chat_template_kwargs") {
+		t.Errorf("OPENJEV_THINKING=on must not send the field:\n%s", sent)
+	}
+}
+
+// TestOpenJEVMaxCompletionTokensOverrideReachesTheBody: the env override replaces
+// the computed budget, so an operator can fit an upstream's context window, or
+// shrink a test's cost, without a rebuild.
+func TestOpenJEVMaxCompletionTokensOverrideReachesTheBody(t *testing.T) {
+	upstream, rec := newFakeUpstream(t, `{"need_m0": 0.7, "need_m1": 0.3}`)
+	shim := serveShimForTest(t, mustParseConfig(t, map[string]string{
+		"OPENJEV_UPSTREAM_BASE_URL":     upstream.URL,
+		"OPENJEV_UPSTREAM_MODEL":        "openjev-test",
+		"OPENJEV_MAX_COMPLETION_TOKENS": "3333",
+	}))
+
+	body := mustMarshal(t, pointerRequestFor("q", "openjev-test", "m0", "m1"))
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	want := map[string]float64{"need_m0": 0.7, "need_m1": 0.3}
+	if got := decodeWire(t, raw).Probabilities; !reflect.DeepEqual(got, want) {
+		t.Errorf("probabilities = %v, want %v", got, want)
+	}
+	if got := rec.at(0).MaxTokens; got != 3333 {
+		t.Errorf("max_tokens = %d, want the OPENJEV_MAX_COMPLETION_TOKENS override 3333", got)
+	}
+}
+
+// TestParseConfigBudgetAndThinkingEnv pins the env semantics: unset/0 means
+// "compute it", a positive number overrides, "on"/"off" toggle the thinking
+// switch, and anything else is rejected rather than silently guessed.
+func TestParseConfigBudgetAndThinkingEnv(t *testing.T) {
+	base := map[string]string{"OPENJEV_UPSTREAM_MODEL": "m"}
+
+	cfg, err := parseConfig(nil, envFrom(base))
+	if err != nil {
+		t.Fatalf("parseConfig defaults: %v", err)
+	}
+	if cfg.MaxCompletionTokens != 0 {
+		t.Errorf("max completion tokens = %d, want 0 (computed)", cfg.MaxCompletionTokens)
+	}
+	if cfg.Thinking {
+		t.Error("thinking must default to off")
+	}
+
+	cases := []struct {
+		name       string
+		env        map[string]string
+		wantTokens int
+		wantThink  bool
+	}{
+		{name: "zero means computed", env: map[string]string{"OPENJEV_MAX_COMPLETION_TOKENS": "0"}},
+		{name: "positive override", env: map[string]string{"OPENJEV_MAX_COMPLETION_TOKENS": "4096"}, wantTokens: 4096},
+		{name: "thinking on", env: map[string]string{"OPENJEV_THINKING": "on"}, wantThink: true},
+		{name: "thinking on is case-insensitive", env: map[string]string{"OPENJEV_THINKING": " ON "}, wantThink: true},
+		{name: "thinking off", env: map[string]string{"OPENJEV_THINKING": "off"}, wantThink: false},
+		{
+			name:       "both explicit",
+			env:        map[string]string{"OPENJEV_MAX_COMPLETION_TOKENS": "300", "OPENJEV_THINKING": "on"},
+			wantTokens: 300,
+			wantThink:  true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parseConfig(nil, envFrom(mergedEnv(base, tc.env)))
+			if err != nil {
+				t.Fatalf("parseConfig(%v): %v", tc.env, err)
+			}
+			if cfg.MaxCompletionTokens != tc.wantTokens {
+				t.Errorf("max completion tokens = %d, want %d", cfg.MaxCompletionTokens, tc.wantTokens)
+			}
+			if cfg.Thinking != tc.wantThink {
+				t.Errorf("thinking = %v, want %v", cfg.Thinking, tc.wantThink)
+			}
+		})
+	}
+
+	invalid := []map[string]string{
+		{"OPENJEV_MAX_COMPLETION_TOKENS": "abc"},
+		{"OPENJEV_MAX_COMPLETION_TOKENS": "-4"},
+		{"OPENJEV_MAX_COMPLETION_TOKENS": "1.5"},
+		{"OPENJEV_THINKING": "maybe"},
+		{"OPENJEV_THINKING": "true"},
+	}
+	for _, env := range invalid {
+		_, err := parseConfig(nil, envFrom(mergedEnv(base, env)))
+		if err == nil {
+			t.Errorf("env %v must be rejected", env)
+			continue
+		}
+		if !strings.Contains(err.Error(), "OPENJEV_") {
+			t.Errorf("env %v: err = %v, want a named env error", env, err)
+		}
 	}
 }

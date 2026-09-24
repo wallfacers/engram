@@ -31,8 +31,24 @@ const (
 	// maxJSONAttempts bounds how many "{" positions the tolerant parser tries.
 	maxJSONAttempts = 64
 
-	maxTokensPerQuestion   = 4
-	responseTokenAllowance = 64
+	// maxTokensPerQuestion budgets the upstream reply for one question key. A real
+	// shard entry (`"need_m123": 0.85,`) costs 12-15 tokens once BPE splits the key
+	// digits, so 24 leaves roughly 2x headroom: the old 4-per-key formula truncated
+	// a 64-key reply at 320 tokens before the closing brace, which is what produced
+	// finish_reason=length and the 502.
+	maxTokensPerQuestion = 24
+	// responseTokenAllowance is the per-call, per-question-count-independent tax:
+	// measured on the real box (051 P1.5c forensics), the upstream emits ~2497 chars
+	// (~625+ tokens) of inline thinking prose before the JSON on every call, and it
+	// is not exposed as a reasoning_content key. 1024 absorbs that plus the object
+	// braces and the response skeleton the prompt asks the model to mirror.
+	responseTokenAllowance = 1024
+	// minCompletionTokens floors a small request: the inline-thinking tax alone is
+	// ~625 tokens, so a 2-question budget of 24*2+1024 = 1072 would still truncate.
+	minCompletionTokens = 1280
+	// maxCompletionTokens caps one request's budget, so an over-wide shard cannot
+	// ask the upstream for unbounded output.
+	maxCompletionTokens = 8192
 )
 
 // shimConfig parameterizes the translation server. A zero value is usable as
@@ -49,6 +65,16 @@ type shimConfig struct {
 	// MaxQuestions bounds one request's question count; a larger request is
 	// rejected with 413 before any model call (default 256).
 	MaxQuestions int
+	// MaxCompletionTokens overrides the computed upstream completion budget. Zero
+	// (the default) computes it — see maxTokensFor — and a positive value is sent
+	// verbatim, floor and cap included, because an operator who sets it means it.
+	MaxCompletionTokens int
+	// Thinking lets the upstream chat template run its chain-of-thought. It
+	// defaults to false ("off"), where the shim sends chat_template_kwargs
+	// {"enable_thinking": false} so a hybrid-thinking model (Qwen3.x on vllm) does
+	// not spend the completion budget on reasoning before the JSON. Set it true
+	// only for an upstream that rejects that body key.
+	Thinking bool
 	// UpstreamTimeout caps a single upstream call (default 120s).
 	UpstreamTimeout time.Duration
 	// Logger receives one line per request plus rejections (default log.Default).
@@ -115,8 +141,9 @@ func serve(cfg shimConfig) error {
 		Handler:           srv.handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	srv.logf("listening on http://%s (upstream %s, model %s, max_questions=%d)",
-		httpSrv.Addr, srv.cfg.UpstreamBaseURL, srv.cfg.UpstreamModel, srv.cfg.MaxQuestions)
+	srv.logf("listening on http://%s (upstream %s, model %s, max_questions=%d, max_completion_tokens=%d (0 = computed), thinking=%t)",
+		httpSrv.Addr, srv.cfg.UpstreamBaseURL, srv.cfg.UpstreamModel,
+		srv.cfg.MaxQuestions, srv.cfg.MaxCompletionTokens, srv.cfg.Thinking)
 	return httpSrv.ListenAndServe()
 }
 
@@ -217,12 +244,20 @@ func (s *shimServer) score(ctx context.Context, req pointerRequest, keys []strin
 // callUpstream sends one chat.completions request for the whole pointer request.
 // strict marks the retry, which appends the JSON-only reminder.
 func (s *shimServer) callUpstream(ctx context.Context, req pointerRequest, keys []string, strict bool) (string, string, *pointerUsage, error) {
-	body, err := json.Marshal(chatRequest{
+	call := chatRequest{
 		Model:       s.cfg.UpstreamModel,
 		Messages:    promptMessages(req, keys, strict),
 		Temperature: 0,
-		MaxTokens:   maxTokensFor(len(keys)),
-	})
+		MaxTokens:   maxTokensFor(len(keys), s.cfg.MaxCompletionTokens),
+	}
+	if !s.cfg.Thinking {
+		// vllm exposes the chat template's thinking switch as a request-body
+		// extension rather than a serve-time flag: without it a hybrid-thinking
+		// model spends the completion budget on chain-of-thought and the JSON
+		// answer never arrives inside the budget.
+		call.ChatTemplateKwargs = map[string]bool{"enable_thinking": false}
+	}
+	body, err := json.Marshal(call)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("encode upstream request: %w", err)
 	}
@@ -340,10 +375,33 @@ func responseSkeleton(keys []string) string {
 	return "{" + strings.Join(entries, ", ") + "}"
 }
 
-// maxTokensFor bounds the reply: a few tokens per probability plus a small
-// allowance for the JSON punctuation and any chat framing.
-func maxTokensFor(questions int) int {
-	return maxTokensPerQuestion*questions + responseTokenAllowance
+// maxTokensFor is the upstream completion budget: a per-key allowance plus the
+// inline-thinking tax, floored for small requests and capped for wide ones. A
+// positive override (OPENJEV_MAX_COMPLETION_TOKENS) replaces the computed value
+// verbatim — floor and cap included — so an operator can fit an upstream's context
+// window, or shrink a test's cost, without a rebuild.
+//
+// Measured on the real box (051 P1.5c): one `"need_mNNN": 0.85,` entry costs
+// 12-15 tokens (24 per key leaves ~2x headroom), and the upstream prepends ~2497
+// chars (~625+ tokens) of inline thinking on every call regardless of question
+// count (1024 of allowance). The previous 4-per-key + 64 formula is what truncated
+// a 64-question reply at 320 tokens and produced finish_reason=length ->
+// unparseable JSON -> retry -> 502.
+//
+// Examples: 2 questions -> 1280 (floor, 1072 computed); 64 -> 2560; 400 -> 8192
+// (cap, 10624 computed).
+func maxTokensFor(questions, override int) int {
+	if override > 0 {
+		return override
+	}
+	budget := maxTokensPerQuestion*questions + responseTokenAllowance
+	if budget < minCompletionTokens {
+		return minCompletionTokens
+	}
+	if budget > maxCompletionTokens {
+		return maxCompletionTokens
+	}
+	return budget
 }
 
 // firstProbabilityObject finds the first {...} object in the reply that decodes
@@ -568,6 +626,10 @@ type chatRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	MaxTokens   int           `json:"max_tokens"`
+	// ChatTemplateKwargs carries the vllm chat template's thinking switch. A nil
+	// map omits the field entirely (OPENJEV_THINKING=on), for an upstream that
+	// rejects unknown body keys.
+	ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
 }
 
 type chatMessage struct {
