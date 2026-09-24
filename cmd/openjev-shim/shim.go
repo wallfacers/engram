@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -668,8 +669,30 @@ const (
 	// "yes" probability is what the pointer protocol reports.
 	typesafeCriteriaYes = "this memory is needed to answer the query"
 	typesafeCriteriaNo  = "this memory is not needed"
-	typesafeGoal        = "decide whether the memory is needed for the query"
-	typesafeRule        = "judge strictly by relevance to answering the query"
+	// typesafeGoal/typesafeRule are the generic question kept for a key that does
+	// not resolve to a memory (the write gate's keys, an id outside the "need_"
+	// convention); the shared state still carries the query and every memory.
+	typesafeGoal = "decide whether the memory is needed for the query"
+	typesafeRule = "judge strictly by relevance to answering the query"
+	// typesafeGoalFormat builds the self-contained question's goal from its own
+	// memory text and the query. Measured on the real gateway (051 T19 slice 12):
+	// the shared-state-only question scored every memory ~0.95 for an unrelated
+	// query, while this binding separated relevant from irrelevant perfectly —
+	// the systemone model judges one question in isolation.
+	typesafeGoalFormat = "decide whether the memory '%s' is needed to answer the query '%s'"
+	// typesafeAgnosticRule is the second half of the measured-working recipe:
+	// with a self-contained question, the explicit "no" for unrelated content is
+	// what keeps a same-person-different-topic memory at no.
+	typesafeAgnosticRule = "answer no for memories about unrelated people, topics, or facts"
+	// needQuestionPrefix is the pointer convention binding a conditional question
+	// to its memory: state.memories is keyed by the memory id and the question
+	// about it is keyed "need_<memory id>" (filter/jev candidateRef).
+	needQuestionPrefix = "need_"
+	// maxTypesafeGoalMemoryChars bounds the memory text a question's goal embeds.
+	// The shared state still carries the full text; 2000 characters is enough to
+	// judge one memory's relevance and keeps one goal from crowding out its
+	// siblings in the same call.
+	maxTypesafeGoalMemoryChars = 2000
 
 	// maxTypesafeRetries is the number of extra attempts after a retryable status:
 	// the initial call plus two, spaced by typesafeBackoff.
@@ -781,8 +804,11 @@ func sleepContext(ctx context.Context, d time.Duration) bool {
 
 // typesafeRequestBody is the whole pointer -> systemone translation: the pointer
 // ids are preserved exactly (they are the client's accounting keys), the query and
-// the memories move into the shared state once instead of once per question, and
-// every key becomes one choice question with the fixed criteria and instructions.
+// the memories travel in the shared state, and every key becomes one choice
+// question. A key that resolves to a state memory gets a self-contained question —
+// ITS memory text and the query in its own instructions — because on the real
+// gateway a shared state alone gives the model no separation between a relevant
+// and an unrelated memory; a key that does not resolve keeps the generic question.
 func typesafeRequestBody(cfg shimConfig, req pointerRequest, keys []string) typesafeRequest {
 	memories := req.State.Memories
 	if memories == nil {
@@ -791,17 +817,63 @@ func typesafeRequestBody(cfg shimConfig, req pointerRequest, keys []string) type
 	}
 	questions := make(map[string]typesafeQuestion, len(keys))
 	for _, key := range keys {
-		questions[key] = typesafeQuestion{
-			Type:         "choice",
-			Criteria:     typesafeCriteria{Yes: typesafeCriteriaYes, No: typesafeCriteriaNo},
-			Instructions: typesafeRuleSet{Goal: typesafeGoal, Rules: []string{typesafeRule}},
-		}
+		questions[key] = typesafeQuestionFor(key, memories, req.State.Query)
 	}
 	return typesafeRequest{
 		Model:     cfg.TypesafeModel,
 		State:     typesafeState{Descriptor: typesafeDescriptor, Query: req.State.Query, Memories: memories},
 		Questions: questions,
 	}
+}
+
+// typesafeQuestionFor builds one systemone choice question: the criteria are
+// fixed, and the instructions are self-contained when the key resolves to a
+// memory. A miss keeps the generic instructions (never an error): the write
+// gate's keys and any id outside the convention must still be answerable.
+func typesafeQuestionFor(key string, memories map[string]pointerMemory, query string) typesafeQuestion {
+	question := typesafeQuestion{
+		Type:         "choice",
+		Criteria:     typesafeCriteria{Yes: typesafeCriteriaYes, No: typesafeCriteriaNo},
+		Instructions: typesafeRuleSet{Goal: typesafeGoal, Rules: []string{typesafeRule}},
+	}
+	mem, ok := lookupTypesafeMemory(key, memories)
+	if !ok {
+		return question
+	}
+	question.Instructions.Goal = fmt.Sprintf(typesafeGoalFormat, typesafeMemoryExcerpt(mem.Text), query)
+	question.Instructions.Rules = []string{typesafeRule, typesafeAgnosticRule}
+	return question
+}
+
+// lookupTypesafeMemory resolves the memory a question asks about. The pointer
+// protocol keys the memories map by the memory id and the question by
+// "need_<memory id>"; a map keyed by the question id itself is accepted too, so
+// a differently keyed caller binds instead of silently falling back.
+func lookupTypesafeMemory(key string, memories map[string]pointerMemory) (pointerMemory, bool) {
+	if mem, ok := memories[key]; ok {
+		return mem, true
+	}
+	if memKey, ok := strings.CutPrefix(key, needQuestionPrefix); ok {
+		if mem, ok := memories[memKey]; ok {
+			return mem, true
+		}
+	}
+	return pointerMemory{}, false
+}
+
+// typesafeMemoryExcerpt bounds the memory text a question's goal carries. The
+// shared state still holds the full text; the excerpt keeps one long memory from
+// spending the call's context on itself. A multi-byte rune straddling the bound
+// is dropped, never split.
+func typesafeMemoryExcerpt(text string) string {
+	if len(text) <= maxTypesafeGoalMemoryChars {
+		return text
+	}
+	cut := maxTypesafeGoalMemoryChars
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "…"
 }
 
 // applyTypesafeHeaders sets the endpoint's headers. The gateway requires its

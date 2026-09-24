@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/filter/jev"
@@ -197,7 +198,8 @@ func newShimForTypesafe(t *testing.T, endpoint string, mutate func(*shimConfig))
 	return serveShimForTest(t, cfg)
 }
 
-// --- (a) translation: ids preserved, state carries query + memories ---------
+// --- (a) translation: ids preserved, state carries query + memories, -------
+// every question binds its own memory + the query (self-contained questions) ---
 
 func TestTypesafeTranslationPreservesNeedIDsAndState(t *testing.T) {
 	reply := typesafeReply(t, 333, 32, typesafeAnswers(map[string]*float64{
@@ -245,7 +247,18 @@ func TestTypesafeTranslationPreservesNeedIDsAndState(t *testing.T) {
 	if _, present := sent.Questions["m1"]; present {
 		t.Error("questions must be keyed by the pointer question ids, not the memory ids")
 	}
-	for _, id := range []string{"need_m1", "need_m2"} {
+	// Every question is self-contained: its OWN memory text and the query. The
+	// expectations are literals, not built from the implementation, so a
+	// cross-bound memory (m1's text in need_m2's goal) fails here.
+	wantGoals := map[string]string{
+		"need_m1": "decide whether the memory 'body-m1' is needed to answer the query 'what is the deploy code?'",
+		"need_m2": "decide whether the memory 'body-m2' is needed to answer the query 'what is the deploy code?'",
+	}
+	wantRules := []string{
+		"judge strictly by relevance to answering the query",
+		"answer no for memories about unrelated people, topics, or facts",
+	}
+	for id, wantGoal := range wantGoals {
 		question, ok := sent.Questions[id]
 		if !ok {
 			t.Fatalf("questions is missing the pointer id %q: %v", id, sent.Questions)
@@ -259,18 +272,18 @@ func TestTypesafeTranslationPreservesNeedIDsAndState(t *testing.T) {
 		if question.Criteria.No != "this memory is not needed" {
 			t.Errorf("%s: criteria.no = %q", id, question.Criteria.No)
 		}
-		if question.Instructions.Goal != "decide whether the memory is needed for the query" {
-			t.Errorf("%s: instructions.goal = %q", id, question.Instructions.Goal)
+		if question.Instructions.Goal != wantGoal {
+			t.Errorf("%s: instructions.goal = %q, want %q", id, question.Instructions.Goal, wantGoal)
 		}
-		want := []string{"judge strictly by relevance to answering the query"}
-		if !reflect.DeepEqual(question.Instructions.Rules, want) {
-			t.Errorf("%s: instructions.rules = %v, want %v", id, question.Instructions.Rules, want)
+		if !reflect.DeepEqual(question.Instructions.Rules, wantRules) {
+			t.Errorf("%s: instructions.rules = %v, want %v", id, question.Instructions.Rules, wantRules)
 		}
 	}
 
-	// The pointer protocol's point: the memories travel once, not once per question.
-	if got := strings.Count(string(rec.rawAt(0)), "body-m1"); got != 1 {
-		t.Errorf("the request body carries the memory text %d times, want 1 (shared state)", got)
+	// The memory text travels in the shared state AND in its own question's goal:
+	// exactly twice, never once per question.
+	if got := strings.Count(string(rec.rawAt(0)), "body-m1"); got != 2 {
+		t.Errorf("the request body carries the memory text %d times, want 2 (shared state + its own goal)", got)
 	}
 
 	out := decodeWire(t, raw)
@@ -280,6 +293,166 @@ func TestTypesafeTranslationPreservesNeedIDsAndState(t *testing.T) {
 	}
 	if out.Usage == nil || out.Usage.PromptTokens != 333 || out.Usage.CompletionTokens != 32 {
 		t.Errorf("usage = %+v, want prompt_tokens=333 completion_tokens=32 (from inputTokens/outputTokens)", out.Usage)
+	}
+}
+
+// TestTypesafeQuestionBindsItsOwnMemoryAndQuery pins the measured fix (051 T19
+// slice 12): on the real gateway, the shared-state-only question scored every
+// memory ~0.95 for an unrelated query, while a self-contained question separated
+// them perfectly. The two halves that did it: the question's OWN memory text
+// (never a sibling's) and the query.
+func TestTypesafeQuestionBindsItsOwnMemoryAndQuery(t *testing.T) {
+	endpoint, rec := newFakeTypesafe(t, fakeReply{status: http.StatusOK, body: typesafeReply(t, 1, 1,
+		typesafeAnswers(map[string]*float64{"need_m0": float64Ptr(1), "need_m1": float64Ptr(0)}))})
+	shim := newShimForTypesafe(t, endpoint.URL, nil)
+
+	body := mustMarshal(t, wireRequest{
+		Model: "ENGINE-LABEL",
+		State: wireState{
+			Query: "What is Ana's favorite food?",
+			Memories: map[string]wireMemory{
+				"m0": {Name: "ana-food", Text: "Ana's favorite food is sushi."},
+				"m1": {Name: "bob-chess", Text: "Bob plays chess every weekend."},
+			},
+		},
+		Questions: map[string]wireQuestion{
+			"need_m0": {Type: "noul", Instructions: "Memory m0 is necessary to answer or act on the query."},
+			"need_m1": {Type: "noul", Instructions: "Memory m1 is necessary to answer or act on the query."},
+		},
+	})
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	var sent typesafeWireRequest
+	if err := json.Unmarshal(rec.rawAt(0), &sent); err != nil {
+		t.Fatalf("decode typesafe body %s: %v", rec.rawAt(0), err)
+	}
+	wantGoals := map[string]string{
+		"need_m0": "decide whether the memory 'Ana's favorite food is sushi.' is needed to answer the query 'What is Ana's favorite food?'",
+		"need_m1": "decide whether the memory 'Bob plays chess every weekend.' is needed to answer the query 'What is Ana's favorite food?'",
+	}
+	for id, want := range wantGoals {
+		if got := sent.Questions[id].Instructions.Goal; got != want {
+			t.Errorf("%s: instructions.goal = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// TestTypesafeQuestionRulesCarryTheMeasuredRecipe pins the second rule verbatim:
+// it is part of what gave the real model separation, not decoration.
+func TestTypesafeQuestionRulesCarryTheMeasuredRecipe(t *testing.T) {
+	endpoint, rec := newFakeTypesafe(t, fakeReply{status: http.StatusOK, body: typesafeReply(t, 1, 1,
+		typesafeAnswers(map[string]*float64{"need_m0": float64Ptr(0.5)}))})
+	shim := newShimForTypesafe(t, endpoint.URL, nil)
+
+	status, raw := postWire(t, shim.URL, mustMarshal(t, pointerRequestFor("q", "ENGINE-LABEL", "m0")))
+	requireStatus(t, status, http.StatusOK, raw)
+
+	var sent typesafeWireRequest
+	if err := json.Unmarshal(rec.rawAt(0), &sent); err != nil {
+		t.Fatalf("decode typesafe body %s: %v", rec.rawAt(0), err)
+	}
+	want := []string{
+		"judge strictly by relevance to answering the query",
+		"answer no for memories about unrelated people, topics, or facts",
+	}
+	if got := sent.Questions["need_m0"].Instructions.Rules; !reflect.DeepEqual(got, want) {
+		t.Errorf("instructions.rules = %v, want the measured recipe %v", got, want)
+	}
+}
+
+// TestTypesafeQuestionFallsBackToGenericInstructionsOnMemoryMiss keeps an
+// unresolvable question safe: a "need_" id with no state entry, and the write
+// gate's keys (outside that convention), keep the generic instructions and lean
+// on the shared state. A miss must not error the whole call.
+func TestTypesafeQuestionFallsBackToGenericInstructionsOnMemoryMiss(t *testing.T) {
+	endpoint, rec := newFakeTypesafe(t, fakeReply{status: http.StatusOK, body: typesafeReply(t, 1, 1,
+		typesafeAnswers(map[string]*float64{"need_m9": float64Ptr(0.4), "durable": float64Ptr(0.7)}))})
+	shim := newShimForTypesafe(t, endpoint.URL, nil)
+
+	body := mustMarshal(t, wireRequest{
+		Model: "ENGINE-LABEL",
+		State: wireState{
+			Query:    "the deploy code is 1234",
+			Memories: map[string]wireMemory{"draft": {Name: "draft", Text: "the deploy code is 1234"}},
+		},
+		Questions: map[string]wireQuestion{
+			"need_m9": {Type: "noul", Instructions: "Memory m9 is necessary to answer or act on the query."},
+			"durable": {Type: "noul", Instructions: "The content in memory draft is a stable fact."},
+		},
+	})
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	var sent typesafeWireRequest
+	if err := json.Unmarshal(rec.rawAt(0), &sent); err != nil {
+		t.Fatalf("decode typesafe body %s: %v", rec.rawAt(0), err)
+	}
+	const wantGoal = "decide whether the memory is needed for the query"
+	for _, id := range []string{"need_m9", "durable"} {
+		question, ok := sent.Questions[id]
+		if !ok {
+			t.Fatalf("questions is missing %q: %v", id, sent.Questions)
+		}
+		if question.Instructions.Goal != wantGoal {
+			t.Errorf("%s: goal = %q, want the generic fallback %q", id, question.Instructions.Goal, wantGoal)
+		}
+		if want := []string{"judge strictly by relevance to answering the query"}; !reflect.DeepEqual(question.Instructions.Rules, want) {
+			t.Errorf("%s: rules = %v, want the generic %v", id, question.Instructions.Rules, want)
+		}
+	}
+	if out := decodeWire(t, raw); out.Probabilities["need_m9"] != 0.4 || out.Probabilities["durable"] != 0.7 {
+		t.Errorf("probabilities = %v, want every key answered despite the fallback", out.Probabilities)
+	}
+}
+
+// TestTypesafeQuestionGoalTruncatesLongMemoryText: the goal carries a bounded
+// excerpt (the state keeps the full text), the bound never splits a rune, and a
+// memory at the bound passes through untouched.
+func TestTypesafeQuestionGoalTruncatesLongMemoryText(t *testing.T) {
+	long := "prelude " + strings.Repeat("x", maxTypesafeGoalMemoryChars)
+	endpoint, rec := newFakeTypesafe(t, fakeReply{status: http.StatusOK, body: typesafeReply(t, 1, 1,
+		typesafeAnswers(map[string]*float64{"need_m0": float64Ptr(0.5)}))})
+	shim := newShimForTypesafe(t, endpoint.URL, nil)
+
+	body := mustMarshal(t, wireRequest{
+		Model: "ENGINE-LABEL",
+		State: wireState{
+			Query:    "q",
+			Memories: map[string]wireMemory{"m0": {Name: "long", Text: long}},
+		},
+		Questions: map[string]wireQuestion{
+			"need_m0": {Type: "noul", Instructions: "Memory m0 is necessary to answer or act on the query."},
+		},
+	})
+	status, raw := postWire(t, shim.URL, body)
+	requireStatus(t, status, http.StatusOK, raw)
+
+	var sent typesafeWireRequest
+	if err := json.Unmarshal(rec.rawAt(0), &sent); err != nil {
+		t.Fatalf("decode typesafe body %s: %v", rec.rawAt(0), err)
+	}
+	wantGoal := "decide whether the memory '" + long[:maxTypesafeGoalMemoryChars] + "…' is needed to answer the query 'q'"
+	if got := sent.Questions["need_m0"].Instructions.Goal; got != wantGoal {
+		t.Errorf("goal is not the bounded excerpt:\n got %q\nwant %q", got, wantGoal)
+	}
+	if got := sent.State.Memories["m0"].Text; got != long {
+		t.Errorf("state.memories[m0].text has %d chars, want the full %d (the state stays the fallback)", len(got), len(long))
+	}
+
+	// At the bound there is nothing to cut; past it, a multi-byte rune straddling
+	// the bound is dropped rather than split (a split reaches the wire as U+FFFD).
+	exact := strings.Repeat("y", maxTypesafeGoalMemoryChars)
+	if got := typesafeMemoryExcerpt(exact); got != exact {
+		t.Errorf("a memory at the bound must pass through, got %q", got)
+	}
+	multi := strings.Repeat("日", maxTypesafeGoalMemoryChars)
+	got := typesafeMemoryExcerpt(multi)
+	if !utf8.ValidString(got) || strings.Contains(got, "\uFFFD") {
+		t.Errorf("the excerpt split a multi-byte rune: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("the excerpt must end in an ellipsis, got %q", got)
 	}
 }
 
