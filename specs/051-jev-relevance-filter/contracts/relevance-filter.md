@@ -34,6 +34,8 @@
 
 响应：每题一个校准概率（0–1）。客户端只依赖「question key → 概率」这一形状；字段细节适配器内收敛，wire 变更不波及接口。（Slice-1 注记）实现对响应形态容忍解析（probabilities/questions/results 多形态）；**T15/T19 前置条件**：评测/冒烟前须对真实端点钉死 canonical 形态与路由 path（默认 `/answers`）。（Slice-6 仲裁）请求里的 `text` 是**遮蔽后的记忆文本**（`filter.MaskSecrets`）：用户明确要求写入（`user_requested`）的密钥只入本地库，不发云；闸门侧 draft/userTurn 同样遮蔽后再发。
 
+**Backend wiring（openjev）**（P1.5 注记）：openjev backend = 按本 § wire 应答的**本地 shim**（`cmd/openjev-shim`：每个 pointer 请求翻译为一次 OpenAI 兼容 `chat.completions`，把题意渲染成单一 JSON 作答要求），**响应形状与本 § 完全一致**（canonical `{"probabilities":{qKey: p}}` + 可选 `usage`），故客户端零分支、wire 不变。**调用方须把 `jev.Config.Deadline` 与 `jev.Config.PerRequestTimeout` 同时放宽到 ≥30s**：生产默认 1s 面向托管端点，而本地 35B 每片需数秒；单请求超时取 `min(剩余 deadline, cap)`，**只放宽 Deadline 仍会被 1s cap 截断**。eval 侧接线落在 `cmd/locomo-bench`（`jevFilterConfig`：两个旋钮同值 30s）；引擎 `filter/jev` 的 1s 默认值不变，`mcpserver` / `engram-filter` 继续走生产默认。
+
 ## 3. Select 策略（纯函数，测试即文档）
 
 输入 `probs`、`cands`、`Policy{0.5, 0.35, 3, 12}`：

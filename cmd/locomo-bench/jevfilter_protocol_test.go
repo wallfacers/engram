@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wallfacers/engram/filter"
 )
@@ -1241,5 +1246,85 @@ func TestJevArmInvalidReasonNeverLetsAFailedRunLookMeasured(t *testing.T) {
 	// The first recorded cause wins.
 	if got := jevArmInvalidReason("arm B hit the frozen cap", fmt.Errorf("later"), &protocol, full[:1]); got != "arm B hit the frozen cap" {
 		t.Errorf("invalid reason = %q, want the first recorded cause", got)
+	}
+}
+
+// --- openjev backend wiring (P1.5) ----------------------------------------
+
+// TestJevFilterConfigWidensTimeoutsForTheLocalShim pins the openjev deadline
+// wiring: the backend is a local shim answering with a 35B model in seconds per
+// shard, and the engine's 1s defaults would cut every filter call off. Both knobs
+// have to move, because the per-request cap is min(remaining deadline, cap).
+func TestJevFilterConfigWidensTimeoutsForTheLocalShim(t *testing.T) {
+	policy := filter.DefaultPolicy()
+	cfg := jevFilterConfig(options{
+		jevBaseURL: "http://127.0.0.1:8020",
+		jevModel:   "Qwen3.6-shim-pinned",
+		jevAPIKey:  "openjev",
+		jevPath:    "/answers",
+	}, policy)
+
+	if cfg.Deadline != 30*time.Second {
+		t.Errorf("Deadline = %s, want 30s", cfg.Deadline)
+	}
+	if cfg.PerRequestTimeout != 30*time.Second {
+		t.Errorf("PerRequestTimeout = %s, want 30s", cfg.PerRequestTimeout)
+	}
+	if cfg.BaseURL != "http://127.0.0.1:8020" || cfg.Model != "Qwen3.6-shim-pinned" || cfg.APIKey != "openjev" || cfg.Path != "/answers" {
+		t.Errorf("address/per-key fields dropped: %+v", cfg)
+	}
+	if cfg.Policy != policy {
+		t.Errorf("policy = %+v, want the run's policy %+v", cfg.Policy, policy)
+	}
+
+	// A caller that pins its own bound wins, and the per-request cap follows it.
+	pinned := jevFilterConfig(options{jevDeadline: 5 * time.Second}, policy)
+	if pinned.Deadline != 5*time.Second || pinned.PerRequestTimeout != 5*time.Second {
+		t.Errorf("explicit bound = %s/%s, want 5s/5s", pinned.Deadline, pinned.PerRequestTimeout)
+	}
+}
+
+// TestBuildJevFilterClientSurvivesALocalShimCall drives the harness's own client
+// against a /answers endpoint that takes 1.5s to answer: with the 1s defaults this
+// call degrades, with the harness wiring it must return probabilities.
+func TestBuildJevFilterClientSurvivesALocalShimCall(t *testing.T) {
+	const latency = 1500 * time.Millisecond
+	answers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/answers" {
+			t.Errorf("shim path = %q, want /answers", r.URL.Path)
+		}
+		select {
+		case <-time.After(latency):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"probabilities":{"need_m0":0.9},"usage":{"prompt_tokens":10,"completion_tokens":2}}`)
+	}))
+	t.Cleanup(answers.Close)
+
+	client, err := buildJevFilterClient(options{
+		jevBaseURL: answers.URL,
+		jevModel:   "Qwen3.6-shim-pinned",
+		jevAPIKey:  "openjev",
+	}, filter.DefaultPolicy())
+	if err != nil {
+		t.Fatalf("build jev filter client: %v", err)
+	}
+	if client == nil {
+		t.Fatal("a fully configured client must not collapse to nil")
+	}
+
+	probs, meta, err := client.Filter(context.Background(), "which memory matters?", []filter.Candidate{
+		{ID: "m0", Name: "memory-m0", Text: "body-m0", Score: 1},
+	})
+	if err != nil {
+		t.Fatalf("filter through a %s-latency shim: %v (degraded: %v, notes %v)", latency, err, meta.Degraded, meta.Notes)
+	}
+	if want := []float64{0.9}; !reflect.DeepEqual(probs, want) {
+		t.Errorf("probabilities = %v, want %v", probs, want)
+	}
+	if meta.Degraded {
+		t.Errorf("the widened wiring must not degrade: %v", meta.Notes)
 	}
 }

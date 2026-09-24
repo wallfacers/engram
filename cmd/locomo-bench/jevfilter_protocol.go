@@ -727,19 +727,19 @@ func printJevArmEstimate(convs []conversation, opt options, prices priceTable, f
 	fmt.Printf("estimate jev-arms: frozen answer_input_cap=%d repetitions=%d empty_injection_floor=%.2f\n", plan.AnswerInputCap, plan.AnswerRepetitions, plan.EmptyInjectionFloor)
 }
 
+// jevFilterTimeout bounds one eval-side filter call, on both of the client's
+// timeout knobs. The engine's 1s defaults fit a hosted endpoint; the openjev
+// backend is a local shim answering with a 35B model, which needs seconds per
+// shard, so the caller widens both: Deadline bounds the whole Filter call and
+// PerRequestTimeout caps a single request at min(remaining, cap)
+// (filter/jev/jev.go). No engine default changes.
+const jevFilterTimeout = 30 * time.Second
+
 // buildJevFilterClient constructs the Jev filter from the run's configuration. An
 // unconfigured client collapses to a nil interface here (typed-nil discipline),
 // which is what the arms read as "degraded".
 func buildJevFilterClient(opt options, pol filter.Policy) (filter.RelevanceFilter, error) {
-	client, err := jev.New(jev.Config{
-		BaseURL:                    opt.jevBaseURL,
-		Model:                      opt.jevModel,
-		APIKey:                     opt.jevAPIKey,
-		Path:                       opt.jevPath,
-		Deadline:                   opt.jevDeadline,
-		PricePerMillionInputTokens: opt.jevPricePerMillion,
-		Policy:                     pol,
-	})
+	client, err := jev.New(jevFilterConfig(opt, pol))
 	if err != nil {
 		return nil, fmt.Errorf("configure jev filter: %w", err)
 	}
@@ -747,6 +747,27 @@ func buildJevFilterClient(opt options, pol filter.Policy) (filter.RelevanceFilte
 		return nil, nil
 	}
 	return client, nil
+}
+
+// jevFilterConfig is the exact Config the arms run with, split out so a test can
+// assert the timeout wiring without a network call. Both knobs get the same
+// value, so the per-request cap can never cut a shard off before the whole-call
+// deadline does; an explicitly set opt.jevDeadline wins over jevFilterTimeout.
+func jevFilterConfig(opt options, pol filter.Policy) jev.Config {
+	timeout := opt.jevDeadline
+	if timeout <= 0 {
+		timeout = jevFilterTimeout
+	}
+	return jev.Config{
+		BaseURL:                    opt.jevBaseURL,
+		Model:                      opt.jevModel,
+		APIKey:                     opt.jevAPIKey,
+		Path:                       opt.jevPath,
+		Deadline:                   timeout,
+		PerRequestTimeout:          timeout,
+		PricePerMillionInputTokens: opt.jevPricePerMillion,
+		Policy:                     pol,
+	}
 }
 
 // validateJevCounterFingerprint proves the packer's tokenizer is the one the
