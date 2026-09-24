@@ -772,15 +772,22 @@ func jevFilterConfig(opt options, pol filter.Policy) jev.Config {
 
 // validateJevCounterFingerprint proves the packer's tokenizer is the one the
 // protocol froze. A drift would silently change every "shown" count, so a
-// mismatch refuses the run instead of surfacing after the fact.
-func validateJevCounterFingerprint(ctx context.Context, counter evidencecompiler.TokenCounter, want string) error {
+// mismatch refuses the run instead of surfacing after the fact. The probe must
+// name the frozen answerer model: the tokenizer endpoint (vLLM /tokenize)
+// rejects an unknown model id, so a placeholder id would fail the run before a
+// single paid call.
+func validateJevCounterFingerprint(ctx context.Context, counter evidencecompiler.TokenCounter, want, answererModel string) error {
 	if counter == nil {
 		return fmt.Errorf("jev arms require a token counter")
 	}
 	if strings.TrimSpace(want) == "" {
+		// Nothing is frozen to prove, so the probe (and its model) never applies.
 		return nil
 	}
-	count, err := counter.CountInput(ctx, evidencecompiler.AnswerInput{Model: "fingerprint-probe", System: "s", User: "u"})
+	if strings.TrimSpace(answererModel) == "" {
+		return fmt.Errorf("jev token counter probe requires the frozen answerer model id")
+	}
+	count, err := counter.CountInput(ctx, evidencecompiler.AnswerInput{Model: answererModel, System: "s", User: "u"})
 	if err != nil {
 		return fmt.Errorf("probe jev token counter: %w", err)
 	}
@@ -1147,7 +1154,7 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 	if err != nil {
 		return fmt.Errorf("configure jev arm token counter: %w", err)
 	}
-	if err := validateJevCounterFingerprint(ctx, counter, protocol.Budget.CounterFingerprint); err != nil {
+	if err := validateJevCounterFingerprint(ctx, counter, protocol.Budget.CounterFingerprint, protocol.Models.Answerer.ID); err != nil {
 		return err
 	}
 	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)

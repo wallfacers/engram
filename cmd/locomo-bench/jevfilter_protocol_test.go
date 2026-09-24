@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/wallfacers/engram/filter"
+	"github.com/wallfacers/engram/memory/evidencecompiler"
 )
 
 // This file tests the 038-protocol integration surface: the pre-registration, the
@@ -1129,6 +1130,94 @@ func TestValidateJevArmsRegistrationEnvironment(t *testing.T) {
 	undeclared.jevPilotGateConfirmed = false
 	if err := validateJevArmsRegistrationEnvironment(undeclared); err == nil {
 		t.Error("an undeclared pilot gate was accepted")
+	}
+}
+
+// jevProbeRecordingCounter records the exact AnswerInput the fingerprint probe
+// sends and counts calls, so a test can prove both which model the probe names
+// and that a refused probe never reached the wire.
+type jevProbeRecordingCounter struct {
+	fingerprint string
+	calls       int
+	lastInput   evidencecompiler.AnswerInput
+}
+
+func (counter *jevProbeRecordingCounter) CountInput(_ context.Context, input evidencecompiler.AnswerInput) (evidencecompiler.TokenCount, error) {
+	counter.calls++
+	counter.lastInput = input
+	return evidencecompiler.TokenCount{InputTokens: 3, Fingerprint: counter.fingerprint}, nil
+}
+
+// TestValidateJevCounterFingerprintProbesWithTheFrozenAnswererModel pins the probe
+// to the frozen answerer model id: vLLM's /tokenize rejects an unknown model with
+// HTTP 404, so the placeholder id this probe used to send failed every --jev-arms
+// pass before a single paid call.
+func TestValidateJevCounterFingerprintProbesWithTheFrozenAnswererModel(t *testing.T) {
+	const (
+		model = "Qwen/Qwen3.6-35B-A3B-FP8"
+		want  = "sha256:answerer-template-r1"
+	)
+	counter := &jevProbeRecordingCounter{fingerprint: want}
+	if err := validateJevCounterFingerprint(context.Background(), counter, want, model); err != nil {
+		t.Fatalf("a probe naming the frozen answerer model was refused: %v", err)
+	}
+	if counter.calls != 1 {
+		t.Fatalf("token counter calls = %d, want 1", counter.calls)
+	}
+	if counter.lastInput.Model != model {
+		t.Errorf("probe model = %q, want the frozen answerer %q", counter.lastInput.Model, model)
+	}
+	if counter.lastInput.Model == "fingerprint-probe" {
+		t.Error("the probe still sends the placeholder model id")
+	}
+}
+
+// TestValidateJevCounterFingerprintRefusesABlankAnswererModel pins the fail-closed
+// rule: without a frozen answerer id the probe cannot name the tokenizer's model,
+// so the run refuses instead of falling back to a placeholder id.
+func TestValidateJevCounterFingerprintRefusesABlankAnswererModel(t *testing.T) {
+	for _, model := range []string{"", "   ", "\t\n"} {
+		counter := &jevProbeRecordingCounter{fingerprint: "sha256:answerer-template-r1"}
+		err := validateJevCounterFingerprint(context.Background(), counter, "sha256:answerer-template-r1", model)
+		if err == nil {
+			t.Fatalf("a blank answerer model id (%q) was accepted", model)
+		}
+		if !strings.Contains(err.Error(), "answerer") {
+			t.Errorf("refusal for %q does not name the missing answerer model: %v", model, err)
+		}
+		if counter.calls != 0 {
+			t.Errorf("a blank answerer model still probed the counter %d times", counter.calls)
+		}
+	}
+}
+
+// TestValidateJevCounterFingerprintStillRefusesDrift pins the comparison: a counter
+// whose fingerprint differs from the frozen one stops the run.
+func TestValidateJevCounterFingerprintStillRefusesDrift(t *testing.T) {
+	counter := &jevProbeRecordingCounter{fingerprint: "sha256:other-template"}
+	err := validateJevCounterFingerprint(context.Background(), counter, "sha256:answerer-template-r1", "Qwen/Qwen3.6-35B-A3B-FP8")
+	if err == nil {
+		t.Fatal("a drifted counter fingerprint was accepted")
+	}
+	if want := `differs from the frozen "sha256:answerer-template-r1"`; !strings.Contains(err.Error(), want) {
+		t.Errorf("drift refusal = %v, want it to contain %q", err, want)
+	}
+}
+
+// TestValidateJevCounterFingerprintKeepsNilCounterAndBlankWant pins the two
+// pre-existing behaviors the answerer-model argument must not disturb: a nil
+// counter is always refused, and a blank frozen fingerprint needs no probe.
+func TestValidateJevCounterFingerprintKeepsNilCounterAndBlankWant(t *testing.T) {
+	err := validateJevCounterFingerprint(context.Background(), nil, "sha256:answerer-template-r1", "Qwen/Qwen3.6-35B-A3B-FP8")
+	if err == nil || !strings.Contains(err.Error(), "jev arms require a token counter") {
+		t.Fatalf("nil counter refusal = %v, want the pre-existing message", err)
+	}
+	counter := &jevProbeRecordingCounter{fingerprint: "sha256:other-template"}
+	if err := validateJevCounterFingerprint(context.Background(), counter, "  ", "Qwen/Qwen3.6-35B-A3B-FP8"); err != nil {
+		t.Fatalf("a blank frozen fingerprint was refused: %v", err)
+	}
+	if counter.calls != 0 {
+		t.Errorf("a blank frozen fingerprint still probed the counter %d times", counter.calls)
 	}
 }
 
