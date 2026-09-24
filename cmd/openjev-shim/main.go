@@ -8,23 +8,39 @@
 // outside edge: a single prompt carrying the query, the memories and the "noul"
 // questions, and a single strict-JSON object of probabilities back.
 //
-// It is a translation layer, not Jev: the numbers are a local approximation of
-// Jev's calibrated probabilities, so any eval claim that uses this backend is
-// labeled "openjev" (data-model.md Backend enum) rather than "jev".
+// It runs in one of two upstream modes (OPENJEV_UPSTREAM):
 //
-// It carries no credentials, reads none, and binds loopback only:
+//	chat      (default) OpenAI-compatible chat.completions against a local model:
+//	          a single prompt carrying the query, the memories and the questions,
+//	          and a single strict-JSON object of probabilities back. The numbers
+//	          are a local approximation of Jev's calibrated probabilities, so an
+//	          eval claim that uses this mode is labeled "openjev".
+//	typesafe  the real TypeSafe "systemone" evaluation model (the Vercel AI
+//	          Gateway's typesafe-ai/jev): the pointer request is translated into
+//	          {model, state, questions} and each answer's "yes" probability becomes
+//	          that question key's probability, so eval claims may be labeled "jev".
+//
+// The chat mode carries no credentials and reads none. The typesafe mode carries
+// exactly one (OPENJEV_TYPESAFE_API_KEY), which travels only in the Authorization
+// header — never into a log, a tool response or a tracked file. Either mode binds
+// loopback only:
 //
 //	openjev-shim --port 8020
-//	  OPENJEV_UPSTREAM_BASE_URL       OpenAI-compatible base URL (default http://127.0.0.1:8000/v1)
-//	  OPENJEV_UPSTREAM_MODEL          upstream model revision (required)
+//	  OPENJEV_UPSTREAM                "chat" (default) or "typesafe"
+//	  OPENJEV_UPSTREAM_BASE_URL       OpenAI-compatible base URL (default http://127.0.0.1:8000/v1; chat)
+//	  OPENJEV_UPSTREAM_MODEL          upstream model revision (required in chat mode)
 //	  OPENJEV_MAX_QUESTIONS           per-request question bound (default 256, larger -> 413)
-//	  OPENJEV_MAX_COMPLETION_TOKENS   upstream max_tokens override (default 0 = computed:
+//	  OPENJEV_MAX_COMPLETION_TOKENS   upstream max_tokens override (chat; default 0 = computed:
 //	                                  24/question + 1024 for the upstream's inline-thinking
 //	                                  tax, floor 1280, cap 8192)
 //	  OPENJEV_THINKING                "off" (default) sends chat_template_kwargs
 //	                                  {"enable_thinking": false} upstream so a hybrid-thinking
 //	                                  model does not spend the budget on chain-of-thought;
 //	                                  "on" omits the field for an upstream that rejects it
+//	  OPENJEV_TYPESAFE_ENDPOINT       systemone endpoint (default
+//	                                  https://ai-gateway.vercel.sh/v4/ai/evaluation-model)
+//	  OPENJEV_TYPESAFE_MODEL          systemone model id (default typesafe-ai/jev)
+//	  OPENJEV_TYPESAFE_API_KEY        gateway credential (required in typesafe mode; never logged)
 //
 // The client's whole-call deadline is part of its own Config, so the caller that
 // wires openjev must widen jev.Config.Deadline and jev.Config.PerRequestTimeout
@@ -56,8 +72,10 @@ func run(args []string, getenv func(string) string) error {
 }
 
 // parseConfig resolves the flags and the environment into a server config. The
-// model has no default on purpose: an openjev run must pin the model revision it
-// measured, or the eval numbers are unattributable.
+// model has no default on purpose in chat mode: an openjev run must pin the model
+// revision it measured, or the eval numbers are unattributable. Typesafe mode
+// requires OPENJEV_TYPESAFE_API_KEY instead and applies the typesafe endpoint and
+// model defaults.
 func parseConfig(args []string, getenv func(string) string) (shimConfig, error) {
 	fs := flag.NewFlagSet("openjev-shim", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -73,10 +91,14 @@ func parseConfig(args []string, getenv func(string) string) (shimConfig, error) 
 	}
 
 	cfg := shimConfig{
-		Port:            *port,
-		UpstreamBaseURL: strings.TrimSpace(getenv("OPENJEV_UPSTREAM_BASE_URL")),
-		UpstreamModel:   strings.TrimSpace(getenv("OPENJEV_UPSTREAM_MODEL")),
-		MaxQuestions:    defaultMaxQuestions,
+		Port:             *port,
+		UpstreamMode:     strings.TrimSpace(getenv("OPENJEV_UPSTREAM")),
+		UpstreamBaseURL:  strings.TrimSpace(getenv("OPENJEV_UPSTREAM_BASE_URL")),
+		UpstreamModel:    strings.TrimSpace(getenv("OPENJEV_UPSTREAM_MODEL")),
+		TypesafeEndpoint: strings.TrimSpace(getenv("OPENJEV_TYPESAFE_ENDPOINT")),
+		TypesafeModel:    strings.TrimSpace(getenv("OPENJEV_TYPESAFE_MODEL")),
+		TypesafeAPIKey:   strings.TrimSpace(getenv("OPENJEV_TYPESAFE_API_KEY")),
+		MaxQuestions:     defaultMaxQuestions,
 	}
 	if raw := strings.TrimSpace(getenv("OPENJEV_MAX_QUESTIONS")); raw != "" {
 		questions, err := strconv.Atoi(raw)
