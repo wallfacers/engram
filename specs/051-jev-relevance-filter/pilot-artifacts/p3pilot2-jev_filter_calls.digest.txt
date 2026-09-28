@@ -1,0 +1,32 @@
+# jev_filter_calls.jsonl digest — autodl-container-mdzl26etdq-06889272 /root/autodl-tmp/051-jev-arms-runs/formal-pilot-20260928T092440 — generated 2026-09-28 14:33:51+0800
+ROWS=3080  BYTES=1074752
+--- head -5 ---
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":1,"q":0,"repetition":0,"arm":"D","pool":133,"memories":2,"kept":2,"dropped":131,"theta":0.5,"latency_ms":1409,"usd":0,"input_tokens":30616,"output_tokens":6754,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":1,"q":0,"repetition":0,"arm":"D-noRelax","pool":133,"memories":2,"kept":2,"dropped":131,"theta":0.5,"latency_ms":1214,"usd":0,"input_tokens":30616,"output_tokens":6754,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":4,"q":0,"repetition":0,"arm":"D","pool":150,"memories":12,"kept":12,"dropped":138,"theta":0.5,"latency_ms":1014,"usd":0,"input_tokens":34590,"output_tokens":7613,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":0,"q":0,"repetition":0,"arm":"D","pool":140,"memories":1,"kept":1,"dropped":139,"theta":0.5,"latency_ms":968,"usd":0,"input_tokens":32451,"output_tokens":7070,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":6,"q":0,"repetition":0,"arm":"D","pool":150,"memories":1,"kept":1,"dropped":149,"theta":0.5,"latency_ms":1014,"usd":0,"input_tokens":34272,"output_tokens":7603,"degraded":false}
+--- tail -5 ---
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":3,"q":196,"repetition":0,"arm":"D-noRelax","pool":150,"memories":1,"kept":1,"dropped":149,"theta":0.5,"latency_ms":1128,"usd":0,"input_tokens":34544,"output_tokens":7601,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":3,"q":197,"repetition":0,"arm":"D","pool":150,"memories":6,"kept":6,"dropped":144,"theta":0.5,"latency_ms":1023,"usd":0,"input_tokens":34355,"output_tokens":7608,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":3,"q":197,"repetition":0,"arm":"D-noRelax","pool":150,"memories":6,"kept":6,"dropped":144,"theta":0.5,"latency_ms":1011,"usd":0,"input_tokens":34355,"output_tokens":7608,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":3,"q":198,"repetition":0,"arm":"D","pool":150,"memories":8,"kept":8,"dropped":142,"theta":0.5,"latency_ms":1815,"usd":0,"input_tokens":36310,"output_tokens":7601,"degraded":false}
+{"schema":"022.v1","protocol_hash":"sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125","mechanism_key":"filter.jev.v1","class":"filter","conv":3,"q":198,"repetition":0,"arm":"D-noRelax","pool":150,"memories":9,"kept":9,"dropped":141,"theta":0.5,"latency_ms":1129,"usd":0,"input_tokens":36310,"output_tokens":7601,"degraded":false}
+--- degraded counts ---
+degraded_true=25
+degraded_false=3055
+--- arm counts ---
+arm=D-noRelax 1540
+arm=D 1540
+degraded_share_pct=0.811688
+--- latency bands (ms) ---
+count=3080 mean_ms=1415 max_ms=30001
+<100=32 100-499=1 500-999=539 1000-1999=2005 2000-4999=486 5000-9999=9 >=10000=8
+--- degraded-only latency ---
+--- token sums ---
+--- notes / invalid markers ---
+     20 "notes":["negative cache: endpoint failed within the last 30s; degraded without a network call"]
+      5 "notes":["shard failure: no partial adoption; the caller must fall back to the fused top-N"]
+293
+--- held: formal_calls present? ---
+0

@@ -1,0 +1,1 @@
+retrieval=hybrid;arms=hybrid={force_answer=false;no_idk_retry=true;answer_prompt_digest=sha256:dec161e46acdb3d50517b95b3a60cdd24d9e99832bb92714f6db141d69552569;judge_model=deepseek-flash}

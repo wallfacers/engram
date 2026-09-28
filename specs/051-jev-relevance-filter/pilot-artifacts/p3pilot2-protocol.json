@@ -1,0 +1,125 @@
+{
+  "schema": "022.v1",
+  "protocol_id": "locomo-b1-high",
+  "protocol_hash": "sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125",
+  "created_at": "2026-09-28T01:24:40.066005544Z",
+  "git": {
+    "commit": "7ff5e807d6e861e53150485f48d6cc86a343de89",
+    "dirty": false
+  },
+  "benchmark": {
+    "name": "locomo",
+    "dataset_digest": "sha256:79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+    "split": "category_1_4",
+    "question_count": 1540,
+    "question_ids_digest": "sha256:fa8e64417a3fd0c18322cf5d074808771b28e8a728294bfab6fec92be8837032"
+  },
+  "store": {
+    "schema_version": 7,
+    "ingestion_recipe": "ledger_lossless_chunks_v2",
+    "ingestion_config_digest": "sha256:b843cf1f8b8b812938e7ac8211b2395ed608cefce43577c4c17ce07e7a668be7",
+    "projection_builder_versions": {
+      "atomic_fact": "entry_store_explicit_v1"
+    }
+  },
+  "models": {
+    "extractor": {
+      "id": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "revision": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "provider": "openai",
+      "prompt_digest": "sha256:5760687e119d835f4508d2478fbbde4854d339f8a1884aea52fe552dc263a896"
+    },
+    "answerer": {
+      "id": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "revision": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "provider": "openai",
+      "prompt_digest": "sha256:dec161e46acdb3d50517b95b3a60cdd24d9e99832bb92714f6db141d69552569"
+    },
+    "judge": {
+      "id": "deepseek-flash",
+      "revision": "deepseek-flash",
+      "provider": "anthropic",
+      "prompt_digest": "sha256:51f61c73d58579b487c95c8a517646a885f0f3b770cc040a6a7a07757d0db0a1"
+    },
+    "planner": {
+      "enabled": false,
+      "id": "",
+      "revision": "",
+      "provider": "",
+      "prompt_digest": ""
+    }
+  },
+  "retrieval": {
+    "recipe": "hybrid",
+    "embedding_fingerprint": "sha256:a69101199b2c3f68180ca03267580d32fa80f771853ac1058de17d235154ae71",
+    "reranker": "disabled",
+    "candidate_limit": 30,
+    "candidate_rules_digest": "sha256:af161cdaa1f7a874025147196bb02b3dfb9efd4eb53d0309a1fa7e20bda9d1d4"
+  },
+  "budget": {
+    "profile": "high",
+    "answer_input_token_cap": 32768,
+    "max_output_tokens": 8000,
+    "candidate_limit": 30,
+    "retrieval_call_limit": 1,
+    "answer_call_limit": 1,
+    "counter_fingerprint": "sha256:4806660dd8fa2e2b5cfe9ebfefed34e661faf4ba4cace6b7d119ddf6ddc8239b"
+  },
+  "aggregation": {
+    "answer_repetitions": 1,
+    "rule": "majority_correctness",
+    "judge_repetitions": 1,
+    "seed_policy": "independent-recorded"
+  },
+  "judge_audit": {
+    "all_discordant": true,
+    "concordant_sampling_digest": "sha256:4fae141ca8b3fb1c786650fee39d1c4763ed2ed87eb3cd8625cf29ae9e768f2c",
+    "reviewers": 2,
+    "blinded_to_arm": true,
+    "adjudication_rule": "independent_then_adjudicate"
+  },
+  "coverage_strata": {
+    "boundaries": [
+      0,
+      0.5,
+      0.9,
+      1
+    ],
+    "selection_digest": "sha256:cf565a82740bbf75c25619d2d41709ba80c3fadb47b481496fac40780b6e65df"
+  },
+  "experiment": {
+    "stage": "b1",
+    "arm": "legacy_count_packer",
+    "control_protocol_hash": "",
+    "primary_cohort": "all",
+    "mechanism_flags": {
+      "filter.jev.v1": true,
+      "idk_retry": false,
+      "iris": false,
+      "rerank": false
+    },
+    "filter": {
+      "mechanism_key": "filter.jev.v1",
+      "filter_model": "typesafe-ai/jev",
+      "filter_base_url_host": "127.0.0.1:8020",
+      "theta": 0.5,
+      "relax_theta": 0.35,
+      "relax_max": 3,
+      "k_show_max": 12,
+      "pool": 150,
+      "answer_input_cap": 32768,
+      "answer_repetitions": 1,
+      "empty_injection_floor": 0.5,
+      "arms": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "D-noRelax"
+      ],
+      "pilot_gate_confirmed": true,
+      "warmup_disposed": true,
+      "same_window_reps": true
+    }
+  }
+}
