@@ -1120,6 +1120,13 @@ func attachJevArmsRegistrationForFreeze(opt options, protocol *evalProtocol) err
 	opt.jevPolicy = policy
 	opt.jevBaseURL = os.Getenv("ENGRAM_JEV_BASE_URL")
 	opt.jevBaseURLHost = baseURLHost(opt.jevBaseURL)
+	// The answering subset is part of the registration the freeze seals, so it
+	// must be parsed here too — a manifest frozen without it would refuse the
+	// subset-scoped run at the binding check.
+	opt.jevAnswerArms, err = parseJevAnswerArms(opt.jevAnswerArmsRaw)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(opt.jevModel) == "" {
 		opt.jevModel = os.Getenv("ENGRAM_JEV_MODEL")
 	}
