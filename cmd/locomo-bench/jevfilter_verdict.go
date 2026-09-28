@@ -272,6 +272,43 @@ func writeJevRunReceipt(runDir string, protocol *evalProtocol, validity jevRunVa
 	return writeJSON(filepath.Join(runDir, evalSummaryArtifactFile), receipt)
 }
 
+// jevB0ContinuityDeclaration is the arms path's honest answer to the
+// --jev-b0-continuity-declared receipt. The 022 chain's b0_continuity_summary.json
+// is a B0-experiment artifact (deriveB0ContinuitySummary marks stage != "b0"
+// invalid by construction) that an arms run can never legitimately produce, so
+// the declaration the validity gate demands records what is actually true: an
+// operator-declared continuity, the machine-checkable anchors (judge model,
+// question-set digest, control protocol hash), and the explicit note that no
+// machine B0 run backs it.
+type jevB0ContinuityDeclaration struct {
+	Schema             string `json:"schema"`
+	ProtocolHash       string `json:"protocol_hash"`
+	Declared           bool   `json:"declared"`
+	ControlProtocolHash string `json:"control_protocol_hash"`
+	JudgeModel         string `json:"judge_model"`
+	JudgeProvider      string `json:"judge_provider"`
+	QuestionIDsDigest  string `json:"question_ids_digest"`
+	Questions          int    `json:"questions"`
+	Note               string `json:"note"`
+}
+
+func writeJevB0ContinuityDeclaration(runDir string, protocol *evalProtocol) error {
+	declaration := jevB0ContinuityDeclaration{
+		Schema:   evalProtocolSchema,
+		Declared: true,
+		Note:     "operator-declared B0 continuity for the 051 arms run; no machine B0 run backs this file — the anchors below are the machine-checkable facts the declaration is made against",
+	}
+	if protocol != nil {
+		declaration.ProtocolHash = protocol.ProtocolHash
+		declaration.ControlProtocolHash = protocol.Experiment.ControlProtocolHash
+		declaration.JudgeModel = protocol.Models.Judge.ID
+		declaration.JudgeProvider = protocol.Models.Judge.Provider
+		declaration.QuestionIDsDigest = protocol.Benchmark.QuestionIDsDigest
+		declaration.Questions = protocol.Benchmark.QuestionCount
+	}
+	return writeJSON(filepath.Join(runDir, evalB0ContinuitySummaryFile), declaration)
+}
+
 // buildJevArmReport aggregates the rows into the report the verdict cites.
 func buildJevArmReport(input jevArmVerdictInput) (jevArmReport, error) {
 	report := jevArmReport{
@@ -702,6 +739,11 @@ func writeJevArmArtifacts(opt options, registration jevFilterRegistration, proto
 	if err := writeJevRunReceipt(opt.runDir, protocol, validity, len(rows), filterCalls, retrievalCalls); err != nil {
 		return fmt.Errorf("write %s: %w", evalSummaryArtifactFile, err)
 	}
+	if opt.jevB0Continuity {
+		if err := writeJevB0ContinuityDeclaration(opt.runDir, protocol); err != nil {
+			return fmt.Errorf("write %s: %w", evalB0ContinuitySummaryFile, err)
+		}
+	}
 	var cost *costReport
 	if ledger != nil {
 		report := ledger.Report()
@@ -768,12 +810,17 @@ func jevDefaultParityEvidence() string {
 }
 
 // jevArtifactPresence reports which validity artifacts exist in the run dir.
+// The B0 continuity declaration is statted outside the core set because its
+// presence is only required when the run declares it.
 func jevArtifactPresence(runDir string) map[string]bool {
-	present := make(map[string]bool, len(jevCoreValidityArtifacts))
+	present := make(map[string]bool, len(jevCoreValidityArtifacts)+1)
 	for _, artifact := range jevCoreValidityArtifacts {
 		if _, err := os.Stat(filepath.Join(runDir, artifact)); err == nil {
 			present[artifact] = true
 		}
+	}
+	if _, err := os.Stat(filepath.Join(runDir, evalB0ContinuitySummaryFile)); err == nil {
+		present[evalB0ContinuitySummaryFile] = true
 	}
 	return present
 }

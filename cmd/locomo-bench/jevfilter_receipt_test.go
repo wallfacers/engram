@@ -250,3 +250,43 @@ func answerArmsContains(arms []jevArm, arm jevArm) bool {
 	}
 	return false
 }
+
+// TestWriteJevArmArtifactsWritesB0Declaration pins the B0 continuity seam fix:
+// the arms path declares --jev-b0-continuity-declared (required by the pre-flight),
+// and the receipt it owes is an honest operator-declaration record — the 022
+// b0_continuity_summary.json is a B0-experiment artifact (stage != b0 is invalid
+// by construction) the arms path can never legitimately produce.
+func TestWriteJevArmArtifactsWritesB0Declaration(t *testing.T) {
+	dir := t.TempDir()
+	for _, artifact := range []string{evalProtocolArtifactFile, jevFilterCallJournalFile} {
+		if err := os.WriteFile(filepath.Join(dir, artifact), []byte("{}\n"), 0o644); err != nil { //nolint:gosec
+			t.Fatal(err)
+		}
+	}
+	protocol := &evalProtocol{Benchmark: evalBenchmarkProvenance{QuestionCount: 2}, Aggregation: evalAggregationProtocol{AnswerRepetitions: 1}}
+	opt := options{runDir: dir, jevB0Continuity: true}
+	if err := writeJevArmArtifacts(opt, jevTestRegistration(), protocol, jevReceiptTestRows(2, 1), nil, 4, 10, nil, false, ""); err != nil {
+		t.Fatalf("write artifacts with B0 declaration: %v", err)
+	}
+	var declaration map[string]any
+	if err := readJSON(filepath.Join(dir, evalB0ContinuitySummaryFile), &declaration); err != nil {
+		t.Fatalf("B0 continuity declaration was not written: %v", err)
+	}
+	if declaration["declared"] != true {
+		t.Errorf("declaration = %v, want declared=true", declaration["declared"])
+	}
+
+	// Without the declaration the file must not appear.
+	dir2 := t.TempDir()
+	for _, artifact := range []string{evalProtocolArtifactFile, jevFilterCallJournalFile} {
+		if err := os.WriteFile(filepath.Join(dir2, artifact), []byte("{}\n"), 0o644); err != nil { //nolint:gosec
+			t.Fatal(err)
+		}
+	}
+	if err := writeJevArmArtifacts(options{runDir: dir2}, jevTestRegistration(), protocol, jevReceiptTestRows(2, 1), nil, 4, 10, nil, false, ""); err != nil {
+		t.Fatalf("write artifacts without B0 declaration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir2, evalB0ContinuitySummaryFile)); err == nil {
+		t.Error("B0 continuity file was written without the declaration")
+	}
+}
