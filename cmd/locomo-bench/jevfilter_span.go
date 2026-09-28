@@ -241,7 +241,10 @@ func recoverSpans(ctx context.Context, sr *spanRecovery, kept, pool []memory.Res
 }
 
 // spanCardText renders one evidence record as a speaker-attributed span card.
-// Offsets are code points; a full-source window renders the whole record.
+// Offsets are code points; a full-source window renders the whole record. The
+// ledger's message ingest already prefixes some content with "Speaker:" — the
+// attribution is added only when the span does not already carry it, so a card
+// never reads "Melanie: Melanie: ...".
 func spanCardText(ev memory.Evidence, w spanWindow) string {
 	text := ev.Content
 	if !w.full && w.end > w.start {
@@ -251,6 +254,9 @@ func spanCardText(ev memory.Evidence, w spanWindow) string {
 	}
 	text = strings.TrimSpace(text)
 	if ev.Speaker == "" {
+		return text
+	}
+	if strings.HasPrefix(text, ev.Speaker+":") {
 		return text
 	}
 	return ev.Speaker + ": " + text

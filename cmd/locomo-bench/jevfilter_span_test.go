@@ -181,4 +181,10 @@ func TestSpanCardTextFallsBackToWholeRecordOnFullSource(t *testing.T) {
 	if got, want := spanCardText(noSpeaker, spanWindow{full: true}), "bare"; got != want {
 		t.Errorf("anonymous card = %q, want %q", got, want)
 	}
+	// Ledger message ingest prefixes some content with the speaker already; the
+	// card must not double the attribution.
+	prefixed := memory.Evidence{Speaker: "Melanie", Content: "Melanie: I signed up for pottery class"}
+	if got, want := spanCardText(prefixed, spanWindow{full: true}), "Melanie: I signed up for pottery class"; got != want {
+		t.Errorf("prefixed card = %q, want %q (no doubled speaker)", got, want)
+	}
 }
