@@ -56,7 +56,7 @@ func TestPairedEvaluationHolmCategoryGateAndPromotionVerdict(t *testing.T) {
 	}
 
 	base := evalPromotionInput{
-		Validity:                       evalArtifactValidity{Valid: true, Complete: true, CandidateIdentityRate: 1, SourceValidationRate: 1, SpanRecoveryRate: 1, CitationCoverageRate: 1, WithinCapRate: 1, AnswerCallComplianceRate: 1},
+		ValidityComplete:               true,
 		PrimaryDeltaPP:                 2.1,
 		PrimaryMcNemarP:                0.01,
 		OtherBenchmarkDeltaPP:          -0.4,
@@ -84,7 +84,7 @@ func TestPairedEvaluationHolmCategoryGateAndPromotionVerdict(t *testing.T) {
 	}
 
 	invalid := base
-	invalid.Validity.WithinCapRate = 0.99
+	invalid.ValidityComplete = false
 	if got := promotionVerdictFor(invalid); got != evalVerdictInvalid {
 		t.Fatalf("invalid artifact verdict = %q, want INVALID", got)
 	}

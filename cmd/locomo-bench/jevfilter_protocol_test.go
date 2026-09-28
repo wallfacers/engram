@@ -30,12 +30,13 @@ func jevTestRegistration() jevFilterRegistration {
 	return registration
 }
 
-func jevTestValidity() evalArtifactValidity {
-	return evalArtifactValidity{
+func jevTestValidity() jevRunValidity {
+	return jevRunValidity{
 		Valid: true, Complete: true,
-		CandidateIdentityRate: 1, SourceValidationRate: 1, SpanRecoveryRate: 1,
-		CitationCoverageRate: 1, WithinCapRate: 1, AnswerCallComplianceRate: 1,
-		UnattributedAddCount: 0,
+		QuestionsMeasured: 2, QuestionsExpected: 2,
+		RepetitionsMeasured: 1, RepetitionsExpected: 1,
+		RowsMeasured: 10, RowsExpected: 10,
+		ArmRowsEqual: true, IdentityRate: 1, WithinCapRate: 1, AnswerComplianceRate: 1,
 	}
 }
 
@@ -782,24 +783,18 @@ func TestJevArmEmptyInjectionRate(t *testing.T) {
 	}
 }
 
-// jevWriteRunDir is a run directory carrying every required validity artifact and
-// a complete per-repeat receipt set, so the writer tests exercise the criteria
-// rather than the validity gate.
+// jevWriteRunDir is a run directory carrying the artifacts earlier stages
+// genuinely write (the frozen protocol and the filter call journal). The rows
+// file and the summary receipt are the arms run's own output and are written by
+// writeJevArmArtifacts itself, so the writer tests exercise the criteria rather
+// than the validity gate.
 func jevWriteRunDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, artifact := range jevCoreValidityArtifacts {
+	for _, artifact := range []string{evalProtocolArtifactFile, jevFilterCallJournalFile} {
 		if err := os.WriteFile(filepath.Join(dir, artifact), []byte("{}\n"), 0o644); err != nil { //nolint:gosec
 			t.Fatal(err)
 		}
-	}
-	summary := map[string]any{"validity": jevTestValidity()}
-	raw, err := json.MarshalIndent(summary, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, evalSummaryArtifactFile), raw, 0o644); err != nil { //nolint:gosec
-		t.Fatal(err)
 	}
 	return dir
 }
@@ -808,11 +803,17 @@ func TestWriteJevArmArtifactsLandsEverythingAndSurfacesValidity(t *testing.T) {
 	dir := jevWriteRunDir(t)
 	opt := options{runDir: dir}
 	registration := jevTestRegistration()
-	rows := jevTestRows(2, jevTestRowSpec{Arm: jevArmD, Shown: 3, Tokens: 500, JevMs: 300, JevUSD: 0.0004})
+	rows := jevTestRows(2,
+		jevTestRowSpec{Arm: jevArmA, Shown: 8, Tokens: 800, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmB, Shown: 150, Tokens: 3000, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmC, Shown: 12, Tokens: 100, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmD, Shown: 3, Tokens: 400, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 3, Tokens: 400, Correct: func(int) bool { return true }},
+	)
 	if err := writeJevArmArtifacts(opt, registration, nil, rows, nil, 2, 8, nil, false, ""); err != nil {
 		t.Fatalf("write artifacts: %v", err)
 	}
-	for _, name := range []string{jevArmRowsFile, jevArmReportFile, jevArmVerdictFile} {
+	for _, name := range []string{jevArmRowsFile, jevArmReportFile, jevArmVerdictFile, evalSummaryArtifactFile} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s was not written: %v", name, err)
 		}
@@ -827,9 +828,10 @@ func TestWriteJevArmArtifactsLandsEverythingAndSurfacesValidity(t *testing.T) {
 	if verdict.RegistrationDigest != mustDigest(t, registration) {
 		t.Errorf("verdict registration digest = %q", verdict.RegistrationDigest)
 	}
-	// Remove a required artifact: the run must fail closed, and it must still have
-	// written the verdict so the operator can read why.
-	if err := os.Remove(filepath.Join(dir, evalBundleArtifactFile)); err != nil {
+	// Remove a required artifact the run does not itself write: the run must fail
+	// closed, and it must still have written the verdict so the operator can
+	// read why.
+	if err := os.Remove(filepath.Join(dir, jevFilterCallJournalFile)); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeJevArmArtifacts(opt, registration, nil, rows, nil, 2, 8, nil, false, ""); err == nil {
@@ -882,7 +884,7 @@ func TestWriteJevArmArtifactsMergesBothPasses(t *testing.T) {
 		jevTestRowSpec{Arm: jevArmB, Shown: 150, Tokens: 3000, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmC, Shown: 12, Tokens: 100, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmD, Shown: 3, Tokens: 400, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
-		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 3, Tokens: 400},
+		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 3, Tokens: 400, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmA, Shown: 8, Tokens: 800, Correct: func(int) bool { return true }},
 	)
 	if err := writeJevArmArtifacts(opt, registration, nil, gatedRows, jevTestDerived(4, 0.5, true, true), 2, 8, nil, false, ""); err != nil {
@@ -897,8 +899,8 @@ func TestWriteJevArmArtifactsMergesBothPasses(t *testing.T) {
 		jevTestRowSpec{Arm: jevArmA, Shown: 8, Tokens: 800, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmC, Shown: 12, Tokens: 100, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmD, Shown: 8, Tokens: 800, Degraded: true, Correct: func(int) bool { return true }},
-		jevTestRowSpec{Arm: jevArmB, Shown: 150, Tokens: 3000},
-		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 8, Tokens: 800, Degraded: true},
+		jevTestRowSpec{Arm: jevArmB, Shown: 150, Tokens: 3000, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 8, Tokens: 800, Degraded: true, Correct: func(int) bool { return true }},
 	)
 	if err := writeJevArmArtifacts(opt, registration, nil, degradedRows, jevTestDerived(4, 0.5, true, true), 0, 8, nil, true, ""); err != nil {
 		t.Fatalf("degraded pass: %v", err)

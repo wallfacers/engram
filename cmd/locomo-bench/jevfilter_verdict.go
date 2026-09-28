@@ -113,7 +113,7 @@ type jevArmVerdictInput struct {
 	FilterCalls           int
 	RetrievalCalls        int
 	RetrievalCallLimit    int
-	Validity              evalArtifactValidity
+	Validity              jevRunValidity
 	Artifacts             map[string]bool
 	B0ContinuityDeclared  bool
 	DegradedPass          bool
@@ -124,6 +124,144 @@ type jevArmVerdictInput struct {
 	// (arm B was truncated by the frozen cap, a call failed, a counter drifted).
 	// It forces HOLD and an INVALID promotion whatever the partial rows say.
 	InvalidReason string
+}
+
+// jevRunValidity is the four-arm run's own receipt validity. The 022 formal
+// chain's evalArtifactValidity rates certify the evidence-compiler pipeline
+// (candidate/trace/bundle receipts), which the arms path never runs, so this
+// gate is backed by what the arms run itself measured: full-cohort coverage,
+// equal per-arm denominators, unique row identities, the packer's frozen token
+// cap, and answer+judge completeness on every row. Nothing is hand-declared:
+// every field is derived mechanically from the rows on disk.
+type jevRunValidity struct {
+	Valid                bool    `json:"valid"`
+	Complete             bool    `json:"complete"`
+	QuestionsMeasured    int     `json:"questions_measured"`
+	QuestionsExpected    int     `json:"questions_expected"`
+	RepetitionsMeasured  int     `json:"repetitions_measured"`
+	RepetitionsExpected  int     `json:"repetitions_expected"`
+	RowsMeasured         int     `json:"rows_measured"`
+	RowsExpected         int     `json:"rows_expected"`
+	ArmRowsEqual         bool    `json:"arm_rows_equal"`
+	IdentityRate         float64 `json:"identity_rate"`
+	WithinCapRate        float64 `json:"within_cap_rate"`
+	AnswerComplianceRate float64 `json:"answer_compliance_rate"`
+	ExtraRows            int     `json:"unattributed_add_count"`
+	InvalidReason        string  `json:"invalid_reason,omitempty"`
+}
+
+func (validity jevRunValidity) isComplete() bool {
+	return validity.Valid && validity.Complete &&
+		validity.QuestionsExpected > 0 &&
+		validity.QuestionsMeasured == validity.QuestionsExpected &&
+		validity.RepetitionsMeasured == validity.RepetitionsExpected &&
+		validity.RowsMeasured == validity.RowsExpected &&
+		validity.ArmRowsEqual && validity.IdentityRate == 1 &&
+		validity.WithinCapRate == 1 && validity.AnswerComplianceRate == 1 &&
+		validity.ExtraRows == 0 && validity.InvalidReason == ""
+}
+
+// jevRunReceipt is what the arms path writes to summary.json: the run's own
+// machine-derived validity plus the counts the verdict cites. The schema stays
+// 022.v1 so tooling can route it, but the validity block is jev-shaped — a
+// 022-formal reader that stumbles onto it sees zero rates and fails closed,
+// never a false pass.
+type jevRunReceipt struct {
+	Schema         string         `json:"schema"`
+	ProtocolHash   string         `json:"protocol_hash"`
+	Rows           int            `json:"rows"`
+	FilterCalls    int            `json:"filter_calls"`
+	RetrievalCalls int            `json:"retrieval_calls"`
+	Validity       jevRunValidity `json:"validity"`
+}
+
+type jevArmRowKey struct {
+	Conv        int
+	Q           int
+	Arm         jevArm
+	Repetition  int
+}
+
+// jevRunValidityFromMeasurements derives the run's validity from the rows it
+// measured. With a frozen protocol the expectations come from the protocol
+// (question count, answer repetitions); without one (unit tests) they come from
+// the rows themselves, so only structural self-consistency is claimed.
+func jevRunValidityFromMeasurements(protocol *evalProtocol, rows []jevArmQuestionRow, invalidReason string) jevRunValidity {
+	validity := jevRunValidity{InvalidReason: invalidReason}
+	main := rowsForBlock(rows, jevArmMainBlock)
+	questions := make(map[[2]int]bool, len(main))
+	repetitions := make(map[int]bool)
+	armCounts := make(map[jevArm]int, len(jevArmNames()))
+	identities := make(map[jevArmRowKey]bool, len(main))
+	for _, row := range main {
+		questions[[2]int{row.Conv, row.Q}] = true
+		repetitions[row.Repetition] = true
+		armCounts[row.Arm]++
+		identities[jevArmRowKey{Conv: row.Conv, Q: row.Q, Arm: row.Arm, Repetition: row.Repetition}] = true
+	}
+	withinCap, answered := 0, 0
+	for _, row := range rows {
+		if row.AnswerInputTokens <= jevArmAnswerInputCap {
+			withinCap++
+		}
+		if row.CorrectMeasured {
+			answered++
+		}
+	}
+	validity.QuestionsMeasured = len(questions)
+	validity.RepetitionsMeasured = len(repetitions)
+	validity.RowsMeasured = len(main)
+	if protocol != nil {
+		validity.QuestionsExpected = protocol.Benchmark.QuestionCount
+		validity.RepetitionsExpected = protocol.Aggregation.AnswerRepetitions
+	} else {
+		validity.QuestionsExpected = len(questions)
+		validity.RepetitionsExpected = len(repetitions)
+	}
+	validity.RowsExpected = validity.QuestionsExpected * validity.RepetitionsExpected * len(jevArmNames())
+	if len(rows) > 0 {
+		validity.WithinCapRate = float64(withinCap) / float64(len(rows))
+		validity.AnswerComplianceRate = float64(answered) / float64(len(rows))
+	}
+	if len(main) > 0 {
+		validity.IdentityRate = float64(len(identities)) / float64(len(main))
+	}
+	expectedPerArm := len(questions) * len(repetitions)
+	validity.ArmRowsEqual = len(armCounts) == len(jevArmNames())
+	if validity.ArmRowsEqual {
+		for _, count := range armCounts {
+			if count != expectedPerArm {
+				validity.ArmRowsEqual = false
+				break
+			}
+		}
+	}
+	if extra := len(main) - validity.RowsExpected; extra > 0 {
+		validity.ExtraRows = extra
+	}
+	validity.Complete = validity.QuestionsMeasured == validity.QuestionsExpected &&
+		validity.RepetitionsMeasured == validity.RepetitionsExpected &&
+		validity.RowsMeasured == validity.RowsExpected
+	validity.Valid = validity.ArmRowsEqual && validity.IdentityRate == 1 &&
+		validity.WithinCapRate == 1 && validity.AnswerComplianceRate == 1 && validity.ExtraRows == 0
+	return validity
+}
+
+// writeJevRunReceipt lands the run's summary.json. T19 fix for the receipts
+// seam: the arms path no longer depends on the 022 writer it never reaches
+// (main.go returns before it); it certifies itself.
+func writeJevRunReceipt(runDir string, protocol *evalProtocol, validity jevRunValidity, rows, filterCalls, retrievalCalls int) error {
+	receipt := jevRunReceipt{
+		Schema:         evalProtocolSchema,
+		Rows:           rows,
+		FilterCalls:    filterCalls,
+		RetrievalCalls: retrievalCalls,
+		Validity:       validity,
+	}
+	if protocol != nil {
+		receipt.ProtocolHash = protocol.ProtocolHash
+	}
+	return writeJSON(filepath.Join(runDir, evalSummaryArtifactFile), receipt)
 }
 
 // buildJevArmReport aggregates the rows into the report the verdict cites.
@@ -314,7 +452,7 @@ func jevPromotionInputDeclaration() string {
 // to return something stricter (INVALID/STOP).
 func jevPromotionFor(input jevArmVerdictInput, report jevArmReport, verdict jevArmVerdict) evalVerdict {
 	promotion := promotionVerdictFor(evalPromotionInput{
-		Validity:                          input.Validity,
+		ValidityComplete:                  input.Validity.isComplete(),
 		PrimaryDeltaPP:                    jevContrastByArms(report.Contrasts, jevArmB, jevArmD).DeltaPP,
 		PrimaryMcNemarP:                   jevContrastByArms(report.Contrasts, jevArmB, jevArmD).McNemarP,
 		OtherBenchmarkDeltaPP:             0, // LongMemEval-S deferred: declared, never measured
@@ -538,13 +676,23 @@ func jevSC007(input jevArmVerdictInput) jevSuccessCriterion {
 	return jevSuccessCriterion{ID: "SC-007", Status: jevCriterionPass, Detail: detail, Metrics: metrics}
 }
 
-// writeJevArmArtifacts lands the measurement journal, the report, and the
-// verdict. A failed validity gate is still written (so the operator can read why)
-// and then returned as an error, so the run exits non-zero rather than presenting
-// an unpromotable verdict as a result.
+// writeJevArmArtifacts lands the measurement journal, the summary receipt, the
+// report, and the verdict. A failed validity gate is still written (so the
+// operator can read why) and then returned as an error, so the run exits
+// non-zero rather than presenting an unpromotable verdict as a result. The
+// rows and the receipt are written first and the validity is derived from the
+// measurements, never read back from disk — a fresh run dir certifies itself
+// (T19 fix for the receipts seam that made every arms run exit 1).
 func writeJevArmArtifacts(opt options, registration jevFilterRegistration, protocol *evalProtocol, rows []jevArmQuestionRow, derived []jevArmQuestionDerived, filterCalls, retrievalCalls int, ledger *costLedger, degradedPass bool, invalidReason string) error {
 	if opt.runDir == "" {
 		return fmt.Errorf("writing jev arm artifacts requires --run-dir")
+	}
+	if err := writeJevArmRows(filepath.Join(opt.runDir, jevArmRowsFile), rows); err != nil {
+		return fmt.Errorf("write %s: %w", jevArmRowsFile, err)
+	}
+	validity := jevRunValidityFromMeasurements(protocol, rows, invalidReason)
+	if err := writeJevRunReceipt(opt.runDir, protocol, validity, len(rows), filterCalls, retrievalCalls); err != nil {
+		return fmt.Errorf("write %s: %w", evalSummaryArtifactFile, err)
 	}
 	var cost *costReport
 	if ledger != nil {
@@ -563,6 +711,7 @@ func writeJevArmArtifacts(opt options, registration jevFilterRegistration, proto
 		DefaultParityEvidence: jevDefaultParityEvidence(),
 		InvalidReason:         invalidReason,
 		Cost:                  cost,
+		Validity:              validity,
 	}
 	if protocol != nil {
 		input.ProtocolHash = protocol.ProtocolHash
@@ -572,15 +721,11 @@ func writeJevArmArtifacts(opt options, registration jevFilterRegistration, proto
 		input.RetrievalCallLimit = protocol.Budget.RetrievalCallLimit * len(jevArmNames()) * len(derived)
 	}
 	input.B0ContinuityDeclared = opt.jevB0Continuity
-	input.Validity = jevArtifactValidityFromDir(opt.runDir)
 	verdict, err := buildJevArmVerdict(input)
 	if err != nil {
 		return err
 	}
 	prior := readJevArmVerdict(filepath.Join(opt.runDir, jevArmVerdictFile))
-	if err := writeJevArmRows(filepath.Join(opt.runDir, jevArmRowsFile), rows); err != nil {
-		return fmt.Errorf("write %s: %w", jevArmRowsFile, err)
-	}
 	if err := writeJSON(filepath.Join(opt.runDir, jevArmReportFile), verdict.Report); err != nil {
 		return fmt.Errorf("write %s: %w", jevArmReportFile, err)
 	}
@@ -625,19 +770,11 @@ func jevArtifactPresence(runDir string) map[string]bool {
 	return present
 }
 
-// jevArtifactValidityFromDir derives the artifact validity from the per-repeat
-// validation receipts the run actually wrote. A missing receipt set is incomplete,
-// which the validity gate then refuses.
-func jevArtifactValidityFromDir(runDir string) evalArtifactValidity {
-	var summary struct {
-		Validity evalArtifactValidity `json:"validity"`
-	}
-	path := filepath.Join(runDir, evalSummaryArtifactFile)
-	if err := readJSON(path, &summary); err != nil {
-		return evalArtifactValidity{}
-	}
-	return summary.Validity
-}
+// jevArtifactValidityFromDir was removed with the 051 T19 receipts seam fix: the
+// arms path derives its validity from its own measurements inside
+// writeJevArmArtifacts (jevRunValidityFromMeasurements) instead of reading a
+// summary.json only the 022 formal writer — which the arms path never reaches —
+// could have written.
 
 // writeJevArmRows writes the measurement journal atomically.
 func writeJevArmRows(path string, rows []jevArmQuestionRow) error {

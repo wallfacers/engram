@@ -958,8 +958,10 @@ func run() error {
 
 	if opt.jevArms {
 		// 051 four-arm protocol: the arms re-read persisted stores and re-answer
-		// the same questions, so it runs after the shared runtimes exist.
-		return runJevArms(ctx, opt, convs, prices, logger)
+		// the same questions, so it runs after the shared runtimes exist. The
+		// bench embedding client built above is passed through so the arms'
+		// hybrid retriever keeps its semantic signal (T19 BUG ①).
+		return runJevArms(ctx, opt, convs, prices, logger, embClient)
 	}
 
 	var formalReplay *formalQuestionReplay

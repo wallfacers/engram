@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wallfacers/engram/embedding"
 	"github.com/wallfacers/engram/filter"
 	"github.com/wallfacers/engram/filter/jev"
 	"github.com/wallfacers/engram/memory"
@@ -491,34 +492,39 @@ func (b jevCallBudget) Validate() error {
 }
 
 // jevCoreValidityArtifacts are the artifacts every gated four-arm run must leave
-// behind. The verdict file is written last and validated by its own schema, so it
-// is not part of its own precondition.
+// behind: the frozen protocol (eval-freeze), the filter call journal and the
+// measurement rows (the run itself), and the summary receipt the run derives
+// from those rows. The 022 formal chain's candidate/trace/bundle/classification
+// artifacts and formal_calls.jsonl are the evidence-compiler pipeline's outputs,
+// which the arms path never runs — requiring them would fail every arms run
+// closed forever (T19 receipts seam). The verdict file is written last and
+// validated by its own schema, so it is not part of its own precondition.
 var jevCoreValidityArtifacts = []string{
 	evalProtocolArtifactFile,
-	evalCandidatesArtifactFile,
-	evalTraceArtifactFile,
-	evalBundleArtifactFile,
-	evalClassificationArtifactFile,
-	formalCallJournalFile,
 	jevFilterCallJournalFile,
 	jevArmRowsFile,
+	evalSummaryArtifactFile,
 }
 
 // jevValidityInput is the evidence a gated four-arm run must present before any
 // SC verdict may be called a result.
 type jevValidityInput struct {
-	Validity             evalArtifactValidity
+	Validity             jevRunValidity
 	Present              map[string]bool
 	B0ContinuityDeclared bool
 	Registration         jevFilterRegistration
 }
 
-// validateJevRunValidity is the fail-closed gate: incomplete per-repeat
-// validation receipts, a missing artifact, or an undeclared protocol prerequisite
-// all refuse the run instead of producing a promotable verdict.
+// validateJevRunValidity is the fail-closed gate: an incomplete measurement
+// receipt (the run's own jevRunValidity, derived from the rows), a missing
+// artifact, or an undeclared protocol prerequisite all refuse the run instead of
+// producing a promotable verdict.
 func validateJevRunValidity(input jevValidityInput) error {
 	if !input.Validity.isComplete() {
-		return fmt.Errorf("per-repeat validation receipts are incomplete (valid=%t complete=%t); the four-arm verdict requires evalArtifactValidity.isComplete", input.Validity.Valid, input.Validity.Complete)
+		return fmt.Errorf("the run's measurement receipts are incomplete (valid=%t complete=%t questions=%d/%d rows=%d/%d); the four-arm verdict requires a complete jevRunValidity",
+			input.Validity.Valid, input.Validity.Complete,
+			input.Validity.QuestionsMeasured, input.Validity.QuestionsExpected,
+			input.Validity.RowsMeasured, input.Validity.RowsExpected)
 	}
 	for _, artifact := range jevCoreValidityArtifacts {
 		if !input.Present[artifact] {
@@ -1072,7 +1078,7 @@ func attachJevArmsRegistrationForFreeze(opt options, protocol *evalProtocol) err
 // runJevArms is the --jev-arms entry point: it assembles the run's filter
 // configuration, applies the pre-registration, refuses an underspecified run
 // before it spends anything, and dispatches the gated or degraded pass.
-func runJevArms(ctx context.Context, opt options, convs []conversation, prices priceTable, logger *slog.Logger) error {
+func runJevArms(ctx context.Context, opt options, convs []conversation, prices priceTable, logger *slog.Logger, embClient embedding.Client) error {
 	policy, err := jevPolicyFromEnv(os.Getenv)
 	if err != nil {
 		return err
@@ -1129,7 +1135,20 @@ func runJevArms(ctx context.Context, opt options, convs []conversation, prices p
 		"pool", registration.Pool,
 		"concurrency", opt.concurrency,
 	)
-	return runJevArmProtocol(ctx, opt, convs, policy, opt.formalProtocol, prices, logger)
+	return runJevArmProtocol(ctx, opt, convs, policy, opt.formalProtocol, prices, logger, embClient)
+}
+
+// validateJevEmbeddingWiring refuses a silent semantic-signal loss before the
+// run spends a single token: the engine's retriever deliberately degrades to
+// keyword+entity with no warning when its embedding client is nil (Constitution
+// V: per-signal degradation is silent by design in the engine), so the adapter
+// must assert the wiring it knows structurally. The pilot run passed a literal
+// nil (T19 BUG ①) and all 7,700 retrievals silently lost the semantic signal.
+func validateJevEmbeddingWiring(armName string, embClient embedding.Client) error {
+	if armBackend(armName) == "hybrid" && embClient == nil {
+		return fmt.Errorf("jev arm %s is hybrid but the bench embedding client is nil; refusing to run with the semantic signal silently disabled — check EMBED_BASE_URL/EMBED_MODEL/EMBED_API_KEY", armName)
+	}
+	return nil
 }
 
 // primaryRetrievalArm is the retrieval backend all four arms share. The arms
@@ -1148,12 +1167,15 @@ func primaryRetrievalArm(opt options) string {
 // (AGENTS.md: model-side stages never run sequentially); within a conversation the
 // arms run in recipe order, and a failure fails the run closed instead of
 // producing a partial verdict.
-func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, pol filter.Policy, protocol *evalProtocol, prices priceTable, logger *slog.Logger) error {
+func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, pol filter.Policy, protocol *evalProtocol, prices priceTable, logger *slog.Logger, embClient embedding.Client) error {
 	if opt.runDir == "" {
 		return fmt.Errorf("--jev-arms requires --run-dir")
 	}
 	if opt.storeDir == "" {
 		return fmt.Errorf("--jev-arms requires --store-dir: the arms read persisted per-conversation stores instead of re-ingesting")
+	}
+	if err := validateJevEmbeddingWiring(primaryRetrievalArm(opt), embClient); err != nil {
+		return err
 	}
 	if !opt.noIDKRetry {
 		return fmt.Errorf("--jev-arms measures first-round evidence sets; pass --no-idk-retry so every arm shares one answer contract")
@@ -1269,7 +1291,9 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 					invalidReason = reason
 				}
 			}
-			runtime, err := openAttributionRuntime(ctx, opt, conv, nil, armName)
+			// The embClient must be the live bench client (T19 BUG ①): a literal nil
+			// here silently disables the semantic signal for every arm retrieval.
+			runtime, err := openAttributionRuntime(ctx, opt, conv, embClient, armName)
 			if err != nil {
 				fail(err)
 				return

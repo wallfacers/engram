@@ -195,7 +195,11 @@ const (
 )
 
 type evalPromotionInput struct {
-	Validity                          evalArtifactValidity
+	// ValidityComplete is the caller's receipt gate outcome (the 022 chain uses
+	// evalArtifactValidity.isComplete, the 051 arms path its jevRunValidity). The
+	// concrete rates stay with the caller: the shared gate only needs whether the
+	// run's own receipts are complete.
+	ValidityComplete                  bool
 	PrimaryDeltaPP                    float64
 	PrimaryMcNemarP                   float64
 	OtherBenchmarkDeltaPP             float64
@@ -208,7 +212,7 @@ type evalPromotionInput struct {
 }
 
 func promotionVerdictFor(input evalPromotionInput) evalVerdict {
-	if !input.Validity.isComplete() || !input.JudgeAuditComplete || !input.JudgeAuditVerdictStable {
+	if !input.ValidityComplete || !input.JudgeAuditComplete || !input.JudgeAuditVerdictStable {
 		return evalVerdictInvalid
 	}
 	if !input.OfflineCompatible || !input.CandidateCoverageNonRegression || input.PrimaryDeltaPP <= 0 || input.OtherBenchmarkDeltaPP < -0.5 || input.OtherBenchmarkNegativeSignificant || hasHolmNegativeRegression(input.CategoryResults) {
