@@ -749,6 +749,17 @@ func printJevArmEstimate(convs []conversation, opt options, prices priceTable, f
 	fmt.Printf("estimate jev-arms: frozen answer_input_cap=%d repetitions=%d empty_injection_floor=%.2f\n", plan.AnswerInputCap, plan.AnswerRepetitions, plan.EmptyInjectionFloor)
 }
 
+// jevFilterShardSize is the per-request candidate count the eval's filter client
+// shards with, below the engine's production default of 48. Measured on the
+// 2026-09-24 pilot: the gateway 503-storms ~48-question pointer requests (~32k
+// tokens) at concurrency 32 — the shim's two retries exhausted and 96% of filter
+// rows degraded — while ~6-question requests (~4k tokens) answered in 0.8s under
+// the same load. 12-question shards (~9k tokens) stay small enough to pass, and
+// total ~18% FEWER tokens than 48-question shards because the per-question
+// pointer schema overhead dominates the shared-state copy. The engine default
+// (48) is untouched: this pins the eval, not the product.
+const jevFilterShardSize = 12
+
 // jevFilterTimeout bounds one eval-side filter call, on both of the client's
 // timeout knobs. The engine's 1s defaults fit a hosted endpoint; the openjev
 // backend is a local shim answering with a 35B model, which needs seconds per
@@ -787,6 +798,7 @@ func jevFilterConfig(opt options, pol filter.Policy) jev.Config {
 		Path:                       opt.jevPath,
 		Deadline:                   timeout,
 		PerRequestTimeout:          timeout,
+		ShardSize:                  jevFilterShardSize,
 		PricePerMillionInputTokens: opt.jevPricePerMillion,
 		Policy:                     pol,
 	}

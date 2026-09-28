@@ -237,12 +237,136 @@ func TestFilterShardPayloadStaysWithinBounds(t *testing.T) {
 	defer srv.Close()
 
 	c := mustClient(t, Config{BaseURL: srv.URL, Model: "m", APIKey: "k", ShardSize: 200})
-	// ShardSize is clamped into the documented 32..64 window.
+	// ShardSize is clamped into the documented window; 200 coerces down to the ceiling.
 	if _, _, err := c.Filter(context.Background(), "q", testCandidates(150)); err != nil {
 		t.Fatalf("filter: %v", err)
 	}
-	if got := atomic.LoadInt32(&maxMemories); got > 64 || got < 32 {
-		t.Fatalf("shard size outside the 32..64 contract window: %d", got)
+	if got := atomic.LoadInt32(&maxMemories); got > maxShardSize || got < minShardSize {
+		t.Fatalf("shard size outside the %d..%d contract window: %d", minShardSize, maxShardSize, got)
+	}
+}
+
+// TestShardCandidatesHonorsAConfiguredSizeBelowTheOldFloor pins the shard shape
+// directly: the eval client configures small shards because the hosted gateway
+// rejects the large pointer requests, so the pool must split at the configured
+// size instead of at a floor the engine used to impose.
+func TestShardCandidatesHonorsAConfiguredSizeBelowTheOldFloor(t *testing.T) {
+	shards := shardCandidates(testCandidates(25), 16, 6)
+	if len(shards) != 5 {
+		t.Fatalf("shards = %d, want 5 (25 candidates at 6 per shard)", len(shards))
+	}
+	var merged int
+	for i, shard := range shards {
+		want := 6
+		if i == len(shards)-1 {
+			want = 1
+		}
+		if len(shard) != want {
+			t.Errorf("shard %d = %d candidates, want %d", i, len(shard), want)
+		}
+		for j, ref := range shard {
+			if ref.idx != merged+j {
+				t.Errorf("shard %d ref %d has idx %d, want %d", i, j, ref.idx, merged+j)
+			}
+		}
+		merged += len(shard)
+	}
+	if merged != 25 {
+		t.Errorf("merged candidates = %d, want 25", merged)
+	}
+}
+
+// TestFilterRespectsAConfiguredShardSizeBelowTheOldFloor drives the same shape
+// through the client: 150 candidates above the default threshold must arrive as
+// 25 six-candidate requests, each carrying six memories in the shared state, and
+// every probability must survive the merge.
+func TestFilterRespectsAConfiguredShardSizeBelowTheOldFloor(t *testing.T) {
+	var requests int32
+	var maxMemories int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, keys := decodePointer(t, r)
+		atomic.AddInt32(&requests, 1)
+		if n := int32(len(req.State.Memories)); n > atomic.LoadInt32(&maxMemories) {
+			atomic.StoreInt32(&maxMemories, n)
+		}
+		respondProbabilities(w, keys, 0.9)
+	}))
+	defer srv.Close()
+
+	c := mustClient(t, Config{BaseURL: srv.URL, Model: "m", APIKey: "k", ShardSize: 6})
+	probs, meta, err := c.Filter(context.Background(), "q", testCandidates(150))
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 25 {
+		t.Fatalf("requests = %d, want 25 (150 candidates at 6 per shard)", got)
+	}
+	if got := atomic.LoadInt32(&maxMemories); got != 6 {
+		t.Fatalf("largest shard = %d memories, want the configured 6", got)
+	}
+	if len(probs) != 150 {
+		t.Fatalf("aligned probabilities = %d, want 150", len(probs))
+	}
+	for i, p := range probs {
+		if p != 0.9 {
+			t.Fatalf("probability %d lost in the shard merge: %v", i, p)
+		}
+	}
+	if meta.Degraded {
+		t.Fatalf("unexpected degradation: %+v", meta)
+	}
+}
+
+// TestNewClampsShardSizeIntoTheDocumentedWindow pins the clamp: values below the
+// floor coerce up, values above the ceiling coerce down, and an unset size keeps
+// the production default of 48 untouched.
+func TestNewClampsShardSizeIntoTheDocumentedWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"unset keeps the production default", 0, defaultShardSize},
+		{"below the floor coerces up", 1, minShardSize},
+		{"the floor itself is respected", minShardSize, minShardSize},
+		{"the eval size is respected", 12, 12},
+		{"the ceiling itself is respected", maxShardSize, maxShardSize},
+		{"above the ceiling coerces down", 1024, maxShardSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := mustClient(t, Config{BaseURL: "http://127.0.0.1:1", Model: "m", APIKey: "k", ShardSize: tc.in})
+			if c.cfg.ShardSize != tc.want {
+				t.Errorf("ShardSize = %d, want %d", c.cfg.ShardSize, tc.want)
+			}
+		})
+	}
+}
+
+// TestFilterDefaultConfigStillShardsAt48 pins the production shape end-to-end: an
+// unset ShardSize still splits 150 candidates into 48-candidate requests, so the
+// eval-side clamp widening cannot quietly move the shipped default.
+func TestFilterDefaultConfigStillShardsAt48(t *testing.T) {
+	var requests int32
+	var maxMemories int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, keys := decodePointer(t, r)
+		atomic.AddInt32(&requests, 1)
+		if n := int32(len(req.State.Memories)); n > atomic.LoadInt32(&maxMemories) {
+			atomic.StoreInt32(&maxMemories, n)
+		}
+		respondProbabilities(w, keys, 0.9)
+	}))
+	defer srv.Close()
+
+	c := mustClient(t, Config{BaseURL: srv.URL, Model: "m", APIKey: "k"})
+	if _, _, err := c.Filter(context.Background(), "q", testCandidates(150)); err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 4 {
+		t.Fatalf("requests = %d, want 4 (150 candidates at the default 48 per shard)", got)
+	}
+	if got := atomic.LoadInt32(&maxMemories); got != 48 {
+		t.Fatalf("largest shard = %d memories, want the default 48", got)
 	}
 }
 

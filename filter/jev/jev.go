@@ -31,7 +31,7 @@ import (
 
 const (
 	defaultPath       = "/answers"
-	minShardSize      = 32
+	minShardSize      = 6
 	maxShardSize      = 64
 	defaultShardSize  = 48
 	defaultShardLimit = 64
@@ -62,8 +62,9 @@ type Config struct {
 	// ShardThreshold is the pool size above which the pool is split into
 	// concurrent shards (default 64).
 	ShardThreshold int
-	// ShardSize is the number of candidates per shard, clamped into [32,64]
-	// (default 48).
+	// ShardSize is the number of candidates per shard, clamped into [6,64]
+	// (default 48). The floor is small because a hosted endpoint may reject large
+	// pointer requests outright; a caller with room to spare keeps 48.
 	ShardSize int
 	// NegativeCacheTTL suppresses new calls to a failing endpoint (default 30s).
 	NegativeCacheTTL time.Duration

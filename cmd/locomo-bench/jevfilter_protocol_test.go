@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1426,6 +1427,95 @@ func TestJevFilterConfigWidensTimeoutsForTheLocalShim(t *testing.T) {
 	pinned := jevFilterConfig(options{jevDeadline: 5 * time.Second}, policy)
 	if pinned.Deadline != 5*time.Second || pinned.PerRequestTimeout != 5*time.Second {
 		t.Errorf("explicit bound = %s/%s, want 5s/5s", pinned.Deadline, pinned.PerRequestTimeout)
+	}
+}
+
+// TestJevFilterConfigPinsTheMeasuredShardSize pins the eval-side shard-size
+// wiring: the gateway 503-storms the engine's 48-candidate pointer requests, so
+// the harness configures 12. The end-to-end leg proves the value survives the
+// engine's clamp (150 candidates leave as 13 twelve-candidate requests) — with
+// the old 32 floor they would arrive as 5 thirty-two-candidate requests.
+func TestJevFilterConfigPinsTheMeasuredShardSize(t *testing.T) {
+	policy := filter.DefaultPolicy()
+	cfg := jevFilterConfig(options{
+		jevBaseURL: "http://127.0.0.1:8020",
+		jevModel:   "Qwen3.6-shim-pinned",
+		jevAPIKey:  "openjev",
+	}, policy)
+	if cfg.ShardSize != jevFilterShardSize {
+		t.Fatalf("ShardSize = %d, want %d", cfg.ShardSize, jevFilterShardSize)
+	}
+	// A caller-pinned deadline moves the timeout knobs only.
+	pinned := jevFilterConfig(options{jevDeadline: 5 * time.Second}, policy)
+	if pinned.ShardSize != jevFilterShardSize {
+		t.Errorf("pinned deadline changed the shard size: %d, want %d", pinned.ShardSize, jevFilterShardSize)
+	}
+
+	var requests int32
+	var maxMemories int32
+	answers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			State struct {
+				Memories map[string]json.RawMessage `json:"memories"`
+			} `json:"state"`
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode pointer request: %v", err)
+			return
+		}
+		atomic.AddInt32(&requests, 1)
+		if n := int32(len(req.State.Memories)); n > atomic.LoadInt32(&maxMemories) {
+			atomic.StoreInt32(&maxMemories, n)
+		}
+		probs := make(map[string]float64, len(req.Questions))
+		for key := range req.Questions {
+			probs[key] = 0.9
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"probabilities": probs,
+			"usage":         map[string]int{"prompt_tokens": 10, "completion_tokens": 2},
+		})
+	}))
+	t.Cleanup(answers.Close)
+
+	client, err := buildJevFilterClient(options{
+		jevBaseURL: answers.URL,
+		jevModel:   "Qwen3.6-shim-pinned",
+		jevAPIKey:  "openjev",
+	}, policy)
+	if err != nil {
+		t.Fatalf("build jev filter client: %v", err)
+	}
+	if client == nil {
+		t.Fatal("a fully configured client must not collapse to nil")
+	}
+
+	cands := make([]filter.Candidate, 150)
+	for i := range cands {
+		cands[i] = filter.Candidate{
+			ID:    fmt.Sprintf("m%d", i),
+			Name:  fmt.Sprintf("memory-%d", i),
+			Text:  fmt.Sprintf("body-%d", i),
+			Score: float64(150 - i),
+		}
+	}
+	probs, meta, err := client.Filter(context.Background(), "which memory matters?", cands)
+	if err != nil {
+		t.Fatalf("filter through the harness client: %v (degraded: %v, notes %v)", err, meta.Degraded, meta.Notes)
+	}
+	if len(probs) != len(cands) {
+		t.Fatalf("aligned probabilities = %d, want %d", len(probs), len(cands))
+	}
+	if got := atomic.LoadInt32(&requests); got != 13 {
+		t.Fatalf("requests = %d, want 13 (150 candidates at the configured %d per shard)", got, jevFilterShardSize)
+	}
+	if got := atomic.LoadInt32(&maxMemories); got != jevFilterShardSize {
+		t.Fatalf("largest shard = %d memories, want the configured %d", got, jevFilterShardSize)
+	}
+	if meta.Degraded {
+		t.Errorf("the harness wiring must not degrade: %v", meta.Notes)
 	}
 }
 
