@@ -127,3 +127,53 @@ ssh … 'curl -s -m 60 -X POST localhost:8020/answers -H "Content-Type: applicat
 ## 9.5 Status at park
 
 S14's capacity fix remains **UNMEASURED** (recorded). Box UP, all services healthy, every artifact staged for a one-command resume. No repo source changes this session (`git status --porcelain -- cmd/ memory/ filter/` = 0; report file rebuild is the only write).
+
+---
+
+# §10 S14 RELAUNCH EXECUTED (2026-09-28 09:24+) — key restored (top-up), pilot LIVE and HEALTHY, LEAVE RUNNING
+
+Maintainer topped up Vercel credits; parent pre-verified 200+separation directly; key value unchanged (same sha-prefix) ⇒ **no `.jev-env.sh` re-push**. Executed §9.4 steps 2–8:
+
+## 10.1 Separation re-smoke through shim :8020 — PASS
+
+`p3-pilot-calib-sep4.json` @09:24:25: **HTTP 200, 1.80 s**, `{"probabilities":{"need_m0":1,"need_m1":0,"need_m2":0,"need_m3":0},"usage":{"prompt_tokens":879,"completion_tokens":123}}` — perfection unchanged, attempts=1 (shim log `answers ok: questions=4 attempts=1 elapsed=1.794206019s`).
+
+## 10.2 Freeze $D7 + mandatory diff — EXACT delta
+
+$D7 = **`/root/autodl-tmp/051-jev-arms-runs/formal-pilot-20260928T092440`** (CURRENT-P3-D rewritten). Same command as $D6 (repeats 1, arms-reps 1, typesafe-ai/jev, standard set): `freeze.exit=0`, `eval-freeze: … questions=1540 cap=32768`; **protocol_hash `sha256:29e6bfe930f825d8f730a3b4006da41a73cff19b8a6c64cffd09dcd248b0a125`**, file sha256 `d3f41a073cea6b6cb609eae3221fa38f51db02d06f71d8da90c14593c659a24d`. **$D6↔$D7 flattened diff = EXACTLY 3 fields:** `created_at`, `protocol_hash`, `git.commit (882c75f1… → 7ff5e807…)` — shard size confirmed NOT a frozen field. Proceed.
+
+## 10.3 Launch + watcher
+
+- `bin/run-p3-pilot.sh` D= swapped to $D7 (only change), `bash -n` OK, **sha256 `39d3d4a60519bc8ba6330d50849bae8b490be4a11aedeefe480b79357cb4d01e` local == remote**; **setsid launch 09:25:09** — runner PID **3998**, drivers 3995/3997.
+- `bin/pilot-autoshutdown.sh` D= swapped to $D7, sha256 `646d6a65943375f794c87f12dd3eadda44ddc39e88518554d3ac7735fef04c74`, **re-armed 09:25:12, watcher PID 4028**, log `$D7/shutdown-watcher.log` — chain-completion-only trigger (600 s grace → sync → shutdown). Nothing else armed; no self-initiated shutdown.
+
+## 10.4 Early health — S14 VALIDATED, ALL GATES CLEAR
+
+| metric | +2 min (09:27:37) | +7 min (09:32:26) | +12 min (09:37:08) | final (09:42:26) |
+|---|---|---|---|---|
+| journal rows degraded:false | **38/38 (100 %)** | 85/85 (100 %) | 134/134 (100 %) | **196/196 (100 %)** |
+| latency_ms (non-degraded) | — | min/med/max 759/1134/1511 | p50 1133 / p90 1320 / max 1639 | same band |
+| shim attempts (session tail) | — | — | attempts=1 ×5/5 consecutive samples (12-Q shards, 0.78–1.02 s) | `questions=12 attempts=1 elapsed=1.02s` @09:42 |
+| vllm stop-counter | — | 191 | 306 → 414 @09:40:59 | running |
+| **answers/min** | — | — | **Δ115/282 s = 24.5** then **Δ108/231 s = 28.0** | avg **≈26** |
+| INVALID / drift | 0 | 0 | 0 | 0 |
+
+- 3 sample rows verbatim (journal row = ONE pool call = ~13 shard calls summed; per-shard ≈12 questions ≈2.3–2.8k tokens — the ~9 k "shard-scale" note applies per-shard, journal sums 23–37k; latency/token shapes prove 12-Q shards, NOT 32k-token 48-Q calls):
+  `{"conv":1,"arm":"D","pool":133,"memories":2,"kept":2,"dropped":131,"latency_ms":1409,"input_tokens":30616,"output_tokens":6754,"degraded":false}` · `{"conv":1,"arm":"D-noRelax",…"latency_ms":1214,"input_tokens":30616,"degraded":false}` · `{"conv":4,"arm":"D","pool":150,"memories":12,"kept":12,"dropped":138,"latency_ms":1014,"input_tokens":34590,"degraded":false}`
+- `pass=gated filter_model=typesafe-ai/jev theta=0.5 pool=150 concurrency=32` logged; `reusing persisted extraction` ×10 (zero extraction spend).
+- **503 storm: GONE** — zero `degraded:true` in 196 rows; `failed=0` on today's timestamped log lines. Honest caveat: an `attempts=` histogram attempt by time-window got contaminated by legacy Sep-24 lines (log-append file not rotated; windowing quoting artifact — whole-file counts ok=2312/failed=106 include Sep 24) and was DISCARDED rather than misquoted; the journal (196/196) + session-line samples are the trustworthy readouts. (H2 lesson applied: rate from `request_success_total{finished_reason="stop"}` deltas — answers finish `stop`, not `length`, on this boot.)
+
+## 10.5 ETA + end state
+
+**ETA = 7,700 ÷ ≈26/min ≈ 296 min ≈ 4.9 h** from 09:25:09 → gated pass completes **≈14:20 CST ±30 min**; watcher then: log → 600 s grace (collect $D7 artifacts — small: gated.log, jev_filter_calls.jsonl, verdict JSON, markers) → sync → **box shutdown ≈14:30–15:00 CST**. If the collector needs the box up longer, disarm = kill PID **4028** by PID before chain.done lands.
+
+**LEAVE RUNNING.** Poll cheat-sheet:
+
+```bash
+D=$(cat /root/autodl-tmp/051-jev-arms-runs/CURRENT-P3-D)   # $D7
+N=$(wc -l < $D/jev_filter_calls.jsonl); T=$(grep -cF '"degraded":true' $D/jev_filter_calls.jsonl); echo "rows=$N degraded=$T"   # keep degraded<30%
+curl -s -m5 http://127.0.0.1:8000/metrics | grep -F 'finished_reason="stop"'   # rate = delta/time (~26/min)
+[ -f $D/gated.exit ] && echo EXIT=$(cat $D/gated.exit) && [ -f $D/chain.done ] && echo CHAIN=$(cat $D/chain.done); tail -1 $D/shutdown-watcher.log
+```
+
+PIDs this launch: runner 3998 · drivers 3995/3997 · watcher **4028** · shim 2007. Verdict semantics (1-rep): gated.exit=0 + single gated verdict JSON in $D7; no degraded pass in the pilot.
