@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/wallfacers/engram/memory"
 )
@@ -65,6 +66,11 @@ type jevArmQuestionDerived struct {
 	Block                  string  `json:"block"`
 	Replications           int     `json:"replications"`
 	DShown                 int     `json:"d_shown"`
+	// EShown is arm E's shown count (facts + span cards). ESpans isolates the
+	// appended verbatim span cards so a D->E contrast can attribute the delta
+	// to the cards rather than to a filter difference.
+	EShown int `json:"e_shown,omitempty"`
+	ESpans int `json:"e_spans,omitempty"`
 	BudgetGradeable        bool    `json:"budget_gradeable"`
 	CBudgetRecallGate      float64 `json:"c_budget_recall_at_12"`
 	CBudgetRecallReference float64 `json:"c_budget_recall_at_8"`
@@ -201,6 +207,15 @@ func measureJevArmQuestion(in jevArmQuestionInput) ([]jevArmQuestionRow, jevArmQ
 				derived.CBudgetRecallGate = budget.Gate
 				derived.CBudgetRecallReference = budget.Reference
 				derived.CBudgetRecallEqual = budget.PerQuestion
+			}
+		}
+	}
+	if eObservation, ok := in.Observations[jevArmE]; ok {
+		shown := eObservation.shown()
+		derived.EShown = len(shown)
+		for _, hit := range shown {
+			if strings.HasPrefix(hit.ID, "span-") {
+				derived.ESpans++
 			}
 		}
 	}

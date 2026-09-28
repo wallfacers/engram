@@ -40,11 +40,11 @@ func TestJevRunValidityFromCompleteMeasurements(t *testing.T) {
 	if !validity.isComplete() {
 		t.Fatalf("a fully measured run is not complete: %+v", validity)
 	}
-	if validity.QuestionsMeasured != 2 || validity.RowsMeasured != 10 || validity.RepetitionsMeasured != 1 {
-		t.Errorf("counts = %+v, want questions=2 rows=10 reps=1", validity)
+	if validity.QuestionsMeasured != 2 || validity.RowsMeasured != 12 || validity.RepetitionsMeasured != 1 {
+		t.Errorf("counts = %+v, want questions=2 rows=12 reps=1", validity)
 	}
-	if validity.QuestionsExpected != 2 || validity.RowsExpected != 10 || validity.RepetitionsExpected != 1 {
-		t.Errorf("expectations = %+v, want questions=2 rows=10 reps=1", validity)
+	if validity.QuestionsExpected != 2 || validity.RowsExpected != 12 || validity.RepetitionsExpected != 1 {
+		t.Errorf("expectations = %+v, want questions=2 rows=12 reps=1", validity)
 	}
 }
 

@@ -322,7 +322,7 @@ func buildJevArmReport(input jevArmVerdictInput) (jevArmReport, error) {
 		report.Main = append(report.Main, aggregateJevArm(rowsForArm(rowsForBlock(input.Rows, jevArmMainBlock), arm)))
 		report.CategoryFive = append(report.CategoryFive, aggregateJevArm(rowsForArm(rowsForBlock(input.Rows, jevArmCategoryFiveBlock), arm)))
 	}
-	for _, pair := range [][2]jevArm{{jevArmB, jevArmD}, {jevArmA, jevArmC}, {jevArmA, jevArmD}} {
+	for _, pair := range [][2]jevArm{{jevArmB, jevArmD}, {jevArmA, jevArmC}, {jevArmA, jevArmD}, {jevArmD, jevArmE}, {jevArmB, jevArmE}} {
 		contrast, err := jevArmContrastFor(rowsForBlock(input.Rows, jevArmMainBlock), pair[0], pair[1])
 		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("contrast %s->%s not reported: %v", pair[0], pair[1], err))

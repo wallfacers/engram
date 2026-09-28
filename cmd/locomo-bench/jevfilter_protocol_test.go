@@ -455,17 +455,17 @@ func TestPlanJevArmCostCountsFilterCallsOnlyOnFilteredArms(t *testing.T) {
 			t.Errorf("arm %s calls = %d answer / %d judge, want 300 each", line.Arm, line.AnswerCalls, line.JudgeCalls)
 		}
 		wantFilterCalls := 0
-		if line.Arm == string(jevArmD) || line.Arm == string(jevArmDNoRelax) {
+		if line.Arm == string(jevArmD) || line.Arm == string(jevArmDNoRelax) || line.Arm == string(jevArmE) {
 			wantFilterCalls = 300
 		}
 		if line.FilterCalls != wantFilterCalls {
 			t.Errorf("arm %s filter calls = %d, want %d", line.Arm, line.FilterCalls, wantFilterCalls)
 		}
 	}
-	if plan.AnswerCalls != 1500 || plan.FilterCalls != 600 {
-		t.Errorf("totals = %d answer / %d filter, want 1500/600", plan.AnswerCalls, plan.FilterCalls)
+	if plan.AnswerCalls != 1800 || plan.FilterCalls != 900 {
+		t.Errorf("totals = %d answer / %d filter, want 1800/900", plan.AnswerCalls, plan.FilterCalls)
 	}
-	if plan.FilterInTokens != 600*jevArmPoolSize*jevEstimateFilterTokensPerCandidate {
+	if plan.FilterInTokens != 900*jevArmPoolSize*jevEstimateFilterTokensPerCandidate {
 		t.Errorf("filter input tokens = %d", plan.FilterInTokens)
 	}
 	if plan.EstimatedUSD <= 0 {
@@ -809,6 +809,7 @@ func TestWriteJevArmArtifactsLandsEverythingAndSurfacesValidity(t *testing.T) {
 		jevTestRowSpec{Arm: jevArmC, Shown: 12, Tokens: 100, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmD, Shown: 3, Tokens: 400, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 3, Tokens: 400, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmE, Shown: 6, Tokens: 700, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
 	)
 	if err := writeJevArmArtifacts(opt, registration, nil, rows, nil, 2, 8, nil, false, ""); err != nil {
 		t.Fatalf("write artifacts: %v", err)
@@ -885,6 +886,7 @@ func TestWriteJevArmArtifactsMergesBothPasses(t *testing.T) {
 		jevTestRowSpec{Arm: jevArmC, Shown: 12, Tokens: 100, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmD, Shown: 3, Tokens: 400, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 3, Tokens: 400, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmE, Shown: 6, Tokens: 700, JevMs: 300, JevUSD: 0.0004, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmA, Shown: 8, Tokens: 800, Correct: func(int) bool { return true }},
 	)
 	if err := writeJevArmArtifacts(opt, registration, nil, gatedRows, jevTestDerived(4, 0.5, true, true), 2, 8, nil, false, ""); err != nil {
@@ -901,6 +903,7 @@ func TestWriteJevArmArtifactsMergesBothPasses(t *testing.T) {
 		jevTestRowSpec{Arm: jevArmD, Shown: 8, Tokens: 800, Degraded: true, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmB, Shown: 150, Tokens: 3000, Correct: func(int) bool { return true }},
 		jevTestRowSpec{Arm: jevArmDNoRelax, Shown: 8, Tokens: 800, Degraded: true, Correct: func(int) bool { return true }},
+		jevTestRowSpec{Arm: jevArmE, Shown: 8, Tokens: 900, Degraded: true, Correct: func(int) bool { return true }},
 	)
 	if err := writeJevArmArtifacts(opt, registration, nil, degradedRows, jevTestDerived(4, 0.5, true, true), 0, 8, nil, true, ""); err != nil {
 		t.Fatalf("degraded pass: %v", err)

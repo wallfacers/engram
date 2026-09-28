@@ -263,6 +263,11 @@ type options struct {
 	// parsed subset lands in jevAnswerArms inside runJevArms.
 	jevAnswerArmsRaw string
 	jevAnswerArms    []jevArm
+	// jevSpanCap is the --jev-span-cap declaration: how many verbatim lineage
+	// span cards arm E appends after its D-identical shortlist. 0 disables
+	// recovery (an E arm then measures exactly D). Frozen into the registration
+	// so a sweep cannot silently change the presented shape.
+	jevSpanCap int
 }
 
 func main() {
@@ -351,6 +356,7 @@ func run() error {
 	flag.StringVar(&opt.jevCostAttribution, "jev-cost-attribution", "", "051 attribution note required when the filter segment is more than 10x off the expectation (SC-007)")
 	flag.IntVar(&opt.jevArmsReps, "jev-arms-reps", jevArmAnswerRepetitions, "051 --jev-arms answer repetitions: 3 = canonical majority-of-3 protocol (default), 1 = gated single-answer pilot; any other value is refused")
 	flag.StringVar(&opt.jevAnswerArmsRaw, "jev-answer-arms", "", "051 resource-saving answering subset (comma-separated arm names, e.g. B,D): all arms are measured but only these spend answer+judge calls; empty = every arm answers; frozen into the protocol registration")
+	flag.IntVar(&opt.jevSpanCap, "jev-span-cap", defaultJevSpanCap, "051 arm E verbatim span cards appended after the filtered shortlist (lineage recovery through the evidence ledger); 0 disables recovery and makes E measure exactly D; frozen into the protocol registration")
 	flag.BoolVar(&opt.jevPilotGateConfirmed, "jev-pilot-gate-confirmed", false, "051 declaration: the 038 pilot gate passed for this run")
 	flag.BoolVar(&opt.jevWarmupDisposed, "jev-warmup-disposed", false, "051 declaration: the warm-up records were disposed of before the gated run")
 	flag.BoolVar(&opt.jevSameWindowReps, "jev-same-window-reps", false, "051 declaration: all answer repetitions (per --jev-arms-reps) run in one window")

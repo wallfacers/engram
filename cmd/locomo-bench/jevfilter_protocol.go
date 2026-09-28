@@ -101,6 +101,11 @@ type jevFilterRegistration struct {
 	// protocol; a subset changes the registration digest, so it is frozen into the
 	// protocol manifest at freeze time and refused on mismatch at run time.
 	AnswerArms []string `json:"answer_arms,omitempty"`
+	// SpanCap declares arm E's verbatim lineage-span card count. Omitted (0)
+	// means no span recovery — either no E arm or an E arm measuring exactly D.
+	// It changes the registration digest, so it is frozen at freeze time and
+	// refused on mismatch at run time like every other presented-shape knob.
+	SpanCap int `json:"span_cap,omitempty"`
 	// The three declared protocol prerequisites. The 038 machine records them as
 	// receipts elsewhere; the registration states that the operator confirmed
 	// them for this run, and validateJevRunValidity refuses a gated run without
@@ -892,6 +897,7 @@ func jevRegistrationForRun(opt options, pol filter.Policy) (jevFilterRegistratio
 		}
 		registration.AnswerArms = names
 	}
+	registration.SpanCap = opt.jevSpanCap
 	if err := validateJevFilterRegistration(registration); err != nil {
 		return jevFilterRegistration{}, err
 	}
@@ -1382,11 +1388,14 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 						productionLimit = jevArmCShowReference
 					}
 					render := jevArmAnswerRenderer(qa, opt, model)
+					// Arm E's lineage-span handle: built once per conversation
+					// runtime, disabled (nil) when --jev-span-cap=0.
+					spans := newSpanRecovery(runtime.entries, opt.jevSpanCap)
 					observations := make(map[jevArm]jevArmObservation, len(jevArmNames()))
 					outcomes := make(map[jevArm]jevArmOutcome, len(jevArmNames()))
 					aborted := false
 					for _, recipe := range jevArmRecipes() {
-						observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit)
+						observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit, spans)
 						if err != nil {
 							fail(err)
 							aborted = true

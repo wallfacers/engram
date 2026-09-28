@@ -23,7 +23,8 @@ import (
 // The engine is untouched: arms only call the public memory.Retriever API
 // (Search / SearchFiltered) and the filter package's pure Select policy.
 
-// jevArm names the four §23 arms plus the D-noRelax kill-switch variant.
+// jevArm names the four §23 arms plus the D-noRelax kill-switch variant and
+// the E span-recovery arm (051 §E: D plus lineage verbatim spans).
 type jevArm string
 
 const (
@@ -32,6 +33,7 @@ const (
 	jevArmC        jevArm = "C"
 	jevArmD        jevArm = "D"
 	jevArmDNoRelax jevArm = "D-noRelax"
+	jevArmE        jevArm = "E"
 )
 
 const (
@@ -96,6 +98,10 @@ type jevArmRecipe struct {
 	Filtered bool
 	// RelaxDisabled is the ENGRAM_JEV_RELAX=0 kill-switch; only D-noRelax sets it.
 	RelaxDisabled bool
+	// SpanRecovery marks arm E: after the D-identical filtered shortlist, the
+	// question's verbatim source spans are traced through the evidence ledger
+	// and appended to the presented list. The only variable E adds over D.
+	SpanRecovery bool
 	// Description documents the recipe in the run report.
 	Description string
 }
@@ -134,6 +140,13 @@ func jevArmRecipes() []jevArmRecipe {
 			Filtered:      true,
 			RelaxDisabled: true,
 			Description:   "same as D with the relax stage disabled (ENGRAM_JEV_RELAX=0); SC-004 is measured on this variant",
+		},
+		{
+			Arm:          jevArmE,
+			Pool:         jevArmPoolSize,
+			Filtered:     true,
+			SpanRecovery: true,
+			Description:  "D plus lineage verbatim spans: kept facts and the RRF pool head trace back to their source turns through the evidence ledger (--jev-span-cap cards)",
 		},
 	}
 }
@@ -241,7 +254,10 @@ func (o jevArmObservation) shown() []memory.Result {
 // memory.Search's default of 8). The filtered arms pass it to SearchFiltered as
 // the degrade truncation width, which is what makes SC-005's "degraded shown set
 // == C@8" comparison true by construction.
-func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, recipe jevArmRecipe, spec *filterRetrieval, quota, productionLimit int) (observation jevArmObservation, err error) {
+//
+// spans carries arm E's lineage-span recovery handle; nil keeps every arm on
+// its pre-E path (and makes an E arm degrade to D when recovery is disabled).
+func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, recipe jevArmRecipe, spec *filterRetrieval, quota, productionLimit int, spans *spanRecovery) (observation jevArmObservation, err error) {
 	if r == nil {
 		return jevArmObservation{}, fmt.Errorf("jev arm %s requires a retriever", recipe.Arm)
 	}
@@ -310,6 +326,17 @@ func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, reci
 		observation.Meta = meta
 		observation.Degraded = meta.Degraded
 		observation.Presented = shortlist
+		if recipe.SpanRecovery {
+			// Arm E: trace the shortlist (and the unfiltered pool head the filter
+			// dropped) back to their source turns. Recovery failures are hard
+			// errors, not degradations: a silently missing span card would make
+			// E measure something other than the declared recipe.
+			cards, err := recoverSpans(ctx, spans, shortlist, pool)
+			if err != nil {
+				return jevArmObservation{}, fmt.Errorf("jev arm %s span recovery: %w", recipe.Arm, err)
+			}
+			observation.Presented = append(observation.Presented, cards...)
+		}
 		return observation, nil
 	}
 
@@ -326,6 +353,13 @@ func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, reci
 	observation.Degraded = true
 	observation.Meta = meta
 	observation.Presented = shortlist
+	if recipe.SpanRecovery {
+		cards, err := recoverSpans(ctx, spans, shortlist, pool)
+		if err != nil {
+			return jevArmObservation{}, fmt.Errorf("jev arm %s degraded span recovery: %w", recipe.Arm, err)
+		}
+		observation.Presented = append(observation.Presented, cards...)
+	}
 	return observation, nil
 }
 
