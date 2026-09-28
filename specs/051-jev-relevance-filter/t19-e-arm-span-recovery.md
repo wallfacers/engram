@@ -59,3 +59,16 @@ k150 池(与 D 完全同池、同一次 jev 调用、同降级语义)
 归因必做:`attribute.py` 交叉 $D9 的 94 道 B对D错 → E 救回数(span 对症率的直接证据)。
 
 *收数后本文件补 §6 数字(B/D/E accuracy、D→E p、E token 比、flips 归因)。*
+
+## 6. 结果(2026-09-29 夜,decider-4b filter,flash 答题,1-rep n=1540)
+
+**Run** `$E1RD = e1rd-20260929T023000`(gated EXIT=0,零降级)。filter 上游已从 Vercel `typesafe-ai/jev`(credit 耗尽 402)换为**本地 decider-4b v2**(Apache-2.0,4090 bf16 + COMPILE + 修桶;shim `OPENJEV_UPSTREAM=typesafe` 直指 `/v1/systemone`,零映射,`8f968a5` 散文化 instructions 为无害重构:mean|ΔP|=0.0146、θ=0.5 翻转 0)。答题=deepseek-flash(DeepSeek 官方),判题同。**B 臂未跑**(维护者指令:太贵,历史锚 80.00%/8408 tok = Qwen 口径,跨口径声明)。token 计数:准入=:8003 CPU Qwen tokenizer(冻结指纹 4806… 不变);记账=deepseek usage。
+
+| 臂 | accuracy | answer tok/题 | shown | kept | degraded |
+|---|---|---|---|---|---|
+| D(filter) | 77.08% | 927(=B 锚 1/9.1) | 5.7 | 5.74 | 0/1540 |
+| **E(+血缘 span)** | **79.94%** | **1249(=B 锚 1/6.7 ≈ 目标 ~1/6)** | 11.7 | 5.74 | 0/1540 |
+
+**D→E = +2.86pp,p<0.0001,paired CI [+1.51,+4.21]pp —— 血缘原文机制显著有效**(枚举/多跳题从 span 卡回收原始证据)。E≈B 历史锚(79.94 vs 80.00,但跨口径:答题模型 flash≠Qwen;flash 口径自身基线漂移 82-85%,严格配对需花 B 的钱重测,留维护者决策)。SC-002 PASS(D=11.0% of B tokens);SC-001/004/005/007 HOLD(B 不答题/cat5 未跑/degraded pass 未跑/filter p95 23.1s 本地排队口径,均预期内可解释)。
+
+运维快照:decider 全量 40k shard 请求 errors=0;吞吐 ~240 shard/min(compile+修桶 1.94×);全程 2.1h(02:30-05:00)。**backlog**:摘录瘦身收益重估为 ~1.2×(真实 payload 98% 落 512-1024 桶);下轮 p50 优化=filter 闸 4→2。**token 维度达成(E≈1/6.7 B 锚);分数维度 91.43 未达**(E 79.94,机制有效但水位不足,后续:θ/枚举规则/3-rep 口径)。
