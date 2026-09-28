@@ -1,6 +1,6 @@
 # T19 P3 PILOT — slices 12+13 deployed & proven; pilot LAUNCHED, then **STOPPED per step-5 gate (decision A)** — box auto-shutdown armed
 
-**Bottom line:** everything the pilot required was deployed and validated at HEAD `882c75f` — s12 shim **separation smoke PERFECT**, s13 `--jev-arms-reps 1` freeze passed with an **exactly-legitimate $D4↔$D6 protocol delta**, gated-only chain launched clean. The pilot then **failed the step-5 acceptance gate for two independent reasons** (gateway 503 storm ⇒ ~96 % degraded filter rows; vllm answer completions **frozen ≥ 9 min**, ≈0–1.2 answers/min vs the 15/min flag line). Supervisor decision **A**: collect evidence → kill by PID → auto-shutdown watcher fires (billing stops ~17:26; data persists). **No box-side debugging, no tuning.** No secrets anywhere (key referenced by `$AI_GATEWAY_API_KEY` / `.jev-env.sh` only; value never printed — log scans verified 0 occurrences).
+**Bottom line:** everything the pilot required was deployed and validated at HEAD `882c75f` — s12 shim **separation smoke PERFECT**, s13 `--jev-arms-reps 1` freeze passed with an **exactly-legitimate $D4↔$D6 protocol delta**, gated-only chain launched clean. The pilot then **failed the step-5 acceptance gate for two independent reasons** (gateway 503 storm ⇒ ~96 % degraded filter rows; vllm counter frozen ≥9 min — later corrected, see §9/morning-brief note re H2). Supervisor decision **A**: collect evidence → kill by PID → auto-shutdown watcher fires (billing stopped; data persists). **No box-side debugging, no tuning.** No secrets anywhere (key referenced by `$AI_GATEWAY_API_KEY` / `.jev-env.sh` only; value never printed — log scans verified 0 occurrences).
 
 Box CST 2026-09-24, sprint window 16:47–17:17.
 
@@ -52,27 +52,78 @@ The 9 healthy rows ARE correctly shaped (input_tokens>0, NOT timeout-shaped) —
 {"…","conv":4,"q":4,"arm":"D","pool":150,"memories":8,"kept":8,"dropped":142,"latency_ms":3178,"input_tokens":32069,"output_tokens":7605,"degraded":false}
 ```
 
-**(H2) Answer rate collapsed.** `vllm:request_success_total{finished_reason="length"}` = **21 at 17:04:58, STILL 21 at 17:13:48 — zero completions for ≥ 9 min** with `num_requests_running≈8–10, waiting=0` (pipeline wedged, not queued). Cumulative ≈21 answers in 18.5 min ≈ **1.2–2.3 answers/min ≪ 15/min flag line** (flagged, NOT tuned, per instruction). **ETA: N/A — pilot was invalid** (D-arm ≈ fused top-N fallback 96 % of the time ⇒ cannot measure the D ≥ B − 0.5pp gate). No INVALID/drift-storm in gated.log (0 error lines) — the run was still "validly" progressing, which is exactly why the ops gate, not the harness, had to stop it.
+**(H2) Answer rate appeared collapsed.** `vllm:request_success_total{finished_reason="length"}` = 21 at 17:04:58, still 21 at 17:13:48 (zero completions ≥9 min with `num_requests_running≈8–10, waiting=0`). **Correction (later, parent-verified in 2e8b4c1): this counter read was a metric mis-attribution — actual answers were ~28/min.** The H1 filter-degradation finding remains the operative stop reason; H2 is recorded as originally measured + corrected here.
 
 ## 6. Disposition (supervisor DECISION A, executed in order)
 
-1. **Evidence collected to LOCAL first** (box up): `specs/051-jev-relevance-filter/pilot-artifacts/` — `gated.log` (full, 36 L), `jev_filter_calls.digest.txt` (wc + head-20 + tail-20 + degraded counts + latency histograms both classes), `shim-log.tail200.txt` (tail-200 + attempts/status counters), `prekill-snapshot.txt` (vllm metrics + pgrep -a + markers, timestamped 17:1x). Freeze-window **17:04:58 → 17:13:48** annotated above. (Untracked, unstaged — `git diff --cached` empty.)
-2. **Kill by PID**: `kill 25975` → markers landed `gated.exit=143`, `chain.done=143`; drivers exited (independent verify: no `run-p3-pilot` processes remain — the lone "2" was my own ssh pattern self-match); `locomo-bench=0`. No `pkill -f`.
-3. **Watcher LEFT ARMED (not killed)**: PID 26350 logged `17:16:24 chain.done detected rc=143; grace 600s for artifact collection` → box powers off **≈ 17:26 CST**; `/root/autodl-tmp` persists. **The collector at 01:05 will find the box down — that is by design.** Shim 25741 + services simply die with the instance.
-4. Not waited on: the shutdown itself. Do NOT ssh expecting the box up after ~17:26.
+1. **Evidence collected to LOCAL first** (box up): `specs/051-jev-relevance-filter/pilot-artifacts/` — `gated.log` (full, 36 L), `jev_filter_calls.digest.txt` (wc + head-20 + tail-20 + degraded counts + latency histograms both classes), `shim-log.tail200.txt` (tail-200 + attempts/status counters), `prekill-snapshot.txt` (vllm metrics + pgrep -a + markers). No marker written before collection.
+2. **Kill by PID**: `kill 25975` → markers landed `gated.exit=143`, `chain.done=143`; drivers exited; `locomo-bench=0`. No `pkill -f`.
+3. **Watcher LEFT ARMED (not killed)**: PID 26350 logged `17:16:24 chain.done detected rc=143; grace 600s for artifact collection` → box powered off; `/root/autodl-tmp` persisted. Collector at 01:05 confirmed box-down signature (4fd0dd6).
+4. Maintenance restarted the box afterwards (fresh credentials, key auth reinstalled; parent relaunched services 2026-09-28 ~09:04).
 
 ## 7. Poll cheat-sheet (post-mortem / reuse)
 
 ```bash
 D=$(cat /root/autodl-tmp/051-jev-arms-runs/CURRENT-P3-D)   # now $D6 (pilot, rc=143 stopped)
 [ -f $D/chain.done ] && echo DONE rc=$(cat $D/chain.done)  # 143 = SIGTERM'd by decision A; no verdict files expected (killed mid-run)
-# gated.done semantics (1-rep): gated.exit=0 + single gated verdict JSON; degraded pass absent in pilot.
 grep -c '"degraded":false' $D/jev_filter_calls.jsonl       # ratio is the F2-style health signal
-curl -s -m5 http://127.0.0.1:8000/metrics | grep 'request_success_total.*length'   # the rate truth (static counter = wedge)
-grep -o 'attempts=[0-9]*' /root/autodl-tmp/logs/openjev-shim.log | sort | uniq -c  # gateway 503 pressure
+curl -s -m5 http://127.0.0.1:8000/metrics | grep 'request_success_total.*length'   # caution: verify attribution (H2 lesson)
+grep -o 'attempts=[0-9]*' /root/autodl-tmp/logs/openjev-shim.log | sort | uniq -c  # gateway pressure
 ```
 
 ## 8. What this pilot PROVED (carries forward) vs. what it KILLED
 
-- **Proven:** s12 separation (binary, perfect); s13 reps-gate freeze + protocol semantics (exact 6-field delta); full ops pipeline (deploy→freeze→launch→measure→stop) clean, zero extraction spend, ~550 gateway calls max before stop.
-- **Killed (the real finding):** the **typesafe gateway at ~32-way × 48-question shard load 503-storms** (~50 % of calls fail after retries) — a **capacity/load-profile problem, not a wiring problem**. Any P4 retry needs the parent to decide among: lower `--concurrency`, larger `OPENJEV`-side negative-cache/retry tuning (harness), gateway quota/plan, or shard-size policy in `filter/jev` (default 48, clamp [32,64]) — all out of scope here by decision A.
+- **Proven:** s12 separation (binary, perfect); s13 reps-gate freeze + protocol semantics (exact 6-field delta); full ops pipeline (deploy→freeze→launch→measure→stop) clean, zero extraction spend.
+- **Killed (the real finding):** the **typesafe gateway at ~32-way × 48-question shard load 503-storms** (~50 % of calls fail after retries) — a **capacity/load-profile problem, not a wiring problem**. S14 (shard 12) is the sized fix; S15 belt options parent-owned.
+
+---
+
+# §9 S14 RELAUNCH (2026-09-28) — deploy DONE, smoke BLOCKED by gateway **403 entitlement change**, PARKED per supervisor (decision: maintainer-side top-up / new key)
+
+Sprint intent: relaunch the pilot at HEAD `7ff5e80` (51fbea1 engine clamp [6,64] + `jevFilterShardSize=12`) to measure the 503-storm fix. **Steps 1–2 done; step 3 hit a hard external wall; steps 4–8 NOT executed (correctly — a pilot with a dead filter measures nothing).** Touched nothing else on the box; no self-initiated shutdown; **box left UP** (parent decision; revisit if maintenance defers >1 h).
+
+## 9.1 Staged-state inventory (all verified this session, 2026-09-28 ~09:12–09:20)
+
+| asset | state |
+|---|---|
+| runner | **`eae9a4b6eb20528e6eff62505b4e5a06ab88dcde1722a808f7d70fe48da34d94`** (built @7ff5e80) deployed to `/root/autodl-tmp/bin/locomo-bench`; s13 build preserved as `locomo-bench.old-882c75f` (`f9324ce4…`) |
+| shim | **UNCHANGED per instruction, NOT redeployed**: `91d02cc9f8611783210774f79b36c03446c7e72a494a469012fe1bb9d517c816`, PID **2007**, typesafe, healthz `ok`, startup line `2026-09-28 09:04:43 listening on http://127.0.0.1:8020 (upstream=typesafe, endpoint https://ai-gateway.vercel.sh/v4/ai/evaluation-model, model typesafe-ai/jev, max_questions=256)` |
+| clone | ff'd to **`7ff5e807d6e861e53150485f48d6cc86a343de89`** via full-branch bundle (sha256 `0e03e25da953c74fc0fc06118ff3b513de57b38ba9732e5a860b272005ce92fc`, local == remote), **porcelain = 0**, `bin/REV` = full sha |
+| services | `:8000` answerer 200 (`/v1/models`), `:8010` embed 200, `:8020` shim ok; disk `/root/autodl-tmp` 20 % used (202 G free) |
+| pointers | `CURRENT-P3-D` still → `$D6` (formal-pilot-20260924T165449); **no $D7 created, no chain launched, no watcher armed**; zero `locomo-bench` processes |
+| env files | `.p2b-env.sh` (typesafe-ai/jev registration) + `.jev-env.sh` (0600) intact from Sep 24 |
+
+## 9.2 THE WALL — verbatim 403
+
+Separation re-smoke (`p3-pilot-calib-sep4.json`, then `p2b-pointer-smoke.json` 5 s later), HTTP 502-wrapped by the shim, both **attempts=1, ~1–2 s**:
+
+```
+{"error":{"message":"upstream error: typesafe upstream returned status 403: Free tier users do not have access to this model. Upgrade to paid credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dtop-up for unrestricted access."}}
+```
+
+Shim log: `2026-09-28 09:13:05 answers failed: questions=4 …status 403…` / `09:13:23 answers failed: questions=2 …`.
+
+## 9.3 Three-point isolation (why this is account-side, not ours)
+
+1. **Bypass test:** direct `curl https://ai-gateway.vercel.sh/v4/ai/evaluation-model` with the EXACT production headers (`ai-gateway-protocol-version: 0.0.1`, `ai-evaluation-model-specification-version: 4`, `ai-model-id: typesafe-ai/jev`), shim fully bypassed → **same 403**. (First probe with guessed `2026-03-10` returned `400 Unsupported gateway protocol version` — a useful positive control that the endpoint actively parses headers.)
+2. **Control model:** generic `moonshotai/kimi-k2.6` via `/v1/chat/completions` on the **same key** → **same "Free tier" 403** ⇒ the ENTITLEMENT IS ACCOUNT-WIDE; Jev is not specially gated.
+3. **Key continuity:** box `.jev-env.sh` untouched since `2026-09-24 16:22:46` (93 B) and local `$AI_GATEWAY_API_KEY` has the **same sha256 prefix `78179216…`** — this is the very key that served **~700 successful calls** on Sep 24 (16:23→17:15, incl. the perfect §2 separation). The gateway-side plan/promo changed in the gap; **nothing deployed or configured here can fix it** — maintainer action required (top-up at the URL above, or issue a paid-scoped key into `~/.engram-eval-secrets.env`).
+
+## 9.4 RESUME PLAYBOOK (the moment the key works again)
+
+```bash
+# 1) re-push key (stdin discipline, value never in argv/logs):
+source ~/.engram-eval-secrets.env && ssh … 'umask 077; read -r K; printf "export OPENJEV_TYPESAFE_API_KEY=%s\n" "$K" > /root/autodl-tmp/.jev-env.sh' <<< "$AI_GATEWAY_API_KEY"
+# 2) separation re-smoke → expect 200 {need_m0:1, m1..m3:0} (~5s):
+ssh … 'curl -s -m 60 -X POST localhost:8020/answers -H "Content-Type: application/json" --data-binary @/root/autodl-tmp/scratch/p3-pilot-calib-sep4.json'
+# 3) then steps 4-8 UNCHANGED: freeze $D7 (--jev-arms-reps 1 --repeats 1 --jev-filter-model typesafe-ai/jev;
+#    $D6↔$D7 delta MUST be EXACTLY {created_at, protocol_hash, git.commit 882c75f→7ff5e80} — shard size is NOT a frozen field);
+#    swap D= line in bin/run-p3-pilot.sh → bash -n + sha both sides → setsid launch;
+#    re-arm watcher (same pilot-autoshutdown.sh design, $D7/chain.done, 600s grace, log to $D7/shutdown-watcher.log, record PID);
+#    health @+2/+7/+12: degraded:false share (expect 503-storm GONE, 12-Q ≈9k-token shards; STOP if ≥30% degraded or 503s persist),
+#    shim attempts=1 dominant, answers/min ~25-30 (count with attribution care — §5-H2 lesson), ETA=7700/rate.
+```
+
+## 9.5 Status at park
+
+S14's capacity fix remains **UNMEASURED** (recorded). Box UP, all services healthy, every artifact staged for a one-command resume. No repo source changes this session (`git status --porcelain -- cmd/ memory/ filter/` = 0; report file rebuild is the only write).
