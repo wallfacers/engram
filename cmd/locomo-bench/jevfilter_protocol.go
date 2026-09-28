@@ -95,6 +95,12 @@ type jevFilterRegistration struct {
 	AnswerRepetitions   int      `json:"answer_repetitions"`
 	EmptyInjectionFloor float64  `json:"empty_injection_floor"`
 	Arms                []string `json:"arms"`
+	// AnswerArms declares a resource-saving answering subset: all arms are still
+	// measured (retrieval, packing, filter journal), but only these arms spend
+	// answer+judge calls. Empty (omitted) = every arm answers, the canonical
+	// protocol; a subset changes the registration digest, so it is frozen into the
+	// protocol manifest at freeze time and refused on mismatch at run time.
+	AnswerArms []string `json:"answer_arms,omitempty"`
 	// The three declared protocol prerequisites. The 038 machine records them as
 	// receipts elsewhere; the registration states that the operator confirmed
 	// them for this run, and validateJevRunValidity refuses a gated run without
@@ -879,10 +885,59 @@ func jevRegistrationForRun(opt options, pol filter.Policy) (jevFilterRegistratio
 	registration.PilotGateConfirmed = opt.jevPilotGateConfirmed
 	registration.WarmupDisposed = opt.jevWarmupDisposed
 	registration.SameWindowReps = opt.jevSameWindowReps
+	if len(opt.jevAnswerArms) > 0 {
+		names := make([]string, 0, len(opt.jevAnswerArms))
+		for _, arm := range opt.jevAnswerArms {
+			names = append(names, string(arm))
+		}
+		registration.AnswerArms = names
+	}
 	if err := validateJevFilterRegistration(registration); err != nil {
 		return jevFilterRegistration{}, err
 	}
 	return registration, nil
+}
+
+// parseJevAnswerArms parses the --jev-answer-arms declaration: an empty value
+// means every arm answers (the canonical protocol, byte-identical to before);
+// otherwise a comma-separated list of known arm names, each at most once.
+func parseJevAnswerArms(raw string) ([]jevArm, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	known := make(map[jevArm]bool, len(jevArmNames()))
+	for _, arm := range jevArmNames() {
+		known[arm] = true
+	}
+	seen := make(map[jevArm]bool)
+	arms := make([]jevArm, 0, 2)
+	for _, field := range strings.Split(raw, ",") {
+		arm := jevArm(strings.TrimSpace(field))
+		if !known[arm] {
+			return nil, fmt.Errorf("--jev-answer-arms: unknown or empty arm %q (known: %v)", field, jevArmNames())
+		}
+		if seen[arm] {
+			return nil, fmt.Errorf("--jev-answer-arms: arm %q declared twice", arm)
+		}
+		seen[arm] = true
+		arms = append(arms, arm)
+	}
+	return arms, nil
+}
+
+// jevArmAnswered reports whether an arm spends answer+judge calls. A nil subset
+// is the canonical protocol: every arm answers.
+func jevArmAnswered(answerArms []jevArm, arm jevArm) bool {
+	if len(answerArms) == 0 {
+		return true
+	}
+	for _, candidate := range answerArms {
+		if candidate == arm {
+			return true
+		}
+	}
+	return false
 }
 
 // validateJevDeclaredPrerequisites refuses a run before it spends anything when a
@@ -1096,6 +1151,10 @@ func runJevArms(ctx context.Context, opt options, convs []conversation, prices p
 			return fmt.Errorf("parse ENGRAM_JEV_PRICE_PER_MILLION=%q: %w", raw, err)
 		}
 		opt.jevPricePerMillion = value
+	}
+	opt.jevAnswerArms, err = parseJevAnswerArms(opt.jevAnswerArmsRaw)
+	if err != nil {
+		return err
 	}
 	opt.jevBaseURLHost = baseURLHost(opt.jevBaseURL)
 	if !validJevArmsReps(opt.jevArmsReps) {
@@ -1365,6 +1424,13 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 						return
 					}
 					for _, recipe := range jevArmRecipes() {
+						// A resource-saving answering subset answers only the declared
+						// arms; the others keep their retrieval/packing measurement
+						// (CorrectMeasured stays false, exactly like a retrieval-only
+						// pass) and are excluded from the SC-001 contrast denominator.
+						if !jevArmAnswered(opt.jevAnswerArms, recipe.Arm) {
+							continue
+						}
 						outcome, err := answerJevArmQuestion(ctx, answerCall, judgeCall, qa, opt, observations[recipe.Arm].shown())
 						if err != nil {
 							fail(fmt.Errorf("conv=%d q=%d arm=%s: %w", conv.ID, selected.Index, recipe.Arm, err))

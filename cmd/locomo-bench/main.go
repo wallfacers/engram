@@ -257,6 +257,12 @@ type options struct {
 	// single-answer pilot (majority-of-1). No other value has majority
 	// semantics; validateJevArmsOptions refuses one by name.
 	jevArmsReps int
+	// jevAnswerArmsRaw is the --jev-answer-arms declaration: empty = every arm
+	// answers (canonical); otherwise a comma-separated answering subset (all
+	// arms are still measured, only answer+judge spend is subset-scoped). The
+	// parsed subset lands in jevAnswerArms inside runJevArms.
+	jevAnswerArmsRaw string
+	jevAnswerArms    []jevArm
 }
 
 func main() {
@@ -344,6 +350,7 @@ func run() error {
 	flag.StringVar(&opt.jevModel, "jev-filter-model", "", "051 pinned Jev filter model revision (a floating tag such as -latest is refused)")
 	flag.StringVar(&opt.jevCostAttribution, "jev-cost-attribution", "", "051 attribution note required when the filter segment is more than 10x off the expectation (SC-007)")
 	flag.IntVar(&opt.jevArmsReps, "jev-arms-reps", jevArmAnswerRepetitions, "051 --jev-arms answer repetitions: 3 = canonical majority-of-3 protocol (default), 1 = gated single-answer pilot; any other value is refused")
+	flag.StringVar(&opt.jevAnswerArmsRaw, "jev-answer-arms", "", "051 resource-saving answering subset (comma-separated arm names, e.g. B,D): all arms are measured but only these spend answer+judge calls; empty = every arm answers; frozen into the protocol registration")
 	flag.BoolVar(&opt.jevPilotGateConfirmed, "jev-pilot-gate-confirmed", false, "051 declaration: the 038 pilot gate passed for this run")
 	flag.BoolVar(&opt.jevWarmupDisposed, "jev-warmup-disposed", false, "051 declaration: the warm-up records were disposed of before the gated run")
 	flag.BoolVar(&opt.jevSameWindowReps, "jev-same-window-reps", false, "051 declaration: all answer repetitions (per --jev-arms-reps) run in one window")

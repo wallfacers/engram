@@ -185,8 +185,11 @@ type jevArmRowKey struct {
 // jevRunValidityFromMeasurements derives the run's validity from the rows it
 // measured. With a frozen protocol the expectations come from the protocol
 // (question count, answer repetitions); without one (unit tests) they come from
-// the rows themselves, so only structural self-consistency is claimed.
-func jevRunValidityFromMeasurements(protocol *evalProtocol, rows []jevArmQuestionRow, invalidReason string) jevRunValidity {
+// the rows themselves, so only structural self-consistency is claimed. The
+// answer-compliance denominator is the answering subset's rows (nil = every
+// arm answers), so a B/D-only resource-saving subset is judged by the arms it
+// declared, not punished for the arms it skipped.
+func jevRunValidityFromMeasurements(protocol *evalProtocol, rows []jevArmQuestionRow, answerArms []jevArm, invalidReason string) jevRunValidity {
 	validity := jevRunValidity{InvalidReason: invalidReason}
 	main := rowsForBlock(rows, jevArmMainBlock)
 	questions := make(map[[2]int]bool, len(main))
@@ -199,13 +202,16 @@ func jevRunValidityFromMeasurements(protocol *evalProtocol, rows []jevArmQuestio
 		armCounts[row.Arm]++
 		identities[jevArmRowKey{Conv: row.Conv, Q: row.Q, Arm: row.Arm, Repetition: row.Repetition}] = true
 	}
-	withinCap, answered := 0, 0
+	withinCap, answerable, answered := 0, 0, 0
 	for _, row := range rows {
 		if row.AnswerInputTokens <= jevArmAnswerInputCap {
 			withinCap++
 		}
-		if row.CorrectMeasured {
-			answered++
+		if jevArmAnswered(answerArms, row.Arm) {
+			answerable++
+			if row.CorrectMeasured {
+				answered++
+			}
 		}
 	}
 	validity.QuestionsMeasured = len(questions)
@@ -221,7 +227,9 @@ func jevRunValidityFromMeasurements(protocol *evalProtocol, rows []jevArmQuestio
 	validity.RowsExpected = validity.QuestionsExpected * validity.RepetitionsExpected * len(jevArmNames())
 	if len(rows) > 0 {
 		validity.WithinCapRate = float64(withinCap) / float64(len(rows))
-		validity.AnswerComplianceRate = float64(answered) / float64(len(rows))
+	}
+	if answerable > 0 {
+		validity.AnswerComplianceRate = float64(answered) / float64(answerable)
 	}
 	if len(main) > 0 {
 		validity.IdentityRate = float64(len(identities)) / float64(len(main))
@@ -690,7 +698,7 @@ func writeJevArmArtifacts(opt options, registration jevFilterRegistration, proto
 	if err := writeJevArmRows(filepath.Join(opt.runDir, jevArmRowsFile), rows); err != nil {
 		return fmt.Errorf("write %s: %w", jevArmRowsFile, err)
 	}
-	validity := jevRunValidityFromMeasurements(protocol, rows, invalidReason)
+	validity := jevRunValidityFromMeasurements(protocol, rows, opt.jevAnswerArms, invalidReason)
 	if err := writeJevRunReceipt(opt.runDir, protocol, validity, len(rows), filterCalls, retrievalCalls); err != nil {
 		return fmt.Errorf("write %s: %w", evalSummaryArtifactFile, err)
 	}

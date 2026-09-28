@@ -36,7 +36,7 @@ func jevReceiptTestRows(questions, reps int) []jevArmQuestionRow {
 
 func TestJevRunValidityFromCompleteMeasurements(t *testing.T) {
 	protocol := &evalProtocol{Benchmark: evalBenchmarkProvenance{QuestionCount: 2}, Aggregation: evalAggregationProtocol{AnswerRepetitions: 1}}
-	validity := jevRunValidityFromMeasurements(protocol, jevReceiptTestRows(2, 1), "")
+	validity := jevRunValidityFromMeasurements(protocol, jevReceiptTestRows(2, 1), nil, "")
 	if !validity.isComplete() {
 		t.Fatalf("a fully measured run is not complete: %+v", validity)
 	}
@@ -84,7 +84,7 @@ func TestJevRunValidityRefusesIncompleteMeasurements(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if validity := jevRunValidityFromMeasurements(tc.protocol, tc.rows, tc.invalid); validity.isComplete() {
+			if validity := jevRunValidityFromMeasurements(tc.protocol, tc.rows, nil, tc.invalid); validity.isComplete() {
 				t.Fatalf("incomplete run passed the gate: %+v", validity)
 			}
 		})
@@ -189,4 +189,64 @@ func TestJevArmsRuntimeKeepsSemanticSignal(t *testing.T) {
 	if client.calls == 0 {
 		t.Error("the query was never embedded; the semantic signal is dead in the arms runtime (T19 BUG ①)")
 	}
+}
+
+// --- --jev-answer-arms subset (maintainer order 2026-09-28: B/D-only answering) ---
+
+func TestParseJevAnswerArms(t *testing.T) {
+	if arms, err := parseJevAnswerArms(""); err != nil || arms != nil {
+		t.Errorf("empty = %v, %v; want nil, nil (all arms answer)", arms, err)
+	}
+	arms, err := parseJevAnswerArms("B,D")
+	if err != nil || len(arms) != 2 || arms[0] != jevArmB || arms[1] != jevArmD {
+		t.Errorf("B,D = %v, %v", arms, err)
+	}
+	for _, raw := range []string{"B,X", "B,B", "B,", "d"} {
+		if _, err := parseJevAnswerArms(raw); err == nil {
+			t.Errorf("subset %q was accepted", raw)
+		}
+	}
+}
+
+func TestJevArmAnswered(t *testing.T) {
+	if !jevArmAnswered(nil, jevArmA) || !jevArmAnswered(nil, jevArmDNoRelax) {
+		t.Error("a nil subset must mean every arm answers")
+	}
+	subset := []jevArm{jevArmB, jevArmD}
+	if !jevArmAnswered(subset, jevArmB) || !jevArmAnswered(subset, jevArmD) {
+		t.Error("B and D must answer under the B,D subset")
+	}
+	if jevArmAnswered(subset, jevArmA) || jevArmAnswered(subset, jevArmC) || jevArmAnswered(subset, jevArmDNoRelax) {
+		t.Error("A/C/D-noRelax must not answer under the B,D subset")
+	}
+}
+
+// TestJevRunValidityComplianceOverAnswerArms pins the receipt's answer-compliance
+// semantics under a B/D-only answering subset: the denominator is the subset's
+// rows, so a fully answered subset on a five-arm measurement is complete while
+// the same rows under all-arms answering are not.
+func TestJevRunValidityComplianceOverAnswerArms(t *testing.T) {
+	protocol := &evalProtocol{Benchmark: evalBenchmarkProvenance{QuestionCount: 2}, Aggregation: evalAggregationProtocol{AnswerRepetitions: 1}}
+	rows := jevReceiptTestRows(2, 1) // all rows CorrectMeasured=true
+	answerArms := []jevArm{jevArmB, jevArmD}
+	for i := range rows {
+		if !answerArmsContains(answerArms, rows[i].Arm) {
+			rows[i].CorrectMeasured = false
+		}
+	}
+	if validity := jevRunValidityFromMeasurements(protocol, rows, answerArms, ""); !validity.isComplete() {
+		t.Fatalf("a fully answered B/D subset is not complete: %+v", validity)
+	}
+	if validity := jevRunValidityFromMeasurements(protocol, rows, nil, ""); validity.isComplete() {
+		t.Fatal("unanswered arms under the all-arms protocol passed the gate")
+	}
+}
+
+func answerArmsContains(arms []jevArm, arm jevArm) bool {
+	for _, candidate := range arms {
+		if candidate == arm {
+			return true
+		}
+	}
+	return false
 }
