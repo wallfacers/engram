@@ -46,17 +46,12 @@ type typesafeWireMemory struct {
 type typesafeWireQuestion struct {
 	Type         string                   `json:"type"`
 	Criteria     typesafeWireCriteria     `json:"criteria"`
-	Instructions typesafeWireInstructions `json:"instructions"`
+	Instructions string `json:"instructions"`
 }
 
 type typesafeWireCriteria struct {
 	Yes string `json:"yes"`
 	No  string `json:"no"`
-}
-
-type typesafeWireInstructions struct {
-	Goal  string   `json:"goal"`
-	Rules []string `json:"rules"`
 }
 
 // --- fake typesafe endpoint -------------------------------------------------
@@ -272,11 +267,13 @@ func TestTypesafeTranslationPreservesNeedIDsAndState(t *testing.T) {
 		if question.Criteria.No != "this memory is not needed" {
 			t.Errorf("%s: criteria.no = %q", id, question.Criteria.No)
 		}
-		if question.Instructions.Goal != wantGoal {
-			t.Errorf("%s: instructions.goal = %q, want %q", id, question.Instructions.Goal, wantGoal)
+		if !strings.Contains(question.Instructions, wantGoal) {
+			t.Errorf("%s: instructions = %q, want it to contain goal %q", id, question.Instructions, wantGoal)
 		}
-		if !reflect.DeepEqual(question.Instructions.Rules, wantRules) {
-			t.Errorf("%s: instructions.rules = %v, want %v", id, question.Instructions.Rules, wantRules)
+		for _, rule := range wantRules {
+			if !strings.Contains(question.Instructions, rule) {
+				t.Errorf("%s: instructions = %q, want it to contain rule %q", id, question.Instructions, rule)
+			}
 		}
 	}
 
@@ -332,8 +329,8 @@ func TestTypesafeQuestionBindsItsOwnMemoryAndQuery(t *testing.T) {
 		"need_m1": "decide whether the memory 'Bob plays chess every weekend.' is needed to answer the query 'What is Ana's favorite food?'",
 	}
 	for id, want := range wantGoals {
-		if got := sent.Questions[id].Instructions.Goal; got != want {
-			t.Errorf("%s: instructions.goal = %q, want %q", id, got, want)
+		if got := sent.Questions[id].Instructions; !strings.Contains(got, want) {
+			t.Errorf("%s: instructions = %q, want it to contain %q", id, got, want)
 		}
 	}
 }
@@ -356,8 +353,11 @@ func TestTypesafeQuestionRulesCarryTheMeasuredRecipe(t *testing.T) {
 		"judge strictly by relevance to answering the query",
 		"answer no for memories about unrelated people, topics, or facts",
 	}
-	if got := sent.Questions["need_m0"].Instructions.Rules; !reflect.DeepEqual(got, want) {
-		t.Errorf("instructions.rules = %v, want the measured recipe %v", got, want)
+	got := sent.Questions["need_m0"].Instructions
+	for _, rule := range want {
+		if !strings.Contains(got, rule) {
+			t.Errorf("instructions = %q, want it to contain the measured rule %q", got, rule)
+		}
 	}
 }
 
@@ -394,11 +394,11 @@ func TestTypesafeQuestionFallsBackToGenericInstructionsOnMemoryMiss(t *testing.T
 		if !ok {
 			t.Fatalf("questions is missing %q: %v", id, sent.Questions)
 		}
-		if question.Instructions.Goal != wantGoal {
-			t.Errorf("%s: goal = %q, want the generic fallback %q", id, question.Instructions.Goal, wantGoal)
+		if !strings.HasPrefix(question.Instructions, wantGoal) {
+			t.Errorf("%s: instructions = %q, want the generic fallback prefix %q", id, question.Instructions, wantGoal)
 		}
-		if want := []string{"judge strictly by relevance to answering the query"}; !reflect.DeepEqual(question.Instructions.Rules, want) {
-			t.Errorf("%s: rules = %v, want the generic %v", id, question.Instructions.Rules, want)
+		if !strings.Contains(question.Instructions, "judge strictly by relevance to answering the query") {
+			t.Errorf("%s: instructions = %q, want the generic rule", id, question.Instructions)
 		}
 	}
 	if out := decodeWire(t, raw); out.Probabilities["need_m9"] != 0.4 || out.Probabilities["durable"] != 0.7 {
@@ -433,8 +433,8 @@ func TestTypesafeQuestionGoalTruncatesLongMemoryText(t *testing.T) {
 		t.Fatalf("decode typesafe body %s: %v", rec.rawAt(0), err)
 	}
 	wantGoal := "decide whether the memory '" + long[:maxTypesafeGoalMemoryChars] + "…' is needed to answer the query 'q'"
-	if got := sent.Questions["need_m0"].Instructions.Goal; got != wantGoal {
-		t.Errorf("goal is not the bounded excerpt:\n got %q\nwant %q", got, wantGoal)
+	if got := sent.Questions["need_m0"].Instructions; !strings.Contains(got, wantGoal) {
+		t.Errorf("instructions is not the bounded excerpt:\n got %q\nwant to contain %q", got, wantGoal)
 	}
 	if got := sent.State.Memories["m0"].Text; got != long {
 		t.Errorf("state.memories[m0].text has %d chars, want the full %d (the state stays the fallback)", len(got), len(long))

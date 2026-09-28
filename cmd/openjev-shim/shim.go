@@ -834,14 +834,14 @@ func typesafeQuestionFor(key string, memories map[string]pointerMemory, query st
 	question := typesafeQuestion{
 		Type:         "choice",
 		Criteria:     typesafeCriteria{Yes: typesafeCriteriaYes, No: typesafeCriteriaNo},
-		Instructions: typesafeRuleSet{Goal: typesafeGoal, Rules: []string{typesafeRule}},
+		Instructions: typesafeGoal + " Rules: " + typesafeRule,
 	}
 	mem, ok := lookupTypesafeMemory(key, memories)
 	if !ok {
 		return question
 	}
-	question.Instructions.Goal = fmt.Sprintf(typesafeGoalFormat, typesafeMemoryExcerpt(mem.Text), query)
-	question.Instructions.Rules = []string{typesafeRule, typesafeAgnosticRule}
+	question.Instructions = fmt.Sprintf(typesafeGoalFormat, typesafeMemoryExcerpt(mem.Text), query) +
+		" Rules: " + typesafeRule + "; " + typesafeAgnosticRule
 	return question
 }
 
@@ -928,7 +928,11 @@ type typesafeState struct {
 type typesafeQuestion struct {
 	Type         string           `json:"type"`
 	Criteria     typesafeCriteria `json:"criteria"`
-	Instructions typesafeRuleSet  `json:"instructions"`
+	// Instructions is rendered as one prose sentence, not a {goal,rules}
+	// object: a small self-hosted systemone model (decider-4b) consumes the
+	// question text directly, and a raw JSON blob in its prompt measurably
+	// reads worse than the same content as prose.
+	Instructions string `json:"instructions"`
 }
 
 // typesafeCriteria is the choice question's yes/no wording; the answer's "yes"
