@@ -791,6 +791,37 @@ const jevFilterShardSize = 12
 // (filter/jev/jev.go). No engine default changes.
 const jevFilterTimeout = 30 * time.Second
 
+// gatedJevFilter bounds concurrent filter calls without touching the engine.
+// The hosted jev endpoint saturates far below the cloud answerer's limits
+// (measured 2026-09-28: ~10 concurrent calls hold p50 ~1.1s at 0.42% degraded,
+// ~32 concurrent calls collapse to p50 ~11s at 34% degraded), so the question
+// pool runs wide while filter calls queue on their own gate — question workers
+// never serialize on the filter's provider capacity.
+type gatedJevFilter struct {
+	inner filter.RelevanceFilter
+	sem   chan struct{}
+}
+
+// Filter implements filter.RelevanceFilter with a concurrency gate.
+func (g *gatedJevFilter) Filter(ctx context.Context, query string, cands []filter.Candidate) ([]float64, filter.FilterMeta, error) {
+	select {
+	case g.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, filter.FilterMeta{}, ctx.Err()
+	}
+	defer func() { <-g.sem }()
+	return g.inner.Filter(ctx, query, cands)
+}
+
+// newGatedJevFilter wraps a configured client in the gate; a nil or
+// non-positive bound returns the client unchanged.
+func newGatedJevFilter(inner filter.RelevanceFilter, bound int) filter.RelevanceFilter {
+	if inner == nil || bound <= 0 {
+		return inner
+	}
+	return &gatedJevFilter{inner: inner, sem: make(chan struct{}, bound)}
+}
+
 // buildJevFilterClient constructs the Jev filter from the run's configuration. An
 // unconfigured client collapses to a nil interface here (typed-nil discipline),
 // which is what the arms read as "degraded".
@@ -1220,7 +1251,7 @@ func runJevArms(ctx context.Context, opt options, convs []conversation, prices p
 	if err != nil {
 		return err
 	}
-	opt.jevFilter.Filter = client
+	opt.jevFilter.Filter = newGatedJevFilter(client, opt.jevFilterConcurrency)
 	logger.Info("jev four-arm run",
 		"pass", map[bool]string{true: jevArmPassDegraded, false: jevArmPassGated}[opt.jevDegradedPass],
 		"filter_model", registration.FilterModel,
