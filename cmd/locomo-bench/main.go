@@ -268,6 +268,12 @@ type options struct {
 	// recovery (an E arm then measures exactly D). Frozen into the registration
 	// so a sweep cannot silently change the presented shape.
 	jevSpanCap int
+	// tokenCounterModel names the model id the /tokenize endpoint serves. It
+	// defaults to the answerer id; a run whose answerer is a cloud model must
+	// point it at the local tokenizer's served name instead (the counter stays
+	// local, so the frozen counter fingerprint keeps describing the same
+	// tokenizer stack).
+	tokenCounterModel string
 	// jevFilterArmsRaw is the --jev-filter-arms declaration: empty = every
 	// filtered arm calls the filter (canonical); a comma-separated subset makes
 	// the unlisted filtered arms measure the degraded no-filter path instead —
@@ -364,6 +370,7 @@ func run() error {
 	flag.IntVar(&opt.jevArmsReps, "jev-arms-reps", jevArmAnswerRepetitions, "051 --jev-arms answer repetitions: 3 = canonical majority-of-3 protocol (default), 1 = gated single-answer pilot; any other value is refused")
 	flag.StringVar(&opt.jevAnswerArmsRaw, "jev-answer-arms", "", "051 resource-saving answering subset (comma-separated arm names, e.g. B,D): all arms are measured but only these spend answer+judge calls; empty = every arm answers; frozen into the protocol registration")
 	flag.IntVar(&opt.jevSpanCap, "jev-span-cap", defaultJevSpanCap, "051 arm E verbatim span cards appended after the filtered shortlist (lineage recovery through the evidence ledger); 0 disables recovery and makes E measure exactly D; frozen into the protocol registration")
+	flag.StringVar(&opt.tokenCounterModel, "token-counter-model", "", "model id served by --token-counter-base-url (default: the answerer id); point it at the local vLLM name when the answerer is a cloud model")
 	flag.DurationVar(&opt.jevDeadline, "jev-deadline", 0, "051 whole-call Jev filter deadline (0 = the frozen 30s eval constant); widening it is legitimate on a cold local backend where shards succeed but need tens of seconds — slow-but-successful keeps the filter semantics, unlike deadline-degraded fallbacks")
 	flag.StringVar(&opt.jevFilterArmsRaw, "jev-filter-arms", "", "051 filtered arms that actually call the Jev filter (comma-separated, e.g. D,E); unlisted filtered arms (e.g. D-noRelax) measure the degraded no-filter path instead, saving their filter calls; empty = every filtered arm filters; frozen into the protocol registration")
 	flag.BoolVar(&opt.jevPilotGateConfirmed, "jev-pilot-gate-confirmed", false, "051 declaration: the 038 pilot gate passed for this run")

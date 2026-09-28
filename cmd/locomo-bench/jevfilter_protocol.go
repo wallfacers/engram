@@ -1309,8 +1309,18 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 	if err != nil {
 		return fmt.Errorf("configure jev arm token counter: %w", err)
 	}
-	if err := validateJevCounterFingerprint(ctx, counter, protocol.Budget.CounterFingerprint, protocol.Models.Answerer.ID); err != nil {
+	counterModel := strings.TrimSpace(opt.tokenCounterModel)
+	if counterModel == "" {
+		counterModel = protocol.Models.Answerer.ID
+	}
+	if err := validateJevCounterFingerprint(ctx, counter, protocol.Budget.CounterFingerprint, counterModel); err != nil {
 		return err
+	}
+	// The packer counts tokens against the counter's tokenizer, not the
+	// answerer's: opt.tokenCounterModel names that tokenizer when they differ.
+	counterTokenModel := strings.TrimSpace(opt.tokenCounterModel)
+	if counterTokenModel == "" {
+		counterTokenModel = envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	}
 	model := envOr("LOCOMO_MODEL", defaultLoCoMoModel)
 	prov, err := buildBenchProvider(envOr("LOCOMO_PROVIDER", defaultLoCoMoProvider), apiKey, envOr("LOCOMO_BASE_URL", "https://api.deepseek.com/anthropic"), opt.maxTokens, "LOCOMO_PROVIDER")
@@ -1408,7 +1418,7 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 					if productionLimit <= 0 {
 						productionLimit = jevArmCShowReference
 					}
-					render := jevArmAnswerRenderer(qa, opt, model)
+					render := jevArmAnswerRenderer(qa, opt, counterTokenModel)
 					// Arm E's lineage-span handle: built once per conversation
 					// runtime, disabled (nil) when --jev-span-cap=0.
 					spans := newSpanRecovery(runtime.entries, opt.jevSpanCap)
