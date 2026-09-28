@@ -106,6 +106,12 @@ type jevFilterRegistration struct {
 	// It changes the registration digest, so it is frozen at freeze time and
 	// refused on mismatch at run time like every other presented-shape knob.
 	SpanCap int `json:"span_cap,omitempty"`
+	// FilterArms declares which filtered arms actually call the Jev filter.
+	// Omitted = every filtered arm filters (canonical). A subset (e.g. D,E)
+	// makes the unlisted filtered arms measure the degraded no-filter path —
+	// the resource knob for 3-rep confirmation runs that never answer on
+	// D-noRelax. Frozen into the digest like every other knob.
+	FilterArms []string `json:"filter_arms,omitempty"`
 	// The three declared protocol prerequisites. The 038 machine records them as
 	// receipts elsewhere; the registration states that the operator confirmed
 	// them for this run, and validateJevRunValidity refuses a gated run without
@@ -898,6 +904,13 @@ func jevRegistrationForRun(opt options, pol filter.Policy) (jevFilterRegistratio
 		registration.AnswerArms = names
 	}
 	registration.SpanCap = opt.jevSpanCap
+	if len(opt.jevFilterArms) > 0 {
+		filterNames := make([]string, 0, len(opt.jevFilterArms))
+		for _, arm := range opt.jevFilterArms {
+			filterNames = append(filterNames, string(arm))
+		}
+		registration.FilterArms = filterNames
+	}
 	if err := validateJevFilterRegistration(registration); err != nil {
 		return jevFilterRegistration{}, err
 	}
@@ -1133,6 +1146,10 @@ func attachJevArmsRegistrationForFreeze(opt options, protocol *evalProtocol) err
 	if err != nil {
 		return err
 	}
+	opt.jevFilterArms, err = parseJevAnswerArms(opt.jevFilterArmsRaw)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(opt.jevModel) == "" {
 		opt.jevModel = os.Getenv("ENGRAM_JEV_MODEL")
 	}
@@ -1166,6 +1183,10 @@ func runJevArms(ctx context.Context, opt options, convs []conversation, prices p
 		opt.jevPricePerMillion = value
 	}
 	opt.jevAnswerArms, err = parseJevAnswerArms(opt.jevAnswerArmsRaw)
+	if err != nil {
+		return err
+	}
+	opt.jevFilterArms, err = parseJevAnswerArms(opt.jevFilterArmsRaw)
 	if err != nil {
 		return err
 	}
@@ -1395,7 +1416,7 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 					outcomes := make(map[jevArm]jevArmOutcome, len(jevArmNames()))
 					aborted := false
 					for _, recipe := range jevArmRecipes() {
-						observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit, spans)
+						observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit, spans, opt.jevFilterArms)
 						if err != nil {
 							fail(err)
 							aborted = true

@@ -102,6 +102,40 @@ func jevObservation(arm jevArm, shown, pool []string, tokens int) jevArmObservat
 	return observation
 }
 
+func TestJevArmRetrieveEconomisesUnlistedFilterArms(t *testing.T) {
+	ctx := context.Background()
+	retriever := jevTestRetriever(t, "keep-me", "drop-me")
+	stub := &jevTestFilter{probs: map[string]float64{"keep-me": 0.9, "drop-me": 0.1}, defaultProb: 0.1}
+	recipe, err := jevArmRecipeFor(jevArmDNoRelax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := jevTestSpec(stub, filter.DefaultPolicy())
+	// D-noRelax outside --jev-filter-arms D,E: the stub must never be called and
+	// the observation is flagged degraded (the no-filter composition).
+	observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipe, spec, 0, 8, nil, []jevArm{jevArmD, jevArmE})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observation.Degraded {
+		t.Error("an economised filtered arm was not flagged degraded")
+	}
+	if stub.calls != 0 {
+		t.Errorf("economised arm reached the filter: %d stub calls", stub.calls)
+	}
+	// The same arm inside the subset filters normally.
+	observation, err = jevArmRetrieve(ctx, retriever, "alpha", recipe, spec, 0, 8, nil, []jevArm{jevArmDNoRelax})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Degraded {
+		t.Error("a listed arm ran degraded")
+	}
+	if stub.calls != 1 {
+		t.Errorf("a listed arm made %d filter calls, want 1", stub.calls)
+	}
+}
+
 func TestJevArmRecipesAndArmSet(t *testing.T) {
 	recipes := jevArmRecipes()
 	if len(recipes) != 6 {
@@ -238,7 +272,7 @@ func TestJevArmRetrieveArmAIsTheProductionSeam(t *testing.T) {
 	ctx := context.Background()
 	retriever := jevTestRetriever(t, "one", "two", "three")
 	recipeA, _ := jevArmRecipeFor(jevArmA)
-	observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipeA, nil, 0, 8, nil)
+	observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipeA, nil, 0, 8, nil, nil)
 	if err != nil {
 		t.Fatalf("arm A retrieve: %v", err)
 	}
@@ -259,7 +293,7 @@ func TestJevArmRetrieveFilteredArmUsesTheFilter(t *testing.T) {
 	retriever := jevTestRetriever(t, "keep-me", "drop-me")
 	stub := &jevTestFilter{probs: map[string]float64{"keep-me": 0.9, "drop-me": 0.1}, defaultProb: 0.1}
 	recipeD, _ := jevArmRecipeFor(jevArmD)
-	observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil)
+	observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil, nil)
 	if err != nil {
 		t.Fatalf("arm D retrieve: %v", err)
 	}
@@ -286,7 +320,7 @@ func TestJevArmRetrieveFilteredArmUsesTheFilter(t *testing.T) {
 	// The unfiltered arms must never call the filter.
 	for _, arm := range []jevArm{jevArmB, jevArmC} {
 		recipe, _ := jevArmRecipeFor(arm)
-		if _, err := jevArmRetrieve(ctx, retriever, "alpha", recipe, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil); err != nil {
+		if _, err := jevArmRetrieve(ctx, retriever, "alpha", recipe, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil, nil); err != nil {
 			t.Fatalf("arm %s retrieve: %v", arm, err)
 		}
 	}
@@ -299,12 +333,12 @@ func TestJevArmRetrieveDegradedArmFallsBackToTheNoFilterSet(t *testing.T) {
 	ctx := context.Background()
 	retriever := jevTestRetriever(t, "one", "two", "three")
 	recipeA, _ := jevArmRecipeFor(jevArmA)
-	armA, err := jevArmRetrieve(ctx, retriever, "alpha", recipeA, nil, 0, 8, nil)
+	armA, err := jevArmRetrieve(ctx, retriever, "alpha", recipeA, nil, 0, 8, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recipeD, _ := jevArmRecipeFor(jevArmD)
-	degraded, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(nil, filter.DefaultPolicy()), 0, 8, nil)
+	degraded, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(nil, filter.DefaultPolicy()), 0, 8, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +360,7 @@ func TestJevArmRetrieveDegradedArmFallsBackToTheNoFilterSet(t *testing.T) {
 
 	// A failing filter must degrade the whole call, never adopt a partial list.
 	stub := &jevTestFilter{err: fmt.Errorf("endpoint down")}
-	failing, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil)
+	failing, err := jevArmRetrieve(ctx, retriever, "alpha", recipeD, jevTestSpec(stub, filter.DefaultPolicy()), 0, 8, nil, nil)
 	if err != nil {
 		t.Fatalf("a failing filter must not error the arm: %v", err)
 	}
@@ -689,7 +723,7 @@ func TestJevArmRetrieveRecordsTheRetrievalSegment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipe, nil, 0, 8, nil)
+		observation, err := jevArmRetrieve(ctx, retriever, "alpha", recipe, nil, 0, 8, nil, nil)
 		if err != nil {
 			t.Fatalf("arm %s retrieve: %v", arm, err)
 		}

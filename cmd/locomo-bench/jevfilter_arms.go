@@ -257,7 +257,14 @@ func (o jevArmObservation) shown() []memory.Result {
 //
 // spans carries arm E's lineage-span recovery handle; nil keeps every arm on
 // its pre-E path (and makes an E arm degrade to D when recovery is disabled).
-func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, recipe jevArmRecipe, spec *filterRetrieval, quota, productionLimit int, spans *spanRecovery) (observation jevArmObservation, err error) {
+//
+// filterArms is the --jev-filter-arms subset: nil means every filtered arm
+// calls the filter (canonical). A filtered arm outside the subset runs the
+// degraded no-filter composition instead — the resource knob that keeps a
+// 3-rep confirmation run from paying filter calls for arms it never answers
+// on (D-noRelax). The observation is flagged degraded so the report cannot
+// mistake the economised path for a working filter.
+func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, recipe jevArmRecipe, spec *filterRetrieval, quota, productionLimit int, spans *spanRecovery, filterArms []jevArm) (observation jevArmObservation, err error) {
 	if r == nil {
 		return jevArmObservation{}, fmt.Errorf("jev arm %s requires a retriever", recipe.Arm)
 	}
@@ -273,6 +280,12 @@ func jevArmRetrieve(ctx context.Context, r *memory.Retriever, query string, reci
 		poolSize = spec.Pool
 	}
 	pol = jevArmPolicy(recipe, pol)
+	if recipe.Filtered && !jevArmAnswered(filterArms, recipe.Arm) && !filter.IsNilRelevanceFilter(flt) {
+		// Economised filtered arm: outside --jev-filter-arms, so it measures the
+		// degraded no-filter path rather than paying a filter call it never
+		// answers on. Collapse to the "no configured filter" composition below.
+		flt = nil
+	}
 	// observation is a named result so the deferred stamp below genuinely lands in
 	// the value the caller receives: with unnamed results Go copies the return
 	// values before the deferred function runs, and the retrieval segment would be
