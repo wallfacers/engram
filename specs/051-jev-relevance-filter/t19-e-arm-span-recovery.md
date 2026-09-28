@@ -46,4 +46,16 @@ k150 池(与 D 完全同池、同一次 jev 调用、同降级语义)
 2. max-tokens 8000→16000(042 口径;注意 token-counter 校准漂移风险,见 runbook §5 fix 方向)
 3. degraded pass(SC-005 完整性,非分数项)
 
+## 5.5 收数决策树(1-rep B,E run `e1be-…` 落地时执行)
+
+| B→E 实测 | 判定 | 动作 |
+|---|---|---|
+| Δ ≥ +3pp 且 p<0.05 | span 机制显著有效 | 直接 `run-3rep.sh`(B,E × 3-rep + `--jev-filter-arms D,E`)冲 91.43 口径 |
+| Δ +1~3pp 或 p≥0.05 | 有效但弱 | 3-rep 前+θ 0.4(`ENGRAM_JEV_THETA`,与 filter-arms 同轮) |
+| Δ ≈ 0 / 负 | span 未兑现 | 查 derived `e_spans`(=6?)与 E 空注入率;若 span 正常但分数不动 → θ 0.35 + KShowMax 16 再试;仍不动 → span 假设降权,回 042 形态(chunk-verbatim 主导) |
+| E token/B > 1/3 | token 超预算 | `--jev-span-cap 4` |
+| E token/B < 1/10 | token 余量 | `--jev-span-cap 8`(枚举题受益) |
+
+归因必做:`attribute.py` 交叉 $D9 的 94 道 B对D错 → E 救回数(span 对症率的直接证据)。
+
 *收数后本文件补 §6 数字(B/D/E accuracy、D→E p、E token 比、flips 归因)。*
