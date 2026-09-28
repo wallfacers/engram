@@ -101,3 +101,5 @@
 - **Slice 13 落地**（run cf62e844，qianwenai/qwen3.8-flash）：--jev-arms-reps {1,3}（默认 3 字节不变、双向 mismatch 拒、2 无多数语义拒）；16 处硬编码 3 审计（B0 连续性/固定金标按设计保留 3-rep）；manifest answer_repetitions=1 全链一致；TDD 7 测试。**终冲刺：部署 s12 绑定 shim + s13 runner → 分离冒烟 → 1-rep 试点 freeze → gated-only 点火**。
 
 - **试点点火+止损（夜间自主）**：s12/s13 部署→分离冒烟完美（1/0/0/0）→freeze 6 域精确→gated 链点火 16:55；20 分钟后 H1（网关对 ~32k token 大分片 503 风暴→filter 96% 降级）触发 STOP→决策 A：证据离盒（pilot-artifacts/）→PID 击杀 143→看门狗 ~17:26 自动关机止损。**复盘修正：worker 的 H2「答题冻结」是指标误读（grep 了 length 标签；stop 标签 817−基线266≈28 答案/分=管线健康）——H1 是唯一真问题**。修复方案备好（晨报）：S14=ShardSize clamp [32,64]→[6,64]+eval 设 12（引擎字段本就存在；总 token 省 ~18%；小请求实测通过）+可选 S15 shim 在飞上限；等维护者晨间拍板。
+
+- **S14 落地**（run b1143574，qianwenai/deepseek-v4.1-flash；router 选的 tokensfree/gpt-6-sol 不在 Pi 注册表→覆盖，第 2 个 router 失配数据点）：clamp [6,64] + eval 接线 ShardSize=12（TDD 6 测试、生产默认 48 钉死）；盒子重启（新凭据 paramiko 装公钥、服务已拉起、shim typesafe 就位、盒钟漂移 09/28 记档）。**S15 belt 暂缓**：先测 12-题片健康度，503 复发再上有实测依据的 cap。重发射排队。
