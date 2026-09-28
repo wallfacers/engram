@@ -1341,13 +1341,22 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 	}
 	defer func() { _ = journal.Close() }()
 
-	sem := make(chan struct{}, max(1, opt.concurrency))
+	// Question-level concurrency. The conversation count itself is far below
+	// any useful --concurrency (LoCoMo has 10 conversations), so the pool gates
+	// questions INSIDE each conversation; a conversation only owns its runtime.
+	// The usage gate keeps its OWN semaphore: a question worker holds a question
+	// slot for its whole body (retrieve, pack, answer, judge), so sharing one
+	// channel with gateUsage would self-deadlock once every question slot is
+	// held by a worker also waiting for a usage slot. A question has at most
+	// three concurrent answer-arm calls, so 3x usage capacity cannot starve.
+	qSem := make(chan struct{}, max(1, opt.concurrency))
+	useSem := make(chan struct{}, max(1, opt.concurrency)*3)
 	ledger := newCostLedger(prices)
 	recordUsage := func(role, model string, usage provider.Usage) {
 		recordBenchUsage(ledger, role, model, usage)
 	}
-	answerCall := gateUsage(sem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
-	judgeCall := gateUsage(sem, newUsageModelCallerWithUsage(judgeProv, judge.Model, opt.maxTokens, "judge", recordUsage))
+	answerCall := gateUsage(useSem, newUsageModelCallerWithUsage(prov, model, opt.maxTokens, "answer", recordUsage))
+	judgeCall := gateUsage(useSem, newUsageModelCallerWithUsage(judgeProv, judge.Model, opt.maxTokens, "judge", recordUsage))
 	armName := primaryRetrievalArm(opt)
 	repetitions := opt.repeats
 	if repetitions < 1 {
@@ -1373,8 +1382,6 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 		wg.Add(1)
 		go func(conv conversation) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
 			if ctx.Err() != nil {
 				return
 			}
@@ -1407,12 +1414,27 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 				fail(fmt.Errorf("conversation %d has no retriever for arm %s", conv.ID, armName))
 				return
 			}
+			// All question workers share this conversation's runtime (store,
+			// retriever, chunk turns); qwg.Wait runs before runtime.Close by
+			// defer order. Repetitions and questions are independent units —
+			// rows land unordered, and every downstream consumer pairs by
+			// (conv, q, arm, repetition) keys, never by file order.
+			var qwg sync.WaitGroup
+			defer qwg.Wait()
 			for repetition := 0; repetition < repetitions; repetition++ {
 				for _, selected := range selectQuestions(conv, opt) {
 					if ctx.Err() != nil {
 						return
 					}
-					qa := selected.QA
+					qwg.Add(1)
+					go func(selected selectedQuestion, repetition int) {
+						defer qwg.Done()
+						if ctx.Err() != nil {
+							return
+						}
+						qSem <- struct{}{}
+						defer func() { <-qSem }()
+						qa := selected.QA
 					topK, quota := opt.retrievalFor(qa.Category)
 					productionLimit := topK
 					if productionLimit <= 0 {
@@ -1422,87 +1444,103 @@ func runJevArmProtocol(ctx context.Context, opt options, convs []conversation, p
 					// Arm E's lineage-span handle: built once per conversation
 					// runtime, disabled (nil) when --jev-span-cap=0.
 					spans := newSpanRecovery(runtime.entries, opt.jevSpanCap)
-					observations := make(map[jevArm]jevArmObservation, len(jevArmNames()))
-					outcomes := make(map[jevArm]jevArmOutcome, len(jevArmNames()))
-					aborted := false
-					for _, recipe := range jevArmRecipes() {
-						observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit, spans, opt.jevFilterArms)
-						if err != nil {
-							fail(err)
-							aborted = true
-							break
-						}
-						packed, err := packJevArmAnswerInput(ctx, counter, jevArmAnswerInputCap, render, observation.Presented)
-						if err != nil {
-							fail(err)
-							aborted = true
-							break
-						}
-						observation.Packed = packed
-						if recipe.Arm == jevArmB {
-							if err := assertJevArmBUntruncated(packed, len(observation.Pool), jevArmAnswerInputCap); err != nil {
-								reason := fmt.Sprintf("conv=%d q=%d: %v", conv.ID, selected.Index, err)
-								invalidate(reason)
-								fail(fmt.Errorf("%s", reason))
-								aborted = true
-								break
-							}
-						}
-						if recipe.Filtered {
-							if err := journal.Record(jevFilterCallRecord{
-								Conv: conv.ID, Q: selected.Index, Repetition: repetition, Arm: string(recipe.Arm),
-								Pool: len(observation.Pool), Memories: len(observation.Presented),
-								Kept: observation.Meta.Kept, Dropped: observation.Meta.Dropped, Theta: observation.Meta.Theta,
-								LatencyMs: observation.Meta.LatencyMs, USD: observation.Meta.CostUSD,
-								InputTokens: observation.Meta.InputTokens, OutputTokens: observation.Meta.OutputTokens,
-								Degraded: observation.Degraded, Notes: observation.Meta.Notes,
-							}); err != nil {
+						observations := make(map[jevArm]jevArmObservation, len(jevArmNames()))
+						outcomes := make(map[jevArm]jevArmOutcome, len(jevArmNames()))
+						for _, recipe := range jevArmRecipes() {
+							observation, err := jevArmRetrieve(ctx, retriever, qa.Question, recipe, opt.jevFilter, quota, productionLimit, spans, opt.jevFilterArms)
+							if err != nil {
 								fail(err)
-								aborted = true
-								break
+								return
 							}
+							packed, err := packJevArmAnswerInput(ctx, counter, jevArmAnswerInputCap, render, observation.Presented)
+							if err != nil {
+								fail(err)
+								return
+							}
+							observation.Packed = packed
+							if recipe.Arm == jevArmB {
+								if err := assertJevArmBUntruncated(packed, len(observation.Pool), jevArmAnswerInputCap); err != nil {
+									reason := fmt.Sprintf("conv=%d q=%d: %v", conv.ID, selected.Index, err)
+									invalidate(reason)
+									fail(fmt.Errorf("%s", reason))
+									return
+								}
+							}
+							if recipe.Filtered {
+								if err := journal.Record(jevFilterCallRecord{
+									Conv: conv.ID, Q: selected.Index, Repetition: repetition, Arm: string(recipe.Arm),
+									Pool: len(observation.Pool), Memories: len(observation.Presented),
+									Kept: observation.Meta.Kept, Dropped: observation.Meta.Dropped, Theta: observation.Meta.Theta,
+									LatencyMs: observation.Meta.LatencyMs, USD: observation.Meta.CostUSD,
+									InputTokens: observation.Meta.InputTokens, OutputTokens: observation.Meta.OutputTokens,
+									Degraded: observation.Degraded, Notes: observation.Meta.Notes,
+								}); err != nil {
+									fail(err)
+									return
+								}
+							}
+							observations[recipe.Arm] = observation
+							mu.Lock()
+							retrievalCalls++
+							mu.Unlock()
 						}
-						observations[recipe.Arm] = observation
-						mu.Lock()
-						retrievalCalls++
-						mu.Unlock()
-					}
-					if aborted {
-						return
-					}
-					for _, recipe := range jevArmRecipes() {
-						// A resource-saving answering subset answers only the declared
-						// arms; the others keep their retrieval/packing measurement
-						// (CorrectMeasured stays false, exactly like a retrieval-only
-						// pass) and are excluded from the SC-001 contrast denominator.
-						if !jevArmAnswered(opt.jevAnswerArms, recipe.Arm) {
-							continue
+						// The answering arms are independent of each other (each
+						// answers from its own packed observation), so they run
+						// concurrently: with a cloud answerer this was the largest
+						// serial segment left inside a question. outcomes is written
+						// under armMu; measureJevArmQuestion runs after all arms land.
+						var armWG sync.WaitGroup
+						var armMu sync.Mutex
+						var armErr error
+						for _, recipe := range jevArmRecipes() {
+							recipe := recipe
+							// A resource-saving answering subset answers only the declared
+							// arms; the others keep their retrieval/packing measurement
+							// (CorrectMeasured stays false, exactly like a retrieval-only
+							// pass) and are excluded from the SC-001 contrast denominator.
+							if !jevArmAnswered(opt.jevAnswerArms, recipe.Arm) {
+								continue
+							}
+							armWG.Add(1)
+							go func() {
+								defer armWG.Done()
+								if ctx.Err() != nil {
+									return
+								}
+								outcome, err := answerJevArmQuestion(ctx, answerCall, judgeCall, qa, opt, observations[recipe.Arm].shown())
+								if err != nil {
+									armMu.Lock()
+									if armErr == nil {
+										armErr = fmt.Errorf("conv=%d q=%d arm=%s: %w", conv.ID, selected.Index, recipe.Arm, err)
+									}
+									armMu.Unlock()
+									return
+								}
+								armMu.Lock()
+								outcomes[recipe.Arm] = outcome
+								armMu.Unlock()
+							}()
 						}
-						outcome, err := answerJevArmQuestion(ctx, answerCall, judgeCall, qa, opt, observations[recipe.Arm].shown())
+						armWG.Wait()
+						if armErr != nil {
+							fail(armErr)
+							return
+						}
+						measured, questionDerived, err := measureJevArmQuestion(jevArmQuestionInput{
+							Conv: conv.ID, Q: selected.Index, Category: qa.Category, QuestionID: qa.QuestionID,
+							Repetition: repetition, QA: qa, ChunkTurns: runtime.chunkTurns,
+							Observations: observations, Outcomes: outcomes,
+						})
 						if err != nil {
-							fail(fmt.Errorf("conv=%d q=%d arm=%s: %w", conv.ID, selected.Index, recipe.Arm, err))
-							aborted = true
-							break
+							fail(err)
+							return
 						}
-						outcomes[recipe.Arm] = outcome
-					}
-					if aborted {
-						return
-					}
-					measured, questionDerived, err := measureJevArmQuestion(jevArmQuestionInput{
-						Conv: conv.ID, Q: selected.Index, Category: qa.Category, QuestionID: qa.QuestionID,
-						Repetition: repetition, QA: qa, ChunkTurns: runtime.chunkTurns,
-						Observations: observations, Outcomes: outcomes,
-					})
-					if err != nil {
-						fail(err)
-						return
-					}
-					questionDerived.Replications = repetitions
-					mu.Lock()
-					rows = append(rows, measured...)
-					derived = append(derived, questionDerived)
-					mu.Unlock()
+						questionDerived.Replications = repetitions
+						mu.Lock()
+						rows = append(rows, measured...)
+						derived = append(derived, questionDerived)
+						mu.Unlock()
+					}(selected, repetition)
 				}
 			}
 		}(convs[ci])
