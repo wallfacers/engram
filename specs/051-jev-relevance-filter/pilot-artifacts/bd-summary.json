@@ -1,0 +1,22 @@
+{
+  "schema": "022.v1",
+  "protocol_hash": "sha256:5d5789f34e4bb64e5c45b2cc28ada2d2cc1d6ae39f420658f997ab614c2cda29",
+  "rows": 7700,
+  "filter_calls": 3080,
+  "retrieval_calls": 7700,
+  "validity": {
+    "valid": true,
+    "complete": true,
+    "questions_measured": 1540,
+    "questions_expected": 1540,
+    "repetitions_measured": 1,
+    "repetitions_expected": 1,
+    "rows_measured": 7700,
+    "rows_expected": 7700,
+    "arm_rows_equal": true,
+    "identity_rate": 1,
+    "within_cap_rate": 1,
+    "answer_compliance_rate": 1,
+    "unattributed_add_count": 0
+  }
+}
